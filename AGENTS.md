@@ -9,3 +9,9 @@
 
 **A spec's version number tracks commits.** A committed change bumps it; edits
 sitting in the working tree do not.
+
+## Pull requests and issues
+
+**Load the `writing-pull-requests` skill before running `gh pr create`, and the
+`writing-issues` skill before running `gh issue create`.** Every time, without
+being asked.
