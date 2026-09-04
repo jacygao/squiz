@@ -528,6 +528,19 @@ findings it has, and the summary comment reports that the bound was reached.
 
 Squiz is its own repository, not a directory inside a host project.
 
+### Language
+
+Squiz is written in TypeScript and runs on Node. Node strips the types and runs
+the `.ts` files as they are, so there is no build step and no compiled output.
+
+- **Erasable syntax only.** No `enum`, no parameter properties, no namespaces. A
+  union of string literals stands where an enum would.
+- **Types are checked by `tsc --noEmit` in CI.** Stripping does not check them.
+- **Node 24 or later.** The setup check reports the version.
+
+There are no runtime dependencies. Everything outside the process is a
+subprocess: `git`, `gh`, and the reviewer's own CLI.
+
 ### Structure
 
 The layout is a Claude Code plugin, which is also how it is distributed. The
