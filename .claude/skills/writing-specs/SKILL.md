@@ -6,30 +6,9 @@ user-invocable: true
 
 # Writing specs
 
-1. **The spec is a standalone document.** Never reference the conversation, prior
-   versions, or what was "discussed" or "decided".
+Write a specification someone can build from.
 
-2. **State what the system does.** Do not state what it doesn't do unless the
-   exclusion is itself a requirement.
-
-3. **No rationale** unless it belongs in a dedicated "Decisions" or "Alternatives
-   considered" section.
-
-4. **When editing, rewrite the whole section.** Do not append.
-
-5. **Write for the reader.** Who is reading this, and what do they need?
-
-6. **Start with the most useful information.** Don't bury the lede.
-
-7. **Show, don't tell.** Code examples, commands, screenshots.
-
-8. **Keep it current.** Outdated docs are worse than no docs.
-
-9. **Link, don't duplicate.** Reference other docs instead of copying.
-
-## Document structure
-
-### Heading levels
+## Structure
 
 Fix the meaning of each heading level and hold to it:
 
@@ -42,3 +21,22 @@ Fix the meaning of each heading level and hold to it:
 
 Do not add, remove, rename, or reorder H2 sections unless asked. If a change
 seems to need a new H2, say so in the reply and ask before adding it.
+
+## Principles
+
+- **The spec is a standalone document** — never reference the conversation,
+  prior versions, or what was "discussed" or "decided"
+- **State what the system does** — do not state what it doesn't do unless the
+  exclusion is itself a requirement
+- **No rationale** — unless it belongs in a dedicated "Decisions" or
+  "Alternatives considered" section
+- **When editing, rewrite the whole section** — do not append
+- **Write for the reader** — who is reading this, and what do they need?
+- **Start with the most useful information** — don't bury the lede
+- **Show, don't tell** — code examples, commands, diagrams
+- **Keep it current** — outdated docs are worse than no docs
+- **Link, don't duplicate** — reference other sections instead of copying
+
+## Resources
+
+`docs/specs/review-harness-spec.md` is the worked example.
