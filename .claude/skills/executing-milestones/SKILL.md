@@ -59,8 +59,8 @@ a query without it reads every open pull request as ready work.
 **Given an issue number or a description**, read that issue and every
 specification section it cites, then go to section 2.
 
-**Given a milestone id**, find its epic — the issue with no parent carrying that
-milestone's label, which is exact where matching a title is not:
+**Given a milestone id**, find its epic — the issue with no parent carrying
+that milestone's label, which is exact where matching a title is not:
 
 ```bash
 milestone=M0
@@ -99,12 +99,11 @@ waiting for the index.
 
 ## 2. Give each piece of work its own worktree
 
-One worktree, one branch, one pull request, one issue.
-
-This is not a preference. It is the shape Squiz itself requires: the harness
-resolves an episode by `git rev-parse --show-toplevel`, so two subagents working
-in one tree read as one shared tree, and the tracked-file comparison under
-Confinement is disabled for that round. Section 3 of the specification says the
+One worktree, one branch, one pull request, one issue. This is the shape Squiz
+itself requires: the harness resolves an episode by
+`git rev-parse --show-toplevel`, so two subagents working in one tree read as
+one shared tree, and the tracked-file comparison under Confinement is disabled
+for that round. Section 3 of the specification says the
 worktrees are created by whatever dispatches the subagents. That is this
 session.
 
@@ -112,9 +111,8 @@ session.
 git worktree add -b <area>/<short-name> .claude/worktrees/i<issue> origin/main
 ```
 
-- **Branch from `origin/main`, not from the primary tree's HEAD.** The primary
-  tree stays on `main` and never switches branches, because every worktree and
-  every dispatched agent reads it.
+- **The primary tree stays on `main` and never switches branches.** Every
+  worktree and every dispatched agent reads it.
 - **Branches are named `<area>/<short-name>`**, matching those already in the
   repository: `spec/identity`, `templates/pr-and-issue`.
 - `.claude/worktrees/` is already in `.gitignore`.
@@ -130,14 +128,15 @@ caused it, and nothing in their reports says so. A baseline is what lets you
 tell a subagent's breakage from an inherited one in section 4.
 
 Squiz has no build step, so the type check is `tsc --noEmit` and the tests are
-whatever `package.json` defines. Neither exists yet, and neither does CI. The
-milestone that creates all three is M1, the plugin skeleton. Until it merges the
-baseline is empty, which is a fact to state rather than a gap to fill with an
-invented check.
+whatever `package.json` defines. Where the repository does not have them yet,
+the baseline is empty, and that is a fact to state rather than a gap to fill
+with an invented check. M1, the plugin skeleton, is the milestone that creates
+them and puts both in CI.
 
-**Dispatch the whole frontier at once, in one message.** Issues with no open
-blocker are independent by construction, and running them one at a time wastes
-what the decomposition bought. A blocked issue is not dispatched, because its
+**Dispatch the whole frontier at once**, as one agent call per issue in a
+single message, so they run concurrently. Issues with no open blocker are
+independent by construction, and running them one at a time wastes what the
+decomposition bought. A blocked issue is not dispatched, because its
 blocker's result is an input to it and not merely an ordering.
 
 Where two issues on the frontier touch the same file, say so in both briefs. The
@@ -169,8 +168,8 @@ Every brief carries:
 - **The pull request body ends at its last real section.** No generated-with
   footer, no session link, no co-author trailer, in the body or in the commits
 - The worktree it was given, which it works in and never leaves
-- Report back: the pull request number, the checks it ran with their output, what
-  it filed, and **what it could not determine**
+- Report back: the pull request number, the checks it ran with their output,
+  what it filed, and **what it could not determine**
 
 **An agent that reports what it could not determine has done its job.** That
 answer is yours to resolve, not theirs to guess:
@@ -196,16 +195,18 @@ nothing you do disturbs the branch:
 git worktree add -q .claude/worktrees/verify-<n> origin/<branch> --detach
 ```
 
-Run the repository's checks there and compare them against the baseline you
-took before dispatching. A failure present in both is inherited, and chasing it
-in this branch is wasted work. Then **mutation-test the guard that matters**. Delete the check, run the suite, confirm something fails, restore it.
+Run the repository's checks there and compare them against the baseline you took
+before dispatching. A failure present in both is inherited, and chasing it in
+this branch is wasted work.
 
-This is the step that earns its keep, and it earns it twice over in a project
-whose failure paths are deliberately quiet. Delete the pull request gate and run
-the suite: if it stays green, the tests are asserting that nothing happened,
-which is also what the gate produces when it works. Green tests are not evidence
-that a guard is held; a test can pass because it broke something else on the way
-to the guard.
+Then **mutation-test the guard that matters**. Delete the check, run the suite,
+confirm something fails, restore it.
+
+This matters most where the failure paths are deliberately quiet. Delete the
+pull request gate and run the suite: if it stays green, the tests are asserting
+that nothing happened, which is also what the gate produces when it works. Green
+tests are not evidence that a guard is held; a test can pass because it broke
+something else on the way to the guard.
 
 Remove the verification worktree when done.
 
@@ -271,7 +272,6 @@ artefact downloaded by hand.
   that produced it belongs in the commit or the issue.
 - **Push back once, with reasons, then implement the decision.** Disagreement is
   a conversation, not a veto in either direction.
-- **Correct yourself plainly and move on.** No tallying, no ceremony.
 
 ## 9. Stop and hand back
 
