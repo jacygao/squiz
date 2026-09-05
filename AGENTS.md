@@ -13,7 +13,9 @@ sitting in the working tree do not.
 ## Milestones
 
 **Load the `planning-milestones` skill before decomposing a milestone from
-`docs/specs/milestones.md` into issues.** Every time, without being asked.
+`docs/specs/milestones.md` into issues, and the `executing-milestones` skill
+before dispatching any of those issues to subagents.** Every time, without being
+asked.
 
 ## Pull requests and issues
 
