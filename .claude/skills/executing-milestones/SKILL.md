@@ -33,9 +33,6 @@ git fetch -q origin && git checkout -q main && git pull -q
 gh pr list --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
 ```
 
-That is the whole of it. Reading the state is about knowing what merged since
-the last session, and the two commands above answer it.
-
 ## 2. Take the work from the argument, never from inference
 
 **The caller names the milestone or the issue.** The argument is a milestone id
