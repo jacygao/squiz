@@ -71,6 +71,22 @@ to do all of the following:
 Resolving and re-opening a review thread is available only through GitHub's
 GraphQL API. REST has no equivalent, so those two operations go through GraphQL.
 
+### Identity
+
+Every comment is posted with the credentials `gh` holds, so all of them appear
+under the account that authenticated it. The reviewer, the coding agent and the
+harness share one GitHub identity.
+
+Each comment names its own author on its first line:
+
+| Written by | Begins |
+|---|---|
+| The reviewer | `**Squiz reviewer**` |
+| The coding agent | `**Squiz coding agent**` |
+| The harness, at close | `**Squiz review**` |
+
+A comment without one of those markers was written by a person.
+
 ## 3. The loop
 
 The loop runs the review from end to end. A coding agent finishes its work, the
@@ -359,12 +375,12 @@ episode in one of the four above.
 
 ### The comment format
 
-Every comment follows one template: a headline naming the problem with the
-severity visible, the reasoning as bullets rather than paragraphs, and a
-suggested fix.
+Every comment follows one template: the marker and a headline naming the problem
+with the severity visible, the reasoning as bullets rather than paragraphs, and
+a suggested fix.
 
 ```markdown
-**high — Card can be placed off-screen once the explanation expands**
+**Squiz reviewer · high — Card can be placed off-screen once the explanation expands**
 
 - `placeCard()` clamps against `window.innerHeight` before the expand animation
   runs, so a card that grows past the fold keeps its pre-expansion offset.
@@ -587,6 +603,7 @@ until something asks.
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
 | **P1** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
+| **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
 | **P2** | Tracking findings that cannot be anchored to the diff | Today they are reported in the summary comment and carried no further |
