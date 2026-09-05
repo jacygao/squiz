@@ -14,7 +14,7 @@ This skill starts where `planning-milestones` stops. That skill ends at a
 reviewable issue tree and files nothing else; this one executes the tree it
 filed.
 
-Two shapes of work arrive here, and everything from section 3 onward is the same
+Two shapes of work arrive here, and everything from section 2 onward is the same
 for both:
 
 - **A milestone.** An epic and its sub-issues, already filed. If the milestone
@@ -22,33 +22,45 @@ for both:
 - **Anything else.** A bug, a spec correction, a task carrying no milestone
   label. One issue, one brief, one pull request.
 
-## 1. Read the state before saying anything
+## 1. Take the work from the argument, never from inference
 
-Always, before answering, even when handed an issue number. A fresh session does
-not know what merged since the last one, and this repository's issue tree
-changes faster than its code does.
+**The caller names the milestone or the issue.** Which one to execute next is a
+fact about what the caller intends to build, and the repository does not hold
+it. Do not infer it from which epic is open, from the order of
+`docs/specs/milestones.md`, or from what was planned last.
+
+A fresh session does not know what merged since the last one, so bring the tree
+and the open pull requests current before answering on any of the three paths
+below:
 
 ```bash
 git fetch -q origin && git checkout -q main && git pull -q
 gh pr list --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
 ```
 
-## 2. Take the work from the argument, never from inference
+**Given no argument**, report and stop. Reporting is not executing. Name the
+open epics, so the caller has something to choose from, and the work outside
+them, which no epic's frontier can see:
 
-**The caller names the milestone or the issue.** The argument is a milestone id
-such as `M0`, an issue number, or a description of something to fix.
+```bash
+gh issue list --state open --limit 100 --json number,title,parent \
+  --jq '.[] | select(.parent == null) | "epic     #\(.number)  \(.title)"'
 
-Which milestone to execute next is a fact about what the caller intends to
-build, and the repository does not hold it. Do not guess it from which epic is
-open, from the order of `docs/specs/milestones.md`, or from what was planned
-last.
+gh api "repos/{owner}/{repo}/issues?state=open&per_page=100" --paginate --jq '
+  .[] | select(.pull_request == null)
+      | select([.labels[].name] | any(. == "bug" or . == "needs-human"))
+      | "outside  #\(.number)  \(.title)"'
+```
+
+The `pull_request == null` filter is not optional. That endpoint returns pull
+requests alongside issues, and a pull request carries no dependency summary, so
+a query without it reads every open pull request as ready work.
 
 **Given an issue number or a description**, read that issue and every
-specification section it cites, then go to section 3.
+specification section it cites, then go to section 2.
 
-**Given a milestone id**, find its epic. The epic is the issue with no parent
-carrying that milestone's label, which is exact and needs no string matching
-against a title:
+**Given a milestone id**, find its epic — the issue with no parent carrying that
+milestone's label, which is exact where matching a title is not:
 
 ```bash
 milestone=M0
@@ -56,13 +68,12 @@ epic=$(gh issue list --label "milestone:$milestone" --state all --limit 100 \
   --json number,parent --jq '.[] | select(.parent == null) | .number')
 ```
 
-If nothing comes back, the milestone has not been planned. Say so and stop. If
-two numbers come back there are two epics for one milestone, which splits the
-tree; name both and stop, because every command below takes one.
+Nothing back means the milestone has not been planned. Two numbers back means
+two epics for one milestone, which splits the tree. Either way, say so and stop.
 
-Then read the frontier, which is the set of sub-issues with no open blocker.
-**Readiness is true at the moment it is computed and wrong after the next
-merge**, so compute it here and never carry it forward:
+Then read the frontier, the sub-issues with no open blocker. **Readiness is true
+at the moment it is computed and wrong after the next merge**, so compute it
+here and never carry it forward:
 
 ```bash
 gh issue list --label "milestone:$milestone" --state open --limit 100 \
@@ -72,45 +83,21 @@ gh issue list --label "milestone:$milestone" --state open --limit 100 \
              then "READY  " else "blocked" end)  #\(.number)  \(.title)"'
 ```
 
-**Cross-check the count against the epic before believing it.** The issue
-listing is served from a search index that lags behind the issues themselves,
-and this repository has already produced a listing that omitted sub-issues the
-epic knew about:
-
-```bash
-gh issue view "$epic" --json subIssuesSummary \
-  --jq '.subIssuesSummary | "\(.completed) done of \(.total)"'
-```
-
-If the rows you listed do not account for that total, read the tree through the
-sub-issues API instead, which is not served from the index:
+**Check that list against the epic before believing it.** It is served from a
+search index that lags behind the issues themselves, and this repository has
+already produced one that omitted sub-issues the epic knew about. The sub-issues
+API is not served from that index:
 
 ```bash
 gh api "repos/{owner}/{repo}/issues/$epic/sub_issues" --paginate \
-  --jq '.[] | select(.state == "open")
-        | "\(if .issue_dependencies_summary.blocked_by == 0
-              then "READY  " else "blocked" end)  #\(.number)  \(.title)"'
+  --jq '[.[] | select(.state == "open") | .number] | "open: \(.)"'
 ```
 
-**Given no argument**, report and ask. An epic's frontier cannot see work
-outside it, so a bug on the hook's path never appears in the queries above. Run
-this one as well, and say which list each piece of work came from, because a bug
-outside the epic is the thing that sits untouched:
+A number here that the frontier did not list is a sub-issue the listing cannot
+yet see. Read those with `gh issue view <n> --json blockedBy` rather than
+waiting for the index.
 
-```bash
-gh api "repos/{owner}/{repo}/issues?state=open&per_page=100" --paginate --jq '
-  .[] | select(.pull_request == null)
-      | select([.labels[].name] | any(. == "bug" or . == "needs-human"))
-      | "#\(.number)  \(.title)"'
-```
-
-The `pull_request == null` filter is not optional. That endpoint returns pull
-requests alongside issues, and a pull request carries no dependency summary, so
-a query without the filter reads every open pull request as ready work.
-
-Reporting is not executing. With no argument, stop after the report.
-
-## 3. Give each piece of work its own worktree
+## 2. Give each piece of work its own worktree
 
 One worktree, one branch, one pull request, one issue.
 
@@ -140,7 +127,7 @@ git worktree add -b <area>/<short-name> .claude/worktrees/i<issue> origin/main
 `main` has and keep the result. Its one job is attribution: if `main` is already
 red and you fan out four agents, all four report a failing suite, none of them
 caused it, and nothing in their reports says so. A baseline is what lets you
-tell a subagent's breakage from an inherited one in section 5.
+tell a subagent's breakage from an inherited one in section 4.
 
 Squiz has no build step, so the type check is `tsc --noEmit` and the tests are
 whatever `package.json` defines. Neither exists yet, and neither does CI. The
@@ -157,7 +144,7 @@ Where two issues on the frontier touch the same file, say so in both briefs. The
 second to merge rebases, and an agent told to expect that handles it without
 asking.
 
-## 4. Brief a subagent with the failures, not the task
+## 3. Brief a subagent with the failures, not the task
 
 A brief that says what to build gets code that compiles. A brief that names what
 will go wrong silently gets code that works.
@@ -200,7 +187,7 @@ precedent in its own acceptance criteria. Reconciling means loading
 `writing-specs` and, because a specification change is a decision about the
 product, bringing it to the caller.
 
-## 5. Verify what comes back. Do not take the report
+## 4. Verify what comes back. Do not take the report
 
 An agent's report is a claim. Check it in a worktree of its own, detached, so
 nothing you do disturbs the branch:
@@ -225,7 +212,7 @@ Remove the verification worktree when done.
 Until Squiz reviews its own pull requests, this session is the only review the
 code gets before a person sees it.
 
-## 6. Report in plain words
+## 5. Report in plain words
 
 Subagents write for other agents. You are writing for somebody deciding what to
 merge, and making them decode a mechanism to reach that decision is the slowest
@@ -242,7 +229,7 @@ The test: could somebody who has not read the diff act on your first paragraph?
 If not, the first paragraph is the thing to rewrite. The pull request body
 itself is governed by `writing-pull-requests`, not by this section.
 
-## 7. Decide, or ask
+## 6. Decide, or ask
 
 **Decide anything recoverable from the specification, the code, or a
 measurement.** Which frontier issues go out together, how the briefs are
@@ -257,7 +244,7 @@ scope moves. Deciding these builds the wrong product confidently.
 When asking, bring a recommendation and the reason, not a menu. When you have
 already argued a position and it is overruled, implement the decision.
 
-## 8. What needs a person
+## 7. What needs a person
 
 File it as `needs-human` rather than mentioning it in a reply that scrolls away.
 The label does not exist until it is made, and creating it is safe to repeat:
@@ -271,7 +258,7 @@ Anything that needs a credential, changes a repository setting, installs or
 publishes the plugin, spends money beyond the episode budget, or needs an
 artefact downloaded by hand.
 
-## 9. Standing rules
+## 8. Standing rules
 
 - **Merged is not loaded.** A Claude Code session reads the plugin once, when it
   starts. A merged change reaches a running session only when that session is
@@ -286,7 +273,7 @@ artefact downloaded by hand.
   a conversation, not a veto in either direction.
 - **Correct yourself plainly and move on.** No tallying, no ceremony.
 
-## 10. Stop and hand back
+## 9. Stop and hand back
 
 At the end of a stretch of work, report what merged, what is open, what each
 open pull request is waiting on, and what needs the caller specifically.
