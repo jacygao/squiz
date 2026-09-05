@@ -1,0 +1,5 @@
+{
+  "name": "squiz-spike",
+  "version": "0.0.0",
+  "description": "Throwaway M0 prerequisites-spike plugin. Registers a SubagentStop hook that logs its payload and can block on demand. Deleted when M0 closes."
+}
