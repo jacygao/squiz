@@ -34,9 +34,10 @@ gh pr list --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
 ```
 
 Then run whatever checks `main` has. Squiz has no build step, so the type check
-is `tsc --noEmit` and the tests are whatever `package.json` defines. M1 is the
-milestone that creates both and puts them in CI. Before M1 lands there is
-nothing to run, and saying that plainly is the correct report.
+is `tsc --noEmit` and the tests are whatever `package.json` defines. Neither
+exists yet: the milestone that creates them and puts them in CI is M1, the
+plugin skeleton. Until it merges there is nothing to run, and reporting that
+plainly is correct. Do not invent a check to fill the gap.
 
 ## 2. Take the work from the argument, never from inference
 
@@ -188,9 +189,10 @@ answer is yours to resolve, not theirs to guess:
   is the outcome you asked for.
 
 **A result that contradicts the specification is reconciled in the
-specification, not worked around.** M0 sets that precedent. Reconciling means
-loading `writing-specs` and, because a specification change is a decision about
-the product, bringing it to the caller.
+specification, not worked around.** M0, the prerequisites spike, sets that
+precedent in its own acceptance criteria. Reconciling means loading
+`writing-specs` and, because a specification change is a decision about the
+product, bringing it to the caller.
 
 ## 5. Verify what comes back. Do not take the report
 
