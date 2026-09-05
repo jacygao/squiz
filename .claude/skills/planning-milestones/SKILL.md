@@ -1,6 +1,6 @@
 ---
 name: planning-milestones
-description: How a milestone in docs/specs/milestones.md becomes an epic issue and one sub-issue per subtask. Load BEFORE planning a milestone or filing its issues.
+description: How a named milestone in docs/specs/milestones.md becomes an epic issue and one sub-issue per subtask. Load BEFORE planning a milestone or filing its issues.
 user-invocable: true
 ---
 
@@ -11,31 +11,38 @@ writes code.
 
 This skill **plans only**. It ends at a reviewable tree and stops.
 
-## 1. Choose the milestone
+## 1. Take the milestone from the argument
 
-An argument may name one, such as `M2`. Use it if given.
+**The caller names the milestone. Never infer it.** The argument is an id such
+as `M2`.
 
-With no argument, the current milestone is **the first section in
-`docs/specs/milestones.md` whose epic issue is not closed**. An epic is an issue
-with no parent whose title starts with the milestone id:
+With no argument, stop and ask which one, listing the milestones from
+`docs/specs/milestones.md` so the caller picks from what the file actually has.
+Do nothing else until the answer comes back. Do not guess from which epics are
+open, from what was planned last, or from the order of the file. Which milestone
+to plan next is a fact about what the caller intends to build, and the
+repository does not hold it.
+
+Then check two things before reading any further.
+
+**The id names a section in `docs/specs/milestones.md`.** If it does not, stop
+and say which ids the file has.
+
+**No epic exists for it yet.** An epic is an issue with no parent whose title
+starts with the id:
 
 ```bash
 gh issue list --state all --limit 200 --json number,title,state,parent \
   --jq '.[] | select(.parent == null) | "\(.state)\t#\(.number)\t\(.title)"'
 ```
 
+If one is already there, the milestone has been planned. Stop, name the issue,
+and ask whether to add to that tree or leave it alone. A second epic for one
+milestone splits the tree, and nothing later in this skill detects it.
+
 Read issues with `--json` throughout, never the rendered text output. That
 output is laid out for a person reading a terminal, and its shape is not a
 contract; `--json` names fields you can test.
-
-A milestone with no epic issue at all counts as not closed, so an unstarted
-milestone is selectable. Read the file top to bottom and take the first match.
-The file is in build order, and its own opening says the milestones are in the
-order they are done.
-
-**Say which milestone you selected and why before doing anything else.** If the
-selection is ambiguous, or the first open epic is not the milestone the file
-implies, stop and ask rather than guessing.
 
 ## 2. Read before decomposing
 
