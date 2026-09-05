@@ -33,11 +33,8 @@ git fetch -q origin && git checkout -q main && git pull -q
 gh pr list --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
 ```
 
-Then run whatever checks `main` has. Squiz has no build step, so the type check
-is `tsc --noEmit` and the tests are whatever `package.json` defines. Neither
-exists yet: the milestone that creates them and puts them in CI is M1, the
-plugin skeleton. Until it merges there is nothing to run, and reporting that
-plainly is correct. Do not invent a check to fill the gap.
+That is the whole of it. Reading the state is about knowing what merged since
+the last session, and the two commands above answer it.
 
 ## 2. Take the work from the argument, never from inference
 
@@ -142,6 +139,18 @@ git worktree add -b <area>/<short-name> .claude/worktrees/i<issue> origin/main
   branch checked out, and the next agent that wants that branch fails for a
   reason that reads like something else.
 
+**Take the baseline before dispatching, not before answering.** Run the checks
+`main` has and keep the result. Its one job is attribution: if `main` is already
+red and you fan out four agents, all four report a failing suite, none of them
+caused it, and nothing in their reports says so. A baseline is what lets you
+tell a subagent's breakage from an inherited one in section 5.
+
+Squiz has no build step, so the type check is `tsc --noEmit` and the tests are
+whatever `package.json` defines. Neither exists yet, and neither does CI. The
+milestone that creates all three is M1, the plugin skeleton. Until it merges the
+baseline is empty, which is a fact to state rather than a gap to fill with an
+invented check.
+
 **Dispatch the whole frontier at once, in one message.** Issues with no open
 blocker are independent by construction, and running them one at a time wastes
 what the decomposition bought. A blocked issue is not dispatched, because its
@@ -203,8 +212,9 @@ nothing you do disturbs the branch:
 git worktree add -q .claude/worktrees/verify-<n> origin/<branch> --detach
 ```
 
-Run the repository's checks there, then **mutation-test the guard that
-matters**. Delete the check, run the suite, confirm something fails, restore it.
+Run the repository's checks there and compare them against the baseline you
+took before dispatching. A failure present in both is inherited, and chasing it
+in this branch is wasted work. Then **mutation-test the guard that matters**. Delete the check, run the suite, confirm something fails, restore it.
 
 This is the step that earns its keep, and it earns it twice over in a project
 whose failure paths are deliberately quiet. Delete the pull request gate and run
