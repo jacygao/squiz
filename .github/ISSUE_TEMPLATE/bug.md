@@ -28,4 +28,5 @@ assignees: ''
 <!-- Whatever governs this and is worth reading first: a spec section, a design
      doc, an RFC, a ticket, a URL. Delete the section if there is nothing. -->
 
-Blocked by #
+<!-- A blocker is a relationship, not a line here: set it in the sidebar under
+     Relationships, or with gh issue edit --add-blocked-by. -->

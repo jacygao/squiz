@@ -26,8 +26,9 @@ Two kinds, each with the matching label:
 - **Every section is optional** — keep one because it says something a reader
   needs, not because the template lists it
 - **Purpose is one sentence** — if it needs two, it is probably two issues
-- **`Blocked by #N` is plain text, one per line** — a ticked box means the work
-  is done; a blocker is a fact about ordering
+- **A blocker is a relationship, not a line of text** — set it with
+  `gh issue create --blocked-by` or `gh issue edit --add-blocked-by`, so GitHub
+  renders it and `--json blockedBy` reads it back
 
 ## Resources
 
@@ -43,4 +44,9 @@ gh issue create --title "<one line, the symptom>" --label bug --body "$(cat <<'E
 <the sections worth keeping, from .github/ISSUE_TEMPLATE/bug.md, comments removed>
 EOF
 )"
+````
+
+````bash
+gh issue create --title "<one line, imperative>" --label task --blocked-by 12,13 --body "..."
+gh issue edit 14 --add-blocked-by 12
 ````
