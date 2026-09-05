@@ -4,9 +4,11 @@ What the harness has to do to a review comment thread, and the exact call that
 does it. The GitHub client in M3 is written against this rather than against a
 rediscovered shape.
 
-Established by running every call below against a scratch pull request,
-[jacygao/squiz#17](https://github.com/jacygao/squiz/pull/17), which was closed
-and its branch deleted afterwards. The comments are still on it and can be read.
+Established by running every call below against two scratch pull requests,
+[jacygao/squiz#17](https://github.com/jacygao/squiz/pull/17) for the thread
+lifecycle and [#20](https://github.com/jacygao/squiz/pull/20) for anchoring to a
+modified file. Both were closed and their branches deleted afterwards. The
+comments are still on them and can be read.
 
 Run against `gh` 2.97.0, authenticated against github.com with the scopes
 `gist`, `read:org`, `repo`, `workflow`. Nothing here needed a scope outside
@@ -61,7 +63,11 @@ POST /repos/{owner}/{repo}/pulls/{pull_number}/comments
 `gh api repos/{owner}/{repo}/pulls/{n} --jq .head.sha`. The base sha is rejected.
 
 `side` is optional and defaults to `RIGHT`. `line` counts lines in the file at
-`side`, not positions in the diff hunk.
+`side`, not positions in the diff hunk. `RIGHT` numbers lines in the head file,
+`LEFT` in the base file, and both work: on a modified file, `line: 3, side: LEFT`
+anchors to the removed line and `line: 3, side: RIGHT` to the line replacing it.
+They are two separate threads on the same line number, so `side` is part of a
+thread's identity and not a detail.
 
 `start_line` (with the optional `start_side`) makes the anchor a range ending at
 `line`. Passing `subject_type: "file"` instead of `line` anchors to the file as a
@@ -255,23 +261,39 @@ The pull request number goes in the `issues/` path. The response has no `path`
 and no `line`, its node id is prefixed `IC_`, and it does not appear in
 `reviewThreads`. That is correct for the summary and wrong for a finding.
 
-## Anchoring: how it fails
+## Anchoring: what counts as part of the diff, and how it fails
+
+§ 4 routes a finding inline when its line "is part of the pull request's diff".
+That is wider than the changed lines. **A hunk's context lines can be anchored
+to as well**, which in a default diff is three lines either side of every
+change.
+
+Checked on a one-line modification to `LICENSE`, whose only hunk was `@@ -1,6
++1,6 @@`:
+
+- Line 6, `RIGHT` — an unchanged context line inside the hunk. Accepted.
+- Line 7, `RIGHT` — a real line of the file, one past the end of the hunk.
+  Rejected.
+- Line 1, `LEFT` — an unchanged context line. Accepted.
+
+So the boundary is the hunk, not the changed lines and not the file.
 
 Every failure below is a loud HTTP 422. None of them is silent.
 
 | What was sent | What came back |
 |---|---|
-| `path` not in the diff (`LICENSE`) | `pull_request_review_thread.path` — `could not be resolved` |
+| `path` not in the diff at all | `pull_request_review_thread.path` — `could not be resolved` |
+| `line` outside every hunk for that file | `pull_request_review_thread.line` — `could not be resolved` |
 | `line` past the end of the file | `pull_request_review_thread.line` — `could not be resolved` |
-| `side: LEFT` on an added file | `pull_request_review_thread.line` — `could not be resolved` |
+| `side: LEFT` on an added file, which has no base side | `pull_request_review_thread.line` — `could not be resolved` |
 | `commit_id` omitted | `No subschema in "oneOf" matched` |
 | `commit_id` set to the base sha | `pull_request_review_thread.path` — `could not be resolved` |
 
-The two `could not be resolved` messages are what the harness sees when a
-finding lands outside the diff. § 4 routes that finding to the summary comment
-instead, so this is a condition to detect and route on, not an error to report.
-A 422 whose `errors[].field` starts `pull_request_review_thread.` means the
-anchor was rejected; anything else is a real failure.
+The `could not be resolved` messages are what the harness sees when a finding
+lands outside the diff. § 4 routes that finding to the summary comment instead,
+so this is a condition to detect and route on, not an error to report. A 422
+whose `errors[].field` starts `pull_request_review_thread.` means the anchor was
+rejected; anything else is a real failure.
 
 Note that the wrong `commit_id` fails as a *path* error, not a commit error. The
 message does not name the cause.
@@ -315,16 +337,17 @@ nobody but the authenticating account can see.
 - **Behaviour when another account resolves a thread.** Everything here ran under
   one account, which is what § 2 Identity describes, so `viewerCanResolve` and
   `viewerCanUnresolve` were only ever observed for the thread's own author.
-- **Whether a thread can be anchored to the base side of a real modification.**
-  The scratch file was added, so it has no `LEFT` side. `side: LEFT` was
-  rejected here for that reason and not because the parameter does not work.
 - **Rate limits under a full round.** A round posts one thread per finding, and
   no limit was approached by the handful of calls here.
+- **Whether the context window is always three lines.** The boundary is the
+  hunk, which is what this note records. How wide GitHub draws a hunk was not
+  varied, so a client should treat a rejected anchor as the signal rather than
+  computing the window itself.
 
 ## How this was run
 
-The calls were run ad hoc with `gh api` against pull request 17. No script was
-written and nothing but this note is committed.
+The calls were run ad hoc with `gh api` against pull requests 17 and 20. No
+script was written and nothing but this note is committed.
 
 The one check worth keeping is the thread count, which is what separates a reply
 from an accidental second thread. Take it before and after any call meant to
