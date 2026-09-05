@@ -480,6 +480,9 @@ registration names it directly rather than an install path.
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
 | `squiz resolve <id>` | The coding agent | Marks a thread resolved. |
 
+`<id>` is whatever `squiz threads` printed for that thread. It round-trips
+between the two commands, and is short enough for an agent to copy.
+
 ### The setup check
 
 `/squiz doctor` is a slash command, run by a person. It reports which of the
@@ -511,15 +514,22 @@ carries what could not be posted.
 
 ### The hook's stderr
 
-Claude Code surfaces the hook's stderr. One line is the whole of it, naming what
-failed:
+Claude Code surfaces the hook's stderr, and two different things are written
+there. They stay apart.
+
+**The blocking reason**, written when a round exits 2. It names the open threads
+and the commands that work them, and the coding agent reads it as its next
+instruction.
+
+**The failure pointer**, written when a round exits 0 having failed. One line,
+naming what failed:
 
 ```
 squiz: round 3 found 3 findings and could not post them to PR #142
 ```
 
-It is a pointer rather than a report, and it must not grow into a second output
-format.
+The pointer is a pointer rather than a report, and it must not grow into a
+second output format.
 
 ### The review budget
 
@@ -553,6 +563,9 @@ the `.ts` files as they are, so there is no build step and no compiled output.
   union of string literals stands where an enum would.
 - **Types are checked by `tsc --noEmit` in CI.** Stripping does not check them.
 - **Node 24 or later.** The setup check reports the version.
+- **`bin/squiz` is a shell shim.** Node decides to strip types from the `.ts`
+  extension, so the entry point cannot be an extensionless Node file. The shim
+  execs the real one.
 
 There are no runtime dependencies. Everything outside the process is a
 subprocess: `git`, `gh`, and the reviewer's own CLI.
@@ -596,12 +609,12 @@ until something asks.
 | **P0** | The GitHub client | Creating a thread anchored to a file and a line, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
 | **P0** | The coding agent's commands | `squiz threads`, `squiz reply` and `squiz resolve`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
+| **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
 | **P0** | The episode state file | Round count, pull request number, per-round cost, keyed by the subagent's id and living in the worktree |
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
 | **P1** | The cost bound | $0.10 per episode, checked when a round records its cost |
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
-| **P1** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
@@ -627,8 +640,15 @@ loads a plugin without installing it. It confirms end to end that:
 - `gh api` can create a review comment thread anchored to a file and a line,
   reply inside that thread, and resolve and re-open it
 
-Two smaller checks, each deciding a behaviour already written down:
+Four smaller checks, each deciding a behaviour already written down:
 
+- **Whether the hook payload carries the subagent's id**, and whether it is the
+  same every time that subagent stops. An episode is keyed on it. If it is not
+  there, the key is the worktree toplevel, the branch, or the pull request
+  number, since there is one of each per episode.
+- **Whether `stop_hook_active` is set when the hook re-enters.** The loop blocks
+  the same subagent repeatedly on purpose, and the runtime counts consecutive
+  blocks for its own reasons.
 - **Whether `pi --tools` actually withholds `edit` and `write`.** A CLI that
   ignores an unrecognised flag and runs with every tool enabled would leave the
   reviewer able to edit the code it is reviewing.
