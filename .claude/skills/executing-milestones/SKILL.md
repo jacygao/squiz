@@ -127,11 +127,12 @@ red and you fan out four agents, all four report a failing suite, none of them
 caused it, and nothing in their reports says so. A baseline is what lets you
 tell a subagent's breakage from an inherited one in section 4.
 
-Squiz has no build step, so the type check is `tsc --noEmit` and the tests are
-whatever `package.json` defines. Where the repository does not have them yet,
-the baseline is empty, and that is a fact to state rather than a gap to fill
-with an invented check. M1, the plugin skeleton, is the milestone that creates
-them and puts both in CI.
+Squiz has no build step by design — Node strips the types and runs the `.ts`
+files as they are — so nothing checks the types unless something is run that
+checks them. That is `tsc --noEmit`, and the tests are whatever `package.json`
+defines. Where the repository does not have them yet, the baseline is empty, and
+that is a fact to state rather than a gap to fill with an invented check. M1,
+the plugin skeleton, is the milestone that creates them and puts both in CI.
 
 **Dispatch the whole frontier at once**, as one agent call per issue in a
 single message, so they run concurrently. Issues with no open blocker are
