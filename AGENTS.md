@@ -10,6 +10,11 @@
 **A spec's version number tracks commits.** A committed change bumps it; edits
 sitting in the working tree do not.
 
+## Milestones
+
+**Load the `planning-milestones` skill before decomposing a milestone from
+`docs/specs/milestones.md` into issues.** Every time, without being asked.
+
 ## Pull requests and issues
 
 **Load the `writing-pull-requests` skill before running `gh pr create`, and the
