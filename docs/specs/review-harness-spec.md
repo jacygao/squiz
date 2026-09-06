@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -44,8 +44,8 @@ each.
 |---|---|---|
 | `git` | 2.50.1 | `git --version` |
 | `gh` | 2.97.0, authenticated against github.com | `gh --version`, `gh auth status` |
-| `pi` | 0.74.2 | `pi --version` |
-| Claude Code | 2.1.228 | `claude --version` |
+| `pi` | 0.84.2 | `pi --version` |
+| Claude Code | 2.1.261 | `claude --version` |
 
 Two behaviours were established rather than assumed:
 
@@ -286,17 +286,24 @@ pi --print --mode json --no-session \
    <task-prompt> < /dev/null
 ```
 
-`< /dev/null` is required. With any tool enabled and stdin inherited, `pi`
-blocks forever and emits nothing: no output, no error, no exit.
+`< /dev/null` is required. With stdin inherited, `pi` blocks forever and emits
+nothing: no output, no error, no exit. This holds whether or not any tool is
+enabled.
 
 `--no-session` is what keeps each round stateless, and `--session-dir` contains
 what `pi` writes so it lands under `.squiz/` rather than in interactive history.
 
-The JSONL stream is large and repetitive: a single review produced 194MB across
-roughly 19,800 lines, of which all but a few hundred were `message_update`
-events repeating the whole partial message. The adapter reads
-`tool_execution_start`, `tool_execution_end` and the final `message_end`
-incrementally, and never holds the stream in memory.
+The JSONL stream is large, so the adapter reads it incrementally and never holds
+it in memory. The largest lines are the ones carrying whole messages, above all
+`agent_end`, which grows with the entire transcript.
+
+The adapter reads `tool_execution_start` and `tool_execution_end` for progress,
+and every `message_end` whose message is from the assistant for the round's
+cost. Cost arrives once per assistant message rather than once per run, and a
+round's cost is the sum of them. `pi` prices the run itself from a local
+catalogue, so a model the catalogue does not cover reports a zero cost against a
+non-zero token count. The adapter returns the token count alongside the cost,
+which is what tells that case apart from a round that cost nothing.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -426,8 +433,9 @@ Three blocks, in this order.
 
 1. **The counts and the cost.** Rounds run, findings raised, how many ended
    `fixed`, `withdrawn`, `open` and `disputed`, how many threads were re-opened,
-   and the cost of each round with the total for the episode. Findings raised
-   counts the general findings too, which carry no status.
+   and the cost of each round with the total for the episode and the tokens it
+   consumed. Findings raised counts the general findings too, which carry no
+   status.
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its `file:line` and its headline. When there are
    none, the comment says so in one line.
@@ -443,7 +451,7 @@ Three blocks, in this order.
 **Squiz review — 3 rounds, 6 findings**
 
 Fixed 2 · Withdrawn 1 · Open 1 · Disputed 1 · 2 re-opened
-Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029
+Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
 
 **Needs a person**
 
@@ -460,8 +468,20 @@ Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029
 Notes is omitted when there is nothing to report.
 
 The cost of each round is written to the episode's local state file as the round
-finishes. Where the reviewer's CLI reports no cost for a round, the comment
-gives that round's cost as unknown rather than as zero.
+finishes, with the token count beside it. The comment reports both.
+
+A round the time bound killed reports its **last tracked cost**, which is the
+cost of the assistant messages that completed. The message in flight when the
+reviewer was killed is spent and never reported, so the figure is lower than the
+round truly cost, and the episode's total carries the same understatement.
+
+Where the reviewer's CLI reports no cost at all, the comment gives that round's
+cost as unknown rather than as zero. Two situations produce it, and they are
+reported differently. A round killed before its first assistant message
+completed has no tracked cost, which is a fact about that round. A reviewer model
+the CLI cannot price reports no cost for every round of every episode, which is a
+setup problem: the comment says once that cost is unavailable for the model, and
+Notes records that the cost bound was not enforced.
 
 ## 6. Commands
 
@@ -540,15 +560,22 @@ The review budget bounds a review two ways. Both are configurable.
 | **Time**, per round | 420 seconds | The reviewer process is killed and the round records no findings. |
 | **Cost**, per episode | $0.10 | The episode closes without starting another round. |
 
-Killing the reviewer yields nothing rather than a partial review, because the
-findings arrive at the end of the run.
+Killing the reviewer yields no findings rather than a partial review, because
+the findings arrive in the last message of the run. It does yield a cost: the
+assistant messages that completed carry their own, and the round records that
+sum as its last tracked cost.
 
 The hook gets 600 seconds from Claude Code, and the harness posts the round's
 comments inside that. The time bound sits below the hook's ceiling.
 
 The cost bound is checked when a round records its cost, so it stops the next
-round rather than the running one. An episode that reaches it closes with the
-findings it has, and the summary comment reports that the bound was reached.
+round rather than the running one. A round already running is never killed for
+cost. An episode that reaches the bound closes with the findings it has, and the
+summary comment reports that the bound was reached.
+
+The bound is enforced against the reviewer CLI's own arithmetic rather than
+against a provider's invoice, and it cannot be enforced at all for a model the
+CLI cannot price.
 
 ## 8. The project
 
@@ -629,8 +656,8 @@ Facts the design rests on that have not been established. Each is settled before
 implementation starts, and each result is written as a finding in
 `docs/notes/`.
 
-**A spike, first and on its own.** Run it with `claude --plugin-dir ./`, which
-loads a plugin without installing it. It confirms end to end that:
+**A spike, first and on its own.** Run it with `claude --plugin-dir <plugin-root>`,
+which loads a plugin without installing it. It confirms end to end that:
 
 - `SubagentStop` fires, exit 2 feeds the reason back, and the subagent resumes
   its turn
@@ -652,9 +679,7 @@ Four smaller checks, each deciding a behaviour already written down:
 - **Whether `pi --tools` actually withholds `edit` and `write`.** A CLI that
   ignores an unrecognised flag and runs with every tool enabled would leave the
   reviewer able to edit the code it is reviewing.
-- **Whether `pi` reports cost during a run or only at the end.** The cost bound
-  stops the next round rather than the running one, which holds only if cost
-  arrives at the end.
+- **Whether `pi` reports cost during a run or only at the end.**
 
 ## 9. Adoption
 
