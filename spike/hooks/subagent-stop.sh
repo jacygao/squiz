@@ -8,6 +8,10 @@
 #      loop forever.
 #   3. Exits 2 for the first SQUIZ_SPIKE_MAX_BLOCKS invocations, writing a
 #      blocking reason to stderr, and exits 0 for every invocation after that.
+#   4. Counts rounds per subagent id, in a directory named for that id, which is
+#      what an episode state file would be keyed on. It reads the id with jq
+#      where jq is installed and records "(unparsed)" where it is not, so a
+#      missing jq costs a log line rather than the run.
 #
 # The blocking reason carries an arbitrary token and asks the subagent to write
 # it to a file. Nothing else in a session would produce that file, so the file
@@ -47,6 +51,29 @@ esac
 n=$((n + 1))
 printf '%s\n' "$n" >"$counter"
 
+# The episode key. § 3 keys an episode on the subagent's id, so the id and the
+# session it arrived in are pulled out onto their own log lines, and a round
+# counter is kept in a directory named for the id — which is what M1's episode
+# state file does with it. If two subagents share an id the counter conflates
+# them, and if one subagent's id changes it starts a second counter, so the
+# directory is the claim under test rather than a convenience.
+agent_id=$(printf '%s' "$payload" | jq -r '.agent_id // "(absent)"' 2>/dev/null) \
+  || agent_id='(unparsed)'
+[ -n "$agent_id" ] || agent_id='(absent)'
+session_id=$(printf '%s' "$payload" | jq -r '.session_id // "(absent)"' 2>/dev/null) \
+  || session_id='(unparsed)'
+# The id becomes a path component, so it is stripped rather than trusted.
+key=$(printf '%s' "$agent_id" | tr -cd 'A-Za-z0-9_-')
+[ -n "$key" ] || key='no-agent-id'
+episode_dir="$spike_dir/episodes/$key"
+mkdir -p "$episode_dir" 2>/dev/null
+rounds=$(cat "$episode_dir/rounds" 2>/dev/null || echo 0)
+case "$rounds" in
+  ''|*[!0-9]*) rounds=0 ;;
+esac
+rounds=$((rounds + 1))
+printf '%s\n' "$rounds" >"$episode_dir/rounds"
+
 {
   printf '===== invocation %s | label %s | %s =====\n' \
     "$n" "$label" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -58,6 +85,9 @@ printf '%s\n' "$n" >"$counter"
     "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '(none)')"
   printf 'CLAUDE_PLUGIN_ROOT: %s\n' "${CLAUDE_PLUGIN_ROOT:-(unset)}"
   printf 'CLAUDE_PROJECT_DIR: %s\n' "${CLAUDE_PROJECT_DIR:-(unset)}"
+  printf 'agent_id: %s\n' "$agent_id"
+  printf 'session_id: %s\n' "$session_id"
+  printf 'episode_rounds: %s\n' "$rounds"
   printf 'payload_bytes: %s\n' "$(printf '%s' "$payload" | wc -c | tr -d ' ')"
   printf 'payload: %s\n' "$payload"
   printf '\n'
