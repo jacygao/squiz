@@ -153,8 +153,9 @@ Every brief carries:
 
 - The issue number, and the specification sections that govern it, cited by H2
   number, to be read in full
-- `AGENTS.md`, which requires the `writing-pull-requests` skill before
-  `gh pr create` and the `writing-issues` skill before `gh issue create`
+- `AGENTS.md`, which requires the `writing-notes` skill before writing a note,
+  the `writing-pull-requests` skill before `gh pr create`, and the
+  `writing-issues` skill before `gh issue create`
 - `docs/notes/` for what earlier work already settled. A fact established there
   is read, not re-derived
 - Section 8 of the specification, which fixes the language rules and the `src/`
@@ -289,5 +290,5 @@ Do not start the next milestone without being asked.
 - `docs/notes/` — facts already settled by earlier work
 - `AGENTS.md` — the skills a subagent is required to load, and when
 - The `planning-milestones` skill — how the tree this skill executes was built
-- The `writing-issues` and `writing-pull-requests` skills — how anything filed
-  from this work is written
+- The `writing-notes`, `writing-issues` and `writing-pull-requests` skills — how
+  the finding, the issue and the pull request from this work are each written

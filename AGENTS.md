@@ -10,6 +10,14 @@
 **A spec's version number tracks commits.** A committed change bumps it; edits
 sitting in the working tree do not.
 
+## Notes
+
+**Load the `writing-notes` skill before writing or editing anything under
+`docs/notes/`.** Every time, without being asked.
+
+`docs/notes/` holds durable findings: what earlier work established, recorded so
+that it is read rather than re-derived.
+
 ## Milestones
 
 **Load the `planning-milestones` skill before decomposing a milestone from
