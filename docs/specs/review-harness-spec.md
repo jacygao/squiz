@@ -332,6 +332,11 @@ The standing rules:
   the code as it now stands and rule from that.
 - The suggested fix is one way to address a finding. Rule on whether the defect
   is gone, not on whether the suggestion was taken.
+- Scope a finding to `change` only when it is about the change as a whole and no
+  single line owns it. Everything else is scoped to `line` and anchored to a line
+  the change touched. Where the defect is somewhere the change did not touch,
+  anchor to the changed line that caused it and name the other location in the
+  body.
 
 ### Findings
 
@@ -341,7 +346,9 @@ on every thread it was handed.
 The pull request holds the record, so a finding carries only what composes a
 comment and what the harness needs in order to route it:
 
-- `file` and `line` — where it is, and what decides inline versus general.
+- `scope` — `line` or `change`, which decides inline versus general.
+- `file` and `line` — the changed line the comment is anchored to. A finding
+  scoped to the change as a whole carries neither.
 - `severity` — `high`, `medium`, or `low`.
 - The body fields, which are the parts of the comment format below.
 
@@ -406,13 +413,27 @@ stand.
 
 ### Pull request comments
 
-- **Inline**, when the finding is on a line that is part of the pull request's
-  diff. It becomes a review comment thread anchored to that file and line. This
-  is the normal case and the preferred one.
-- **General**, when it is not. GitHub cannot anchor a comment to a line outside
-  the diff, and the reviewer reads beyond the diff by design: untouched files,
-  callers, history. Those findings are collected into the summary comment, with
-  `file:line` written in the text.
+A finding's `scope` decides where its comment goes. The reviewer sets it,
+because it is a judgement about what the finding is about rather than about
+where a line falls.
+
+- **Inline**, for a finding scoped to `line`. It becomes a review comment thread
+  anchored to a file and a line that the change touched. This is the normal case
+  and the preferred one.
+- **General**, for a finding scoped to `change`. It is about the change as a
+  whole rather than about any line of it — that the feature duplicates one the
+  project already has, or that the approach is wrong. It goes into the summary
+  comment.
+
+The reviewer reads beyond the diff by design: untouched files, callers, history.
+A finding it makes there is still scoped to `line`, and it is anchored to the
+changed line that caused it, with the affected file and line named in the body.
+The reviewer does not go looking for the affected line to anchor to, and GitHub
+would refuse an anchor outside the diff in any case.
+
+An anchor the harness cannot place is reported as a general finding, with
+`file:line` written in the text, and the summary's Notes records that it could
+not be anchored.
 
 A general finding is reported once and then forgotten. It is a line of text in
 the summary comment rather than a thread, so nothing records whether it was
@@ -440,10 +461,11 @@ Three blocks, in this order.
    `disputed` one, each with its `file:line` and its headline. When there are
    none, the comment says so in one line.
 3. **Notes.** Anything else a person reviewing the pull request should know:
-   findings that could not be anchored to the diff, each with its `file:line`
-   and headline; a tracked file that changed while the reviewer ran; a round
-   whose review did not run; other episodes that shared the worktree; and a cap
-   or bound that ended the episode early.
+   findings about the change as a whole, each with its headline; a finding whose
+   anchor the harness could not place, with its `file:line`; a tracked file that
+   changed while the reviewer ran; a round whose review did not run; other
+   episodes that shared the worktree; and a cap or bound that ended the episode
+   early.
 
 ### The format
 
@@ -460,8 +482,8 @@ Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
 
 **Notes**
 
-- Not anchored to the diff: `packages/sync/src/store/sqlite.ts:212` — Batch write
-  is not rolled back when one row fails
+- About the change as a whole: the retry queue duplicates the scheduler already
+  in `packages/sync/src/scheduler.ts`, which nothing calls
 - The review ran against uncommitted changes in `packages/sync/src/queue.test.ts`
 ```
 
@@ -646,7 +668,7 @@ until something asks.
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
-| **P2** | Tracking findings that cannot be anchored to the diff | Today they are reported in the summary comment and carried no further |
+| **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 
 Nothing at P2 gets an interface built for it in advance.
 
