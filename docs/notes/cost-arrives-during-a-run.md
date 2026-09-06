@@ -15,26 +15,39 @@ and answers it the other way, saying the cost bound "holds only if cost arrives
 at the end", so the premise is wrong even though the design it defends still
 works. A killed round therefore yields a cost floor rather than nothing.
 
-## Needs a decision
+## Decisions
 
-- **§ 8's premise is wrong; the design it defends is still sound.** A bound
-  checked when a round records its cost, stopping the next round, remains
-  implementable — it is now a choice rather than a consequence. A **mid-round
-  bound is newly available**: an adapter summing assistant `message_end` costs as
-  they stream could kill the reviewer the moment the total crosses $0.10.
+- **Cost arrives per assistant message, not at the end of the run.** A round's
+  cost is the sum over assistant `message_end` events; there is no run-total
+  event, so the adapter does the addition.
+- **A killed round yields a floor, not a figure.** The tokens of the request in
+  flight are spent, billed, and never reported.
+- **A zero cost is not proof of a free round.** `pi` prices runs from its own
+  catalog, so an unpriced model reports zero cost against non-zero tokens.
+  Treat that as unknown, and keep both fields in the episode state file.
+
+## Needs your input
+
+Four things in the specification disagree with this, and none is fixed here.
+
+- **§ 8's premise is wrong; the design it defends still works.** It says the cost
+  bound "holds only if cost arrives at the end". Summing at the end of a round
+  remains implementable — it is now a choice rather than a consequence. A
+  **mid-round bound is newly available**: an adapter summing as it streams could
+  kill the reviewer the moment the total crosses $0.10. Recommended: keep the
+  current design and drop the false premise, because a mid-round kill loses the
+  findings and buys only the tail of one round.
 - **§ 7 needs a third state for a killed round.** "Killing the reviewer yields
-  nothing rather than a partial review" holds for *findings*, which are in the
-  final assistant message. It does not hold for cost, which is partial and
-  understated — neither the round's cost nor unknown. Recommended, if the current
-  design is kept: record the recovered figure as a lower bound, report it as
-  such, and have the episode bound treat it as at least that much. Reporting it
-  as the round's cost understates the episode; reporting zero is worse.
-- **§ 5's "unknown rather than zero" rule now has two triggers, not one.** A
-  round killed before its first assistant message finished (every usage field
-  zero), and a model the price catalog does not cover (zero cost, non-zero
-  tokens). The rule itself is right as written.
-- **§ 4's description of the stream is version-drifted.** See Reference; the
-  event named there as the one never to hold in memory has changed.
+  nothing rather than a partial review" holds for findings, which are in the
+  final assistant message. It does not hold for cost. Recommended: record the
+  recovered figure as a lower bound and have the episode bound treat it as at
+  least that much. Reporting it as the round's cost understates the episode;
+  reporting zero is worse.
+- **§ 5's "unknown rather than zero" rule now has two triggers.** A round killed
+  before its first assistant message finished, and a model the catalog does not
+  price. The rule is right as written; only the triggers need naming.
+- **§ 4's description of the stream is version-drifted.** The event never to hold
+  in memory has changed; see Reference.
 
 ## Reference
 
@@ -70,7 +83,7 @@ There is **no run-total event**. Neither `agent_end` nor `agent_settled` carries
 an aggregate. The adapter does the addition.
 
 Cost becomes non-zero on the last `message_update` before each `message_end`,
-leading it by 0.3–1.4 ms. Reading `message_end` loses nothing.
+so reading `message_end` loses nothing.
 
 ### The dollars are `pi`'s arithmetic, not the provider's
 
@@ -89,14 +102,11 @@ Both fields belong in the episode state file for that check to be possible.
 `SIGTERM` — what a time bound would send — makes `pi` kill its tracked children
 and exit 143. It prints nothing after the signal and leaves no partial line.
 
-| Killed | Assistant messages completed | Cost recoverable |
-|---|---|---|
-| 2007 ms, mid first message | 0 | **None.** Every usage field zero, `totalTokens` included |
-| 4503 ms, after one message | 1 | $0.000224 |
-| not killed, same prompt | 2 | $0.004059 |
-
-The last two ran the same prompt, so the kill recovered $0.000224 of $0.004059.
-The in-flight request's tokens are spent, billed, and never reported.
+A kill before the first assistant message finishes recovers **nothing** — every
+usage field reads zero, `totalTokens` included. After that, it recovers only the
+messages already complete: on the same prompt, a kill recovered $0.000224 of the
+$0.004059 the finished run reported. The in-flight request's tokens are spent,
+billed, and never reported.
 
 Nothing on disk fills the gap: with `--no-session`, `pi` wrote no file under
 `--session-dir` and none appeared under `~/.pi`; stderr was empty in every run.
@@ -105,15 +115,15 @@ Nothing on disk fills the gap: with `--no-session`, `pi` wrote no file under
 ### Stream shape at 0.84.2
 
 `message_update` no longer repeats the whole partial message — `dist/modes/json-event.js`
-strips `partial` and emits the delta plus a constant-size `usage`. Those events
-averaged 254 bytes and peaked at 1,196 across 337 of them. § 4's "194MB across
-roughly 19,800 lines, of which all but a few hundred were `message_update`
-events repeating the whole partial message" was 0.74.2's behaviour.
+strips `partial` and emits the delta plus a constant-size `usage`, so those
+events are small. § 4's "194MB across roughly 19,800 lines, of which all but a
+few hundred were `message_update` events repeating the whole partial message"
+was 0.74.2's behaviour.
 
-The bulk now sits in the message-carrying events: `agent_end`, `turn_end`,
-`message_start`, `message_end` and `tool_execution_end` were the five largest
-lines at 34–39KB each, since they carry whole messages including tool output.
-Read incrementally and hold nothing — but the line that must not be held is now
+The bulk now sits in the message-carrying events — `agent_end`, `turn_end`,
+`message_start`, `message_end` and `tool_execution_end` — which carry whole
+messages including tool output and run to tens of kilobytes each. Read
+incrementally and hold nothing, but the line that must not be held is now
 `agent_end`, not `message_update`.
 
 ## Limits
@@ -121,9 +131,9 @@ Read incrementally and hold nothing — but the line that must not be held is no
 - **Whether another provider reports cost mid-message.** Only `deepseek` is
   authenticated here, so only the OpenAI-completions path was exercised, which
   receives usage in the final SSE chunk. `pi-ai`'s Anthropic path populates and
-  prices usage at the SSE `message_start`, putting a real cost *seconds* before
-  `message_end` rather than a millisecond. Read from source, not measured. It
-  strengthens the conclusion rather than weakening it.
+  prices usage at the SSE `message_start`, which would put a real cost *seconds*
+  before `message_end` *(unverified — read from `pi`'s source, never observed in
+  output)*. It strengthens the conclusion rather than weakening it.
 - **`SIGKILL`.** Only `SIGTERM` was tested. `SIGKILL` denies `pi` its handler, so
   it can only recover less.
 - **A review-sized run.** Probes lasted 2–8 seconds over 108–366 lines. A
