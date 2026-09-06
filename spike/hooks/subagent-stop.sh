@@ -24,6 +24,9 @@
 #   SQUIZ_SPIKE_TOKEN       the arbitrary token (default ZZQ-4417)
 #   SQUIZ_SPIKE_LABEL       a per-run label written into every log record, so
 #                           one log can hold several runs
+#   SQUIZ_SPIKE_SPLIT_BY_TOPLEVEL
+#                           when non-empty, give each git worktree its own
+#                           subdirectory under SQUIZ_SPIKE_DIR
 
 set -u
 
@@ -37,6 +40,16 @@ case "$max_blocks" in
   ''|*[!0-9]*) max_blocks=2 ;;
 esac
 [ "$max_blocks" -gt 5 ] && max_blocks=5
+
+# Two subagents running at once fire two hooks that share $SQUIZ_SPIKE_DIR, and
+# the counter is a single file. They race on it, losing increments, and
+# interleave their writes into one log, and a corrupted log reads like a genuine
+# finding about concurrency. With SQUIZ_SPIKE_SPLIT_BY_TOPLEVEL set, each git
+# worktree gets its own subdirectory, so two concurrent hooks share no state.
+if [ -n "${SQUIZ_SPIKE_SPLIT_BY_TOPLEVEL:-}" ]; then
+  spike_toplevel=$(git rev-parse --show-toplevel 2>/dev/null || printf 'no-worktree')
+  spike_dir="$spike_dir/$(printf '%s' "$spike_toplevel" | tr -c 'A-Za-z0-9._-' '_')"
+fi
 
 mkdir -p "$spike_dir" 2>/dev/null
 log="$spike_dir/hook.log"
