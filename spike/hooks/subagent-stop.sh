@@ -16,7 +16,7 @@
 # Environment, all optional:
 #   SQUIZ_SPIKE_DIR         where the log and the counter live
 #                           (default /tmp/squiz-spike)
-#   SQUIZ_SPIKE_MAX_BLOCKS  how many invocations exit 2 (default 2, clamped to 5)
+#   SQUIZ_SPIKE_MAX_BLOCKS  how many invocations exit 2 (default 2, clamped to 7)
 #   SQUIZ_SPIKE_TOKEN       the arbitrary token (default ZZQ-4417)
 #   SQUIZ_SPIKE_LABEL       a per-run label written into every log record, so
 #                           one log can hold several runs
@@ -28,11 +28,13 @@ max_blocks="${SQUIZ_SPIKE_MAX_BLOCKS:-2}"
 token="${SQUIZ_SPIKE_TOKEN:-ZZQ-4417}"
 label="${SQUIZ_SPIKE_LABEL:-unlabelled}"
 
-# A typo must not turn into an unbounded billed loop.
+# A typo must not turn into an unbounded billed loop. The ceiling is 7 because
+# § 3 caps a round at 8, and a cap of 8 blocks the coding agent 7 times in a
+# row, so 7 is the most consecutive blocks the harness can ever ask for.
 case "$max_blocks" in
   ''|*[!0-9]*) max_blocks=2 ;;
 esac
-[ "$max_blocks" -gt 5 ] && max_blocks=5
+[ "$max_blocks" -gt 7 ] && max_blocks=7
 
 mkdir -p "$spike_dir" 2>/dev/null
 log="$spike_dir/hook.log"
