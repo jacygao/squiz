@@ -29,22 +29,28 @@ recheck-when: pi upgrades
 
 <Two or three sentences: what holds, what does not, and what it costs.>
 
-## Needs a decision
+## Decisions
 
-<Only what a person must choose or act on. Say "Nothing" if nothing does.>
+<What the work settled. A person reviews these; they do not choose them.>
+
+## Needs your input
+
+<What is still open and cannot be settled without a person, each with a
+recommendation. Say "Nothing" rather than omitting the section.>
 
 ## Reference
 
-<The exact field names, request shapes, command lines and identifiers a later
-milestone reads instead of rediscovering.>
+<Only what someone needs in order to act on the decisions above: field names,
+endpoints, required parameters, the trap that would otherwise be rediscovered.>
 
 ## Limits
 
 <What was not established, so a clean result is not read as a wider one.>
 ```
 
-Omit a section with nothing in it, except **Needs a decision**, which says
-"Nothing" rather than disappearing.
+Omit a section with nothing in it, except **Needs your input**, which says
+"Nothing" rather than disappearing. Its absence would be ambiguous between
+nothing being needed and the author forgetting to ask.
 
 `settles` points forward, at what the fact now governs, cited by H2 number.
 `issue` points back, at what commissioned it. `recheck-when` names the upgrade
@@ -52,27 +58,17 @@ that would invalidate the finding, so `grep -L` finds what to re-run.
 
 ## Principles
 
-- **Serve the person first, the next milestone second** — a note is read twice:
-  by a person deciding what to do, who reads the top and stops, and by a later
-  milestone that skips to the reference and mines it for an exact string
-- **Record what was settled, not how you settled it** — method, evidence and
-  justification belong in the pull request body and the commit, which is where
-  a reader goes when they doubt the finding
-- **The verdict is the title, and the file name** — "Cost arrives during a run",
-  not "Cost investigation findings"
-- **Never compress the reference** — an exact field name, endpoint or id is the
-  deliverable, and a summary of one costs the next milestone a re-run
-- **What needs a person goes in the first screen** — a decision found on line
-  200 is a decision missed
-- **The note stands on its own** — `issue:` is for auditing a finding, never for
-  understanding it. Never write "see #12 for the details"; a link out of the
-  repository is the first thing to rot
-- **A limit is a fact, not an apology** — name what was not established plainly
-  and move on
-- **Do not reconcile the spec here** — a note records the contradiction and
-  names the section; changing `docs/specs/` is a separate decision
-- **A finding is true of a version** — record what it was checked against, so a
-  note that has gone stale can be found rather than trusted
+- **Record what was settled, not how** — method, evidence, tables and what was
+  tried go in the pull request
+- **Never summarise an exact field name, endpoint or id** — the string is the
+  deliverable
+- **Mark a reference value you did not see in output** as `(unverified)`, so a
+  plausible guess is never read as an observation
+- **Never write "see #12 for the details"** — the note stands on its own, and a
+  link out of the repository is the first thing to rot
+- **State a limit plainly** — it is a fact, not an apology
+- **Record a contradiction with `docs/specs/` and name the section** — do not
+  edit the spec; reconciling it is a separate decision
 
 ## Resources
 
