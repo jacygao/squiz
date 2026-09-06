@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -129,9 +129,9 @@ flowchart TD
    nothing is posted.
 2. **Run the reviewer.** The harness spawns the reviewer as a separate local
    agent process, hands it the pull request for scope and intent, and lets it
-   read the working tree directly: files the diff did not touch, callers, git
-   history, and the test suite. The reviewer never edits the code it is
-   reviewing.
+   read the working tree directly: files the diff did not touch, callers, and
+   git history. At depth `deep` it also runs the tests. The reviewer never edits
+   the code it is reviewing.
 3. **Post the findings, and act on the verdicts.** Each new finding opens a new
    inline review comment thread anchored to a file and a line. Each verdict the
    reviewer returned is applied to the thread it names: `fixed` and `withdrawn`
@@ -201,7 +201,8 @@ Where a tree is shared, the harness detects it by resolving
 `git rev-parse --show-toplevel` and comparing it against the live episodes. Two
 live episodes on one toplevel means a shared tree. The round still runs, the
 summary comment names the other episodes that were in flight, and the
-tracked-file comparison under Confinement is disabled for that round.
+tracked-file comparison under Confinement is disabled for that round. A round
+that loses the comparison runs at depth `read`.
 
 ## 4. The reviewer
 
@@ -238,8 +239,12 @@ CLI's names.
 
 | Depth | Tools granted | What it can answer |
 |---|---|---|
-| `read` | `read`, `grep`, `find`, `ls` | Anything the code can be read for. |
-| `deep` *(default)* | the above, plus `bash` | Also whether the tests actually pass, whether a line was deliberate (`git log -S`, `git blame`), and whether a hypothesis holds when run. |
+| `read` *(default)* | `read`, `grep`, `find`, `ls` | Anything the code can be read for. |
+| `deep` | the above, plus `bash` | Also whether the tests actually pass, whether a line was deliberate (`git log -S`, `git blame`), and whether a hypothesis holds when run. |
+
+`deep` depends on the tracked-file comparison described under Confinement, which
+is the only mechanism that catches a write made through the shell. A round that
+cannot run the comparison runs at `read`.
 
 ### Confinement
 
@@ -247,14 +252,21 @@ The reviewer must not change anything the coding agent would commit. Writes to
 gitignored paths and to locations outside the repository are permitted, which is
 what running a build and a test suite requires.
 
-Three mechanisms hold this. None is configurable, and each applies where the
-third column says.
+What holds this depends on the depth.
+
+**At `read` the tool grant holds it.** The reviewer is given no tool that
+writes: `edit` and `write` are withheld, and so is the shell. Nothing it can
+reach for touches the tree.
+
+**At `deep` the grant includes `bash`, which is itself a write primitive.** A
+reviewer at `deep` can write to a tracked file, and three mechanisms bound what
+follows. None is configurable, and each applies where the third column says.
 
 | Mechanism | Guards against | Applies |
 |---|---|---|
 | **Scratch space.** `TMPDIR` points at `.squiz/<episode>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
-| **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured, and depth is `deep` |
-| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Everything else. | Except in a shared worktree |
+| **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
+| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Everything else, including a write made through the shell. | Always at `deep`; a round that cannot run it runs at `read` |
 
 The first two prevent, and the third detects. A tracked file that changed during
 a round is named in the summary comment.
@@ -281,7 +293,7 @@ The adapter that ships. It builds this command line:
 ```bash
 pi --print --mode json --no-session \
    --session-dir .squiz/<episode>/session \
-   --tools read,grep,find,ls,bash \
+   --tools read,grep,find,ls \
    --append-system-prompt <charter-file> \
    <task-prompt> < /dev/null
 ```
@@ -308,7 +320,7 @@ which is what tells that case apart from a round that cost nothing.
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
 
-`--tools` sets the grant. The list above is `deep`; `read` drops `bash`.
+`--tools` sets the grant. The list above is `read`; `deep` adds `bash`.
 
 ### Charter
 
@@ -321,8 +333,9 @@ The standing rules:
   that assert nothing.
 - Do not report formatting, naming, import order, anything the compiler catches,
   or speculation. "Consider whether" means there is no finding.
-- Verify before reporting. Read the file, grep the callers, run the test. A
-  finding that could have been checked and was not is not reportable.
+- Verify before reporting. Read the file, grep the callers, and run the test
+  where the depth grants a shell. A finding that could have been checked with
+  the tools you were given and was not is not reportable.
 - Read what the project treats as authoritative. `AGENTS.md` names it, and it is
   the authority on intended behaviour. It extends what counts as a finding; it
   does not change these rules, the requirement to verify, or the shape of a
@@ -650,9 +663,8 @@ until something asks.
 | | | |
 |---|---|---|
 | **P0** | The hook and the loop | The `SubagentStop` registration, the pull request gate, the round cap, the exit-code decisions, and the time bound on the reviewer |
-| **P0** | The `pi` adapter | The command line, the parse of its output, and the tool grants at each depth |
+| **P0** | The `pi` adapter | The command line, the parse of its output, and the `read` grant |
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<episode>/scratch/` |
-| **P0** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review |
 | **P0** | The charter | The standing rules handed to the reviewer every round |
 | **P0** | The finding contract | `file`, `line`, `severity`, the body fields, the rule routing a finding inline or general, and the per-thread verdicts |
 | **P0** | The GitHub client | Creating a thread anchored to a file and a line, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
@@ -660,7 +672,9 @@ until something asks.
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
 | **P0** | The episode state file | Round count, pull request number, per-round cost, keyed by the subagent's id and living in the worktree |
-| **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits |
+| **P1** | Depth `deep` | The `bash` grant, and the fallback to `read` for a round that cannot run the tracked-file comparison. It ships with that comparison or not at all |
+| **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
+| **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
 | **P1** | The cost bound | $0.10 per episode, checked when a round records its cost |
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
@@ -727,9 +741,9 @@ Four things in the host project, the last two optional.
 2. Allow `squiz` in the project's Claude Code permissions, so the coding agent
    is not prompted every time it works a thread.
 3. **Optional.** `.squiz.json`, to change any of the settings below. Every one
-   has a working default, so a project that writes none still runs. Without a
-   `test` setting the reviewer runs whatever test command it can infer, and the
-   non-mutating invocation has nothing to name.
+   has a working default, so a project that writes none still runs. The `test`
+   setting is read only at depth `deep`, where it names the non-mutating command
+   the reviewer runs instead of one it infers for itself.
 4. **Optional.** `AGENTS.md`, to have the reviewer enforce rules of the
    project's own. It carries the conventions a reviewer cannot derive from
    reading code, and it can point at whatever else the project treats as
@@ -748,7 +762,7 @@ on its own branch. Squiz does not create them.
 | Setting | Default | |
 |---|---|---|
 | `rounds` | 3 | The round cap, settable 1 to 8 |
-| `depth` | `deep` | `read` withholds the shell |
+| `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 420 | Seconds one round's reviewer may run |
 | `budget` | 0.10 | Dollars an episode may cost |
