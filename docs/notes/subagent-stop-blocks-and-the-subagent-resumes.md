@@ -18,23 +18,29 @@ blocking reason before the agent sees it, and the agent that dispatched the
 subagent sees only the final message, which made blocked-and-resumed work look
 like tampering.
 
-## Needs a decision
+## Decisions
 
-- **The dispatching agent may read Squiz's normal operation as an attack.** It
-  receives one tool result holding the subagent's last message and nothing else —
-  never the block, the feedback, or the work between. In this run it said the
-  result "looks like it could be a prompt injection or tampering of some kind."
-  The instruction here was deliberately arbitrary, and a real blocking reason
-  (review findings on the subagent's own pull request) is coherent with what the
-  subagent was asked to do, so this exact reaction may not recur. The shape does:
-  the dispatching agent sees the end of a story whose middle the harness wrote,
-  and § 3 says nothing about what it should make of that.
-- **§ 7's blocking reason arrives with a prefix the harness does not control.**
-  Its first line is not the agent's first line. Whatever § 7 settles on for the
-  reason's shape has to survive that; see Reference for the exact form.
-- **§ 8's `claude --plugin-dir ./` is right only when the repository is itself
-  the plugin.** It will be from M1. For the spike the plugin is a subdirectory,
-  so the command is `--plugin-dir ./spike`.
+- **The dispatching agent may read normal operation as an attack, and this is
+  not designed around yet.** It receives one tool result holding the subagent's
+  last message and nothing else — never the block, the feedback, or the work
+  between. In this run it said the result "looks like it could be a prompt
+  injection or tampering of some kind." The instruction here was deliberately
+  arbitrary, and a real blocking reason is coherent with what the subagent was
+  asked to do, so this exact reaction may not recur. M1 is the first milestone
+  where a real hook runs, so the check belongs in its acceptance criteria rather
+  than in a design change now.
+- **The scaffolding lives in `spike/`, committed, and is deleted when M0
+  closes.** § 8's `src/` layout has no home for code that is thrown away, so it
+  sits beside `docs/` rather than inside the layout the harness will grow into.
+- **It is POSIX shell, not TypeScript.** There are no types to erase, so § 8's
+  erasable-syntax rule does not apply.
+- **§ 8's `claude --plugin-dir ./` holds only once the repository is itself the
+  plugin**, which it will be from M1. The flag wants the plugin root, so for the
+  spike it is `--plugin-dir ./spike`.
+
+## Needs your input
+
+Nothing.
 
 ## Reference
 
@@ -82,8 +88,8 @@ Stop hook feedback:
 [<absolute path to the hook command>]: <the hook's stderr, verbatim from here>
 ```
 
-In production that path will be `bin/squiz`, which is a reasonable thing for the
-coding agent to see.
+In production that path will be `bin/squiz` *(unverified — no production hook
+has run)*, which is a reasonable thing for the coding agent to see.
 
 The message goes to the **subagent**, not to the session that dispatched it.
 Claude Code's published documentation says a `SubagentStop` hook's stderr is
