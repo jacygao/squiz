@@ -29,22 +29,34 @@ recheck-when: pi upgrades
 
 <Two or three sentences: what holds, what does not, and what it costs.>
 
-## Needs a decision
+## Decisions
 
-<Only what a person must choose or act on. Say "Nothing" if nothing does.>
+<What the work settled. A person reviews these; they do not choose them.>
+
+## Needs your input
+
+<What is still open and cannot be settled without a person, each with a
+recommendation. Say "Nothing" rather than omitting the section.>
 
 ## Reference
 
-<The exact field names, request shapes, command lines and identifiers a later
-milestone reads instead of rediscovering.>
+<Only what someone needs in order to act on the decisions above: field names,
+endpoints, required parameters, the trap that would otherwise be rediscovered.>
 
 ## Limits
 
 <What was not established, so a clean result is not read as a wider one.>
 ```
 
-Omit a section with nothing in it, except **Needs a decision**, which says
-"Nothing" rather than disappearing.
+Omit a section with nothing in it, except **Needs your input**, which says
+"Nothing" rather than disappearing. Its absence would be ambiguous between
+nothing being needed and the author forgetting to ask.
+
+**Reference supports a decision; it never justifies one.** A field name someone
+needs in order to write the code belongs there. A measurement, a comparison
+table, or a record of what was tried does not, however much work it took — that
+is how the decision was reached, and it goes in the pull request. Reference that
+argues rather than informs is what turns a note into something nobody reads.
 
 `settles` points forward, at what the fact now governs, cited by H2 number.
 `issue` points back, at what commissioned it. `recheck-when` names the upgrade
@@ -60,10 +72,13 @@ that would invalidate the finding, so `grep -L` finds what to re-run.
   a reader goes when they doubt the finding
 - **The verdict is the title, and the file name** — "Cost arrives during a run",
   not "Cost investigation findings"
-- **Never compress the reference** — an exact field name, endpoint or id is the
-  deliverable, and a summary of one costs the next milestone a re-run
-- **What needs a person goes in the first screen** — a decision found on line
-  200 is a decision missed
+- **Reference informs, it does not argue** — keep what a reader must have to act,
+  drop what shows how you got there; a note is not a defence of its own findings
+- **Never compress what survives that cut** — an exact field name, endpoint or id
+  is the deliverable, and a summary of one costs the next milestone a re-run
+- **Separate what was settled from what is still open** — a person reviews the
+  first and answers the second, and being unable to tell them apart costs them
+  the time the note was meant to save
 - **The note stands on its own** — `issue:` is for auditing a finding, never for
   understanding it. Never write "see #12 for the details"; a link out of the
   repository is the first thing to rot
