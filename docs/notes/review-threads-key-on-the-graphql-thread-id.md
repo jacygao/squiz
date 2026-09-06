@@ -1,20 +1,39 @@
-# Review comment threads through `gh api`
+---
+settles: "§ 8 — the gh api shapes for a review comment thread's lifecycle"
+issue: 10
+recorded: 2026-09-06
+versions: { gh: 2.97.0 }
+recheck-when: GitHub changes the review-thread API
+---
 
-What the harness has to do to a review comment thread, and the exact call that
-does it. The GitHub client in M3 is written against this rather than against a
-rediscovered shape.
+# Review threads key on the GraphQL thread id
 
-Established by running every call below against two scratch pull requests,
-[jacygao/squiz#17](https://github.com/jacygao/squiz/pull/17) for the thread
-lifecycle and [#20](https://github.com/jacygao/squiz/pull/20) for anchoring to a
-modified file. Both were closed and their branches deleted afterwards. The
-comments are still on them and can be read.
+The full lifecycle works through `gh api`: create anchored to a file and a line,
+reply inside the thread, resolve, re-open, and read back with replies and
+resolved state. Only the GraphQL `PRRT_` thread node id serves every operation,
+so that is what `squiz threads`, `reply` and `resolve` round-trip. Four calls in
+this area return success while doing the wrong thing, and one of them posts a
+review nobody can see.
 
-Run against `gh` 2.97.0, authenticated against github.com with the scopes
-`gist`, `read:org`, `repo`, `workflow`. Nothing here needed a scope outside
-that set.
+## Needs a decision
 
-## The two identifier spaces
+**§ 4's inline-routing boundary is wider than its wording.** It routes a finding
+inline when its line "is part of the pull request's diff". The real limit is the
+*hunk*, context lines included — on a `@@ -1,6 +1,6 @@` hunk, unchanged line 6
+was accepted and line 7, one past the hunk, was rejected. More findings can be
+anchored inline than the sentence implies, so the wording is worth widening.
+
+Everything else here is M3's to implement, not a person's to choose.
+
+## Reference
+
+Worked examples are still readable on the scratch pull requests this was
+established against, [#17](https://github.com/jacygao/squiz/pull/17) (lifecycle)
+and [#20](https://github.com/jacygao/squiz/pull/20) (anchoring to a modified
+file). Both are closed and their branches deleted. Every call ran under the `gh`
+scopes `gist`, `read:org`, `repo`, `workflow`; none needed more.
+
+### The two identifier spaces
 
 This is the fact the rest of the note depends on, so it comes first.
 
@@ -43,7 +62,41 @@ listing `reviewThreads` and matching on the root comment's `databaseId` — or b
 creating the thread through GraphQL, which returns it directly. See *Creating a
 thread* below for why that second route has a catch.
 
-## Creating a thread anchored to a file and a line
+### The failures that are not loud
+
+Every call in this section returns a success. Three were checked because they
+were suspected in advance; one of those three turned out not to be silent at
+all, and the fourth was found while checking the others.
+
+**A second top-level thread posted where a reply was meant.** This is real. A
+`POST /pulls/{n}/comments` carrying `body`, `commit_id`, `path` and `line` but
+no reply parameter returns 201 with a comment on the right file and the right
+line. It is a new thread. Told apart by counting `reviewThreads.totalCount`
+before and after: it went 1 to 2, where a reply leaves it unchanged. The
+response alone does not show it — the only tell is `in_reply_to_id: null`, and
+nothing makes a caller look at it.
+
+**A misspelled reply parameter does not do this.** `in_reply_to_id` in place of
+`in_reply_to` was expected to be ignored and to create a second thread. It is
+rejected, 422, `"in_reply_to_id" is not a permitted key`. The endpoint validates
+its keys against a `oneOf`, so an unknown key fails rather than being dropped.
+The silent case above comes from omitting the parameter, not from misnaming it.
+
+**Passing the wrong id to a resolve mutation is loud.** Both the comment node id
+and the REST database id were tried against `resolveReviewThread`. Both return a
+GraphQL `NOT_FOUND`: `Could not resolve to PullRequestReviewThread node with the
+global id of 'PRRC_…'`. Note that GraphQL returns HTTP 200 with an `errors`
+array here, so a client that checks only the status code will read this as
+success. `gh api graphql` exits non-zero, and a client calling GitHub directly
+must check `errors` itself.
+
+**A GraphQL-created thread is invisible until the review is submitted.** Covered
+under *Creating a thread* above. This is the worst of the four, because the
+mutation returns a well-formed thread with a usable node id, later calls against
+that id all succeed, and the harness would report a round of findings that
+nobody but the authenticating account can see.
+
+### Creating a thread anchored to a file and a line
 
 ```
 POST /repos/{owner}/{repo}/pulls/{pull_number}/comments
@@ -94,7 +147,7 @@ does.
 This call publishes the comment immediately. It creates a review of its own in
 state `COMMENTED` as a side effect, which needs no submitting.
 
-### The GraphQL alternative, and why it is not the default
+#### The GraphQL alternative, and why it is not the default
 
 `addPullRequestReviewThread` takes the pull request's node id and returns the
 thread node id directly, which would save the match-back:
@@ -127,7 +180,7 @@ So the choice is one REST call plus a read-back to learn the thread id, or two
 GraphQL calls. Either is defensible. What is not defensible is the single
 GraphQL call, which posts a comment nobody can see and reports success.
 
-## Replying inside a thread
+### Replying inside a thread
 
 Two calls do this. Both were run, and neither changed the thread count.
 
@@ -163,7 +216,7 @@ Prefer the replies endpoint, which rejects what it will not honour.
 
 A reply is recognised in a read-back by `in_reply_to_id` being non-null.
 
-## Resolving and re-opening
+### Resolving and re-opening
 
 Both are GraphQL, as § 2 of the spec says. There is no REST equivalent, and this
 was checked rather than assumed: no field on `GET /pulls/{n}/comments` mentions
@@ -195,7 +248,7 @@ are both safe.
 describing what the UI would offer, not what the mutation will accept — the
 mutation succeeded with it false. Do not gate on it.
 
-## Reading the threads back
+### Reading the threads back
 
 One query returns everything the harness needs, and only GraphQL returns the
 resolved state.
@@ -247,7 +300,7 @@ returns every comment flat with `in_reply_to_id`, `path`, `line` and
 `original_line`, but it carries **no resolved state and no thread node id**, so
 a client built on it can neither report what is open nor resolve anything.
 
-## The summary comment
+### The summary comment
 
 The episode's summary is an issue-level comment, which is a different endpoint
 and a different object:
@@ -261,7 +314,7 @@ The pull request number goes in the `issues/` path. The response has no `path`
 and no `line`, its node id is prefixed `IC_`, and it does not appear in
 `reviewThreads`. That is correct for the summary and wrong for a finding.
 
-## Anchoring: what counts as part of the diff, and how it fails
+### Anchoring: what counts as part of the diff, and how it fails
 
 § 4 routes a finding inline when its line "is part of the pull request's diff".
 That is wider than the changed lines. **A hunk's context lines can be anchored
@@ -298,41 +351,7 @@ rejected; anything else is a real failure.
 Note that the wrong `commit_id` fails as a *path* error, not a commit error. The
 message does not name the cause.
 
-## The failures that are not loud
-
-Every call in this section returns a success. Three were checked because they
-were suspected in advance; one of those three turned out not to be silent at
-all, and the fourth was found while checking the others.
-
-**A second top-level thread posted where a reply was meant.** This is real. A
-`POST /pulls/{n}/comments` carrying `body`, `commit_id`, `path` and `line` but
-no reply parameter returns 201 with a comment on the right file and the right
-line. It is a new thread. Told apart by counting `reviewThreads.totalCount`
-before and after: it went 1 to 2, where a reply leaves it unchanged. The
-response alone does not show it — the only tell is `in_reply_to_id: null`, and
-nothing makes a caller look at it.
-
-**A misspelled reply parameter does not do this.** `in_reply_to_id` in place of
-`in_reply_to` was expected to be ignored and to create a second thread. It is
-rejected, 422, `"in_reply_to_id" is not a permitted key`. The endpoint validates
-its keys against a `oneOf`, so an unknown key fails rather than being dropped.
-The silent case above comes from omitting the parameter, not from misnaming it.
-
-**Passing the wrong id to a resolve mutation is loud.** Both the comment node id
-and the REST database id were tried against `resolveReviewThread`. Both return a
-GraphQL `NOT_FOUND`: `Could not resolve to PullRequestReviewThread node with the
-global id of 'PRRC_…'`. Note that GraphQL returns HTTP 200 with an `errors`
-array here, so a client that checks only the status code will read this as
-success. `gh api graphql` exits non-zero, and a client calling GitHub directly
-must check `errors` itself.
-
-**A GraphQL-created thread is invisible until the review is submitted.** Covered
-under *Creating a thread* above. This is the worst of the four, because the
-mutation returns a well-formed thread with a usable node id, later calls against
-that id all succeed, and the harness would report a round of findings that
-nobody but the authenticating account can see.
-
-## What was not established
+## Limits
 
 - **Behaviour when another account resolves a thread.** Everything here ran under
   one account, which is what § 2 Identity describes, so `viewerCanResolve` and
@@ -343,19 +362,3 @@ nobody but the authenticating account can see.
   hunk, which is what this note records. How wide GitHub draws a hunk was not
   varied, so a client should treat a rejected anchor as the signal rather than
   computing the window itself.
-
-## How this was run
-
-The calls were run ad hoc with `gh api` against pull requests 17 and 20. No
-script was written and nothing but this note is committed.
-
-The one check worth keeping is the thread count, which is what separates a reply
-from an accidental second thread. Take it before and after any call meant to
-land inside an existing thread:
-
-```bash
-gh api graphql -f query='
-  { repository(owner:"OWNER",name:"REPO") { pullRequest(number:N) {
-      reviewThreads(first:100) { totalCount } } } }' \
-  --jq '.data.repository.pullRequest.reviewThreads.totalCount'
-```
