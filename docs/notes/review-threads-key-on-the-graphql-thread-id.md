@@ -27,17 +27,18 @@ review nobody can see.
   the two honest routes.
 - **Resolve and re-open are GraphQL-only.** Checked rather than assumed: no REST
   field carries resolution state.
+- **A finding is anchored to a changed line, so the anchoring boundary does not
+  decide anything.** GitHub accepts an anchor anywhere inside a hunk, context
+  lines included, and rejects anything outside it. Since a finding is anchored to
+  the line whose change caused it, the anchor is inside the diff by construction,
+  and how wide GitHub draws a hunk never affects whether a finding gets a thread.
+  A finding whose effect lands elsewhere names that location in the comment body
+  rather than being anchored there. Issue #26 carries this into § 4.
 
 ## Needs your input
 
-**§ 4's inline-routing boundary is wider than its wording.** It routes a finding
-inline when its line "is part of the pull request's diff". The real limit is the
-*hunk*, context lines included, so more findings can be anchored inline than the
-sentence implies.
-
-Recommended: widen the wording to name the hunk. The routing predicate in M2 is
-built from this sentence, and the narrow reading would send anchorable findings
-to the summary comment where nothing tracks whether they were fixed.
+Nothing. The anchoring boundary was raised and settled: see the last decision
+above.
 
 ## Reference
 
@@ -279,12 +280,12 @@ The pull request number goes in the `issues/` path. The response has no `path`
 and no `line`, its node id is prefixed `IC_`, and it does not appear in
 `reviewThreads`. That is correct for the summary and wrong for a finding.
 
-### Anchoring: what counts as part of the diff, and how it fails
+### Which anchors GitHub accepts, and how it refuses
 
-§ 4 routes a finding inline when its line "is part of the pull request's diff".
-That is wider than the changed lines. **The boundary is the hunk**, context
-lines included, on both sides — an unchanged line inside the hunk anchors, and a
-real line of the file one past the hunk does not.
+**The boundary is the hunk**, context lines included, on both sides: an
+unchanged line inside the hunk anchors, and a real line of the file one past the
+hunk does not. A changed line is always inside its own hunk, so an anchor chosen
+that way is always accepted.
 
 Every anchoring failure is a loud HTTP 422. None is silent.
 
