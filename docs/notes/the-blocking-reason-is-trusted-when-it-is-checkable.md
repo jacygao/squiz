@@ -58,22 +58,7 @@ believe exists, it refuses whatever the wording.
 
 ## Needs your input
 
-**Whether whatever dispatches a coding subagent tells it, in its brief, that a
-review loop runs on its pull request.** This is not the authorisation line
-rejected above, which was a standing declaration of trust planted in the
-repository for the coding agent to find. It is the dispatcher describing the
-workflow the subagent is being sent into. The problem it addresses is one level
-up: a parent agent that dispatched a subagent, and knew nothing of the review
-loop, reported its own subagent's correct compliance as an attack, objecting
-that the subagent had posted inline replies on a pull request under the user's
-GitHub identity without the task having asked for it. The parent was right that
-the action was outward-facing and unrequested by the brief it wrote.
-
-The recommendation is yes, with the caveat that it is adjacent to what was just
-rejected and must not become a declaration that Squiz's feedback is to be
-trusted. Describing a loop the subagent will encounter is a statement about the
-workflow. Declaring in advance that the loop's output is authorised is a
-statement about trust, and it is the one that backfires.
+Nothing.
 
 ## Reference
 
@@ -136,4 +121,11 @@ will check them.
 - **The coding agent's replies land under the invoking user's GitHub
   credentials.** That was observed rather than designed for, and what Squiz
   should do about a coding agent taking outward-facing actions on a pull request
-  is not settled here.
+  is not settled here. A parent agent that had dispatched a coding agent, and
+  knew nothing of the review loop, reported its own subagent's correct
+  compliance as an attack on exactly this ground: the replies were outward-
+  facing and its brief had not asked for them. It reported and stopped there,
+  reverting nothing and halting nothing, so the round completed correctly in
+  every run where a parent objected. The objection is a report to the reader,
+  not a failure of the loop, and nothing here establishes a parent that acts on
+  one.
