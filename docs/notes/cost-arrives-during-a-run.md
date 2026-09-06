@@ -28,26 +28,23 @@ works. A killed round therefore yields a cost floor rather than nothing.
 
 ## Needs your input
 
-Four things in the specification disagree with this, and none is fixed here.
+Nothing. Four consequences for the specification were raised and all four are
+settled, in § 4, § 5, § 7 and § 8:
 
-- **§ 8's premise is wrong; the design it defends still works.** It says the cost
-  bound "holds only if cost arrives at the end". Summing at the end of a round
-  remains implementable — it is now a choice rather than a consequence. A
-  **mid-round bound is newly available**: an adapter summing as it streams could
-  kill the reviewer the moment the total crosses $0.10. Recommended: keep the
-  current design and drop the false premise, because a mid-round kill loses the
-  findings and buys only the tail of one round.
-- **§ 7 needs a third state for a killed round.** "Killing the reviewer yields
-  nothing rather than a partial review" holds for findings, which are in the
-  final assistant message. It does not hold for cost. Recommended: record the
-  recovered figure as a lower bound and have the episode bound treat it as at
-  least that much. Reporting it as the round's cost understates the episode;
-  reporting zero is worse.
-- **§ 5's "unknown rather than zero" rule now has two triggers.** A round killed
-  before its first assistant message finished, and a model the catalog does not
-  price. The rule is right as written; only the triggers need naming.
-- **§ 4's description of the stream is version-drifted.** The event never to hold
-  in memory has changed; see Reference.
+- The cost bound stops the next round and never kills a running one. A mid-round
+  bound is technically available and is not taken, because killing a run loses
+  its findings and recovers only the tail of one round's cost. § 8's premise that
+  the bound "holds only if cost arrives at the end" was false and is gone.
+- A round the time bound killed records its **last tracked cost** — the cost of
+  the assistant messages that completed — and the episode's total counts it. The
+  message in flight is spent and never reported, so the figure understates and is
+  labelled as what it is rather than as the round's cost.
+- The two situations that report no cost at all are named separately. A round
+  killed before its first assistant message completed is a fact about that round.
+  A model the price catalogue does not cover is a setup problem, reported once,
+  with the summary recording that the cost bound could not be enforced.
+- The adapter sums every assistant `message_end` rather than reading the last
+  one, and returns the token count beside the cost.
 
 ## Reference
 
