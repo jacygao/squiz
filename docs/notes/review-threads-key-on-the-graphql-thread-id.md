@@ -64,9 +64,8 @@ thread* below for why that second route has a catch.
 
 ### The failures that are not loud
 
-Every call in this section returns a success. Three were checked because they
-were suspected in advance; one of those three turned out not to be silent at
-all, and the fourth was found while checking the others.
+Every call in this section returns a success while doing something other than
+what the caller intended.
 
 **A second top-level thread posted where a reply was meant.** This is real. A
 `POST /pulls/{n}/comments` carrying `body`, `commit_id`, `path` and `line` but
