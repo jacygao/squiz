@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -69,16 +69,18 @@ from the `.ts` extension. It is a shell shim that execs `node src/cli.ts "$@"`.
 ## M2 — The finding contract and the comment format
 
 Pure code, no input or output. The finding shape, the three verdicts and the
-four terminal statuses, severity ordering, the comment renderer, and the routing
-predicate that decides inline against general — which is a unified-diff parser
-answering whether a given `file:line` is in the pull request's diff.
+four terminal statuses, severity ordering, the comment renderer, and the anchor
+validator — a unified-diff parser answering whether the line a finding names is
+one the change touched.
 
 ### Acceptance criteria
 
 - [ ] A finding renders to the template in the specification, with and without
       the optional trailing reference, and reads correctly with it deleted.
-- [ ] A line inside the diff routes inline; a line in an untouched file routes
-      general.
+- [ ] A finding scoped to `line` routes inline; one scoped to `change` routes
+      general and carries no `file` or `line`.
+- [ ] An anchor the parser rejects falls back to a general finding carrying its
+      `file:line`, rather than being dropped or failing the round.
 - [ ] A thread the reviewer returned no verdict for resolves to `open`.
 - [ ] The diff parser is tested against added, removed, context and multi-hunk
       cases.

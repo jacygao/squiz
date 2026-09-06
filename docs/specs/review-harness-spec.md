@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -44,8 +44,8 @@ each.
 |---|---|---|
 | `git` | 2.50.1 | `git --version` |
 | `gh` | 2.97.0, authenticated against github.com | `gh --version`, `gh auth status` |
-| `pi` | 0.74.2 | `pi --version` |
-| Claude Code | 2.1.228 | `claude --version` |
+| `pi` | 0.84.2 | `pi --version` |
+| Claude Code | 2.1.261 | `claude --version` |
 
 Two behaviours were established rather than assumed:
 
@@ -286,17 +286,24 @@ pi --print --mode json --no-session \
    <task-prompt> < /dev/null
 ```
 
-`< /dev/null` is required. With any tool enabled and stdin inherited, `pi`
-blocks forever and emits nothing: no output, no error, no exit.
+`< /dev/null` is required. With stdin inherited, `pi` blocks forever and emits
+nothing: no output, no error, no exit. This holds whether or not any tool is
+enabled.
 
 `--no-session` is what keeps each round stateless, and `--session-dir` contains
 what `pi` writes so it lands under `.squiz/` rather than in interactive history.
 
-The JSONL stream is large and repetitive: a single review produced 194MB across
-roughly 19,800 lines, of which all but a few hundred were `message_update`
-events repeating the whole partial message. The adapter reads
-`tool_execution_start`, `tool_execution_end` and the final `message_end`
-incrementally, and never holds the stream in memory.
+The JSONL stream is large, so the adapter reads it incrementally and never holds
+it in memory. The largest lines are the ones carrying whole messages, above all
+`agent_end`, which grows with the entire transcript.
+
+The adapter reads `tool_execution_start` and `tool_execution_end` for progress,
+and every `message_end` whose message is from the assistant for the round's
+cost. Cost arrives once per assistant message rather than once per run, and a
+round's cost is the sum of them. `pi` prices the run itself from a local
+catalogue, so a model the catalogue does not cover reports a zero cost against a
+non-zero token count. The adapter returns the token count alongside the cost,
+which is what tells that case apart from a round that cost nothing.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -325,6 +332,11 @@ The standing rules:
   the code as it now stands and rule from that.
 - The suggested fix is one way to address a finding. Rule on whether the defect
   is gone, not on whether the suggestion was taken.
+- Scope a finding to `change` only when it is about the change as a whole and no
+  single line owns it. Everything else is scoped to `line` and anchored to a line
+  the change touched. Where the defect is somewhere the change did not touch,
+  anchor to the changed line that caused it and name the other location in the
+  body.
 
 ### Findings
 
@@ -334,7 +346,9 @@ on every thread it was handed.
 The pull request holds the record, so a finding carries only what composes a
 comment and what the harness needs in order to route it:
 
-- `file` and `line` — where it is, and what decides inline versus general.
+- `scope` — `line` or `change`, which decides inline versus general.
+- `file` and `line` — the changed line the comment is anchored to. A finding
+  scoped to the change as a whole carries neither.
 - `severity` — `high`, `medium`, or `low`.
 - The body fields, which are the parts of the comment format below.
 
@@ -399,13 +413,27 @@ stand.
 
 ### Pull request comments
 
-- **Inline**, when the finding is on a line that is part of the pull request's
-  diff. It becomes a review comment thread anchored to that file and line. This
-  is the normal case and the preferred one.
-- **General**, when it is not. GitHub cannot anchor a comment to a line outside
-  the diff, and the reviewer reads beyond the diff by design: untouched files,
-  callers, history. Those findings are collected into the summary comment, with
-  `file:line` written in the text.
+A finding's `scope` decides where its comment goes. The reviewer sets it,
+because it is a judgement about what the finding is about rather than about
+where a line falls.
+
+- **Inline**, for a finding scoped to `line`. It becomes a review comment thread
+  anchored to a file and a line that the change touched. This is the normal case
+  and the preferred one.
+- **General**, for a finding scoped to `change`. It is about the change as a
+  whole rather than about any line of it — that the feature duplicates one the
+  project already has, or that the approach is wrong. It goes into the summary
+  comment.
+
+The reviewer reads beyond the diff by design: untouched files, callers, history.
+A finding it makes there is still scoped to `line`, and it is anchored to the
+changed line that caused it, with the affected file and line named in the body.
+The reviewer does not go looking for the affected line to anchor to, and GitHub
+would refuse an anchor outside the diff in any case.
+
+An anchor the harness cannot place is reported as a general finding, with
+`file:line` written in the text, and the summary's Notes records that it could
+not be anchored.
 
 A general finding is reported once and then forgotten. It is a line of text in
 the summary comment rather than a thread, so nothing records whether it was
@@ -426,16 +454,18 @@ Three blocks, in this order.
 
 1. **The counts and the cost.** Rounds run, findings raised, how many ended
    `fixed`, `withdrawn`, `open` and `disputed`, how many threads were re-opened,
-   and the cost of each round with the total for the episode. Findings raised
-   counts the general findings too, which carry no status.
+   and the cost of each round with the total for the episode and the tokens it
+   consumed. Findings raised counts the general findings too, which carry no
+   status.
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its `file:line` and its headline. When there are
    none, the comment says so in one line.
 3. **Notes.** Anything else a person reviewing the pull request should know:
-   findings that could not be anchored to the diff, each with its `file:line`
-   and headline; a tracked file that changed while the reviewer ran; a round
-   whose review did not run; other episodes that shared the worktree; and a cap
-   or bound that ended the episode early.
+   findings about the change as a whole, each with its headline; a finding whose
+   anchor the harness could not place, with its `file:line`; a tracked file that
+   changed while the reviewer ran; a round whose review did not run; other
+   episodes that shared the worktree; and a cap or bound that ended the episode
+   early.
 
 ### The format
 
@@ -443,7 +473,7 @@ Three blocks, in this order.
 **Squiz review — 3 rounds, 6 findings**
 
 Fixed 2 · Withdrawn 1 · Open 1 · Disputed 1 · 2 re-opened
-Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029
+Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
 
 **Needs a person**
 
@@ -452,16 +482,28 @@ Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029
 
 **Notes**
 
-- Not anchored to the diff: `packages/sync/src/store/sqlite.ts:212` — Batch write
-  is not rolled back when one row fails
+- About the change as a whole: the retry queue duplicates the scheduler already
+  in `packages/sync/src/scheduler.ts`, which nothing calls
 - The review ran against uncommitted changes in `packages/sync/src/queue.test.ts`
 ```
 
 Notes is omitted when there is nothing to report.
 
 The cost of each round is written to the episode's local state file as the round
-finishes. Where the reviewer's CLI reports no cost for a round, the comment
-gives that round's cost as unknown rather than as zero.
+finishes, with the token count beside it. The comment reports both.
+
+A round the time bound killed reports its **last tracked cost**, which is the
+cost of the assistant messages that completed. The message in flight when the
+reviewer was killed is spent and never reported, so the figure is lower than the
+round truly cost, and the episode's total carries the same understatement.
+
+Where the reviewer's CLI reports no cost at all, the comment gives that round's
+cost as unknown rather than as zero. Two situations produce it, and they are
+reported differently. A round killed before its first assistant message
+completed has no tracked cost, which is a fact about that round. A reviewer model
+the CLI cannot price reports no cost for every round of every episode, which is a
+setup problem: the comment says once that cost is unavailable for the model, and
+Notes records that the cost bound was not enforced.
 
 ## 6. Commands
 
@@ -540,15 +582,22 @@ The review budget bounds a review two ways. Both are configurable.
 | **Time**, per round | 420 seconds | The reviewer process is killed and the round records no findings. |
 | **Cost**, per episode | $0.10 | The episode closes without starting another round. |
 
-Killing the reviewer yields nothing rather than a partial review, because the
-findings arrive at the end of the run.
+Killing the reviewer yields no findings rather than a partial review, because
+the findings arrive in the last message of the run. It does yield a cost: the
+assistant messages that completed carry their own, and the round records that
+sum as its last tracked cost.
 
 The hook gets 600 seconds from Claude Code, and the harness posts the round's
 comments inside that. The time bound sits below the hook's ceiling.
 
 The cost bound is checked when a round records its cost, so it stops the next
-round rather than the running one. An episode that reaches it closes with the
-findings it has, and the summary comment reports that the bound was reached.
+round rather than the running one. A round already running is never killed for
+cost. An episode that reaches the bound closes with the findings it has, and the
+summary comment reports that the bound was reached.
+
+The bound is enforced against the reviewer CLI's own arithmetic rather than
+against a provider's invoice, and it cannot be enforced at all for a model the
+CLI cannot price.
 
 ## 8. The project
 
@@ -619,7 +668,7 @@ until something asks.
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
-| **P2** | Tracking findings that cannot be anchored to the diff | Today they are reported in the summary comment and carried no further |
+| **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 
 Nothing at P2 gets an interface built for it in advance.
 
@@ -629,8 +678,8 @@ Facts the design rests on that have not been established. Each is settled before
 implementation starts, and each result is written as a finding in
 `docs/notes/`.
 
-**A spike, first and on its own.** Run it with `claude --plugin-dir ./`, which
-loads a plugin without installing it. It confirms end to end that:
+**A spike, first and on its own.** Run it with `claude --plugin-dir <plugin-root>`,
+which loads a plugin without installing it. It confirms end to end that:
 
 - `SubagentStop` fires, exit 2 feeds the reason back, and the subagent resumes
   its turn
@@ -652,9 +701,7 @@ Four smaller checks, each deciding a behaviour already written down:
 - **Whether `pi --tools` actually withholds `edit` and `write`.** A CLI that
   ignores an unrecognised flag and runs with every tool enabled would leave the
   reviewer able to edit the code it is reviewing.
-- **Whether `pi` reports cost during a run or only at the end.** The cost bound
-  stops the next round rather than the running one, which holds only if cost
-  arrives at the end.
+- **Whether `pi` reports cost during a run or only at the end.**
 
 ## 9. Adoption
 
