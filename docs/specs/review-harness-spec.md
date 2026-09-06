@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -44,7 +44,7 @@ each.
 |---|---|---|
 | `git` | 2.50.1 | `git --version` |
 | `gh` | 2.97.0, authenticated against github.com | `gh --version`, `gh auth status` |
-| `pi` | 0.74.2 | `pi --version` |
+| `pi` | 0.84.2 | `pi --version` |
 | Claude Code | 2.1.228 | `claude --version` |
 
 Two behaviours were established rather than assumed:
@@ -286,8 +286,10 @@ pi --print --mode json --no-session \
    <task-prompt> < /dev/null
 ```
 
-`< /dev/null` is required. With any tool enabled and stdin inherited, `pi`
-blocks forever and emits nothing: no output, no error, no exit.
+`< /dev/null` is required. With stdin inherited, `pi` blocks forever and emits
+nothing: no output, no error, no exit. It does so whatever the grant, including
+when no tool is enabled at all. Give every run a hard timeout, because a silent
+hang and an honest finding of nothing look alike from outside.
 
 `--no-session` is what keeps each round stateless, and `--session-dir` contains
 what `pi` writes so it lands under `.squiz/` rather than in interactive history.
