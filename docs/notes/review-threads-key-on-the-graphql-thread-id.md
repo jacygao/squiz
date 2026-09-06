@@ -19,8 +19,8 @@ review nobody can see.
 
 - **`<id>` in `squiz threads`, `reply` and `resolve` is the GraphQL `PRRT_`
   thread node id.** It is the only identifier serving every operation the coding
-  agent needs. The REST comment id reaches the replies endpoint but not the
-  resolve mutations.
+  agent needs. The REST comment id can only be replied to; the resolve
+  mutations reject it.
 - **Threads are created over REST, not with `addPullRequestReviewThread`.** The
   single GraphQL call leaves the comment in a pending review that nobody can
   see. One REST call plus a read-back to learn the thread id is the cheaper of
@@ -56,7 +56,7 @@ A review comment thread has two identifiers, and they are not interchangeable.
 | | Looks like | Comes from | Consumed by |
 |---|---|---|---|
 | The thread's node id | `PRRT_kwDOUEd2qM6fnpx6` | GraphQL `reviewThreads.nodes[].id` only | `resolveReviewThread`, `unresolveReviewThread`, `addPullRequestReviewThreadReply` |
-| A comment's REST id | `3942350907` | The REST create response's `id`, and `GET /pulls/{n}/comments` | The REST replies endpoint |
+| A comment's REST id | `3942350907` | The REST create response's `id`, and `GET /pulls/{n}/comments` | Replies only — the resolve mutations reject it |
 
 A comment also has a node id of its own, `PRRC_kwDOUEd2qM7q-4A7`. It is the
 comment's, not the thread's, and the resolve mutations reject it.
@@ -66,9 +66,9 @@ comment's, not the thread's, and the resolve mutations reject it.
 operation the coding agent needs, because GraphQL has a reply mutation that
 takes it. It is 21 characters, which is short enough for an agent to copy.
 
-The REST comment id cannot play that role: it reaches the replies endpoint but
-not the resolve mutations, so a client that carried it would need a second
-lookup before it could resolve anything.
+The REST comment id cannot play that role: it can be replied to but not
+resolved, so a client carrying it needs a second lookup before it can resolve
+anything.
 
 There is no field that maps a comment to its thread. `PullRequestReviewComment`
 in GraphQL has no `pullRequestReviewThread`, so a thread node id is obtained by
@@ -155,44 +155,23 @@ does.
 This call publishes the comment immediately. It creates a review of its own in
 state `COMMENTED` as a side effect, which needs no submitting.
 
-#### The GraphQL alternative, and why it is not the default
+#### Why not `addPullRequestReviewThread`
 
-`addPullRequestReviewThread` takes the pull request's node id and returns the
-thread node id directly, which would save the match-back:
+The GraphQL create takes the pull request's node id and returns the thread node
+id directly, which would save the read-back. **It leaves the comment in a
+pending review**: `state: "PENDING"`, `publishedAt: null`, absent from
+`GET /pulls/{n}/comments`, and visible to nobody but the author. The mutation
+returns a well-formed thread with a usable node id, and every later call against
+that id succeeds, so a round can post its whole review to an audience of nobody
+and look healthy throughout.
 
-```graphql
-mutation($prId:ID!, $body:String!) {
-  addPullRequestReviewThread(input:{
-    pullRequestId: $prId, path: "scratch-probe.txt",
-    line: 2, side: RIGHT, body: $body
-  }) { thread { id } }
-}
-```
-
-**It leaves the comment in a pending review.** The mutation returns a normal
-thread with a real node id, and the comment is `state: "PENDING"`,
-`publishedAt: null`, absent from `GET /pulls/{n}/comments`, and visible to
-nobody but the author. Publishing it takes a second call:
-
-```graphql
-mutation($id:ID!) {
-  submitPullRequestReview(input:{ pullRequestReviewId: $id, event: COMMENT })
-  { pullRequestReview { state } }
-}
-```
-
-where `$id` is `comments.nodes[0].pullRequestReview.id` on the new thread. After
-it, the comment reads `state: "SUBMITTED"` and appears in the REST list.
-
-So the choice is one REST call plus a read-back to learn the thread id, or two
-GraphQL calls. Either is defensible. What is not defensible is the single
-GraphQL call, which posts a comment nobody can see and reports success.
+Publishing needs a second call, `submitPullRequestReview` with `event: COMMENT`
+and the review id from the new thread. Two GraphQL calls is defensible; the
+single call is not.
 
 ### Replying inside a thread
 
-Two calls do this. Both were run, and neither changed the thread count.
-
-**By thread node id, which is what `squiz reply <id>` should use:**
+Take the `PRRT_` thread node id, which is what `squiz reply <id>` holds:
 
 ```graphql
 mutation($threadId:ID!, $body:String!) {
@@ -202,25 +181,7 @@ mutation($threadId:ID!, $body:String!) {
 }
 ```
 
-This one publishes immediately — the reply came back with a `databaseId` and
-appeared in the REST list without a submit.
-
-**By REST comment id, if the client is holding one:**
-
-```
-POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies
-{ "body": "..." }
-```
-
-`{comment_id}` is any comment already in the thread; the root comment is the
-obvious one. Only `body` is accepted: sending `path` and `line` alongside it is
-a 422, `"line", "path" are not permitted keys`.
-
-`POST /pulls/{n}/comments` with `in_reply_to: <comment_id>` and a body also
-works and is equivalent. Unlike the replies endpoint it *accepts* `path`,
-`line` and `commit_id` and then ignores them — the comment still lands as a
-reply in the thread `in_reply_to` names, whatever the anchoring fields say.
-Prefer the replies endpoint, which rejects what it will not honour.
+This publishes immediately — no submit — and does not change the thread count.
 
 A reply is recognised in a read-back by `in_reply_to_id` being non-null.
 
@@ -287,13 +248,9 @@ Both connections paginate, so both need their `pageInfo` honoured. A pull
 request can carry more than 100 threads, and a long argument can carry more than
 100 comments.
 
-**`line` is null once the anchored line changes.** This was checked by pushing a
-commit that edited the anchored line and inserted one above it:
-
-- A thread whose line was edited: `isOutdated: true`, `line: null`,
-  `originalLine: 4`.
-- A thread whose lines only shifted: `isOutdated: false`, `line: 9`,
-  `originalLine: 8` — `line` follows the code.
+**`line` goes null once the anchored line is edited**, with `isOutdated: true`
+and `originalLine` still set. A thread whose lines merely shifted keeps a live
+`line` and stays `isOutdated: false`.
 
 `squiz threads` prints `file:line`, so it has to fall back to `originalLine`
 when `line` is null, or it will print `file:null` for exactly the threads a
