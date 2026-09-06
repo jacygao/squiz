@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether two concurrent subagents are separated by their worktree toplevel"
+settles: "§ 8 — whether two concurrent subagents each get their own worktree, and whether git rev-parse --show-toplevel separates them"
 issue: 15
 recorded: 2026-09-06
 versions: { claude-code: 2.1.261, git: 2.50.1 }
