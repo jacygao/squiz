@@ -15,15 +15,29 @@ so that is what `squiz threads`, `reply` and `resolve` round-trip. Four calls in
 this area return success while doing the wrong thing, and one of them posts a
 review nobody can see.
 
-## Needs a decision
+## Decisions
+
+- **`<id>` in `squiz threads`, `reply` and `resolve` is the GraphQL `PRRT_`
+  thread node id.** It is the only identifier serving every operation the coding
+  agent needs. The REST comment id reaches the replies endpoint but not the
+  resolve mutations.
+- **Threads are created over REST, not with `addPullRequestReviewThread`.** The
+  single GraphQL call leaves the comment in a pending review that nobody can
+  see. One REST call plus a read-back to learn the thread id is the cheaper of
+  the two honest routes.
+- **Resolve and re-open are GraphQL-only.** Checked rather than assumed: no REST
+  field carries resolution state.
+
+## Needs your input
 
 **§ 4's inline-routing boundary is wider than its wording.** It routes a finding
 inline when its line "is part of the pull request's diff". The real limit is the
-*hunk*, context lines included — on a `@@ -1,6 +1,6 @@` hunk, unchanged line 6
-was accepted and line 7, one past the hunk, was rejected. More findings can be
-anchored inline than the sentence implies, so the wording is worth widening.
+*hunk*, context lines included, so more findings can be anchored inline than the
+sentence implies.
 
-Everything else here is M3's to implement, not a person's to choose.
+Recommended: widen the wording to name the hunk. The routing predicate in M2 is
+built from this sentence, and the narrow reading would send anchorable findings
+to the summary comment where nothing tracks whether they were fixed.
 
 ## Reference
 
@@ -67,27 +81,22 @@ thread* below for why that second route has a catch.
 Every call in this section returns a success while doing something other than
 what the caller intended.
 
-**A second top-level thread posted where a reply was meant.** This is real. A
-`POST /pulls/{n}/comments` carrying `body`, `commit_id`, `path` and `line` but
-no reply parameter returns 201 with a comment on the right file and the right
-line. It is a new thread. Told apart by counting `reviewThreads.totalCount`
-before and after: it went 1 to 2, where a reply leaves it unchanged. The
-response alone does not show it — the only tell is `in_reply_to_id: null`, and
-nothing makes a caller look at it.
+**A second top-level thread lands where a reply was meant.** A
+`POST /pulls/{n}/comments` carrying `body`, `commit_id`, `path` and `line` but no
+reply parameter returns 201 with a comment on the right file and the right line.
+It is a new thread. The only tell in the response is `in_reply_to_id: null`;
+otherwise it takes a `reviewThreads.totalCount` before and after, which a reply
+leaves unchanged. Note this comes from *omitting* the reply parameter — a
+misspelled one is rejected, 422, `"in_reply_to_id" is not a permitted key`,
+because the endpoint validates its keys against a `oneOf`.
 
-**A misspelled reply parameter does not do this.** `in_reply_to_id` in place of
-`in_reply_to` was expected to be ignored and to create a second thread. It is
-rejected, 422, `"in_reply_to_id" is not a permitted key`. The endpoint validates
-its keys against a `oneOf`, so an unknown key fails rather than being dropped.
-The silent case above comes from omitting the parameter, not from misnaming it.
-
-**Passing the wrong id to a resolve mutation is loud.** Both the comment node id
-and the REST database id were tried against `resolveReviewThread`. Both return a
-GraphQL `NOT_FOUND`: `Could not resolve to PullRequestReviewThread node with the
-global id of 'PRRC_…'`. Note that GraphQL returns HTTP 200 with an `errors`
-array here, so a client that checks only the status code will read this as
-success. `gh api graphql` exits non-zero, and a client calling GitHub directly
-must check `errors` itself.
+**A wrong id to a resolve mutation returns HTTP 200.** Neither the comment node
+id nor the REST database id is accepted; both give a GraphQL `NOT_FOUND`,
+`Could not resolve to PullRequestReviewThread node with the global id of
+'PRRC_…'`. The status code is 200 and the failure is in the `errors` array, so a
+client checking only the status reads a failed resolve as a success. `gh api
+graphql` exits non-zero; a client calling GitHub directly must check `errors`
+itself.
 
 **A GraphQL-created thread is invisible until the review is submitted.** Covered
 under *Creating a thread* above. This is the worst of the four, because the
@@ -316,21 +325,11 @@ and no `line`, its node id is prefixed `IC_`, and it does not appear in
 ### Anchoring: what counts as part of the diff, and how it fails
 
 § 4 routes a finding inline when its line "is part of the pull request's diff".
-That is wider than the changed lines. **A hunk's context lines can be anchored
-to as well**, which in a default diff is three lines either side of every
-change.
+That is wider than the changed lines. **The boundary is the hunk**, context
+lines included, on both sides — an unchanged line inside the hunk anchors, and a
+real line of the file one past the hunk does not.
 
-Checked on a one-line modification to `LICENSE`, whose only hunk was `@@ -1,6
-+1,6 @@`:
-
-- Line 6, `RIGHT` — an unchanged context line inside the hunk. Accepted.
-- Line 7, `RIGHT` — a real line of the file, one past the end of the hunk.
-  Rejected.
-- Line 1, `LEFT` — an unchanged context line. Accepted.
-
-So the boundary is the hunk, not the changed lines and not the file.
-
-Every failure below is a loud HTTP 422. None of them is silent.
+Every anchoring failure is a loud HTTP 422. None is silent.
 
 | What was sent | What came back |
 |---|---|
