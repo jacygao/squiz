@@ -201,8 +201,7 @@ Where a tree is shared, the harness detects it by resolving
 `git rev-parse --show-toplevel` and comparing it against the live episodes. Two
 live episodes on one toplevel means a shared tree. The round still runs, the
 summary comment names the other episodes that were in flight, and the
-tracked-file comparison under Confinement is disabled for that round. A round
-that loses the comparison runs at depth `read`.
+tracked-file comparison under Confinement is disabled for that round.
 
 ## 4. The reviewer
 
@@ -243,8 +242,7 @@ CLI's names.
 | `deep` | the above, plus `bash` | Also whether the tests actually pass, whether a line was deliberate (`git log -S`, `git blame`), and whether a hypothesis holds when run. |
 
 `deep` depends on the tracked-file comparison described under Confinement, which
-is the only mechanism that catches a write made through the shell. A round that
-cannot run the comparison runs at `read`.
+is the only mechanism that catches a write made through the shell.
 
 ### Confinement
 
@@ -266,7 +264,7 @@ follows. None is configurable, and each applies where the third column says.
 |---|---|---|
 | **Scratch space.** `TMPDIR` points at `.squiz/<episode>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
-| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Everything else, including a write made through the shell. | Always at `deep`; a round that cannot run it runs at `read` |
+| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Everything else, including a write made through the shell. | Except in a shared worktree, where nothing detects such a write |
 
 The first two prevent, and the third detects. A tracked file that changed during
 a round is named in the summary comment.
@@ -672,7 +670,7 @@ until something asks.
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
 | **P0** | The episode state file | Round count, pull request number, per-round cost, keyed by the subagent's id and living in the worktree |
-| **P1** | Depth `deep` | The `bash` grant, and the fallback to `read` for a round that cannot run the tracked-file comparison. It ships with that comparison or not at all |
+| **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison or not at all |
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |

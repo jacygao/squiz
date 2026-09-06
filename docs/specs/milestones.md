@@ -187,8 +187,6 @@ what detects a write made through the shell it grants.
       The round still runs, and the summary names the other episodes in flight.
 - [ ] Depth `deep` produces a command line with `bash`, and the configured test
       command reaches the reviewer.
-- [ ] A round that cannot run the comparison runs at `read`, whatever the
-      configured depth.
 
 ## M8 — Episode boundaries
 
