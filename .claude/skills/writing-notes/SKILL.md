@@ -9,25 +9,12 @@ user-invocable: true
 Write a note a person can act on in one screen and a later milestone can build
 from without re-running the work.
 
-## Two audiences, in this order
-
-A note is read twice. **A person, once**, deciding what to do about it, who
-reads the top and stops. **A later milestone, months on**, needing an exact
-string, shape or field, which skips to the reference and mines it.
-
-Serve the person first and the machine below the fold. Neither is served by an
-account of how the work was done.
-
-## The file name is the index
+## The template
 
 Name the file for the verdict, not the subject: `cost-arrives-during-a-run.md`,
-not `pi-cost-reporting.md`. `ls docs/notes/` is then the whole index, it needs
-no upkeep, and it cannot drift out of step with the directory.
-
-Nothing central is updated when a note is added. Notes are written by several
-subagents at once, and a shared index file would conflict every time.
-
-## The template
+not `pi-cost-reporting.md`. Listing the directory is then the whole index, and
+there is no central file to update when a note lands. Notes are written by
+several subagents at once, and a shared index would conflict every time.
 
 ```markdown
 ---
@@ -65,6 +52,9 @@ that would invalidate the finding, so `grep -L` finds what to re-run.
 
 ## Principles
 
+- **Serve the person first, the next milestone second** — a note is read twice:
+  by a person deciding what to do, who reads the top and stops, and by a later
+  milestone that skips to the reference and mines it for an exact string
 - **Record what was settled, not how you settled it** — method, evidence and
   justification belong in the pull request body and the commit, which is where
   a reader goes when they doubt the finding
