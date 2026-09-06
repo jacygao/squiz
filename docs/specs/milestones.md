@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -58,7 +58,7 @@ later milestone writes through.
       tool's `PATH`.
 - [ ] The hook exits 0 and posts nothing when the branch has no pull request,
       and finds the pull request when it has one.
-- [ ] `.squiz.json` with no keys yields rounds 3, depth `deep`, timeout 420,
+- [ ] `.squiz.json` with no keys yields rounds 3, depth `read`, timeout 420,
       budget 0.10 and no test command. An out-of-range `rounds` is rejected with
       a readable error.
 - [ ] CI runs `tsc --noEmit` and the tests green, with no runtime dependencies.
@@ -117,7 +117,8 @@ This milestone needs a scratch repository and pull request to test against.
 `charter.md`, the `pi` adapter's `argv`, `parse` and `grants`, and the spawn
 harness: working directory, `TMPDIR` at `.squiz/<episode>/scratch/`,
 `< /dev/null`, the time bound, one parse retry, cost extraction, and the prompt
-carrying the pull request, the existing threads and the configured test command.
+carrying the pull request and the existing threads. Depth `read` only: the
+`bash` grant is M7's, along with the comparison that detects what it can do.
 
 ### Acceptance criteria
 
@@ -126,8 +127,9 @@ carrying the pull request, the existing threads and the configured test command.
 - [ ] A JSONL fixture at the scale the specification records parses with flat
       memory. Individual lines are large, so cheap type discrimination comes
       before `JSON.parse`.
-- [ ] Depth `read` produces a command line without `bash`; `deep` includes it.
-      The adapter never chooses depth for itself.
+- [ ] The command line carries the `read` grant and no `bash`, and the adapter
+      never chooses depth for itself.
+- [ ] `edit` and `write` appear in no command line the adapter builds.
 - [ ] A kill at the time bound records a failed round with no findings, distinct
       from an honest finding of nothing.
 - [ ] Unparseable output is retried once, then treated as an unavailable API.
@@ -166,22 +168,25 @@ counter, and the three-block comment, posted once and never edited.
       headline, and Notes.
 - [ ] Notes is omitted when there is nothing to report.
 - [ ] A round whose cost was not reported prints as unknown rather than zero.
-- [ ] General findings appear in Notes with their `file:line`, and count toward
-      findings raised while carrying no status.
+- [ ] General findings appear in Notes with their headline and no `file:line`,
+      and count toward findings raised while carrying no status.
 - [ ] A second episode on the same pull request posts a second comment, and the
       first is untouched.
 
-## M7 — Confinement detection and shared trees
+## M7 — Confinement detection, shared trees, and depth `deep`
 
 The tracked-file comparison, taken before the reviewer starts and again when it
 exits, and shared-tree detection comparing `git rev-parse --show-toplevel`
-against the live episodes.
+against the live episodes. Depth `deep` ships here, because the comparison is
+what detects a write made through the shell it grants.
 
 ### Acceptance criteria
 
 - [ ] A file mutated during a run is named in the summary.
 - [ ] Two live episodes on one toplevel disable the comparison for that round.
       The round still runs, and the summary names the other episodes in flight.
+- [ ] Depth `deep` produces a command line with `bash`, and the configured test
+      command reaches the reviewer.
 
 ## M8 — Episode boundaries
 
