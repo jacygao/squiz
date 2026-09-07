@@ -29,11 +29,13 @@ running, so it would have both merged two episodes and split one.
 - **Never key on `prompt_id`.** It is per user turn in the parent session, not
   per subagent. In the two-subagent run it was the same string for both agents,
   and it changed between one agent's second and third stop.
-- **M1 sanitises the id before it becomes a path component.** § 3 puts episode
-  state in `.squiz/<episode>/`, which makes a payload field into a directory
-  name. Every id observed matched `^a[0-9a-f]{16}$`, but the harness reads the
-  id from a payload rather than generating it, so it strips the string down to
-  that character set rather than trusting it.
+- **The id is sanitised before it becomes a path component, in M5.** § 3 puts
+  episode state in `.squiz/<episode>/`, which makes a payload field into a
+  directory name, and M5 is the milestone that builds that directory. The guard
+  belongs with the path it guards, so that no code path can reach the filesystem
+  with an unsanitised id. Every id observed matched `^a[0-9a-f]{16}$`, but the
+  harness reads the id from a payload rather than generating it, so it strips
+  the string down to that character set rather than trusting it.
 - **Cross-session uniqueness is not required by the design, whatever the
   runtime guarantees.** § 3 gives each episode its own worktree and puts the
   state file inside it, so two ids only collide destructively if two episodes

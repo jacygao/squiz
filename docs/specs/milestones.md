@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.3 (draft)
+**Version:** 0.4 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -91,10 +91,11 @@ Everything that shells out to `gh`, and the three commands that make it
 demonstrable before the loop exists: `squiz threads`, `squiz reply` and
 `squiz resolve`.
 
-Covers finding the pull request by head branch; fetching its number, base and
-head refs, description and diff; listing review threads with their comments and
-resolved state; creating an anchored review comment with `path`, `line`, `side`
-and `commit_id`; replying in a thread; resolving and re-opening; and posting an
+Covers bringing the head-branch lookup M1 landed under the typed error
+contract; fetching the pull request's number, base and head refs, description
+and diff; listing review threads with their comments and resolved state;
+creating an anchored review comment with `path`, `line`, `side` and
+`commit_id`; replying in a thread; resolving and re-opening; and posting an
 issue-level comment.
 
 ### Acceptance criteria
@@ -137,9 +138,11 @@ carrying the pull request and the existing threads. Depth `read` only: the
 
 ## M5 — The round
 
-The loop composes M3 and M4. Episode state under `.squiz/<episode>/`, and the
-round itself: gate, review, post new findings as threads, apply each verdict to
-the thread it names, then exit 2 with a blocking reason or exit 0 at the cap.
+The loop composes M3 and M4. Episode state under `.squiz/<episode>/`, whose
+directory name is the subagent's `agent_id` stripped to a safe character set
+before it becomes a path component, and the round itself: gate, review, post new
+findings as threads, apply each verdict to the thread it names, then exit 2 with
+a blocking reason or exit 0 at the cap.
 
 ### Acceptance criteria
 
@@ -148,6 +151,11 @@ the thread it names, then exit 2 with a blocking reason or exit 0 at the cap.
 - [ ] After the coding agent resolves one thread and replies on another, round 2
       hands both to the reviewer and applies its verdicts: `fixed` and
       `withdrawn` close, `open` re-opens.
+- [ ] The coding agent acts on the blocking reason rather than declining it. A
+      round whose block is declined is recorded as a failed round rather than
+      passing as a round that found nothing to do.
+- [ ] The agent that dispatched the subagent reads a blocked-and-resumed result
+      without treating it as tampering.
 - [ ] A cap of 1 reviews once and never blocks. A cap of R blocks at most R−1
       times.
 - [ ] Every row of the specification's failure table exits 0 when exercised.
