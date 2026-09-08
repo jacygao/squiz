@@ -1,11 +1,12 @@
-// The failure pointer: the one line the hook writes to stderr when a round
-// exits 0 having failed. § 7 keeps the hook's two stderr channels apart, and
-// this is the whole of one of them. The other one, the blocking reason a round
-// exits 2 with, is the round's own text and does not come through here.
-//
-// Every later milestone writes its failure pointer through `reportFailure`.
-// There is one function because there is one line: a pointer to what failed
-// rather than a report of it, with nowhere for a second output format to grow.
+/**
+ * The failure pointer: the one line the hook writes to stderr when a round
+ * exits 0 having failed.
+ *
+ * The hook's other stderr channel, the blocking reason a round exits 2 with,
+ * does not come through here. There is one function because there is one line,
+ * so a second output format has nowhere to grow.
+ * (review-harness-spec, "The hook's stderr")
+ */
 
 import { writeSync } from "node:fs";
 
@@ -16,15 +17,15 @@ import { writeSync } from "node:fs";
 // a `write(2)` call that has already happened by the time it returns.
 const STDERR = 2;
 
-// A pointer that named nothing would read as silence, which § 7 forbids.
+// A pointer naming nothing would read as silence, which a failure must never
+// do. (review-harness-spec, "Failure modes")
 const UNNAMED = "the hook failed for a reason it could not name";
 
-// A pipe with no room left in it is the one write error worth waiting out: the
-// reader is Claude Code, and it drains. This bounds attempts rather than
-// failures, so that the loop ends whatever the descriptor does. Waiting out
-// every one of them takes about a second, and a hook that waited forever would
-// be killed by the runtime — the single failure § 7 puts outside the harness's
-// control.
+// A full pipe is the one write error worth waiting out, because the reader is
+// Claude Code and it drains. Bounded so the loop ends whatever the descriptor
+// does: about a second of waiting, well under the runtime's own kill, which is
+// the single failure outside the harness's control.
+// (review-harness-spec, "Failure modes")
 const WRITE_ATTEMPTS = 1000;
 
 /**

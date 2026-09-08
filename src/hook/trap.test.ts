@@ -142,7 +142,7 @@ test("a round that fails nothing writes nothing", async () => {
 });
 
 test("a round that blocks keeps its exit 2, and no failure pointer joins its reason", async () => {
-  // The other of § 7's two stderr channels. It is the round's own text, it is
+  // The other of the hook's two stderr channels. It is the round's own text, it is
   // several lines, and the trap neither writes it nor interferes with it.
   const reason = [
     "Squiz reviewed the change on this branch and left 3 comments on PR #6.",
@@ -186,7 +186,7 @@ test("a failure the round handles itself goes out through the same one line", as
 test("a pointer that cannot be written does not become a failure of its own", async () => {
   // Nothing is left to report with once stderr has gone, and a reporter that
   // threw here would take the exit code with it — turning the one failure the
-  // trap exists for into the one exit § 7 forbids.
+  // trap exists for into the one exit a hook must never make.
   const run = await runInChild(
     hook(`async () => {
       const { closeSync } = await import("node:fs");

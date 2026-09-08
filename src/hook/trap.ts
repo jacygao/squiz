@@ -1,13 +1,17 @@
-// The top-level trap. § 7 says every failure the harness controls exits 0: the
-// hook may fail in any way except by preventing the coding agent from finishing
-// its turn, and a non-zero exit is exactly that. So a throw from anywhere
-// beneath the entry point ends the hook at exit 0, with one line on stderr
-// naming what failed. Exiting 0 in silence would read as a clean review, which
-// § 7 forbids just as firmly.
+/**
+ * The top-level trap. A throw from anywhere beneath the entry point ends the
+ * hook at exit 0, with one line on stderr naming what failed.
+ *
+ * Every failure the harness controls exits 0, because a non-zero exit is the
+ * one thing that stops the coding agent finishing its turn. Exiting 0 in
+ * silence is forbidden just as firmly: it would read as a clean review.
+ * (review-harness-spec, "Failure modes")
+ */
 
 import { reportFailure } from "./report.ts";
 
-/** The two exits § 3 gives a round: 0 lets the turn finish, 2 blocks it. */
+// The two exits a round has: 0 lets the turn finish, 2 blocks it.
+// (review-harness-spec, "A round, step by step")
 export type HookExit = 0 | 2;
 
 /**

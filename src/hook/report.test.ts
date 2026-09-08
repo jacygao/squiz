@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { failureLine } from "./report.ts";
 
-test("the failure pointer reads the way § 7 records it", () => {
+test("the failure pointer reads the way the specification records it", () => {
   assert.equal(
     failureLine("round 3 found 3 findings and could not post them to PR #142"),
     "squiz: round 3 found 3 findings and could not post them to PR #142\n",
@@ -11,7 +11,7 @@ test("the failure pointer reads the way § 7 records it", () => {
 });
 
 test("a blocking reason cannot be carried by the failure pointer", () => {
-  // § 7's two stderr channels stay apart. A blocking reason is several lines of
+  // The hook's two stderr channels stay apart. A blocking reason is several lines of
   // the round's own text, and the coding agent reads it as an instruction.
   // Anything handed to the reporter leaves as one line under the failure
   // prefix, so the pointer has nowhere to grow into the other channel.
@@ -47,7 +47,8 @@ test("every reason leaves as exactly one line", () => {
 });
 
 test("a reason naming nothing still says that something failed", () => {
-  // A bare prefix on stderr is the silence § 7 forbids, dressed as a report.
+  // A bare prefix on stderr is silence dressed as a report, which a failure
+  // must never be. (review-harness-spec, "Failure modes")
   const line = failureLine("  \n\t ");
 
   assert.notEqual(line, "squiz: \n");
