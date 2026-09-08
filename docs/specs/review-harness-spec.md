@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.3 (draft)
+**Version:** 0.4 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -599,7 +599,8 @@ assistant messages that completed carry their own, and the round records that
 sum as its last tracked cost.
 
 The hook gets 600 seconds from Claude Code, and the harness posts the round's
-comments inside that. The time bound sits below the hook's ceiling.
+comments inside that. The time bound sits below the hook's ceiling: it is
+settable to 480 seconds at most, which leaves two minutes for posting.
 
 The cost bound is checked when a round records its cost, so it stops the next
 round rather than the running one. A round already running is never killed for
@@ -642,11 +643,12 @@ commands/                    slash commands; the setup check is the first
 bin/                         the CLI, on PATH whenever the plugin is enabled
 charter.md                   the standing review instructions, shipped as one file
 src/
+  config/                    .squiz.json, its defaults and its ranges
   hook/                      the SubagentStop entry point and its translation
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution, shared-tree detection, removal
   reviewers/                 one adapter per reviewer CLI; pi/ is the first
-  github/                    threads, replies, resolve and re-open, summary comment
+  github/                    the pull request, threads, replies, resolve and re-open, summary
   findings/                  the finding contract, severity, inline versus general
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
@@ -665,7 +667,7 @@ until something asks.
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<episode>/scratch/` |
 | **P0** | The charter | The standing rules handed to the reviewer every round |
 | **P0** | The finding contract | `file`, `line`, `severity`, the body fields, the rule routing a finding inline or general, and the per-thread verdicts |
-| **P0** | The GitHub client | Creating a thread anchored to a file and a line, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
+| **P0** | The GitHub client | Finding the pull request whose head is a branch, creating a thread anchored to a file and a line, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
 | **P0** | The coding agent's commands | `squiz threads`, `squiz reply` and `squiz resolve`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
@@ -762,5 +764,10 @@ on its own branch. Squiz does not create them.
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
-| `timeout` | 420 | Seconds one round's reviewer may run |
-| `budget` | 0.10 | Dollars an episode may cost |
+| `timeout` | 420 | Seconds one round's reviewer may run, settable 1 to 480 |
+| `budget` | 0.10 | Dollars an episode may cost, settable above 0 to 5.00 |
+
+A setting outside its range, or of a type the table does not give it, is
+rejected with an error naming the setting, the value given and what was
+expected. A `.squiz.json` that cannot be read or parsed is a failure the harness
+controls, so the round exits 0 and the hook's stderr names it.

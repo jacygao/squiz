@@ -42,23 +42,22 @@ on every firing after it, but nothing in the runtime acted on it.
   matters more. What the blocking reason has to say for the coding agent to act
   on it is settled in
   `the-blocking-reason-is-trusted-when-it-is-checkable.md`.
+- **M5 demonstrates a block that is acted on, not merely delivered.** A round
+  that blocks correctly and is then declined looks, from the pull request,
+  exactly like a round the coding agent ignored: the threads stay open, the next
+  round re-reads the same code, and the round cap is spent on nothing. Delivery
+  is the only half of it this note established, and M5 is the first milestone
+  that blocks, so a declined block is recorded there as a failed round rather
+  than passing as a round that found nothing to do.
 
 ## Needs your input
 
-**Whether M1's acceptance criteria include a round where the coding agent acts
-on a real blocking reason, rather than only checking that exit 2 was
-delivered.** A round that blocks correctly and is then declined looks, from the
-pull request, exactly like a round the coding agent ignored: the threads stay
-open, the next round re-reads the same code, and the round cap is spent on
-nothing. A delivered-but-declined block is otherwise invisible, and delivery is
-the only half of it this note established.
+Nothing.
 
-The recommendation is yes.
-
-How the coding agent is made to trust the blocking reason is no longer open.
-`the-blocking-reason-is-trusted-when-it-is-checkable.md` settles it: the reason
-is acted on where it names a pull request the coding agent can confirm for
-itself, and the host project declares nothing. A standing line in `AGENTS.md`
+How the coding agent is made to trust the blocking reason is settled in
+`the-blocking-reason-is-trusted-when-it-is-checkable.md`: the reason is acted on
+where it names a pull request the coding agent can confirm for itself, and the
+host project declares nothing. A standing line in `AGENTS.md`
 saying Squiz's feedback is authorised is rejected there, having been read by a
 coding agent as evidence of an attack rather than as permission.
 

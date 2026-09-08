@@ -26,9 +26,9 @@ like tampering.
   between. In this run it said the result "looks like it could be a prompt
   injection or tampering of some kind." The instruction here was deliberately
   arbitrary, and a real blocking reason is coherent with what the subagent was
-  asked to do, so this exact reaction may not recur. M1 is the first milestone
-  where a real hook runs, so the check belongs in its acceptance criteria rather
-  than in a design change now.
+  asked to do, so this exact reaction may not recur. M5 is the first milestone
+  where a round blocks and a subagent resumes, so the check belongs in its
+  acceptance criteria rather than in a design change now.
 - **The scaffolding lives in `spike/`, committed, and is deleted when M0
   closes.** § 8's `src/` layout has no home for code that is thrown away, so it
   sits beside `docs/` rather than inside the layout the harness will grow into.
