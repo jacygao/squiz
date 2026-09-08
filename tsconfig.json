@@ -1,0 +1,34 @@
+{
+  // Target and lib describe Node 24 rather than "latest", so that the checker
+  // refuses syntax and APIs the runtime does not have. The values are
+  // @tsconfig/node24's, inlined rather than depended on.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": [
+      "es2024",
+      "ESNext.Array",
+      "ESNext.Collection",
+      "ESNext.Error",
+      "ESNext.Iterator",
+      "ESNext.Promise"
+    ],
+    "module": "nodenext",
+    "types": ["node"],
+
+    // Node strips the types and runs the .ts files as they are. Nothing is
+    // emitted, and imports carry the .ts extension the runtime resolves.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+
+    // No enum, no parameter properties, no namespaces: Node cannot strip them,
+    // so they fail here rather than in review.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": false
+  },
+  "include": ["src/**/*.ts"]
+}
