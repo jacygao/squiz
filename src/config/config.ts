@@ -1,37 +1,41 @@
-// The `.squiz.json` loader: § 9's five settings, their defaults and their
-// ranges. Nothing consults the settings yet. The reviewer's time bound is M4's,
-// the round cap M5's, and the cost bound M8's.
+/**
+ * The `.squiz.json` loader: the five settings, their defaults and their ranges.
+ * A project that writes no file runs on the defaults, and a value outside its
+ * range is refused rather than replaced.
+ * (review-harness-spec, "Configuration")
+ */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** The file § 9 puts at the root of the repository. */
 export const configFileName = ".squiz.json";
 
 /**
- * § 4's two grants. A union of string literals stands where an enum would,
- * because § 8 allows erasable syntax only.
+ * The two grants a reviewer can be given. A union of string literals stands
+ * where an enum would: Node cannot strip an enum.
+ * (review-harness-spec, "Depth" and "Language")
  */
 export type Depth = "read" | "deep";
 
 export type Config = {
-  /** § 3's round cap. */
+  // The round cap. (review-harness-spec, "The round cap")
   rounds: number;
-  /** § 4's depth. `deep` adds the shell. */
+  // `deep` adds the shell. (review-harness-spec, "Depth")
   depth: Depth;
   /**
    * The non-mutating command that runs the tests, read only at depth `deep`.
-   * `null` where the file names none, so that a caller can tell "no test
-   * command" from a command that runs and does nothing.
+   * `null` where the file names none, so a caller can tell "no test command"
+   * from a command that runs and does nothing.
    */
   test: string | null;
-  /** § 7's time bound, in seconds, on one round's reviewer. */
+  // Seconds one round's reviewer may run. (review-harness-spec, "The review budget")
   timeout: number;
-  /** § 7's cost bound, in dollars, on one episode. */
+  // Dollars an episode may cost. (review-harness-spec, "The review budget")
   budget: number;
 };
 
-/** § 9's defaults. Every setting has one, so a project that writes none runs. */
+// Every setting has a default, so a project that writes no file still runs.
+// (review-harness-spec, "Configuration")
 export const defaultConfig: Readonly<Config> = Object.freeze({
   rounds: 3,
   depth: "read",
@@ -41,9 +45,12 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
 });
 
 /**
- * A `.squiz.json` that cannot be read, cannot be parsed, or holds a value § 9's
- * table does not give it. § 7 makes it a failure the harness controls, so the
- * round exits 0 and the hook's stderr names it.
+ * A `.squiz.json` that cannot be read or parsed, or that holds a value the
+ * settings table does not give it.
+ *
+ * This is a failure the harness controls, so the round exits 0 and the hook's
+ * stderr names it rather than the throw reaching the coding agent.
+ * (review-harness-spec, "Failure modes")
  */
 export class ConfigError extends Error {
   constructor(message: string, options?: ErrorOptions) {

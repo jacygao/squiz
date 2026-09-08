@@ -72,8 +72,8 @@ test("every setting the file names is read", () => {
   );
 });
 
-// § 9's ranges are inclusive on both sides, so each is checked at the last value
-// it accepts and the first it refuses.
+// The ranges are inclusive on both sides, so each is checked at the last value
+// it accepts and the first it refuses. (review-harness-spec, "Configuration")
 
 test("rounds accepts 1 and 8, and refuses 0 and 9", () => {
   assert.equal(load(`{"rounds": 1}`).rounds, 1);
@@ -105,9 +105,9 @@ test("a count that is not whole is refused", () => {
   rejection(`{"timeout": 90.5}`);
 });
 
-// A zero is falsy, so a loader that decides presence by truthiness returns the
-// default and reports nothing. § 9 says a value out of range is refused, and
-// these are the two settings where the wrong answer is silent.
+// A zero is falsy, so a loader deciding presence by truthiness would return the
+// default and report nothing. These are the two settings where that wrong
+// answer is silent. (review-harness-spec, "Configuration")
 
 test("a budget of 0 is refused rather than replaced by the default", () => {
   const error = rejection(`{"budget": 0}`);
@@ -160,9 +160,9 @@ test("an empty test command is refused, because it is not the same as none", () 
   rejection(`{"test": "   "}`);
 });
 
-// § 9: the error names the setting, the value given and what was expected. An
-// error saying only that the configuration is invalid is the failure this
-// checks for.
+// The error names the setting, the value given and what was expected. One
+// saying only that the configuration is invalid is the failure this checks for.
+// (review-harness-spec, "Configuration")
 
 test("every refusal names the setting, the value given and what was expected", () => {
   const cases: ReadonlyArray<{
