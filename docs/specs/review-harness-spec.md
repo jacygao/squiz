@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.4 (draft)
+**Version:** 0.5 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -523,8 +523,9 @@ Everything the harness ships to be run. One binary and one slash command.
 ### The `squiz` binary
 
 A plugin's `bin/` is added to the Bash tool's `PATH` while the plugin is
-enabled, so the binary is on the path of any agent with a shell, and the hook
-registration names it directly rather than an install path.
+enabled, so the coding agent runs the binary by name. The hook's shell is given
+no such `PATH`, so the `hooks.json` registration reaches the same file through
+`${CLAUDE_PLUGIN_ROOT}`.
 
 | Command | Run by | What it does |
 |---|---|---|
@@ -640,7 +641,7 @@ plugin is the package, so there is no separate packaging step.
 .claude-plugin/plugin.json   manifest: name, version, description
 hooks/hooks.json             the SubagentStop registration
 commands/                    slash commands; the setup check is the first
-bin/                         the CLI, on PATH whenever the plugin is enabled
+bin/                         the CLI, on the Bash tool's PATH while enabled
 charter.md                   the standing review instructions, shipped as one file
 src/
   config/                    .squiz.json, its defaults and its ranges
