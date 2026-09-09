@@ -1,0 +1,33 @@
+#!/bin/sh
+# The `squiz` binary. A plugin's bin/ is on the Bash tool's PATH while the
+# plugin is enabled, so the coding agent runs this by name.
+# (review-harness-spec, "The `squiz` binary")
+#
+# The hook is given no such PATH and reaches this same file through the plugin
+# root. (docs/notes/the-hook-shell-does-not-get-the-plugin-bin-on-path.md)
+#
+# Shell rather than an extensionless Node file: Node decides whether to strip
+# types from the extension, and would run an extensionless entry point as
+# JavaScript. (review-harness-spec, "Language")
+
+set -eu
+
+# The entry point is resolved from this file rather than from the working
+# directory. The hook is given the session's directory, which is not even the
+# worktree root, so a relative path here resolves against a directory that has
+# nothing to do with the plugin.
+# (docs/notes/the-worktree-toplevel-separates-concurrent-subagents.md)
+self=$0
+
+# A PATH entry that is a symlink to this shim would otherwise look for src/
+# beside the link.
+while [ -L "$self" ]; do
+  link=$(readlink -- "$self")
+  case $link in
+  /*) self=$link ;;
+  *) self=$(dirname -- "$self")/$link ;;
+  esac
+done
+
+root=$(CDPATH='' cd -P -- "$(dirname -- "$self")/.." && pwd)
+exec node "$root/src/cli.ts" "$@"
