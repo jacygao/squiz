@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.6 (draft)
+**Version:** 0.7 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -650,6 +650,7 @@ commands/                    slash commands; the setup check is the first
 bin/                         the CLI, on the Bash tool's PATH while enabled
 charter.md                   the standing review instructions, shipped as one file
 src/
+  cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
   hook/                      the SubagentStop entry point and its translation
   loop/                      episode state, round cap, verdict decisions
@@ -660,6 +661,15 @@ src/
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
 ```
+
+`src/` is organised by what a thing is about rather than by which command
+reaches it. Several commands share `github/`, and `cli.ts` maps a subcommand to
+the directory that does the work.
+
+A test sits beside the code it tests, named for it: `src/config/config.ts` is
+tested by `src/config/config.test.ts`. One `include` then covers the code and
+its tests together, and a directory lists what it holds beside how it is
+checked.
 
 ### What ships
 
