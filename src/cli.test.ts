@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const shim = fileURLToPath(new URL("../bin/squiz", import.meta.url));
@@ -14,7 +14,28 @@ const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
 // which is not even the worktree root, so every run here starts somewhere the
 // entry point cannot be reached from by a relative path.
 // (docs/notes/the-worktree-toplevel-separates-concurrent-subagents.md)
-const elsewhere = tmpdir();
+//
+// Its HEAD is detached, which is the one shape of working directory the gate
+// answers without asking GitHub anything. These tests are about the binary, and
+// a fixture that reached the network would be about something else.
+let elsewhere = "";
+
+before(async () => {
+  elsewhere = await mkdtemp(join(tmpdir(), "squiz-elsewhere-"));
+  const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz"];
+  git(["init", "--quiet", "--initial-branch", "main"]);
+  git([...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "x"]);
+  git(["checkout", "--quiet", "--detach"]);
+});
+
+after(async () => {
+  await rm(elsewhere, { recursive: true, force: true });
+});
+
+function git(args: readonly string[]): void {
+  const result = spawnSync("git", args, { cwd: elsewhere, encoding: "utf8" });
+  assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+}
 
 type Run = {
   readonly code: number | null;
