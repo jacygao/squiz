@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.5 (draft)
+**Version:** 0.6 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -361,7 +361,11 @@ comment and what the harness needs in order to route it:
 - `file` and `line` — the changed line the comment is anchored to. A finding
   scoped to the change as a whole carries neither.
 - `severity` — `high`, `medium`, or `low`.
-- The body fields, which are the parts of the comment format below.
+- `headline` — the problem, named in one line.
+- `reasoning` — the bullets beneath the headline, one point each.
+- `suggestedFix` — what to do about it.
+- `reference` — optional. A quoted convention, or something the reviewer could
+  not check.
 
 | Severity | |
 |---|---|
@@ -370,7 +374,9 @@ comment and what the harness needs in order to route it:
 | `low` | Real, narrow, and survivable. |
 
 Every finding holds the work whatever its severity. Severity orders the
-findings; it does not decide whether they count.
+findings; it does not decide whether they count. The order runs `high` to
+`low`, and findings of one severity keep the order the reviewer returned them
+in.
 
 From round 2 on the reviewer is handed the threads already on the pull request,
 and returns one verdict for each. It rules by reading the code as it now stands.
@@ -650,7 +656,7 @@ src/
   worktree/                  toplevel resolution, shared-tree detection, removal
   reviewers/                 one adapter per reviewer CLI; pi/ is the first
   github/                    the pull request, threads, replies, resolve and re-open, summary
-  findings/                  the finding contract, severity, inline versus general
+  findings/                  the finding contract, severity, the anchor validator, inline versus general
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
 ```
