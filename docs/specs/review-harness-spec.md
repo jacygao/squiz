@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.9 (draft)
+**Version:** 0.10 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -619,6 +619,17 @@ sum as its last tracked cost.
 The hook gets 600 seconds from Claude Code, and the harness posts the round's
 comments inside that. The time bound sits below the hook's ceiling: it is
 settable to 480 seconds at most, which leaves two minutes for posting.
+
+**No single call to GitHub may take more than 30 seconds.** Those two minutes
+are shared by every call a round makes, and a round makes one for each finding
+it posts, one to read each new thread back, one to list the threads it was
+handed, and one for the summary. A call that hangs spends the budget belonging
+to all of them, and what it spends is the runtime's kill — the one failure the
+harness cannot control. A call that reaches the bound is treated as GitHub
+being unreachable, so the round exits 0 and the comments that landed stay.
+
+This bound is not configurable. It is not a budget a project chooses but a
+guard on the one deadline the harness does not own.
 
 The cost bound is checked when a round records its cost, so it stops the next
 round rather than the running one. A round already running is never killed for
