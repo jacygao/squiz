@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.7 (draft)
+**Version:** 0.8 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -77,15 +77,21 @@ Every comment is posted with the credentials `gh` holds, so all of them appear
 under the account that authenticated it. The reviewer, the coding agent and the
 harness share one GitHub identity.
 
-Each comment names its own author on its first line:
+Each comment names its own author at the start of its first line, inside that
+line's bold span. What follows the marker differs from comment to comment, so
+the marker is the opening of the span rather than the whole of it.
 
 | Written by | Begins |
 |---|---|
-| The reviewer | `**Squiz reviewer**` |
-| The coding agent | `**Squiz coding agent**` |
-| The harness, at close | `**Squiz review**` |
+| The reviewer | `**Squiz reviewer · ` |
+| The coding agent | `**Squiz coding agent` |
+| The harness, at close | `**Squiz review — ` |
 
 A comment without one of those markers was written by a person.
+
+`**Squiz review` is itself a prefix of `**Squiz reviewer`, so the character
+after the name is what separates the summary from a review comment. A test for
+the summary that stops at the name matches every finding the reviewer posted.
 
 ## 3. The loop
 
