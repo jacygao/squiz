@@ -21,11 +21,6 @@ exited 0.
 - **The registration is `${CLAUDE_PLUGIN_ROOT}/bin/squiz hook`, exactly.** The
   runtime sets `CLAUDE_PLUGIN_ROOT` to the plugin root for the hook, so the
   registration still writes down no install path.
-- **§ 6 is contradicted in one clause and holds in the rest.** "A plugin's
-  `bin/` is added to the Bash tool's `PATH` while the plugin is enabled" is
-  true, and it is what `squiz threads`, `squiz reply` and `squiz resolve` rest
-  on. "The hook registration names it directly" is false: the hook is not run
-  by the Bash tool and does not get that `PATH`.
 - **A hook that cannot resolve its command looks exactly like a hook with
   nothing to say.** Both leave an empty transcript. Nothing about the plugin
   loading says the command will run, so the two are told apart by the exit code
@@ -33,28 +28,15 @@ exited 0.
 
 ## Needs your input
 
-**Whether § 6's sentence about the registration is amended, and how.** The
-recommendation is to keep the claim about the Bash tool's `PATH`, since the
-coding agent's three commands depend on it, and to say that the hook is
-registered through `${CLAUDE_PLUGIN_ROOT}` because a hook does not run under
-that `PATH`. Nothing in the harness's behaviour changes either way.
+Nothing. § 6 now says which `PATH` each caller gets and registers the hook
+through `${CLAUDE_PLUGIN_ROOT}`.
 
 ## Reference
 
-### The registration that runs
+### The command that runs
 
-```json
-{
-  "hooks": {
-    "SubagentStop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook" }
-        ]
-      }
-    ]
-  }
-}
+```
+${CLAUDE_PLUGIN_ROOT}/bin/squiz hook
 ```
 
 ### The hook's environment, as observed
