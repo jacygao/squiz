@@ -85,8 +85,10 @@ export function routeFindings(findings: readonly Finding[], diff: string): Route
 }
 
 function routeOne(finding: Finding, changed: ChangedLines): Routing {
-  // A line the change did not touch cannot be anchored to. A context line is
-  // one of those today, and whether GitHub would accept one is open (#61).
+  // Only a line the change added is anchored to. GitHub would take a context
+  // line too, but no finding is anchored to one: a finding is anchored to the
+  // changed line that caused it.
+  // (review-harness-spec, "Pull request comments")
   if (finding.scope === "line" && touchesLine(changed, finding.file, finding.line)) {
     return { placement: "inline", finding };
   }
