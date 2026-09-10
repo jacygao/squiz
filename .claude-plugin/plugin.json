@@ -1,0 +1,5 @@
+{
+  "name": "squiz",
+  "version": "0.1.0",
+  "description": "A local review loop that lives on the pull request. Reviews a subagent's change when it stops, comments on the pull request, and blocks the turn until the threads are worked."
+}
