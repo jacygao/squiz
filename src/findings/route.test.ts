@@ -141,7 +141,7 @@ test("a finding whose anchor is rejected routes general, carrying its `file:line
   assert.equal(
     context.unplacedAnchor,
     "src/ui/card.ts:85",
-    "a line the change did not touch is one GitHub refuses as an anchor (#61)",
+    "a finding on a line the change did not add keeps its own file:line",
   );
 
   const untouched = generalOnly(routeFindings([inAnUntouchedFile], cardDiff));
