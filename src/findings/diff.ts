@@ -130,8 +130,10 @@ export function parseDiff(diff: string): ChangedLines {
  * Whether the change touched this line of this file.
  *
  * True only for a line the change added, which is what an inline comment is
- * anchored to. A context line answers false: the change did not touch it, and
- * whether GitHub would nonetheless accept it as an anchor is open (#61).
+ * anchored to. A context line answers false. GitHub would take one as an
+ * anchor, but no finding is anchored there: a finding is anchored to the
+ * changed line that caused it.
+ * (review-harness-spec, "Pull request comments")
  *
  * A file the diff does not name answers false rather than throwing.
  */
