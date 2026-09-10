@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.8 (draft)
+**Version:** 0.9 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -454,6 +454,11 @@ changed line that caused it, with the affected file and line named in the body.
 The reviewer does not go looking for the affected line to anchor to, and GitHub
 would refuse an anchor outside the diff in any case.
 
+An anchor is one line. A finding about several lines names the one a reader
+would point at when explaining the defect, which is where it is visible rather
+than where the construct begins or ends. The charter carries that instruction,
+since it is a judgement the reviewer makes.
+
 An anchor the harness cannot place is reported as a general finding, with
 `file:line` written in the text, and the summary's Notes records that it could
 not be anchored.
@@ -702,6 +707,7 @@ until something asks.
 | **P1** | The cost bound | $0.10 per episode, checked when a round records its cost |
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
+| **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
