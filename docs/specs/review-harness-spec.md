@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.11 (draft)
+**Version:** 0.12 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -153,10 +153,10 @@ flowchart TD
    looks at.
 
 From round 2 on, the coding agent works the existing threads before it finishes
-its turn. It resolves a thread when it made the change as asked, and replies on
-the thread when it disagrees, has a question, or did something different.
-Resolving is a claim, and the reviewer's re-read in the next round is what
-settles it.
+its turn. It replies on a thread to say what it changed, to disagree, or to ask
+a question. It does not close threads. A thread closes when the reviewer's
+verdict closes it, so a closed thread means the reviewer read the code as it now
+stands and accepted it.
 
 ### The round cap
 
@@ -408,9 +408,9 @@ the episode closes.
 | `open` | Still unresolved at the close of the episode, with no reply from the coding agent. | Yes |
 | `disputed` | Still unresolved at the close of the episode, and the coding agent replied. There is a disagreement for a person to settle. | Yes |
 
-A thread the coding agent resolved and the reviewer then ruled `open` is counted
-separately. It is a counter and not a status: such a thread still ends its
-episode in one of the four above.
+A thread the reviewer closed and later ruled `open` is counted separately. It is
+a counter and not a status: such a thread still ends its episode in one of the
+four above.
 
 ### The comment format
 
@@ -558,7 +558,6 @@ no such `PATH`, so the `hooks.json` registration reaches the same file through
 | `squiz hook` | Claude Code | The `SubagentStop` entry point, named in `hooks.json`. Runs one round. |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch, each with its identifier. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
-| `squiz resolve <id>` | The coding agent | Marks a thread resolved. |
 
 `<id>` is whatever `squiz threads` printed for that thread. It round-trips
 between the two commands, and is short enough for an agent to copy.
@@ -716,7 +715,7 @@ until something asks.
 | **P0** | The charter | The standing rules handed to the reviewer every round |
 | **P0** | The finding contract | `file`, `line`, `severity`, the body fields, the rule routing a finding inline or general, and the per-thread verdicts |
 | **P0** | The GitHub client | Finding the pull request whose head is a branch, creating a thread anchored to a file and a line, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
-| **P0** | The coding agent's commands | `squiz threads`, `squiz reply` and `squiz resolve`, which are how the coding agent works the threads |
+| **P0** | The coding agent's commands | `squiz threads` and `squiz reply`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
 | **P0** | The episode state file | Round count, pull request number, per-round cost, keyed by the subagent's id and living in the worktree |
