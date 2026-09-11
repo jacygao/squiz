@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "./threads.ts";
 
-const pullRequest = { owner: "jacygao", repo: "squiz", number: 80 } as const;
+const pullRequestId = "PR_kwDOUEd2qM8AAAABDNPXSA";
 
 /** One answer from `gh`, in the order the calls are made. */
 type Answer = {
@@ -126,9 +126,7 @@ type Page = { readonly hasNextPage: boolean; readonly endCursor?: string | null 
 const lastPage: Page = { hasNextPage: false, endCursor: null };
 
 function threadsPage(nodes: readonly unknown[], pageInfo: Page = lastPage): Answer {
-  return answered({
-    data: { repository: { pullRequest: { reviewThreads: { pageInfo, nodes } } } },
-  });
+  return answered({ data: { node: { reviewThreads: { pageInfo, nodes } } } });
 }
 
 function commentsPage(nodes: readonly unknown[], pageInfo: Page = lastPage): Answer {
@@ -190,7 +188,7 @@ test("a thread comes back with its node id, its state, its anchor and its commen
       ]),
     ],
     () => {
-      const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.deepEqual(onlyThread(result), {
         id: "PRRT_kwDOUEd2qM6fnpx6",
@@ -217,7 +215,7 @@ test("the identifier carried out is the thread's, never the root comment's", asy
   // HTTP 200. A reader that carried the comment id out would look correct here
   // and fail at every mutation.
   await withFakeGh([threadsPage([threadNode()])], () => {
-    const thread = onlyThread(listReviewThreads(pullRequest, { directory: tmpdir() }));
+    const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
     assert.equal(thread.id, "PRRT_kwDOUEd2qM6fnpx6");
     assert.equal(thread.comments[0]?.databaseId, 3942350907);
@@ -241,7 +239,7 @@ test("replies are the comments after the first, in the order GitHub returned the
       ]),
     ],
     () => {
-      const thread = onlyThread(listReviewThreads(pullRequest, { directory: tmpdir() }));
+      const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
       assert.deepEqual(
         thread.comments.map((entry) => entry.body),
@@ -251,16 +249,15 @@ test("replies are the comments after the first, in the order GitHub returned the
   );
 });
 
-test("the repository and the number go as variables, and the first page has no cursor", async () => {
+test("the pull request goes as its node id, and the first page asks for no cursor", async () => {
+  // No repository is named anywhere. `gh` decides the repository for a REST
+  // path from the directory it runs in, and a second way of deciding it here
+  // could read one repository while the harness posts to another.
   await withFakeGh([threadsPage([])], (gh) => {
-    listReviewThreads(pullRequest, { directory: tmpdir() });
+    listReviewThreads(pullRequestId, { directory: tmpdir() });
 
-    assert.deepEqual(gh.sentAt(1).variables, {
-      owner: "jacygao",
-      repo: "squiz",
-      number: 80,
-      cursor: null,
-    });
+    assert.deepEqual(gh.sentAt(1).variables, { pullRequest: pullRequestId, cursor: null });
+    assert.doesNotMatch(gh.sentAt(1).query, /repository|owner/u);
   });
 });
 
@@ -274,7 +271,7 @@ test("a second page of threads is read, and its threads come back with the first
       threadsPage([threadNode({ id: "PRRT_two" })]),
     ],
     (gh) => {
-      const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.deepEqual(
         listed(result).map((thread) => thread.id),
@@ -282,9 +279,7 @@ test("a second page of threads is read, and its threads come back with the first
       );
       assert.equal(gh.calls(), 2);
       assert.deepEqual(gh.sentAt(2).variables, {
-        owner: "jacygao",
-        repo: "squiz",
-        number: 80,
+        pullRequest: pullRequestId,
         cursor: "cursor-1",
       });
     },
@@ -309,7 +304,7 @@ test("comments past the first page are followed to the end, by the thread's node
       commentsPage([comment("jacygao", "third", 3)]),
     ],
     (gh) => {
-      const thread = onlyThread(listReviewThreads(pullRequest, { directory: tmpdir() }));
+      const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
       assert.deepEqual(
         thread.comments.map((entry) => entry.body),
@@ -334,7 +329,7 @@ test("an outdated thread reports the line it was anchored to", async () => {
   await withFakeGh(
     [threadsPage([threadNode({ isOutdated: true, line: null, originalLine: 12 })])],
     () => {
-      const thread = onlyThread(listReviewThreads(pullRequest, { directory: tmpdir() }));
+      const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
       assert.equal(thread.line, 12);
       assert.equal(thread.isOutdated, true);
@@ -344,7 +339,7 @@ test("an outdated thread reports the line it was anchored to", async () => {
 
 test("a thread anchored to no line at all reports no line", async () => {
   await withFakeGh([threadsPage([threadNode({ line: null, originalLine: null })])], () => {
-    const thread = onlyThread(listReviewThreads(pullRequest, { directory: tmpdir() }));
+    const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
     assert.equal(thread.line, null);
   });
@@ -359,7 +354,7 @@ test("a resolved thread is listed alongside an open one", async () => {
       ]),
     ],
     () => {
-      const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.deepEqual(
         listed(result).map((thread) => thread.isResolved),
@@ -379,7 +374,7 @@ test("a comment whose account is gone reads as having no author", async () => {
       ]),
     ],
     () => {
-      const thread = onlyThread(listReviewThreads(pullRequest, { directory: tmpdir() }));
+      const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
       assert.deepEqual(thread.comments, [{ databaseId: 7, author: null, body: "gone" }]);
     },
@@ -388,7 +383,7 @@ test("a comment whose account is gone reads as having no author", async () => {
 
 test("a page claiming another page without a cursor to reach it is unreadable", async () => {
   await withFakeGh([threadsPage([threadNode()], { hasNextPage: true, endCursor: null })], () => {
-    const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
     assert.equal(
       result.outcome,
@@ -401,21 +396,24 @@ test("a page claiming another page without a cursor to reach it is unreadable", 
 test("a cursor that does not advance fails rather than being followed forever", async () => {
   const stuck: Page = { hasNextPage: true, endCursor: "cursor-1" };
   await withFakeGh([threadsPage([threadNode()], stuck), threadsPage([threadNode()], stuck)], () => {
-    const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
     assert.equal(result.outcome, "unreadable");
   });
 });
 
-test("a null pull request is not a pull request carrying no threads", async () => {
-  await withFakeGh([answered({ data: { repository: { pullRequest: null } } })], () => {
-    const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+test("an id naming something that is not a pull request carries no threads back", async () => {
+  // The quiet shape: an id that resolves to a node of another type answers with
+  // an empty node, HTTP 200 and no error at all.
+  await withFakeGh([answered({ data: { node: {} } })], () => {
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
-    assert.equal(result.outcome, "unreadable");
-    assert.match(
-      result.outcome === "unreadable" ? result.reason : "",
-      /no pull request jacygao\/squiz#80/u,
+    assert.equal(
+      result.outcome,
+      "unreadable",
+      "an empty node is not a pull request with no threads",
     );
+    assert.match(result.outcome === "unreadable" ? result.reason : "", /no pull request for PR_/u);
   });
 });
 
@@ -423,16 +421,16 @@ test("a thread that cannot be read fails the listing rather than dropping out of
   // Reporting the threads that did parse would be the quiet failure: the round
   // would believe a line is free and post a second thread on it.
   await withFakeGh([threadsPage([threadNode(), { path: "scratch/target.txt", line: 4 }])], () => {
-    const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
     assert.equal(result.outcome, "unreadable");
   });
 });
 
 test("an answer that is not a list of threads is unreadable", async () => {
-  const page = answered({ data: { repository: { pullRequest: { reviewThreads: {} } } } });
+  const page = answered({ data: { node: { reviewThreads: {} } } });
   await withFakeGh([page], () => {
-    const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
     assert.equal(result.outcome, "unreadable");
   });
@@ -445,12 +443,12 @@ test("a GraphQL error inside an HTTP 200 is a failure", async () => {
   await withFakeGh(
     [
       answered({
-        data: { repository: null },
-        errors: [{ type: "NOT_FOUND", message: "Could not resolve to a Repository" }],
+        data: { node: null },
+        errors: [{ type: "NOT_FOUND", message: "Could not resolve to a node with the global id" }],
       }),
     ],
     () => {
-      const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.equal(result.outcome, "graphql-errors");
     },
@@ -461,7 +459,7 @@ test("a gh that exits non-zero is a failure", async () => {
   await withFakeGh(
     [{ stdout: "", stderr: "HTTP 401: Bad credentials\n", status: 1 }],
     () => {
-      const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.equal(result.outcome, "exited");
     },
@@ -470,7 +468,7 @@ test("a gh that exits non-zero is a failure", async () => {
 
 test("a gh that is not installed is a failure", async () => {
   await withNoGh(() => {
-    const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
     assert.equal(result.outcome, "not-run");
   });
@@ -483,7 +481,7 @@ test("a failure on a later page is a failure for the whole listing", async () =>
       { stdout: "", stderr: "HTTP 502: Bad gateway\n", status: 1 },
     ],
     () => {
-      const result = listReviewThreads(pullRequest, { directory: tmpdir() });
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.equal(result.outcome, "exited", "a half-read pull request is never a listing");
     },
