@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.10 (draft)
+**Version:** 0.11 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -363,9 +363,11 @@ on every thread it was handed.
 The pull request holds the record, so a finding carries only what composes a
 comment and what the harness needs in order to route it:
 
-- `scope` — `line` or `change`, which decides inline versus general.
+- `scope` — `line`, `file` or `change`, which decides inline, file-level or
+  general.
 - `file` and `line` — the changed line the comment is anchored to. A finding
-  scoped to the change as a whole carries neither.
+  scoped to a file carries the file alone, and one scoped to the change as a
+  whole carries neither.
 - `severity` — `high`, `medium`, or `low`.
 - `headline` — the problem, named in one line.
 - `reasoning` — the bullets beneath the headline, one point each.
@@ -443,6 +445,9 @@ where a line falls.
 - **Inline**, for a finding scoped to `line`. It becomes a review comment thread
   anchored to a file and a line that the change touched. This is the normal case
   and the preferred one.
+- **File**, for a finding scoped to `file`. It is about a file rather than any
+  line of it, or about a file the diff carries without a line to anchor to. It
+  becomes a review comment thread on the file, carrying no line.
 - **General**, for a finding scoped to `change`. It is about the change as a
   whole rather than about any line of it — that the feature duplicates one the
   project already has, or that the approach is wrong. It goes into the summary
@@ -459,9 +464,13 @@ would point at when explaining the defect, which is where it is visible rather
 than where the construct begins or ends. The charter carries that instruction,
 since it is a judgement the reviewer makes.
 
-An anchor the harness cannot place is reported as a general finding, with
-`file:line` written in the text, and the summary's Notes records that it could
+An anchor the harness cannot place is posted on the file instead, with
+`file:line` written in the text. Where the diff does not carry the file either,
+the finding is reported as general and the summary's Notes records that it could
 not be anchored.
+
+A file-scoped comment is a thread. It is resolved, re-opened and ruled on the
+way an inline one is, and it carries across rounds.
 
 A general finding is reported once and then forgotten. It is a line of text in
 the summary comment rather than a thread, so nothing records whether it was
