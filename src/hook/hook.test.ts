@@ -142,7 +142,13 @@ test("a branch with a pull request is asked about, and nothing is said", async (
   // Asking gh is the only thing the found case leaves behind.
   await withTemporaryDirectory(async (directory) => {
     commitOn(directory, "review/the-gate");
-    const gh = await fakeGh(directory, { stdout: '[{"number":142}]\n' });
+    // Every field the lookup asks for: a row short of one is a failure, and a
+    // failure is not silent.
+    const listing =
+      '[{"number":142,"id":"PR_kwDOUEd2qM8AAAABDNPXSA","baseRefName":"main",' +
+      '"headRefName":"review/the-gate",' +
+      '"headRefOid":"3a1937e729dbab0f618ef761c833a7e2d3675b80","body":""}]\n';
+    const gh = await fakeGh(directory, { stdout: listing });
 
     const result = hook(directory, gh.path);
 
