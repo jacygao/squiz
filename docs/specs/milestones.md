@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.4 (draft)
+**Version:** 0.5 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -87,9 +87,8 @@ one the change touched.
 
 ## M3 — The GitHub client and the coding agent's commands
 
-Everything that shells out to `gh`, and the three commands that make it
-demonstrable before the loop exists: `squiz threads`, `squiz reply` and
-`squiz resolve`.
+Everything that shells out to `gh`, and the two commands that make it
+demonstrable before the loop exists: `squiz threads` and `squiz reply`.
 
 Covers bringing the head-branch lookup M1 landed under the typed error
 contract; fetching the pull request's number, base and head refs, description
@@ -100,16 +99,15 @@ issue-level comment.
 
 ### Acceptance criteria
 
-- [ ] Against a scratch pull request, `squiz threads` lists the open threads,
-      `squiz reply` adds a reply that appears in the thread, and `squiz resolve`
-      marks it resolved, visible in the next `squiz threads`.
+- [ ] Against a scratch pull request, `squiz threads` lists the open threads
+      and `squiz reply` adds a reply that appears in the thread.
 - [ ] Every capability in the specification's GitHub access list has a tested
       call behind it, re-opening included.
 - [ ] A failure returns a typed error rather than throwing, and a partial
       success is never reported as success.
-- [ ] The thread identifier `squiz reply` and `squiz resolve` take is decided
-      and recorded. It round-trips from `squiz threads` output and survives
-      being copied by an agent.
+- [ ] The thread identifier `squiz reply` takes is decided and recorded. It
+      round-trips from `squiz threads` output and survives being copied by an
+      agent.
 
 This milestone needs a scratch repository and pull request to test against.
 
