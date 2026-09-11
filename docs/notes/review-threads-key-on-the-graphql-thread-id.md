@@ -11,7 +11,7 @@ recheck-when: GitHub changes the review-thread API
 The full lifecycle works through `gh api`: create anchored to a file and a line,
 reply inside the thread, resolve, re-open, and read back with replies and
 resolved state. Only the GraphQL `PRRT_` thread node id serves every operation,
-so that is what `squiz threads`, `reply` and `resolve` round-trip. Four calls in
+so that is what `squiz threads`, `reply` and `resolve` round-trip. Five calls in
 this area return success while doing the wrong thing, and one of them posts a
 review nobody can see.
 
@@ -85,10 +85,14 @@ what the caller intended.
 **A second top-level thread lands where a reply was meant.** A
 `POST /pulls/{n}/comments` carrying `body`, `commit_id`, `path` and `line` but no
 reply parameter returns 201 with a comment on the right file and the right line.
-It is a new thread. The only tell in the response is `in_reply_to_id: null`;
-otherwise it takes a `reviewThreads.totalCount` before and after, which a reply
-leaves unchanged. Note this comes from *omitting* the reply parameter — a
-misspelled one is rejected, 422, `"in_reply_to_id" is not a permitted key`,
+It is a new thread. The only tell in the response is whether `in_reply_to_id`
+is present: a comment that opened a thread carries no such key at all, and a
+reply carries the id of the comment it answered. The key's presence is the tell
+and its value is not, so a reader that requires the key and reads its value
+rejects every real create. Otherwise it takes a `reviewThreads.totalCount`
+before and after, which a reply leaves unchanged. Note this comes from
+*omitting* the reply parameter — a misspelled one is rejected, 422,
+`"in_reply_to_id" is not a permitted key`,
 because the endpoint validates its keys against a `oneOf`.
 
 **A wrong id to a resolve mutation returns HTTP 200.** Neither the comment node
@@ -99,8 +103,15 @@ client checking only the status reads a failed resolve as a success. `gh api
 graphql` exits non-zero; a client calling GitHub directly must check `errors`
 itself.
 
+**A thread's node id where a pull request's belongs reads as a pull request with
+no threads.** `node(id:)` given a `PRRT_` id in place of a `PR_` id answers
+`{"data":{"node":{}}}` at HTTP 200 with no `errors` array, so neither the status
+nor the response marks it as a failure. A reader that takes
+`data.node.reviewThreads` must treat an absent connection as a failure; read as
+an empty one, it reports a clean review of a pull request nothing looked at.
+
 **A GraphQL-created thread is invisible until the review is submitted.** Covered
-under *Creating a thread* above. This is the worst of the four, because the
+under *Creating a thread* above. This is the worst of them, because the
 mutation returns a well-formed thread with a usable node id, later calls against
 that id all succeed, and the harness would report a round of findings that
 nobody but the authenticating account can see.
@@ -297,12 +308,15 @@ Every anchoring failure is a loud HTTP 422. None is silent.
 | `side: LEFT` on an added file, which has no base side | `pull_request_review_thread.line` — `could not be resolved` |
 | `commit_id` omitted | `No subschema in "oneOf" matched` |
 | `commit_id` set to the base sha | `pull_request_review_thread.path` — `could not be resolved` |
+| `body` empty, anchor valid | `pull_request_review_thread.body` — `required when requesting changes`. The prefix, and not an anchor failure. |
 
 The `could not be resolved` messages are what the harness sees when a finding
-lands outside the diff. § 4 routes that finding to the summary comment instead,
-so this is a condition to detect and route on, not an error to report. A 422
-whose `errors[].field` starts `pull_request_review_thread.` means the anchor was
-rejected; anything else is a real failure.
+lands outside the diff. § 4 decides where that finding goes instead, so this is
+a condition to detect and route on, not an error to report. The prefix alone
+does not identify it: a 422 under `pull_request_review_thread.` is a refused
+anchor only where the field is `path`, `line` or `side`. The same prefix carries
+refusals that are real failures, and routing one of those as an anchor that did
+not fit reports a malformed comment as a finding that could not be placed.
 
 Note that the wrong `commit_id` fails as a *path* error, not a commit error. The
 message does not name the cause.
