@@ -234,6 +234,13 @@ itself is governed by `writing-pull-requests`, not by this section.
 
 ## 6. Decide, or ask
 
+**Test the question before passing it on.** A subagent's open question arrives
+with its assumptions attached, and the first of them to check is whether it
+needs answering at all: whether the thing is needed, whether it earns its
+place, and whether it is already solved another way. A question a command
+settles in a minute is not a question for the caller. Answer it, and report the
+answer rather than the question.
+
 **Decide anything recoverable from the specification, the code, or a
 measurement.** Which frontier issues go out together, how the briefs are
 written, which guard to mutation-test, whether a finding is fixed here or filed
