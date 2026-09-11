@@ -17,13 +17,6 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
  */
 const CALL_CEILING_MS = 30_000;
 
-/**
- * Room for the largest answer GitHub gives, in bytes. Node's own default is one
- * mebibyte, and a pull request diff past it arrives truncated: read as an
- * answer, it is a diff with files missing from the end.
- */
-const OUTPUT_LIMIT_BYTES = 32 * 1024 * 1024;
-
 /** The failure line is a pointer rather than a report, so one bounded line of it. */
 const REASON_LIMIT = 200;
 
@@ -196,7 +189,10 @@ function invoke(
     cwd: call.directory,
     encoding: "utf8",
     input,
-    maxBuffer: OUTPUT_LIMIT_BYTES,
+    // GitHub's limit is the only limit. Node's default stops at a mebibyte and
+    // hands back what it got, so a large diff arrives as one that reads whole
+    // with files missing from the end.
+    maxBuffer: Infinity,
     timeout: boundMs,
   });
   return classify(result, boundMs);
