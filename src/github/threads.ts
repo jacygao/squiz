@@ -12,13 +12,6 @@
 
 import { callGraphql, saidBy, type GhCall, type GhFailure } from "./gh.ts";
 
-/** Which pull request to ask about. The repository is named, not inferred from a directory. */
-export type PullRequestAddress = {
-  readonly owner: string;
-  readonly repo: string;
-  readonly number: number;
-};
-
 /** One comment of a thread. The first is what opened it and the rest are replies. */
 export type ThreadComment = {
   /** The REST id of this comment, which is not the thread's and resolves nothing. */
@@ -69,9 +62,9 @@ const commentFields = `nodes { databaseId author { login } body }`;
 
 const pageFields = `pageInfo { hasNextPage endCursor }`;
 
-const threadsQuery = `query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$number) {
+const threadsQuery = `query($pullRequest:ID!, $cursor:String) {
+  node(id:$pullRequest) {
+    ... on PullRequest {
       reviewThreads(first:${PAGE_SIZE}, after:$cursor) {
         ${pageFields}
         nodes {
@@ -93,33 +86,30 @@ const commentsQuery = `query($thread:ID!, $cursor:String) {
 }`;
 
 /**
- * List every review thread on `pullRequest`, each with its comments in order.
+ * List every review thread on the pull request `pullRequestId` names, each with
+ * its comments in order.
+ *
+ * `pullRequestId` is the pull request's `PR_` node id. The repository is not
+ * named anywhere: the id carries it, so this reader cannot end up reading one
+ * repository while the rest of the harness posts to another.
  *
  * Resolved threads are listed alongside open ones; deciding which to act on is
  * the caller's. Never throws: a `gh` that could not answer comes back as the
  * boundary's own failure, and an answer that is not a list of threads comes
  * back as `unreadable`.
  */
-export function listReviewThreads(pullRequest: PullRequestAddress, call: GhCall): ThreadListing {
+export function listReviewThreads(pullRequestId: string, call: GhCall): ThreadListing {
   const threads: ReviewThread[] = [];
   let cursor: string | null = null;
 
   for (;;) {
     const answer = callGraphql(
-      {
-        query: threadsQuery,
-        variables: {
-          owner: pullRequest.owner,
-          repo: pullRequest.repo,
-          number: pullRequest.number,
-          cursor,
-        },
-      },
+      { query: threadsQuery, variables: { pullRequest: pullRequestId, cursor } },
       call,
     );
     if (answer.outcome !== "answered") return answer;
 
-    const page = readThreadsPage(answer.body, pullRequest);
+    const page = readThreadsPage(answer.body, pullRequestId);
     if (page.outcome !== "read") return page;
 
     for (const partial of page.threads) {
@@ -197,16 +187,17 @@ function readRemainingComments(threadId: string, from: string, call: GhCall): Co
   }
 }
 
-function readThreadsPage(body: unknown, at: PullRequestAddress): ThreadsPage {
-  const pullRequest = fieldOf(fieldOf(fieldOf(body, "data"), "repository"), "pullRequest");
-  // A null pull request must not read as a pull request carrying no threads.
-  if (pullRequest === null || pullRequest === undefined) {
+function readThreadsPage(body: unknown, pullRequestId: string): ThreadsPage {
+  const node = fieldOf(fieldOf(body, "data"), "node");
+  const connection = fieldOf(node, "reviewThreads");
+  // An id naming something that is not a pull request answers with an empty
+  // node and no error, which must not read as a pull request with no threads.
+  if (connection === null || connection === undefined) {
     return unreadable(
-      `GitHub answered with no pull request ${at.owner}/${at.repo}#${at.number}: ${describe(body)}`,
+      `GitHub answered with no pull request for ${pullRequestId}: ${describe(body)}`,
     );
   }
 
-  const connection = fieldOf(pullRequest, "reviewThreads");
   const nodes = fieldOf(connection, "nodes");
   if (!Array.isArray(nodes)) {
     return unreadable(
