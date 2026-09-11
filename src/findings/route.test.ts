@@ -134,7 +134,6 @@ test("a finding scoped to the change routes general and acquires no anchor", () 
 /**
  * A general finding naming no location is one a person cannot act on, and the
  * summary's Notes records exactly the location this carries.
- * (review-harness-spec, "What the comment carries")
  */
 test("a finding whose anchor is rejected routes general, carrying its `file:line`", () => {
   const context = generalOnly(routeFindings([onAContextLine], cardDiff));
@@ -152,9 +151,9 @@ test("a finding whose anchor is rejected routes general, carrying its `file:line
 });
 
 /**
- * The acceptance criterion of #51. A finding that routes nowhere leaves nothing
- * on the pull request, and a round that reported nothing looks exactly like a
- * round that found nothing.
+ * A finding that routes nowhere leaves nothing on the pull request, which is
+ * the whole record of a review. A round that reported nothing then looks
+ * exactly like a round that found nothing.
  */
 test("no finding is dropped: the count out is the count in", () => {
   const findings: readonly Finding[] = [
@@ -226,7 +225,6 @@ test("a finding routed general by an unreadable diff still carries its `file:lin
  * `orderBySeverity` in `finding.ts` decides the order findings are reported in.
  * A router that grouped the inline findings ahead of the general ones would
  * hand the summary an order nobody chose.
- * (review-harness-spec, "Findings")
  */
 test("the order the findings arrived in is the order they are routed in", () => {
   const findings: readonly Finding[] = [

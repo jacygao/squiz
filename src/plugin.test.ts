@@ -28,7 +28,6 @@ test("the manifest names the plugin", () => {
 test("the manifest's version is the package's", () => {
   // The plugin is the package, so a second version number here is the same one
   // written twice, and the two drift the first time either is bumped.
-  // (review-harness-spec, "Structure")
   assert.equal(manifest.version, packageVersion);
 });
 
@@ -36,7 +35,6 @@ test("SubagentStop runs the binary through the plugin root", () => {
   // The bare name does not resolve here. A hook runs under a shell whose PATH
   // is the user's, without the plugin's bin/ in it, and the runtime supplies
   // the root instead.
-  // (docs/notes/the-hook-shell-does-not-get-the-plugin-bin-on-path.md)
   const registered = registration.hooks?.["SubagentStop"] ?? [];
   const commands = registered.flatMap((matcher) => matcher.hooks ?? []);
 

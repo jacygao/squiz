@@ -6,7 +6,6 @@
  * own working directory are the session's directory, which is somewhere inside
  * the worktree and not necessarily its root. A branch answers the same from any
  * subdirectory, so this is all the gate needs.
- * (docs/notes/the-worktree-toplevel-separates-concurrent-subagents.md)
  */
 
 import { spawnSync } from "node:child_process";

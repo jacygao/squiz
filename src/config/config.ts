@@ -2,7 +2,6 @@
  * The `.squiz.json` loader: the five settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
- * (review-harness-spec, "Configuration")
  */
 
 import { readFileSync } from "node:fs";
@@ -13,14 +12,13 @@ export const configFileName = ".squiz.json";
 /**
  * The two grants a reviewer can be given. A union of string literals stands
  * where an enum would: Node cannot strip an enum.
- * (review-harness-spec, "Depth" and "Language")
  */
 export type Depth = "read" | "deep";
 
 export type Config = {
-  // The round cap. (review-harness-spec, "The round cap")
+  // The round cap.
   rounds: number;
-  // `deep` adds the shell. (review-harness-spec, "Depth")
+  // `deep` adds the shell.
   depth: Depth;
   /**
    * The non-mutating command that runs the tests, read only at depth `deep`.
@@ -28,14 +26,13 @@ export type Config = {
    * from a command that runs and does nothing.
    */
   test: string | null;
-  // Seconds one round's reviewer may run. (review-harness-spec, "The review budget")
+  // Seconds one round's reviewer may run.
   timeout: number;
-  // Dollars an episode may cost. (review-harness-spec, "The review budget")
+  // Dollars an episode may cost.
   budget: number;
 };
 
 // Every setting has a default, so a project that writes no file still runs.
-// (review-harness-spec, "Configuration")
 export const defaultConfig: Readonly<Config> = Object.freeze({
   rounds: 3,
   depth: "read",
@@ -50,7 +47,6 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
  *
  * This is a failure the harness controls, so the round exits 0 and the hook's
  * stderr names it rather than the throw reaching the coding agent.
- * (review-harness-spec, "Failure modes")
  */
 export class ConfigError extends Error {
   constructor(message: string, options?: ErrorOptions) {

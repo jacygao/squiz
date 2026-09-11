@@ -1,13 +1,13 @@
 /**
  * The pull request whose head is a branch: the question the gate asks before a
- * round can start. (review-harness-spec, "A round, step by step")
+ * round can start.
  *
- * Nothing outside `src/github/` invokes `gh`. (review-harness-spec, "Structure")
+ * Nothing outside `src/github/` invokes `gh`.
  *
  * A `gh` that could not answer stays distinguishable from an answer of none all
  * the way out to the caller. An install that failed and read as a branch with no
  * pull request would look exactly like the harness working normally, every round
- * and forever. (review-harness-spec, "Failure modes")
+ * and forever.
  */
 
 import { spawnSync } from "node:child_process";
@@ -19,11 +19,10 @@ export type PullRequestLookup =
   | { readonly outcome: "failed"; readonly reason: string };
 
 // One branch has one pull request, so one row is the whole answer.
-// (review-harness-spec, "Parallel subagents")
 const query = ["pr", "list", "--state", "open", "--json", "number", "--limit", "1"] as const;
 
 // The failure pointer is a pointer rather than a report, so `gh`'s own words
-// reach it as one bounded line. (review-harness-spec, "The hook's stderr")
+// reach it as one bounded line.
 const REASON_LIMIT = 200;
 
 /**

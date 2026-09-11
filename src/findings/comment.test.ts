@@ -23,7 +23,6 @@ const cardReference = "`AGENTS.md`: re-run placement whenever the card's height 
 
 /**
  * The finding the specification's own example is rendered from.
- * (review-harness-spec, "The comment format")
  */
 const card: LineFinding = {
   scope: "line",

@@ -312,7 +312,7 @@ test("a diff with no changes is empty rather than unreadable", () => {
 });
 
 // A parse failure and a line the diff does not contain are the two facts the
-// caller must be able to tell apart. (review-harness-spec, "Pull request comments")
+// caller must be able to tell apart.
 test("a diff that cannot be read is refused rather than answered no", () => {
   assert.equal(
     touches(driftingHunks, "drift.txt", 9),
