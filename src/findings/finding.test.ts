@@ -166,7 +166,7 @@ test("the type refuses reasoning written as one paragraph", () => {
 
 // A comparator compared only against its opposite passes when it is reversed,
 // so every pair of the three severities is checked, and the order is asserted
-// as a whole sequence. (review-harness-spec, "Findings")
+// as a whole sequence.
 
 test("severity orders findings high, medium, low", () => {
   const shuffled = [
@@ -219,7 +219,6 @@ test("the comparator ranks every pair of severities, and ties at zero", () => {
 
 // Two findings of one severity keep the order the reviewer returned them in,
 // which a comparator breaking the tie on anything at all would lose.
-// (review-harness-spec, "Findings")
 
 test("findings of one severity keep the order the reviewer returned them in", () => {
   const returned = [
@@ -263,7 +262,6 @@ test("ordering leaves the findings it was handed as they were", () => {
 
 // A reference that is absent and one that is empty must not collapse: a caller
 // that took the empty string for absence would emit an empty quote block.
-// (review-harness-spec, "The comment format")
 
 test("a reference that is absent is not a reference that is empty", () => {
   const absent: Finding = {

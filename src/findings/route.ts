@@ -4,7 +4,6 @@
  *
  * The pull request is the whole record of a review, so a finding that routes
  * nowhere leaves no trace anywhere at all.
- * (review-harness-spec, "Pull request comments")
  */
 
 import { type ChangedLines, DiffParseError, parseDiff, touchesLine } from "./diff.ts";
@@ -35,7 +34,6 @@ export type ChangeRouting = {
  * The anchor is carried as `file:line` text because the summary writes it into
  * its Notes. Required rather than optional: a general finding naming no
  * location is one a person cannot act on.
- * (review-harness-spec, "What the comment carries")
  */
 export type UnplacedRouting = {
   readonly placement: "general";
@@ -62,7 +60,6 @@ export type Routed = {
  * `scope` is the reviewer's judgement about what the finding is about, and is
  * never overridden here. The one decision this makes is whether the anchor a
  * `line` finding names can be placed.
- * (review-harness-spec, "Pull request comments")
  *
  * Returns one routing per finding, in the order they were handed in. Ordering
  * is `orderBySeverity`'s job in `finding.ts`, and a router that grouped the
@@ -88,7 +85,6 @@ function routeOne(finding: Finding, changed: ChangedLines): Routing {
   // Only a line the change added is anchored to. GitHub would take a context
   // line too, but no finding is anchored to one: a finding is anchored to the
   // changed line that caused it.
-  // (review-harness-spec, "Pull request comments")
   if (finding.scope === "line" && touchesLine(changed, finding.file, finding.line)) {
     return { placement: "inline", finding };
   }

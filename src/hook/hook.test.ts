@@ -131,7 +131,7 @@ function commitOn(directory: string, branch: string): void {
   );
 }
 
-/** The pointer is one line, whatever it had to say. (review-harness-spec, "The hook's stderr") */
+/** The pointer is one line, whatever it had to say. */
 function assertOneLine(stderr: string): void {
   assert.equal(stderr.split("\n").length, 2, `the pointer is not one line: ${stderr}`);
 }

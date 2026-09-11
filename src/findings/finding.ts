@@ -2,11 +2,9 @@
  * The finding contract: the one shape the reviewer returns and every later part
  * composes a comment from. A finding carries only what composes a comment and
  * what routes it, because the pull request holds the record.
- * (review-harness-spec, "Findings")
  */
 
 // Severity orders the findings; it does not decide whether they count.
-// (review-harness-spec, "Findings")
 export type Severity = "high" | "medium" | "low";
 
 /** The fields the comment template is composed from. */
@@ -18,7 +16,6 @@ type Body = {
    * The bullets beneath the headline, one point each. A list rather than one
    * string, because bullets rather than paragraphs is what the template asks
    * for and a string meets that only by accident.
-   * (review-harness-spec, "The comment format")
    */
   readonly reasoning: readonly string[];
   // What to do about it.
@@ -26,7 +23,6 @@ type Body = {
   /**
    * A quoted convention, or something the reviewer could not check. Optional:
    * the comment must still stand with it deleted.
-   * (review-harness-spec, "The comment format")
    *
    * The property being absent is the only way to carry none. An empty string is
    * a reference that is empty, which is a malformed finding rather than one
@@ -48,7 +44,6 @@ export type LineFinding = Body & {
  * `file` and `line` are declared absent rather than left out. Leaving them out
  * bars only a fresh object literal, so a finding built elsewhere and widened to
  * `Finding` would still carry an anchor the summary has nowhere to put.
- * (review-harness-spec, "Pull request comments")
  */
 export type ChangeFinding = Body & {
   readonly scope: "change";
@@ -73,7 +68,6 @@ const rank: Readonly<Record<Severity, number>> = { high: 0, medium: 1, low: 2 };
  *
  * Two findings of one severity compare equal. The tie is deliberately not
  * broken by `file:line`, which a finding scoped to the change does not carry.
- * (review-harness-spec, "Findings")
  */
 export function bySeverity(a: Finding, b: Finding): number {
   return rank[a.severity] - rank[b.severity];

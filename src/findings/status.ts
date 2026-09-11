@@ -1,7 +1,6 @@
 /**
  * What a thread ends its episode as: the reviewer's verdict on it and what the
  * coding agent did to it, read as one of four statuses.
- * (review-harness-spec, "Findings")
  */
 
 /** What the reviewer rules on a thread it was handed. */
@@ -11,14 +10,12 @@ export type Verdict = "fixed" | "withdrawn" | "open";
  * The verdict a thread the reviewer returned none for is treated as. A default
  * and not an error: a thread the reviewer forgot must not be closed by the
  * forgetting.
- * (review-harness-spec, "Findings")
  */
 export const defaultVerdict: Verdict = "open";
 
 /**
  * Where a thread ends its episode. `open` and `disputed` are the two that need
  * a person, and the summary comment counts all four.
- * (review-harness-spec, "Findings" and "What the comment carries")
  */
 export type ThreadStatus = "fixed" | "withdrawn" | "open" | "disputed";
 
@@ -61,7 +58,6 @@ export function statusOf(thread: ThreadAtClose): ThreadStatus {
  *
  * The summary counts these, and the count is not a fifth status: a thread
  * counted here still ends its episode in one of the four.
- * (review-harness-spec, "Findings")
  */
 export function isReopened(thread: ThreadAtClose): boolean {
   return verdictOf(thread) === "open" && thread.codingAgentResolved;

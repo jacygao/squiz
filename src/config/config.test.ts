@@ -73,7 +73,7 @@ test("every setting the file names is read", () => {
 });
 
 // The ranges are inclusive on both sides, so each is checked at the last value
-// it accepts and the first it refuses. (review-harness-spec, "Configuration")
+// it accepts and the first it refuses.
 
 test("rounds accepts 1 and 8, and refuses 0 and 9", () => {
   assert.equal(load(`{"rounds": 1}`).rounds, 1);
@@ -107,7 +107,7 @@ test("a count that is not whole is refused", () => {
 
 // A zero is falsy, so a loader deciding presence by truthiness would return the
 // default and report nothing. These are the two settings where that wrong
-// answer is silent. (review-harness-spec, "Configuration")
+// answer is silent.
 
 test("a budget of 0 is refused rather than replaced by the default", () => {
   const error = rejection(`{"budget": 0}`);
@@ -162,7 +162,6 @@ test("an empty test command is refused, because it is not the same as none", () 
 
 // The error names the setting, the value given and what was expected. One
 // saying only that the configuration is invalid is the failure this checks for.
-// (review-harness-spec, "Configuration")
 
 test("every refusal names the setting, the value given and what was expected", () => {
   const cases: ReadonlyArray<{

@@ -2,7 +2,6 @@
  * A finding rendered as the markdown comment that goes on the pull request.
  * One template serves both scopes, and the anchor is not written into the body:
  * an inline comment is placed on its line rather than naming it.
- * (review-harness-spec, "The comment format")
  */
 
 import type { Finding } from "./finding.ts";
@@ -13,7 +12,6 @@ import type { Finding } from "./finding.ts";
  * rather than a label. The table gives it bolded on its own; the template folds
  * it into the first line's bold span, so what a reader or a later matcher has
  * is the prefix.
- * (review-harness-spec, "Identity")
  */
 const marker = "Squiz reviewer";
 

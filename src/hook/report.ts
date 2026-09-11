@@ -5,7 +5,6 @@
  * The hook's other stderr channel, the blocking reason a round exits 2 with,
  * does not come through here. There is one function because there is one line,
  * so a second output format has nowhere to grow.
- * (review-harness-spec, "The hook's stderr")
  */
 
 import { writeSync } from "node:fs";
@@ -18,14 +17,13 @@ import { writeSync } from "node:fs";
 const STDERR = 2;
 
 // A pointer naming nothing would read as silence, which a failure must never
-// do. (review-harness-spec, "Failure modes")
+// do.
 const UNNAMED = "the hook failed for a reason it could not name";
 
 // A full pipe is the one write error worth waiting out, because the reader is
 // Claude Code and it drains. Bounded so the loop ends whatever the descriptor
 // does: about a second of waiting, well under the runtime's own kill, which is
 // the single failure outside the harness's control.
-// (review-harness-spec, "Failure modes")
 const WRITE_ATTEMPTS = 1000;
 
 /**

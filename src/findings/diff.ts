@@ -5,7 +5,6 @@
  * An inline comment is anchored to a line the change touched, and GitHub
  * refuses an anchor outside the diff, so a finding whose anchor this rejects is
  * reported as a general finding instead.
- * (review-harness-spec, "Pull request comments")
  *
  * The diff arrives as a string. Nothing here reaches GitHub, the network or the
  * filesystem.
@@ -133,7 +132,6 @@ export function parseDiff(diff: string): ChangedLines {
  * anchored to. A context line answers false. GitHub would take one as an
  * anchor, but no finding is anchored there: a finding is anchored to the
  * changed line that caused it.
- * (review-harness-spec, "Pull request comments")
  *
  * A file the diff does not name answers false rather than throwing.
  */

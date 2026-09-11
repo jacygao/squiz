@@ -1,6 +1,5 @@
 /**
  * The `SubagentStop` entry point: one round.
- * (review-harness-spec, "The `squiz` binary")
  */
 
 import { findPullRequestForBranch } from "../github/pull-request.ts";
@@ -14,7 +13,6 @@ import type { HookExit } from "./trap.ts";
  *
  * The gate comes first: a branch with no pull request ends the round here,
  * having posted nothing, run nothing and said nothing.
- * (review-harness-spec, "A round, step by step")
  */
 export function runHook(): HookExit {
   // The hook reads nothing from the payload. Everything the gate needs comes
@@ -40,6 +38,5 @@ export function runHook(): HookExit {
 
   // Both remaining outcomes end the round here. Spawning the reviewer against
   // the number is the step after the gate.
-  // (review-harness-spec, "A round, step by step")
   return 0;
 }

@@ -13,7 +13,6 @@ const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
 // Anywhere that is not the plugin. The hook is given the session's directory,
 // which is not even the worktree root, so every run here starts somewhere the
 // entry point cannot be reached from by a relative path.
-// (docs/notes/the-worktree-toplevel-separates-concurrent-subagents.md)
 //
 // Its HEAD is detached, which is the one shape of working directory the gate
 // answers without asking GitHub anything. These tests are about the binary, and
@@ -97,7 +96,6 @@ test("the binary runs by name off PATH, through a symlink to the shim", async ()
   // How a plugin's bin/ reaches an agent's PATH is the runtime's business, and
   // a directory of symlinks is one of the shapes it can take. `dirname $0` in
   // the shim would look for src/ beside the link.
-  // (review-harness-spec, "The `squiz` binary")
   const directory = await mkdtemp(join(tmpdir(), "squiz-bin-"));
   try {
     await symlink(shim, join(directory, "squiz"));
@@ -174,7 +172,6 @@ test("the shim is executable", async () => {
   // Tracked mode, not the mode on this disk. A shim committed without the bit
   // is on PATH and still cannot be run, and a hook whose command will not run
   // leaves the same empty transcript as a round with nothing to say.
-  // (docs/notes/the-hook-shell-does-not-get-the-plugin-bin-on-path.md)
   const result = await run("git", ["ls-files", "--stage", "--", "bin/squiz"], {
     cwd: dirname(dirname(shim)),
   });

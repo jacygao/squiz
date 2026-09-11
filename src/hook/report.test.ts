@@ -48,7 +48,7 @@ test("every reason leaves as exactly one line", () => {
 
 test("a reason naming nothing still says that something failed", () => {
   // A bare prefix on stderr is silence dressed as a report, which a failure
-  // must never be. (review-harness-spec, "Failure modes")
+  // must never be.
   const line = failureLine("  \n\t ");
 
   assert.notEqual(line, "squiz: \n");

@@ -5,13 +5,11 @@
  * Every failure the harness controls exits 0, because a non-zero exit is the
  * one thing that stops the coding agent finishing its turn. Exiting 0 in
  * silence is forbidden just as firmly: it would read as a clean review.
- * (review-harness-spec, "Failure modes")
  */
 
 import { reportFailure } from "./report.ts";
 
 // The two exits a round has: 0 lets the turn finish, 2 blocks it.
-// (review-harness-spec, "A round, step by step")
 export type HookExit = 0 | 2;
 
 /**

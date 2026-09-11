@@ -57,7 +57,6 @@ test("the branch checked out in the directory is the one that comes back", async
 test("the branch resolves the same from a subdirectory of the worktree", async () => {
   // The hook is given the session's directory, which is inside the worktree and
   // not necessarily its root.
-  // (docs/notes/the-worktree-toplevel-separates-concurrent-subagents.md)
   await withTemporaryDirectory(async (directory) => {
     commitOn(directory, "review/the-gate");
     const inside = join(directory, "src", "deep");
