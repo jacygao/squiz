@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.13 (draft)
+**Version:** 0.14 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -310,9 +310,20 @@ enabled.
 `--no-session` is what keeps each round stateless, and `--session-dir` contains
 what `pi` writes so it lands under `.squiz/` rather than in interactive history.
 
-The JSONL stream is large, so the adapter reads it incrementally and never holds
-it in memory. The largest lines are the ones carrying whole messages, above all
-`agent_end`, which grows with the entire transcript.
+The JSONL stream is large. A review of a 450-line change at depth `read`
+produced 9.9MB across 32,854 lines, measured at `pi` 0.85.1. That is a floor
+rather than a bound, because the stream is the length of the round rather than
+the size of the diff: it grows with every tool call the reviewer makes and every
+token it thinks.
+
+The volume and the largest line are in different events. Almost all of the
+volume is `message_update`, which is tens of thousands of streaming deltas of a
+few hundred bytes each. Almost none of the size of any one line is: the largest
+line in that run was a single 361KB `agent_end`, which carries the whole
+transcript.
+
+So the adapter reads the stream incrementally, accumulates nothing, and never
+holds a line it does not need. `agent_end` is the line it must not hold.
 
 The adapter reads `tool_execution_start` and `tool_execution_end` for progress,
 and every `message_end` whose message is from the assistant for the round's

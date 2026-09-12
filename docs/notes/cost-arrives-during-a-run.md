@@ -221,16 +221,16 @@ cost first appears and how long before `message_end`, the usage fields and their
 names, and which events are the large ones.
 
 `message_update` no longer repeats the whole partial message — `dist/modes/json-event.js`
-strips `partial` and emits the delta plus a constant-size `usage`, so those
-events are small. § 4's "194MB across roughly 19,800 lines, of which all but a
-few hundred were `message_update` events repeating the whole partial message"
-was 0.74.2's behaviour.
+strips `partial` and emits the delta plus a constant-size `usage`. § 4's "194MB
+across roughly 19,800 lines, of which all but a few hundred were `message_update`
+events repeating the whole partial message" was 0.74.2's behaviour.
 
-The bulk now sits in the message-carrying events — `agent_end`, `turn_end`,
+The largest lines are now the message-carrying events — `agent_end`, `turn_end`,
 `message_start`, `message_end` and `tool_execution_end` — which carry whole
 messages including tool output and run to tens of kilobytes each. Read
 incrementally and hold nothing, but the line that must not be held is now
-`agent_end`, not `message_update`.
+`agent_end`, not `message_update`. The largest lines are not the bulk of the
+bytes; on a run long enough to tell the two apart, `message_update` is.
 
 ## Limits
 
