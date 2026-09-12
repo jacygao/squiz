@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.14 (draft)
+**Version:** 0.15 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -323,15 +323,15 @@ non-zero token count. The adapter returns the token count alongside the cost,
 which is what tells that case apart from a round that cost nothing.
 
 An assistant message carries a `stopReason`, and a value of `error` on one of
-them does not mean the run failed. `pi` retries a failed request, and a round
-that completed a review carried twenty-two errored messages among its working
-ones. Each carries zero usage, so summing cost over them stays correct.
+them does not mean the run failed: `pi` retries a failed request, so a round that
+completes a review can carry errored messages among its working ones. Each
+carries zero usage, and the cost sum is unaffected.
 
-The run failed where no assistant message completed at all, which is where none
-carries a `stopReason` of `stop`. `pi` exits 0 and writes nothing to stderr
-either way, and the reason sits in the errored message's `errorMessage`. The
-adapter decides this before it looks for findings, and does not spawn a second
-run for it: `pi` has already retried the request three times.
+The run failed where no assistant message carries a `stopReason` of `stop`. `pi`
+exits 0 and writes nothing to stderr either way, and the reason sits in the
+errored message's `errorMessage`. The adapter reads this before it looks for
+findings, and does not spawn a second run, because `pi` has already retried the
+request itself.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
