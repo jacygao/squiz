@@ -146,6 +146,13 @@ thread's identity and not a detail.
 `line`. Passing `subject_type: "file"` instead of `line` anchors to the file as a
 whole; the response then reads back as `line: 1`, `subject_type: "file"`.
 
+The line and the subject type are mutually exclusive rather than one overriding
+the other, and the endpoint's `oneOf` is what enforces it. A request carrying
+both is refused, 422, `"subject_type" is not a permitted key`. A request
+carrying neither is refused as well, `"line" wasn't supplied`. Neither body
+carries an `errors` array, so a client that reads only that array sees nothing
+at all in either.
+
 The response is the comment, and the fields worth keeping are:
 
 ```jsonc
@@ -308,6 +315,7 @@ Every anchoring failure is a loud HTTP 422. None is silent.
 | `side: LEFT` on an added file, which has no base side | `pull_request_review_thread.line` — `could not be resolved` |
 | `commit_id` omitted | `No subschema in "oneOf" matched` |
 | `commit_id` set to the base sha | `pull_request_review_thread.path` — `could not be resolved` |
+| `commit_id` set to a sha the pull request does not carry | `commit_id` — `commit_id is not part of the pull request`. No prefix, so a real failure. |
 | `body` empty, anchor valid | `pull_request_review_thread.body` — `required when requesting changes`. The prefix, and not an anchor failure. |
 
 The `could not be resolved` messages are what the harness sees when a finding
@@ -318,8 +326,13 @@ anchor only where the field is `path`, `line` or `side`. The same prefix carries
 refusals that are real failures, and routing one of those as an anchor that did
 not fit reports a malformed comment as a finding that could not be placed.
 
-Note that the wrong `commit_id` fails as a *path* error, not a commit error. The
-message does not name the cause.
+Note that the base sha fails as a *path* error, not a commit error. The message
+does not name the cause, and a client routing on the field reports it as a
+finding that would not fit. Only a sha the pull request does not carry at all
+fails under `commit_id`, and that one is a real failure.
+
+A file-scoped create is refused in the same terms. It sends no `line` and no
+`side`, so `path` is the only anchor field it can be refused under.
 
 ## Limits
 

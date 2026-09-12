@@ -1,7 +1,8 @@
 /**
- * Opening a review comment thread on the line a finding names.
+ * Opening the review comment thread a finding is posted as: on the line the
+ * finding names, or on a file as a whole where no line of it owns the defect.
  *
- * The thread is created over REST. The GraphQL create leaves the comment in a
+ * Both are created over REST. The GraphQL create leaves the comment in a
  * pending review that nobody but the authenticating account can see, while
  * returning a well-formed thread id that every later call accepts.
  *
@@ -24,8 +25,8 @@ export type Anchor = {
   readonly side: "LEFT" | "RIGHT";
 };
 
-/** The comment to post, and the thread it opens. */
-export type ThreadRequest = {
+/** What every new comment carries, whatever its thread hangs on. */
+type NewComment = {
   readonly pullRequest: number;
   /**
    * The pull request's current head sha.
@@ -34,16 +35,28 @@ export type ThreadRequest = {
    * value arrives as an anchor GitHub would not place rather than as a failure.
    */
   readonly headSha: string;
-  readonly anchor: Anchor;
   readonly body: string;
 };
+
+/** The comment to post, and the thread it opens on the line `anchor` names. */
+export type ThreadRequest = NewComment & { readonly anchor: Anchor };
+
+/**
+ * The comment to post, and the thread it opens on `path` as a whole.
+ *
+ * A shape of its own rather than a line and a side made optional on
+ * `ThreadRequest`. Optional ones would let a comment be asked for with neither,
+ * and GitHub refuses such a request as malformed rather than anchoring it
+ * anywhere.
+ */
+export type FileThreadRequest = NewComment & { readonly path: string };
 
 /**
  * What became of the comment.
  *
  * `anchor-refused` is the one outcome that is neither a success nor a failure.
- * GitHub would not place a comment on that line, and the caller reports the
- * finding in the summary instead.
+ * GitHub would not place a comment there, and the caller reports the finding in
+ * the summary instead.
  */
 export type ThreadPosting =
   | {
@@ -89,12 +102,64 @@ type Created = {
  * reached and a `gh` that is not installed all come back as outcomes.
  */
 export function postThread(request: ThreadRequest, call: GhCall): ThreadPosting {
-  const created = create(request, call);
+  return open(
+    {
+      pullRequest: request.pullRequest,
+      fields: {
+        body: request.body,
+        commit_id: request.headSha,
+        path: request.anchor.path,
+        line: request.anchor.line,
+        side: request.anchor.side,
+      },
+      where: `${request.anchor.path}:${request.anchor.line}`,
+    },
+    call,
+  );
+}
+
+/**
+ * Open a review comment thread on `path` as a whole, and hand back the thread's
+ * node id.
+ *
+ * The same two calls, and the same outcomes, as a thread on a line.
+ */
+export function postFileThread(request: FileThreadRequest, call: GhCall): ThreadPosting {
+  return open(
+    {
+      pullRequest: request.pullRequest,
+      fields: {
+        body: request.body,
+        commit_id: request.headSha,
+        path: request.path,
+        // What carries the file scope. It goes instead of the line and the
+        // side, never beside them: a line and a subject type together are
+        // refused outright.
+        subject_type: "file",
+      },
+      where: request.path,
+    },
+    call,
+  );
+}
+
+/** One REST create, and what a refusal of it is reported as. */
+type Opening = {
+  readonly pullRequest: number;
+  // The request body as it is sent. Its exact key set is what decides whether
+  // GitHub opens a thread at all, and where.
+  readonly fields: Readonly<Record<string, unknown>>;
+  /** Where the comment was to go, for the one line a refusal is reported as. */
+  readonly where: string;
+};
+
+function open(opening: Opening, call: GhCall): ThreadPosting {
+  const created = create(opening, call);
   if (created.outcome !== "created") return created;
 
-  // A comment sitting inside somebody else's thread reads as a finding posted
-  // against the line, and it is not one: the line and the file in the response
-  // are the ones that were asked for either way.
+  // A comment sitting inside somebody else's thread reads as a finding of its
+  // own, and it is not one: the response names the file that was asked for
+  // either way.
   if (!created.opensThread) {
     return failed("the comment joined an existing thread instead of opening one");
   }
@@ -116,24 +181,18 @@ export function postThread(request: ThreadRequest, call: GhCall): ThreadPosting 
   };
 }
 
-function create(request: ThreadRequest, call: GhCall): Created | Refused | Failure {
+function create(opening: Opening, call: GhCall): Created | Refused | Failure {
   const answer = callRest(
     {
-      path: `repos/{owner}/{repo}/pulls/${request.pullRequest}/comments`,
+      path: `repos/{owner}/{repo}/pulls/${opening.pullRequest}/comments`,
       method: "POST",
-      body: {
-        body: request.body,
-        commit_id: request.headSha,
-        path: request.anchor.path,
-        line: request.anchor.line,
-        side: request.anchor.side,
-      },
+      body: opening.fields,
     },
     call,
   );
 
   if (answer.outcome === "exited") {
-    const refusal = refusedAnchorIn(answer.httpStatus, answer.body, request.anchor);
+    const refusal = refusedAnchorIn(answer.httpStatus, answer.body, opening.where);
     if (refusal !== null) return { outcome: "anchor-refused", reason: refusal };
     return failed(answer.reason);
   }
@@ -165,7 +224,7 @@ const ANCHOR_FIELDS: ReadonlySet<string> = new Set(["path", "line", "side"]);
  * Why GitHub would not place the comment, in one line, or `null` where the
  * response describes a real failure.
  */
-function refusedAnchorIn(httpStatus: number | null, body: unknown, anchor: Anchor): string | null {
+function refusedAnchorIn(httpStatus: number | null, body: unknown, where: string): string | null {
   if (httpStatus !== 422) return null;
   for (const error of errorsIn(body)) {
     const field = at(error, "field");
@@ -174,7 +233,7 @@ function refusedAnchorIn(httpStatus: number | null, body: unknown, anchor: Ancho
     if (!ANCHOR_FIELDS.has(part)) continue;
     const message = at(error, "message");
     const detail = typeof message === "string" ? message : "was refused";
-    return `GitHub would not anchor a comment to ${anchor.path}:${anchor.line}: ${part} ${detail}`;
+    return `GitHub would not anchor a comment to ${where}: ${part} ${detail}`;
   }
   return null;
 }
