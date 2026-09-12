@@ -322,11 +322,16 @@ catalogue, so a model the catalogue does not cover reports a zero cost against a
 non-zero token count. The adapter returns the token count alongside the cost,
 which is what tells that case apart from a round that cost nothing.
 
-An assistant message carries a `stopReason`, and a value of `error` means the run
-failed rather than finished. `pi` exits 0, writes nothing to stderr, and emits a
-complete stream whose every usage field is zero, with the reason in the
-message's `errorMessage`. The adapter reads `stopReason` before it looks for
-findings, and does not retry a run that carries it.
+An assistant message carries a `stopReason`, and a value of `error` on one of
+them does not mean the run failed. `pi` retries a failed request, and a round
+that completed a review carried twenty-two errored messages among its working
+ones. Each carries zero usage, so summing cost over them stays correct.
+
+The run failed where no assistant message completed at all, which is where none
+carries a `stopReason` of `stop`. `pi` exits 0 and writes nothing to stderr
+either way, and the reason sits in the errored message's `errorMessage`. The
+adapter decides this before it looks for findings, and does not spawn a second
+run for it: `pi` has already retried the request three times.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -593,7 +598,7 @@ carries what could not be posted.
 | Failure | Behaviour |
 |---|---|
 | The reviewer is not installed, or has no API key | Exit 0, nothing posted, and stderr names the check that failed. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
-| The reviewer runs, exits cleanly, and reports an error | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer ran and answered. Reported as a setup problem rather than as a bad round. |
+| The reviewer runs, exits cleanly, and completes no message | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The model API is unavailable or rate-limited | Exit 0 and nothing is posted. stderr says the review did not run. |
 | The reviewer returns output the adapter cannot parse | Retried once, then treated as an unavailable API. A failed parse and an honest finding of nothing are distinguished before anything is posted. |
 | The reviewer exceeds the review budget | The reviewer process is killed and the round records no findings. The round is recorded as a failed round rather than a clean one. |
