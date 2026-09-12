@@ -10,7 +10,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { renderComment } from "./comment.ts";
-import { type ChangeFinding, hasReference, type LineFinding } from "./finding.ts";
+import {
+  type ChangeFinding,
+  type FileFinding,
+  hasReference,
+  type LineFinding,
+} from "./finding.ts";
 
 // The expected comments are lines joined rather than template literals: the
 // markdown they carry is full of backticks, and a blank line is a `""` that
@@ -135,10 +140,38 @@ test("text that carries newlines is rendered as one line rather than breaking th
   assert.equal(renderComment(wrapped), cardComment);
 });
 
-// The finding is scoped to the change, so this also pins that the scope reaches
-// the routing and not the body.
 test("one point of reasoning is a bullet, not a paragraph", () => {
   assert.equal(renderComment(duplicate), duplicateComment);
+});
+
+/**
+ * The scope reaches the routing and never the body. The findings below differ
+ * from the change-scoped one in scope and anchor alone, and render as the one
+ * comment it renders as.
+ */
+test("one template serves every scope, and the anchor is never written into the comment", () => {
+  const anchoredFile = "src/retry/queue.ts";
+  const anchoredLine = 41;
+  const onALine: LineFinding = {
+    ...duplicate,
+    scope: "line",
+    file: anchoredFile,
+    line: anchoredLine,
+  };
+  const onAFile: FileFinding = { ...duplicate, scope: "file", file: anchoredFile };
+
+  assert.equal(renderComment(onALine), duplicateComment);
+  assert.equal(renderComment(onAFile), duplicateComment);
+  assert.equal(
+    duplicateComment.includes(anchoredFile),
+    false,
+    "a comment is placed on the file it was anchored to rather than naming it",
+  );
+  assert.equal(
+    duplicateComment.includes(String(anchoredLine)),
+    false,
+    "a comment is placed on the line it was anchored to rather than naming it",
+  );
 });
 
 test("the severity sits on the first line, between the marker and the headline", () => {
