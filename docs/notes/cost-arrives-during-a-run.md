@@ -3,17 +3,18 @@ settles: "§ 8 — whether pi reports cost during a run"
 issue: [12, 21]
 recorded: 2026-09-12
 versions: { pi: "0.84.2, 0.85.1", node: 24.15.0 }
-recheck-when: pi upgrades, or a non-openai-completions API path is configured
+recheck-when: pi upgrades, or an unmeasured API path is configured
 ---
 
 # Cost arrives during a run
 
 `pi` reports cost during a run, not at the end of it. A final, non-zero cost
 lands on every assistant message, and a run produces several; the run's cost is
-their sum, which is only complete when the process exits. § 8 asks this question
-and answers it the other way, saying the cost bound "holds only if cost arrives
-at the end", so the premise is wrong even though the design it defends still
-works. A killed round therefore yields a cost floor rather than nothing.
+their sum, which is only complete when the process exits. § 8 asked this
+question and answered it the other way, saying the cost bound "holds only if
+cost arrives at the end"; that premise was wrong, the design it defended still
+works, and the sentence has since gone from the spec. A killed round therefore
+yields a cost floor rather than nothing.
 
 ## Decisions
 
@@ -33,21 +34,17 @@ works. A killed round therefore yields a cost floor rather than nothing.
 
 ## Needs your input
 
-**A credential or a setting, for whichever of the two unmeasured API paths you
-want closed.** Both are blocked on something only you can supply, and neither
-blocks M5.
+**An Anthropic key, if you want the last interesting path closed.** Two of the
+four paths are measured and agree. Of the two that are not, only
+`anthropic-messages` could behave differently, and no Anthropic credential is
+configured here. It does not block M5: the conclusion holds whichever way it
+goes, because a cost that arrives earlier still arrives during the run.
 
-- **`anthropic-messages` needs an Anthropic key.** None is configured here. This
-  is the path whose source says cost is priced *seconds* earlier in a message,
-  and it is the only one where the timing could differ enough to matter.
-- **`azure-openai-responses` needs an endpoint.** The key is configured and
-  `pi auth check` reports the provider ready, but no base URL is set, so every
-  request fails before it is sent. `AZURE_OPENAI_BASE_URL` or
-  `AZURE_OPENAI_RESOURCE_NAME` in the environment is enough.
-
-Recommended: supply the Anthropic key and leave Azure alone. Azure is a third
-API path that prices cost at the end of a message like the one already
-measured, so closing it would confirm what is already the expected answer.
+Not worth your time: **`azure-openai-responses` needs an endpoint** —
+`AZURE_OPENAI_BASE_URL` or `AZURE_OPENAI_RESOURCE_NAME` — and runs the same
+stream processor as the `openai-responses` path already measured. `pi auth
+check` reports it ready on the strength of its stored key, which is why it
+looks available when it is not.
 
 Also for you: **§ 2's Verified against table records `pi` 0.84.2.** Everything
 measured since is 0.85.1, and the two agree wherever both were run.
@@ -104,13 +101,12 @@ Three rules go with reading it:
 There is **no run-total event**. Neither `agent_end` nor `agent_settled` carries
 an aggregate. The adapter does the addition.
 
-Cost becomes non-zero on the last `message_update` before each `message_end`,
-so reading `message_end` loses nothing. The gap between the two is **0.3–1.5
-milliseconds** across fourteen assistant messages, against messages lasting
-0.6–1.4 seconds: cost is effectively part of `message_end`, and no adapter can
-usefully act on the earlier event. On `message_update` the usage sits at the
-event's top level, as `usage`, not under `message` — that event carries no
-`message` key at all.
+**`message_end` is the only event to read the cost from.** What `message_update`
+holds depends on the API path, and on one of the two measured it holds zero for
+the whole of the message.
+
+On `message_update` the usage sits at the event's top level, as `usage`, not
+under `message` — that event carries no `message` key at all.
 
 ### Which API path a provider takes
 
@@ -118,17 +114,34 @@ The timing belongs to the API path, not to the provider or the model. `pi`
 names the path on every assistant message, as `message.api`, which is what
 identifies it in output rather than in the source.
 
-| `message.api` | Priced at | Measured |
+| `message.api` | Priced at | Where a non-zero cost first appears |
 |---|---|---|
-| `openai-completions` | the final SSE chunk | Yes — `deepseek-v4-pro`, `deepseek-flash` |
-| `azure-openai-responses` | the terminal response event | No *(unverified)* |
-| `anthropic-messages` | the SSE `message_start`, then again on each usage update | No *(unverified)* |
+| `openai-completions` | the final SSE chunk | the last `message_update`, 0.2–1.5 ms before `message_end` |
+| `openai-responses` | the terminal response event | `message_end` itself, in 14 messages of 15 |
+| `azure-openai-responses` | the terminal response event | *(unverified)* — same stream processor as `openai-responses` |
+| `anthropic-messages` | the SSE `message_start`, then again on each usage update | *(unverified)* — would be seconds before `message_end` |
 
-`azure-openai-responses` is a third path, not the plain OpenAI one. It has its
-own `dist/api/azure-openai-responses.js` and shares a stream processor with the
-OpenAI Responses path, which prices the message in its `finalizeResponse` —
-the end of the message, as `openai-completions` does. Only `anthropic-messages`
-prices at the start.
+Both measured paths price at the end of a message. They differ in whether
+anything earlier shows it, and that difference is what makes `message_end` the
+only field worth reading:
+
+- On `openai-completions` the last `message_update` reliably carries the final
+  cost, **0.2–1.5 milliseconds** ahead of `message_end` across seventeen
+  assistant messages lasting 0.6–1.4 seconds each — too little to act on.
+- On `openai-responses` it usually carries **zero**. The last `message_update`
+  arrives 3–174 ms before `message_end` and is emitted before the response is
+  finalised, so the cost is not in it yet. One message in fifteen showed a cost
+  on an update, 0.5 ms early; the other fourteen showed it first at
+  `message_end`. Which side of the finalisation the last update falls on is a
+  race.
+
+So an adapter that reads `message_update` for cost recovers everything on one
+path and almost nothing on the other. Reading `message_end` is correct on both.
+
+`azure-openai-responses` and `openai-responses` are separate paths with separate
+modules, but they share `processResponsesStream`, which prices the message in
+its `finalizeResponse`. Azure is therefore the least informative of the two
+unverified rows: closing it would exercise code already exercised.
 
 ### A provider that cannot run
 
@@ -159,10 +172,32 @@ rather than a fixed one.** `deepseek-v4-pro` was recorded at 0.435 input and
 The cost bound is enforced against whatever the catalog holds when the round
 runs, which need not be what a person read when they chose the bound.
 
+A model's rate is also not always a single number. Several carry a `tiers` array
+that raises every rate above a threshold — 272,000 input tokens, roughly
+doubling them. A long review can cross that line mid-episode.
+
 So **a model the catalog does not price yields `cost.total: 0` against a
 non-zero `totalTokens`**, indistinguishable from a genuinely free round if only
 the cost is read. Treat `totalTokens > 0` with `cost.total === 0` as unknown.
 Both fields belong in the episode state file for that check to be possible.
+
+### Reasoning tokens are priced, and are not a new zero-cost case
+
+`usage.reasoning` is a **subset of `usage.output`**, not an addition to it. On a
+reasoning model it dominates: 832 of 903 output tokens on one message, 192 of
+227 on another. `totalTokens` is `input + output`, with reasoning already inside
+`output` and never counted twice.
+
+`calculateCost` has no reasoning rate. It prices `input`, `output`, `cacheRead`
+and `cacheWrite` and nothing else, so reasoning is billed at the output rate by
+virtue of sitting inside the output count. The arithmetic checks out: every
+observed `cost.output` equals `output × rate ÷ 1,000,000` exactly, reasoning
+tokens included.
+
+A reasoning model therefore **does not** report tokens that carry no cost. The
+worry is real for a provider that bills reasoning separately rather than folding
+it into output, because `pi` has nowhere to put such a rate and would silently
+under-price the round — but no measured path does that.
 
 ### A killed run
 
@@ -199,15 +234,21 @@ incrementally and hold nothing, but the line that must not be held is now
 
 ## Limits
 
-- **Whether another API path reports cost mid-message.** Only
-  `openai-completions` has been run, on two models. `pi-ai`'s Anthropic path
-  populates and prices usage at the SSE `message_start`, which would put a real
-  cost *seconds* before `message_end` *(unverified — read from `pi`'s source,
-  never observed in output)*. That claim is exactly as unverified as it was: no
-  Anthropic credential exists here, and the second provider that does exist,
-  `azure-openai-responses`, is a third path rather than the Anthropic one. It
-  strengthens the conclusion rather than weakening it either way, because a
-  cost that arrives earlier still arrives during the run.
+- **Whether `anthropic-messages` reports cost mid-message.** `pi-ai`'s Anthropic
+  path populates and prices usage at the SSE `message_start`, which would put a
+  real cost *seconds* before `message_end` *(unverified — read from `pi`'s
+  source, never observed in output)*. No Anthropic credential exists here, so
+  it is as unverified as it ever was. It strengthens the conclusion rather than
+  weakening it either way, because a cost that arrives earlier still arrives
+  during the run.
+- **Whether a provider that bills reasoning separately exists.** Both measured
+  paths fold reasoning into the output token count, where the output rate
+  prices it. `calculateCost` has no rate for reasoning, so a provider that
+  billed it apart from output would be under-priced with nothing in the stream
+  to show it.
+- **Tiered rates in practice.** That `tiers` raises the rate above 272,000 input
+  tokens was read from the catalog and from `calculateCost`. No probe came close
+  to the threshold, so no tiered round was observed.
 - **`SIGKILL`.** Only `SIGTERM` was tested. `SIGKILL` denies `pi` its handler, so
   it can only recover less.
 - **What a killed run recovers at 0.85.1.** The kill behaviour was measured at
