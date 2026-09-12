@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.12 (draft)
+**Version:** 0.13 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -64,6 +64,7 @@ to do all of the following:
 - Read a pull request: its diff, its description, and its base and head refs
 - List the existing review threads and whether each one is resolved
 - Create a review comment anchored to a file and a line
+- Create a review comment on a file as a whole, carrying no line
 - Reply inside an existing review comment thread
 - Resolve a review thread, and re-open one
 - Post an issue-level comment on the pull request, for the summary
@@ -120,7 +121,7 @@ flowchart TD
     B --> C{Pull request for this branch?}
     C -->|no| D[Exit 0, nothing happens]
     C -->|yes| E[Reviewer runs locally against<br/>the working tree]
-    E --> F[Findings posted as inline threads<br/>on the pull request]
+    E --> F[Findings posted as threads<br/>on the pull request]
     F --> G{Threads open and rounds remaining?}
     G -->|no| I[Post summary comment<br/>on the pull request]
     I --> J[Exit 0, episode ends]
@@ -139,9 +140,9 @@ flowchart TD
    git history. At depth `deep` it also runs the tests. The reviewer never edits
    the code it is reviewing.
 3. **Post the findings, and act on the verdicts.** Each new finding opens a new
-   inline review comment thread anchored to a file and a line. Each verdict the
-   reviewer returned is applied to the thread it names: `fixed` and `withdrawn`
-   close the thread, `open` re-opens it or leaves it open.
+   review comment thread, anchored to a file and a line or to a file as a whole.
+   Each verdict the reviewer returned is applied to the thread it names: `fixed`
+   and `withdrawn` close the thread, `open` re-opens it or leaves it open.
 4. **Block, or stop.** If threads are still open and the round cap has not been
    reached, the hook exits 2. The blocking reason names the open threads and the
    commands that work them, and goes back into the coding agent's still-open
@@ -349,11 +350,15 @@ The standing rules:
   the code as it now stands and rule from that.
 - The suggested fix is one way to address a finding. Rule on whether the defect
   is gone, not on whether the suggestion was taken.
-- Scope a finding to `change` only when it is about the change as a whole and no
-  single line owns it. Everything else is scoped to `line` and anchored to a line
-  the change touched. Where the defect is somewhere the change did not touch,
-  anchor to the changed line that caused it and name the other location in the
-  body.
+- Scope a finding to `line` where a single line owns the defect, and anchor it to
+  a line the change touched. This is the normal case. Where the defect is
+  somewhere the change did not touch, anchor to the changed line that caused it
+  and name the other location in the body.
+- Scope a finding to `file` only where no single line owns the defect, or where
+  the change touched the file but left no line to anchor to. It carries the file
+  and no line.
+- Scope a finding to `change` only where no single file owns the defect. It
+  carries neither a file nor a line.
 
 ### Findings
 
@@ -495,27 +500,29 @@ Three blocks, in this order.
    consumed. Findings raised counts the general findings too, which carry no
    status.
 2. **The findings that need a person.** Every `open` finding and every
-   `disputed` one, each with its `file:line` and its headline. When there are
-   none, the comment says so in one line.
+   `disputed` one, each with its headline and where it sits: `file:line` for a
+   thread anchored to a line, and the file alone for one anchored to the file.
+   When there are none, the comment says so in one line.
 3. **Notes.** Anything else a person reviewing the pull request should know:
-   findings about the change as a whole, each with its headline; a finding whose
-   anchor the harness could not place, with its `file:line`; a tracked file that
-   changed while the reviewer ran; a round whose review did not run; other
-   episodes that shared the worktree; and a cap or bound that ended the episode
-   early.
+   findings about the change as a whole, each with its headline; a finding the
+   harness could anchor to neither a line nor a file, with its `file:line`; a
+   tracked file that changed while the reviewer ran; a round whose review did not
+   run; other episodes that shared the worktree; and a cap or bound that ended
+   the episode early.
 
 ### The format
 
 ```markdown
-**Squiz review — 3 rounds, 6 findings**
+**Squiz review — 3 rounds, 7 findings**
 
-Fixed 2 · Withdrawn 1 · Open 1 · Disputed 1 · 2 re-opened
+Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1 · 2 re-opened
 Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
 
 **Needs a person**
 
 - `packages/sync/src/queue.ts:134` — Retry backoff resets on every enqueue (open)
 - `packages/sync/src/session.ts:57` — Clock skew is read as token expiry (disputed)
+- `packages/sync/src/retry.ts` — Every path here is dead once the queue lands (open)
 
 **Notes**
 
@@ -687,7 +694,7 @@ src/
   worktree/                  toplevel resolution, shared-tree detection, removal
   reviewers/                 one adapter per reviewer CLI; pi/ is the first
   github/                    the pull request, threads, replies, resolve and re-open, summary
-  findings/                  the finding contract, severity, the anchor validator, inline versus general
+  findings/                  the finding contract, severity, the anchor validator, and where a finding's comment goes
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
 ```
@@ -713,8 +720,8 @@ until something asks.
 | **P0** | The `pi` adapter | The command line, the parse of its output, and the `read` grant |
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<episode>/scratch/` |
 | **P0** | The charter | The standing rules handed to the reviewer every round |
-| **P0** | The finding contract | `file`, `line`, `severity`, the body fields, the rule routing a finding inline or general, and the per-thread verdicts |
-| **P0** | The GitHub client | Finding the pull request whose head is a branch, creating a thread anchored to a file and a line, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
+| **P0** | The finding contract | `file`, `line`, `severity`, the body fields, the rule routing a finding inline, onto its file, or general, and the per-thread verdicts |
+| **P0** | The GitHub client | Finding the pull request whose head is a branch, creating a thread anchored to a file and a line or to a file as a whole, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
 | **P0** | The coding agent's commands | `squiz threads` and `squiz reply`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
