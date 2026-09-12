@@ -8,10 +8,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DiffParseError } from "./diff.ts";
-import type { ChangeFinding, Finding, LineFinding } from "./finding.ts";
+import type { ChangeFinding, LineFinding } from "./finding.ts";
 import {
   type ChangeRouting,
   type InlineRouting,
+  type RoutableFinding,
   type Routed,
   routeFindings,
   type Routing,
@@ -156,7 +157,7 @@ test("a finding whose anchor is rejected routes general, carrying its `file:line
  * exactly like a round that found nothing.
  */
 test("no finding is dropped: the count out is the count in", () => {
-  const findings: readonly Finding[] = [
+  const findings: readonly RoutableFinding[] = [
     onAChangedLine,
     aboutTheChange,
     onAContextLine,
@@ -187,7 +188,7 @@ test("an empty batch routes to an empty batch rather than to nothing", () => {
  * healthy.
  */
 test("an unreadable diff routes every finding general and is reported as such", () => {
-  const findings: readonly Finding[] = [onAChangedLine, aboutTheChange, onAContextLine];
+  const findings: readonly RoutableFinding[] = [onAChangedLine, aboutTheChange, onAContextLine];
   const routed = routeFindings(findings, cutOffDiff);
 
   assert.equal(routed.routings.length, findings.length, "an unreadable diff drops no finding");
@@ -227,7 +228,7 @@ test("a finding routed general by an unreadable diff still carries its `file:lin
  * hand the summary an order nobody chose.
  */
 test("the order the findings arrived in is the order they are routed in", () => {
-  const findings: readonly Finding[] = [
+  const findings: readonly RoutableFinding[] = [
     changeFinding("first"),
     onAChangedLine,
     changeFinding("third"),
