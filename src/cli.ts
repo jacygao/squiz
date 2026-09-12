@@ -155,12 +155,16 @@ export function threadListing(pullRequest: number, threads: readonly ReviewThrea
 /**
  * Where a thread is, as `file:line`.
  *
- * A thread carrying no line is anchored to the file as a whole rather than to
- * any line of it, and the listing says that in words. `file:null` names nothing
- * a reader can open.
+ * A thread whose subject is the file is named by its file. GitHub reads one
+ * back on line 1, and printing that sends the agent to a line nobody said
+ * anything about.
+ *
+ * A line thread GitHub named no line for is named by its file in different
+ * words, because it is about a line and that line is not printed.
  */
 function locationOf(thread: ReviewThread): string {
-  return thread.line === null ? `${thread.path} (whole file)` : `${thread.path}:${thread.line}`;
+  if (thread.subjectType === "file") return `${thread.path} (whole file)`;
+  return thread.line === null ? `${thread.path} (line unknown)` : `${thread.path}:${thread.line}`;
 }
 
 // The dispatch runs only where this file is the process's entry point, so that

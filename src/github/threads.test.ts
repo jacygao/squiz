@@ -149,6 +149,7 @@ function threadNode(fields: Readonly<Record<string, unknown>> = {}): unknown {
     path: "scratch/target.txt",
     line: 4,
     originalLine: 4,
+    subjectType: "LINE",
     comments: {
       pageInfo: lastPage,
       nodes: [comment("jacygao", "the finding", 3942350907)],
@@ -195,6 +196,7 @@ test("a thread comes back with its node id, its state, its anchor and its commen
         isResolved: false,
         isOutdated: false,
         path: "scratch/target.txt",
+        subjectType: "line",
         line: 4,
         comments: [
           {
@@ -342,6 +344,76 @@ test("a thread anchored to no line at all reports no line", async () => {
     const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
     assert.equal(thread.line, null);
+    assert.equal(thread.subjectType, "line", "a line GitHub would not name is still a line thread");
+  });
+});
+
+test("a thread on the file as a whole is told from a thread on the first line", async () => {
+  // The two are byte-identical in `line` and `originalLine`, which is why the
+  // subject type is read at all. Both nodes are as #80 answers them.
+  await withFakeGh(
+    [
+      threadsPage([
+        threadNode({
+          id: "PRRT_kwDOUEd2qM6hqMTt",
+          path: "scratch/target.txt",
+          line: 1,
+          originalLine: 1,
+          subjectType: "FILE",
+        }),
+        threadNode({
+          id: "PRRT_kwDOUEd2qM6hqQd7",
+          path: "scratch/a file with spaces.txt",
+          line: 1,
+          originalLine: 1,
+          subjectType: "LINE",
+        }),
+      ]),
+    ],
+    () => {
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
+
+      assert.deepEqual(
+        listed(result).map((thread) => [thread.subjectType, thread.line]),
+        [
+          ["file", null],
+          ["line", 1],
+        ],
+        "a comment about a whole file read as a comment on line 1 sends the agent to the wrong place",
+      );
+    },
+  );
+});
+
+test("the query asks GitHub for each thread's subject type", async () => {
+  // Nothing else in the answer carries it, so a query that stops asking makes
+  // every listing unreadable rather than quietly wrong.
+  await withFakeGh([threadsPage([])], (gh) => {
+    listReviewThreads(pullRequestId, { directory: tmpdir() });
+
+    assert.match(gh.sentAt(1).query, /subjectType/u);
+  });
+});
+
+test("a thread carrying no subject type is unreadable", async () => {
+  // `undefined` leaves the key out of the JSON the fixture serves, which is the
+  // answer an older query or a narrowed field would produce.
+  await withFakeGh([threadsPage([threadNode({ subjectType: undefined })])], () => {
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
+
+    assert.equal(result.outcome, "unreadable");
+  });
+});
+
+test("a subject type this does not know fails rather than reading as a line", async () => {
+  await withFakeGh([threadsPage([threadNode({ subjectType: "PARAGRAPH" })])], () => {
+    const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
+
+    assert.equal(
+      result.outcome,
+      "unreadable",
+      "a third subject type read as a line puts every thread it names back on line 1",
+    );
   });
 });
 
