@@ -175,7 +175,18 @@ function budgetOf(path: string, value: unknown): number {
 
 function depthOf(path: string, value: unknown): Depth {
   for (const depth of depths) {
-    if (value === depth) return depth;
+    if (value !== depth) continue;
+    // `deep` grants the shell, the shell writes, and the comparison of tracked
+    // files that detects such a write is not built. Refusing says so; loading
+    // `read` in its place would leave a project believing its tests were being
+    // run when only files were being read. Deleting this branch is the whole of
+    // accepting `deep` again.
+    if (depth === "deep") {
+      throw new ConfigError(
+        `${path}: "depth" is "deep", which is not supported yet: it grants the shell, and the comparison of tracked files that detects a write made through the shell is not built. Use "read".`,
+      );
+    }
+    return depth;
   }
   throw new ConfigError(reject(path, "depth", value, `"read" or "deep"`));
 }
