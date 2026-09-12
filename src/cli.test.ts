@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -21,20 +21,43 @@ const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
 // a fixture that reached the network would be about something else.
 let elsewhere = "";
 
+// A branch is checked out here, which is what the coding agent's commands need
+// before they ask GitHub anything. The `gh` they reach is a fixture.
+let onABranch = "";
+
+const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz"];
+
 before(async () => {
   elsewhere = await mkdtemp(join(tmpdir(), "squiz-elsewhere-"));
-  const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz"];
   git(["init", "--quiet", "--initial-branch", "main"]);
   git([...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "x"]);
   git(["checkout", "--quiet", "--detach"]);
+
+  onABranch = await mkdtemp(join(tmpdir(), "squiz-branch-"));
+  gitIn(onABranch, ["init", "--quiet", "--initial-branch", "main"]);
+  gitIn(onABranch, [
+    ...identity,
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "-m",
+    "x",
+  ]);
 });
 
 after(async () => {
   await rm(elsewhere, { recursive: true, force: true });
+  await rm(onABranch, { recursive: true, force: true });
 });
 
 function git(args: readonly string[]): void {
-  const result = spawnSync("git", args, { cwd: elsewhere, encoding: "utf8" });
+  gitIn(elsewhere, args);
+}
+
+function gitIn(directory: string, args: readonly string[]): void {
+  const result = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
   assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
 }
 
@@ -322,4 +345,144 @@ test("squiz reply with no text to post reports how it is called", () => {
     result.stderr,
     "squiz: nothing replied: squiz reply <id> <text>, where <id> is what squiz threads printed\n",
   );
+});
+
+/** What the fake `gh` answers the one API call a command makes. */
+type ApiAnswer = {
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly status?: number;
+};
+
+/**
+ * A response as `gh api --include` writes one.
+ *
+ * The status line ends in a bare newline and the headers in CRLF, which is what
+ * the boundary reads the body out of.
+ */
+function answered(value: unknown): ApiAnswer {
+  const headers = "HTTP/2.0 200 OK\nContent-Type: application/json; charset=utf-8\r\n\r\n";
+  return { stdout: `${headers}${JSON.stringify(value)}` };
+}
+
+/** The row `gh pr list` prints for the pull request a command then works on. */
+const pullRequestRow = JSON.stringify([
+  {
+    number: 80,
+    id: "PR_kwDOUEd2qM8AAAABDNPXSA",
+    baseRefName: "main",
+    headRefName: "main",
+    headRefOid: "655997442d7a69aec2903665478883e71dac5da0",
+    body: "",
+  },
+]);
+
+/**
+ * Run the binary's `args` where a branch is checked out, with a `gh` on PATH
+ * that answers the pull request lookup with one pull request and the API call
+ * with `api`.
+ *
+ * A fake binary rather than an injected runner, as the rest of the repository
+ * tests `gh` with. The two calls are told apart by the `graphql` argument: the
+ * lookup is `gh pr list`, which is not an API call and carries no status line.
+ */
+async function withFakeGh(args: readonly string[], api: ApiAnswer): Promise<Run> {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-gh-"));
+  try {
+    await writeFile(join(directory, "list.out"), pullRequestRow, "utf8");
+    await writeFile(join(directory, "api.out"), api.stdout ?? "", "utf8");
+    await writeFile(join(directory, "api.err"), api.stderr ?? "", "utf8");
+    await writeFile(join(directory, "api.status"), String(api.status ?? 0), "utf8");
+    await writeFile(join(directory, "gh"), fakeGh(directory), "utf8");
+    await chmod(join(directory, "gh"), 0o755);
+
+    return await run(shim, args, {
+      cwd: onABranch,
+      // node and git have to stay reachable: the shim execs node, and the
+      // commands resolve the branch with git.
+      path: `${directory}:${process.env["PATH"] ?? ""}`,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function fakeGh(directory: string): string {
+  const at = `'${directory.replaceAll("'", `'\\''`)}'`;
+  return [
+    "#!/bin/sh",
+    // The request body arrives on stdin, and a gh that never read it would have
+    // the caller fail on a broken pipe instead of on the answer below.
+    "cat > /dev/null",
+    'for arg in "$@"; do',
+    '  if [ "$arg" = graphql ]; then',
+    `    cat ${at}/api.out`,
+    `    cat ${at}/api.err >&2`,
+    `    exit "$(cat ${at}/api.status)"`,
+    "  fi",
+    "done",
+    `cat ${at}/list.out`,
+    "",
+  ].join("\n");
+}
+
+const emptyListing = answered({
+  data: { node: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] } } },
+});
+
+test("a listing GitHub answered unreadably is not printed as a pull request with nothing open", async () => {
+  // An id naming something that is not a pull request answers with an empty
+  // node, at HTTP 200 and with no errors array.
+  const result = await withFakeGh(["threads"], answered({ data: { node: {} } }));
+
+  assert.equal(
+    result.stdout,
+    "",
+    "a listing read as empty has the agent finish its turn with findings open",
+  );
+  assert.equal(result.code, 0);
+  assert.match(result.stderr, /^squiz: the threads on #80 could not be listed: /u);
+});
+
+test("a gh that failed is not printed as a pull request with nothing open", async () => {
+  const result = await withFakeGh(["threads"], { status: 1, stderr: "gh: HTTP 502" });
+
+  assert.equal(
+    result.stdout,
+    "",
+    "a listing read as empty has the agent finish its turn with findings open",
+  );
+  assert.equal(result.code, 0);
+  assert.equal(
+    result.stderr,
+    "squiz: the threads on #80 could not be listed: gh exited 1: gh: HTTP 502\n",
+  );
+});
+
+test("a pull request GitHub says has no threads is the only thing that prints none", async () => {
+  const result = await withFakeGh(["threads"], emptyListing);
+
+  assert.equal(result.stdout, "no open threads on #80\n");
+  assert.equal(result.stderr, "");
+  assert.equal(result.code, 0);
+});
+
+test("a reply GitHub refused inside an HTTP 200 is not printed as a reply that landed", async () => {
+  const refused = answered({
+    errors: [{ message: "Could not resolve to a node with the global id of 'PRRT_nothing'." }],
+  });
+  const result = await withFakeGh(["reply", "PRRT_nothing", "a reply"], refused);
+
+  assert.equal(result.stdout, "", "a reply reported as posted is a finding the agent answers twice");
+  assert.equal(result.code, 0);
+  assert.match(result.stderr, /^squiz: nothing replied in PRRT_nothing: GitHub reported a GraphQL /u);
+});
+
+test("a reply that landed names the thread that took it", async () => {
+  const posted = answered({ data: { addPullRequestReviewThreadReply: { comment: {} } } });
+  const result = await withFakeGh(["reply", "PRRT_somewhere", "a reply"], posted);
+
+  assert.equal(result.stdout, "replied in PRRT_somewhere on #80\n");
+  assert.equal(result.stderr, "");
+  assert.equal(result.code, 0);
 });
