@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.13 (draft)
+**Version:** 0.14 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -285,7 +285,7 @@ else. A new adapter implements three things:
 | | |
 |---|---|
 | `argv(opts)` | Build the command line from a working directory, a charter file, a prompt, a session directory, and the depth. |
-| `parse(stdout)` | Return the findings, and the run's cost where the CLI reports one. |
+| `parse(stdout)` | Return the findings, and the run's cost where the CLI reports one. A run the CLI reports as failed is told apart from one that returned no findings. |
 | `grants` | Which tools the CLI is given at each depth. |
 
 The harness passes `read` or `deep`, and the adapter turns that into the right
@@ -321,6 +321,17 @@ round's cost is the sum of them. `pi` prices the run itself from a local
 catalogue, so a model the catalogue does not cover reports a zero cost against a
 non-zero token count. The adapter returns the token count alongside the cost,
 which is what tells that case apart from a round that cost nothing.
+
+An assistant message carries a `stopReason`, and a value of `error` on one of
+them does not mean the run failed. `pi` retries a failed request, and a round
+that completed a review carried twenty-two errored messages among its working
+ones. Each carries zero usage, so summing cost over them stays correct.
+
+The run failed where no assistant message completed at all, which is where none
+carries a `stopReason` of `stop`. `pi` exits 0 and writes nothing to stderr
+either way, and the reason sits in the errored message's `errorMessage`. The
+adapter decides this before it looks for findings, and does not spawn a second
+run for it: `pi` has already retried the request three times.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -587,6 +598,7 @@ carries what could not be posted.
 | Failure | Behaviour |
 |---|---|
 | The reviewer is not installed, or has no API key | Exit 0, nothing posted, and stderr names the check that failed. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
+| The reviewer runs, exits cleanly, and completes no message | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The model API is unavailable or rate-limited | Exit 0 and nothing is posted. stderr says the review did not run. |
 | The reviewer returns output the adapter cannot parse | Retried once, then treated as an unavailable API. A failed parse and an honest finding of nothing are distinguished before anything is posted. |
 | The reviewer exceeds the review budget | The reviewer process is killed and the round records no findings. The round is recorded as a failed round rather than a clean one. |
