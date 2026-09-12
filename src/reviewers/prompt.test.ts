@@ -40,6 +40,7 @@ const finding: ReviewThread = {
   isResolved: false,
   isOutdated: false,
   path: "src/ui/card.ts",
+  subjectType: "line",
   line: 88,
   comments: [
     {
@@ -60,6 +61,7 @@ const settled: ReviewThread = {
   isResolved: true,
   isOutdated: false,
   path: "src/ui/card.ts",
+  subjectType: "line",
   line: 12,
   comments: [{ databaseId: 3942350900, author: null, body: "The import is unused." }],
 };
