@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.13 (draft)
+**Version:** 0.15 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -250,6 +250,12 @@ CLI's names.
 
 `deep` depends on the tracked-file comparison described under Confinement, which
 is the only mechanism that catches a write made through the shell.
+
+**`read` is the only value configuration accepts today.** A `.squiz.json` naming
+`deep` is refused with an error saying the value is not supported yet, in the
+same way a setting outside its range is refused. An adapter still holds the
+grant for both values, so the day the comparison exists, accepting `deep` again
+is a change to configuration alone.
 
 ### Confinement
 
@@ -817,7 +823,7 @@ on its own branch. Squiz does not create them.
 | Setting | Default | |
 |---|---|---|
 | `rounds` | 3 | The round cap, settable 1 to 8 |
-| `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
+| `depth` | `read` | `read` is the only value accepted today; `deep` adds the shell, and waits on the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 420 | Seconds one round's reviewer may run, settable 1 to 480 |
 | `budget` | 0.10 | Dollars an episode may cost, settable above 0 to 5.00 |
