@@ -2,6 +2,11 @@
  * The finding contract: the one shape the reviewer returns and every later part
  * composes a comment from. A finding carries only what composes a comment and
  * what routes it, because the pull request holds the record.
+ *
+ * An anchor field a scope does not carry is declared absent rather than left
+ * out. Leaving it out bars only a fresh object literal, so a finding built
+ * elsewhere and widened to `Finding` would still carry an anchor nothing
+ * downstream has a place for.
  */
 
 // Severity orders the findings; it does not decide whether they count.
@@ -39,22 +44,29 @@ export type LineFinding = Body & {
 };
 
 /**
- * A finding about the change as a whole, which goes into the summary comment.
+ * A finding about a file rather than any line of it, which becomes a thread on
+ * the file.
  *
- * `file` and `line` are declared absent rather than left out. Leaving them out
- * bars only a fresh object literal, so a finding built elsewhere and widened to
- * `Finding` would still carry an anchor the summary has nowhere to put.
+ * The file is required: a thread on no file is a thread GitHub has nowhere to
+ * put.
  */
+export type FileFinding = Body & {
+  readonly scope: "file";
+  readonly file: string;
+  readonly line?: never;
+};
+
+/** A finding about the change as a whole, which goes into the summary comment. */
 export type ChangeFinding = Body & {
   readonly scope: "change";
   readonly file?: never;
   readonly line?: never;
 };
 
-export type Finding = LineFinding | ChangeFinding;
+export type Finding = LineFinding | FileFinding | ChangeFinding;
 
 /**
- * Which of the two a finding is, for a caller that routes on it. Read off
+ * Which scope a finding declares, for a caller that routes on it. Read off
  * `Finding` rather than written out again, so the two cannot drift apart.
  */
 export type Scope = Finding["scope"];
@@ -67,7 +79,7 @@ const rank: Readonly<Record<Severity, number>> = { high: 0, medium: 1, low: 2 };
  * Orders two findings by severity, `high` to `low`.
  *
  * Two findings of one severity compare equal. The tie is deliberately not
- * broken by `file:line`, which a finding scoped to the change does not carry.
+ * broken by `file:line`, which not every scope carries.
  */
 export function bySeverity(a: Finding, b: Finding): number {
   return rank[a.severity] - rank[b.severity];

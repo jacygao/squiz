@@ -1,7 +1,7 @@
 /**
  * A finding rendered as the markdown comment that goes on the pull request.
- * One template serves both scopes, and the anchor is not written into the body:
- * an inline comment is placed on its line rather than naming it.
+ * One template serves every scope, and the anchor is not written into the body:
+ * an anchored comment is placed where it belongs rather than naming it.
  */
 
 import type { Finding } from "./finding.ts";
