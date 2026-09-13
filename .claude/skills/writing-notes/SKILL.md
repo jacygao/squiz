@@ -27,11 +27,16 @@ recheck-when: pi upgrades
 
 # <the verdict, as the title>
 
-<Two or three sentences: what holds, what does not, and what it costs.>
+## Intent
+
+<Why the note exists: one bullet per question that was open before the work.>
 
 ## Decisions
 
-<What the work settled. A person reviews these; they do not choose them.>
+<What to do, then a sentence on why. Lead with the decision: if "so what do I
+do?" returns a different sentence, you led with the reason. Every decision
+answers a question above; one that answers none was invented. Detail stays in
+Reference.>
 
 ## Needs your input
 
@@ -58,8 +63,8 @@ that would invalidate the finding, so `grep -L` finds what to re-run.
 
 ## Principles
 
-- **Record what was settled, not how** — method, evidence, tables and what was
-  tried go in the pull request
+- **Record the decision, not the case for it** — method, evidence, tables and
+  what was tried go in the pull request
 - **Never summarise an exact field name, endpoint or id** — the string is the
   deliverable
 - **Mark a reference value you did not see in output** as `(unverified)`, so a
