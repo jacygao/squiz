@@ -67,8 +67,8 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 
 test("every setting the file names is read", () => {
   assert.deepEqual(
-    load(`{"rounds": 5, "depth": "deep", "test": "npm test", "timeout": 90, "budget": 1.5}`),
-    { rounds: 5, depth: "deep", test: "npm test", timeout: 90, budget: 1.5 },
+    load(`{"rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "budget": 1.5}`),
+    { rounds: 5, depth: "read", test: "npm test", timeout: 90, budget: 1.5 },
   );
 });
 
@@ -128,12 +128,20 @@ test("a value in range but below the default survives the load", () => {
   assert.equal(load(`{"budget": 0.01}`).budget, 0.01);
 });
 
-test("depth is read or deep, and anything else is refused", () => {
+test("depth is read, and anything else is refused", () => {
   assert.equal(load(`{"depth": "read"}`).depth, "read");
-  assert.equal(load(`{"depth": "deep"}`).depth, "deep");
   rejection(`{"depth": "shallow"}`);
   rejection(`{"depth": "READ"}`);
   rejection(`{"depth": ""}`);
+});
+
+// The refusal is what stands between a project that asked for `deep` and a
+// reviewer holding a shell whose writes nothing detects.
+test("depth deep is refused, and the refusal says so rather than loading read", () => {
+  const error = rejection(`{"depth": "deep"}`);
+  assert.match(error.message, /"depth" is "deep"/);
+  assert.match(error.message, /not supported yet/);
+  assert.match(error.message, /Use "read"/);
 });
 
 test("a value of the wrong type is refused like one out of range", () => {
@@ -174,6 +182,7 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"rounds": "3"}`, setting: "rounds", given: `"3"`, expected: /whole number from 1 to 8/ },
     { contents: `{"depth": "shallow"}`, setting: "depth", given: `"shallow"`, expected: /"read" or "deep"/ },
     { contents: `{"depth": 3}`, setting: "depth", given: "3", expected: /"read" or "deep"/ },
+    { contents: `{"depth": "deep"}`, setting: "depth", given: `"deep"`, expected: /not supported yet/ },
     { contents: `{"test": ""}`, setting: "test", given: `""`, expected: /a command to run/ },
     { contents: `{"timeout": 600}`, setting: "timeout", given: "600", expected: /seconds from 1 to 480/ },
     { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 1 to 480/ },
