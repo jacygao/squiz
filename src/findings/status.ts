@@ -21,18 +21,12 @@ export type ThreadStatus = "fixed" | "withdrawn" | "open" | "disputed";
 
 /**
  * A thread as the harness has it when the episode closes: what the reviewer
- * ruled on it, and what the coding agent did to it.
- *
- * The two booleans are named rather than positional. A caller that swapped
- * them would read `open` for a thread that is `disputed`, and no type would
- * catch it.
+ * ruled on it, and whether the coding agent answered it.
  */
 export type ThreadAtClose = {
   // `null` where the reviewer returned no verdict for the thread.
   verdict: Verdict | null;
   codingAgentReplied: boolean;
-  // Resolved by the coding agent before the verdict above ruled on it.
-  codingAgentResolved: boolean;
 };
 
 /**
@@ -51,16 +45,6 @@ export function statusOf(thread: ThreadAtClose): ThreadStatus {
     case "open":
       return thread.codingAgentReplied ? "disputed" : "open";
   }
-}
-
-/**
- * Whether the verdict re-opens a thread the coding agent had resolved.
- *
- * The summary counts these, and the count is not a fifth status: a thread
- * counted here still ends its episode in one of the four.
- */
-export function isReopened(thread: ThreadAtClose): boolean {
-  return verdictOf(thread) === "open" && thread.codingAgentResolved;
 }
 
 function verdictOf(thread: ThreadAtClose): Verdict {
