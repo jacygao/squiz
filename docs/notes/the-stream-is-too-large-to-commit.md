@@ -17,36 +17,22 @@ and a test that needs the scale generates one.
 
 ## Decisions
 
-- **A review-sized stream is about ten megabytes across thirty-odd thousand
-  lines.** Measured over a 450-line change across four files at depth `read`,
-  which produced 9,873,029 bytes across 32,854 lines.
+- **The adapter reads the stream incrementally, accumulates nothing, and never
+  holds `agent_end`.** Two failure modes, not one: the volume is tens of
+  thousands of small lines, so an adapter that accumulates fails on the count;
+  the largest line is a single `agent_end` carrying the whole transcript, so an
+  adapter that holds a line fails on that one.
 
-- **That is a floor, not a bound.** The stream is the length of the round rather
-  than the size of the diff: it grows with every tool call the reviewer makes
-  and every token it thinks. Two runs of the same command over the same change
-  agreed on bytes within 2% and differed fivefold in wall time.
+- **No capture is committed at review scale, and no figure here bounds a
+  round.** The stream is the length of the round rather than the size of the
+  diff, so it grows with every tool call the reviewer makes and every token it
+  thinks. Every figure recorded below is a floor.
 
-- **The volume and the largest line are in different events.** `message_update`
-  is 99.3% of the lines and 84.9% of the bytes, at about 260 bytes each.
-  `agent_end` is a single line and the largest in the stream. An adapter that
-  accumulates lines fails on the first; an adapter that holds one line fails on
-  the second.
-
-- **`agent_end` is not once per run.** `pi` restarts the agent on a failed
-  request, and every attempt emits its own `agent_start` and `agent_end`. One
-  run emitted 22. A reader that skips `agent_end` skips a line it may see many
-  times.
-
-- **A `message_update` is not always a small delta.** `thinking_end` and
-  `text_end` repeat the whole content block they close, at about 24KB against
-  about 260 bytes for a `thinking_delta`.
-
-- **194MB across roughly 19,800 lines is retired.** That was `pi` 0.74.2, where
-  `message_update` repeated the whole partial message, and it must not be quoted
-  as current. What replaced it is not that the bulk moved into the
-  message-carrying events: `agent_end`, `turn_end`, `message_start`,
-  `message_end` and `tool_execution_end` together are 15.1% of the bytes. They
-  are the largest lines and they are not the bulk.
+- **194MB across roughly 19,800 lines must not be quoted as current.** That was
+  `pi` 0.74.2, where `message_update` repeated the whole partial message. What
+  replaced it is not that the bulk moved into the message-carrying events, which
+  is what the earlier correction assumed: those are the largest lines and they
+  are not the bulk.
 
 - **A fixture at review scale is generated at test time. A fixture for shape is
   recorded whole and committed.**
@@ -90,6 +76,29 @@ Filed as `needs-human`. Not worth buying: the fixture is generated from a shape,
 and the shape is the same on both paths.
 
 ## Reference
+
+### The scale
+
+A 450-line change across four files, reviewed at depth `read`, produced
+9,873,029 bytes across 32,854 lines in 408 seconds. A second run of the same
+command over the same change agreed on bytes within 2% and differed fivefold in
+wall time.
+
+- `message_update` is 99.3% of the lines and 84.9% of the bytes, at about 260
+  bytes each.
+- `agent_end` is 3.7% of the bytes in a single line, and the largest line in the
+  stream.
+- `agent_end`, `turn_end`, `message_start`, `message_end` and
+  `tool_execution_end` together are 15.1% of the bytes.
+
+**`agent_end` is not once per run.** `pi` restarts the agent on a failed
+request, and every attempt emits its own `agent_start` and `agent_end`. One run
+emitted 22, so a reader that skips `agent_end` skips a line it may see many
+times.
+
+**A `message_update` is not always a small delta.** `thinking_end` and
+`text_end` repeat the whole content block they close, at about 24KB against
+about 260 bytes for a `thinking_delta`.
 
 ### The event types
 
