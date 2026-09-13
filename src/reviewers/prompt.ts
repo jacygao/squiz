@@ -78,12 +78,23 @@ function threadSection(thread: ReviewThread): string {
 /** Whether the thread is resolved, and the code it was opened against. */
 function where(thread: ReviewThread): string {
   const state = thread.isResolved ? "Resolved" : "Not resolved";
-  // Null is a thread on the file as a whole, never a line to go looking for.
-  const at =
-    thread.line === null
-      ? `\`${thread.path}\` as a whole`
-      : `\`${thread.path}\` line ${thread.line}`;
-  return `${state}. On ${at}.`;
+  return `${state}. On ${locationOf(thread)}.`;
+}
+
+/**
+ * The code a thread was opened against.
+ *
+ * A thread whose subject is the file is about no line of it. A thread about a
+ * line GitHub named no line for is still about that line, and telling the
+ * reviewer it is about the file asks for a verdict on the wrong thing.
+ *
+ * The reviewer reads this and the coding agent reads the thread listing, about
+ * the same thread, so the two keep these three cases apart the same way.
+ */
+function locationOf(thread: ReviewThread): string {
+  if (thread.subjectType === "file") return `\`${thread.path}\` as a whole`;
+  if (thread.line === null) return `\`${thread.path}\`, line unknown`;
+  return `\`${thread.path}\` line ${thread.line}`;
 }
 
 /** One comment, said by whoever wrote it. The first opened the thread. */

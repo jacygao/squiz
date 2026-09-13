@@ -230,10 +230,22 @@ test("a fence inside the diff does not close the block it is carried in", () => 
   );
 });
 
-test("a thread anchored to no line is on its file as a whole", () => {
-  const whole: ReviewThread = { ...settled, line: null, comments: [] };
+test("a thread whose subject is the file is on that file as a whole", () => {
+  const whole: ReviewThread = { ...settled, subjectType: "file", line: null, comments: [] };
 
   assert.match(round([whole]), /^Resolved\. On `src\/ui\/card\.ts` as a whole\.$/mu);
+});
+
+// Both threads carry `line: null`, and describing them alike asks the reviewer
+// to rule on a file when the finding is about a line nobody can name.
+test("a thread on a line GitHub named no line for is not called the file", () => {
+  const lost: ReviewThread = { ...settled, line: null, comments: [] };
+
+  assert.match(
+    round([lost]),
+    /^Resolved\. On `src\/ui\/card\.ts`, line unknown\.$/mu,
+    "a line thread described as the whole file takes the verdict back against the wrong thing",
+  );
 });
 
 test("a pull request nobody described is said to have no description", () => {
