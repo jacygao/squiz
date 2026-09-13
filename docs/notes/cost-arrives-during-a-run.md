@@ -8,10 +8,19 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
 
 # Cost arrives during a run
 
-`pi` reports cost during a run, not at the end of it. A final, non-zero cost
-lands on every assistant message, and a run produces several; the run's cost is
-their sum, which is only complete when the process exits. A killed round
-therefore yields a cost floor rather than nothing.
+## Intent
+
+- **§ 8 assumed cost arrives at the end of a run**, and rested the cost bound on
+  it. If cost instead arrives during a run, a killed round yields a figure
+  rather than nothing, and the bound's design has to be checked against that.
+- **Nothing said which field carries the cost, or how many carry it.** An
+  adapter that reads the wrong one, or sums two that overlap, reports a number
+  no one can tell is wrong.
+- **A cost of zero had one reading and needed more.** A free round, a model the
+  price catalogue cannot price, and a run that never reached the provider all
+  report zero, and the bound cannot be enforced without telling them apart.
+- **Only one provider was configured**, so nothing established whether any of
+  this belongs to `pi` or to the API path underneath it.
 
 ## Decisions
 

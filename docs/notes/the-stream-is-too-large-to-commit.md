@@ -8,25 +8,22 @@ recheck-when: pi upgrades, or the reviewer's model changes
 
 # The stream is too large to commit
 
-A review-sized run of `pi` emits about ten megabytes of JSONL across thirty-odd
-thousand lines. Almost all of that volume is tens of thousands of small
-`message_update` deltas; almost all of the size of any one line is a single
-`agent_end` carrying the whole transcript. A capture at that scale is not
-committed: a test that needs the stream's shape gets a short run recorded whole,
-and a test that needs the scale generates one.
+## Intent
+
+- **§ 4 records no scale for the reviewer's JSONL stream.** The figure it used
+  to carry was `pi` 0.74.2's and was retired, so nothing said what the adapter
+  has to survive, or which line is the one that would sink it.
+- **A test cannot prove flat memory without a fixture, and no fixture could be
+  chosen.** Committing a capture, generating one, and recording a short run are
+  three different answers, and nothing said which.
 
 ## Decisions
 
-- **The adapter reads the stream incrementally, accumulates nothing, and never
-  holds `agent_end`.** Two failure modes, not one: the volume is tens of
-  thousands of small lines, so an adapter that accumulates fails on the count;
-  the largest line is a single `agent_end` carrying the whole transcript, so an
-  adapter that holds a line fails on that one.
-
-- **No capture is committed at review scale, and no figure here bounds a
-  round.** The stream is the length of the round rather than the size of the
-  diff, so it grows with every tool call the reviewer makes and every token it
-  thinks. Every figure recorded below is a floor.
+- **`agent_end` is the line the adapter must not hold.** § 4 already required
+  reading incrementally; what it did not say is which line makes that matter.
+  There are two failure modes and this is the second: an adapter that
+  accumulates fails on the count of small lines, and an adapter that holds one
+  line fails on this one.
 
 - **194MB across roughly 19,800 lines must not be quoted as current.** That was
   `pi` 0.74.2, where `message_update` repeated the whole partial message. What
@@ -35,7 +32,9 @@ and a test that needs the scale generates one.
   are not the bulk.
 
 - **A fixture at review scale is generated at test time. A fixture for shape is
-  recorded whole and committed.**
+  recorded whole and committed.** No capture at review scale is committed, and
+  no figure here bounds a round: the stream is the length of the round rather
+  than the size of the diff, so every figure below is a floor.
 
   | | Recorded | Generated |
   |---|---|---|
