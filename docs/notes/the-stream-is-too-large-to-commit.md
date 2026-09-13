@@ -44,14 +44,8 @@ Nothing.
 | **Size** | 135 lines, 73,332 bytes | whatever length the test asks for |
 | **Reaches the test** | as a file in the repository | as an in-process stream, never written to disk |
 
-Nothing in the recorded fixture is edited, because a hand-written fixture is
-what is wrong when the parser is right. Nothing in the generated one is real,
-because nothing about a 10MB capture is a contract and it would sit in every
-clone forever.
-
-The generated fixture's length has to be a parameter. A single capture of a
-fixed length cannot tell flat memory from linear; two lengths can, and that
-comparison does not exist unless the length can vary.
+Nothing in the recorded fixture is edited: a hand-written fixture is what is
+wrong when the parser is right.
 
 ### The scale
 
@@ -66,8 +60,11 @@ wall time.
   stream.
 - `agent_end`, `turn_end`, `message_start`, `message_end` and
   `tool_execution_end` together are 15.1% of the bytes. They are the largest
-  lines and they are not the bulk, which is what an earlier correction, drawn
-  from probes of a few hundred lines, had the wrong way round.
+  lines and they are not the bulk.
+
+`message_start` and `message_end` fire for the user message and for every
+`toolResult` message, not only for assistant messages, so their counts run ahead
+of the number of assistant messages.
 
 The retired figure was 194MB across roughly 19,800 lines, at `pi` 0.74.2, where
 `message_update` repeated the whole partial message rather than a delta.
@@ -94,19 +91,6 @@ Inside a `message_update` the delta sits under `assistantMessageEvent`, whose
 
 `thinking_start`, `thinking_delta`, `thinking_end`, `text_start`, `text_delta`,
 `text_end`, `toolcall_start`, `toolcall_delta`, `toolcall_end`.
-
-### What a generated fixture has to reproduce
-
-Four properties, which are what make the stream hard to read rather than merely
-long:
-
-- `message_update` is about 99% of the lines, at about 260 bytes each, and
-  `thinking_delta` is the bulk of those.
-- One `agent_end` of a few hundred kilobytes, carrying the whole transcript.
-- `thinking_end` and `text_end` at about 24KB, so a `message_update` is not
-  safely assumed small.
-- `message_start` and `message_end` fire for the user message and for every
-  `toolResult` message, not only for assistant messages.
 
 ### The two events a clean run never emits
 
