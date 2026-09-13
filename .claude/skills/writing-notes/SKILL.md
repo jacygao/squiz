@@ -27,12 +27,15 @@ recheck-when: pi upgrades
 
 # <the verdict, as the title>
 
-<Two or three sentences: what holds, what does not, and what it costs.>
+## Intent
+
+<Why the note exists: one bullet per question that was open before the work.>
 
 ## Decisions
 
-<What to do, never why. Ask "so what do I do?" of each: a different sentence
-back means you wrote the reason, and that sentence is the decision.>
+<What to do about them, never why. Every decision answers a question above; one
+that answers none was invented. Ask "so what do I do?" of each — a different
+sentence back means you wrote the reason, and that sentence is the decision.>
 
 ## Needs your input
 
