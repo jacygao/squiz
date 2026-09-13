@@ -19,8 +19,9 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
 - **A cost of zero had one reading and needed more.** A free round, a model the
   price catalogue cannot price, and a run that never reached the provider all
   report zero, and the bound cannot be enforced without telling them apart.
-- **Only one provider was configured**, so nothing established whether any of
-  this belongs to `pi` or to the API path underneath it.
+- **Whether any of this belongs to `pi` or to the API path underneath it.** Only
+  one provider was configured, so a second could have reported cost differently
+  or not at all.
 
 ## Decisions
 
@@ -38,23 +39,16 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
 - **`message_end` is the only event to read the cost from.** What
   `message_update` holds depends on the API path, and on one of the two measured
   it holds zero for the whole of the message.
+- **The adapter assumes no provider reports cost, and treats one that does as
+  the ordinary case.** Two providers on two API paths both report it, so the
+  behaviour belongs to `pi` rather than to a provider — but `pi` prices from a
+  catalog it can miss, so an unpriced model is a configuration a shipped harness
+  meets rather than an edge case.
 
 ## Needs your input
 
-**An Anthropic key, if you want the last interesting path closed.** Two of the
-four paths are measured and agree. Of the two that are not, only
-`anthropic-messages` could behave differently, and no Anthropic credential is
-configured here. It does not block M5: the conclusion holds whichever way it
-goes, because a cost that arrives earlier still arrives during the run.
-
-Not worth your time: **`azure-openai-responses` needs an endpoint** —
-`AZURE_OPENAI_BASE_URL` or `AZURE_OPENAI_RESOURCE_NAME` — and runs the same
-stream processor as the `openai-responses` path already measured. `pi auth
-check` reports it ready on the strength of its stored key, which is why it looks
-available when it is not.
-
-Also for you: **§ 2's Verified against table records `pi` 0.84.2.** Everything
-measured since is 0.85.1, and the two agree wherever both were run.
+**§ 2's Verified against table records `pi` 0.84.2.** Everything measured since
+is 0.85.1, and the two agree wherever both were run.
 
 ## Reference
 
@@ -192,6 +186,10 @@ Nothing on disk fills the gap: with `--no-session`, `pi` wrote no file under
   is as unverified as it ever was. It strengthens the conclusion rather than
   weakening it either way, because a cost that arrives earlier still arrives
   during the run.
+- **`azure-openai-responses` was never run.** It needs `AZURE_OPENAI_BASE_URL`
+  or `AZURE_OPENAI_RESOURCE_NAME`, and neither is set here. It shares
+  `processResponsesStream` with the `openai-responses` path already measured, so
+  it is the least informative of the unverified rows.
 - **Whether a provider that bills reasoning separately exists.** Both measured
   paths fold reasoning into the output token count, where the output rate prices
   it. `calculateCost` has no rate for reasoning, so a provider that billed it
