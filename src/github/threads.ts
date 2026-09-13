@@ -21,6 +21,15 @@ export type ThreadComment = {
   readonly body: string;
 };
 
+/**
+ * What a thread is about: one line of a file, or the file as a whole.
+ *
+ * GitHub reads a file-scoped thread back carrying `line: 1` and
+ * `originalLine: 1`, which is what a thread on the first line carries too. This
+ * is the only field that tells the two apart.
+ */
+export type ThreadSubject = "line" | "file";
+
 export type ReviewThread = {
   /**
    * The `PRRT_` thread node id, which is the identifier every later operation
@@ -31,12 +40,13 @@ export type ReviewThread = {
   readonly isResolved: boolean;
   readonly isOutdated: boolean;
   readonly path: string;
+  readonly subjectType: ThreadSubject;
   /**
    * The line to report the thread on, which is the live one or, once the file
    * has changed under it, the line it was anchored to.
    *
-   * Null is a thread anchored to no line at all, and never a thread whose line
-   * moved.
+   * Null on a thread whose subject is the file, and null on one GitHub gave
+   * neither a live line nor an original one. Never a thread whose line moved.
    */
   readonly line: number | null;
   /** Every comment, in the order GitHub returns them, replies included. */
@@ -68,7 +78,7 @@ const threadsQuery = `query($pullRequest:ID!, $cursor:String) {
       reviewThreads(first:${PAGE_SIZE}, after:$cursor) {
         ${pageFields}
         nodes {
-          id isResolved isOutdated path line originalLine
+          id isResolved isOutdated path line originalLine subjectType
           comments(first:${PAGE_SIZE}) { ${pageFields} ${commentFields} }
         }
       }
@@ -257,7 +267,8 @@ function readThread(node: unknown): PartialThread | null {
   const isResolved = fieldOf(node, "isResolved");
   const isOutdated = fieldOf(node, "isOutdated");
   const path = stringOf(fieldOf(node, "path"));
-  if (id === null || path === null) return null;
+  const subjectType = subjectOf(node);
+  if (id === null || path === null || subjectType === null) return null;
   if (typeof isResolved !== "boolean" || typeof isOutdated !== "boolean") return null;
 
   const connection = fieldOf(node, "comments");
@@ -269,7 +280,15 @@ function readThread(node: unknown): PartialThread | null {
   if (page === null) return null;
 
   return {
-    thread: { id, isResolved, isOutdated, path, line: lineOf(node), comments },
+    thread: {
+      id,
+      isResolved,
+      isOutdated,
+      path,
+      subjectType,
+      line: lineOf(node, subjectType),
+      comments,
+    },
     commentsNext: page.next,
   };
 }
@@ -288,6 +307,21 @@ function readComments(nodes: readonly unknown[]): readonly ThreadComment[] | nul
   return comments;
 }
 
+/** How GitHub spells each subject type, against what a thread carries. */
+const SUBJECTS: Readonly<Record<string, ThreadSubject>> = { LINE: "line", FILE: "file" };
+
+/**
+ * What a thread is about, or `null` where GitHub named something else.
+ *
+ * GitHub always answers this field and spells exactly these two, so a third
+ * value is an answer of a shape this cannot read. Standing it in for a line is
+ * the failure the subject type is carried to prevent, so it fails closed.
+ */
+function subjectOf(node: unknown): ThreadSubject | null {
+  const named = stringOf(fieldOf(node, "subjectType"));
+  return named === null ? null : (SUBJECTS[named] ?? null);
+}
+
 /**
  * The line a thread is reported on.
  *
@@ -295,7 +329,9 @@ function readComments(nodes: readonly unknown[]): readonly ThreadComment[] | nul
  * threads a person most wants to look at, so the line it was anchored to stands
  * in for it.
  */
-function lineOf(node: unknown): number | null {
+function lineOf(node: unknown, subject: ThreadSubject): number | null {
+  // A thread about the file is about no line of it, whatever GitHub answers here.
+  if (subject === "file") return null;
   return integerOf(fieldOf(node, "line")) ?? integerOf(fieldOf(node, "originalLine"));
 }
 

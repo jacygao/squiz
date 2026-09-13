@@ -222,8 +222,8 @@ test("the shim is executable", async () => {
  * is about.
  *
  * `line` is already the line to report on: the reader puts `originalLine` in
- * its place when GitHub nulls the live one, so null here is a thread anchored
- * to no line at all.
+ * its place when GitHub nulls the live one, and nulls it outright on a thread
+ * whose subject is the file.
  */
 function thread(overrides: Partial<ReviewThread>): ReviewThread {
   return {
@@ -231,6 +231,7 @@ function thread(overrides: Partial<ReviewThread>): ReviewThread {
     isResolved: false,
     isOutdated: false,
     path: "src/cli.ts",
+    subjectType: "line",
     line: 7,
     comments: [],
     ...overrides,
@@ -271,11 +272,39 @@ test("a pull request with nothing open says so in words", () => {
   assert.equal(threadListing(80, [thread({ isResolved: true })]), none);
 });
 
-test("a thread anchored to no line names the file instead of printing a null", () => {
-  const printed = threadListing(80, [thread({ id: "PRRT_file", path: "scratch/target.txt", line: null })]);
+test("a thread on the file as a whole is listed as its file, not as its first line", () => {
+  // Both threads are on #80 and GitHub reads both back on line 1. Listing them
+  // alike is what this exists to stop.
+  const printed = threadListing(80, [
+    thread({
+      id: "PRRT_kwDOUEd2qM6hqMTt",
+      path: "scratch/target.txt",
+      subjectType: "file",
+      line: null,
+    }),
+    thread({ id: "PRRT_kwDOUEd2qM6hqQd7", path: "scratch/a file with spaces.txt", line: 1 }),
+  ]);
 
-  assert.equal(printed, ["1 open thread on #80", "PRRT_file scratch/target.txt (whole file)", ""].join("\n"));
+  assert.equal(
+    printed,
+    [
+      "2 open threads on #80",
+      "PRRT_kwDOUEd2qM6hqMTt scratch/target.txt (whole file)",
+      "PRRT_kwDOUEd2qM6hqQd7 scratch/a file with spaces.txt:1",
+      "",
+    ].join("\n"),
+  );
   assert.doesNotMatch(printed, /null/u, "file:null names nothing a reader can open");
+});
+
+test("a thread on a line GitHub would not name says so rather than claiming the file", () => {
+  const printed = threadListing(80, [thread({ id: "PRRT_lost", line: null })]);
+
+  assert.equal(
+    printed,
+    ["1 open thread on #80", "PRRT_lost src/cli.ts (line unknown)", ""].join("\n"),
+    "a line thread listed as the whole file misreports what the finding is about",
+  );
 });
 
 test("a thread whose anchored line was edited is listed on the line it was anchored to", () => {

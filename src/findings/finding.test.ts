@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   bySeverity,
   type ChangeFinding,
+  type FileFinding,
   type Finding,
   hasReference,
   type LineFinding,
@@ -32,6 +33,18 @@ function finding(severity: Severity, headline: string, line = 12): Finding {
   };
 }
 
+/** The same, scoped to a file, so that a tie can be pinned across scopes. */
+function fileFinding(severity: Severity, headline: string): FileFinding {
+  return {
+    scope: "file",
+    file: `src/${headline}.ts`,
+    severity,
+    headline,
+    reasoning: ["The one point beneath the headline."],
+    suggestedFix: "Do the other thing.",
+  };
+}
+
 function headlines(findings: readonly Finding[]): string[] {
   return findings.map((found) => found.headline);
 }
@@ -49,6 +62,19 @@ test("a finding scoped to a line carries the anchor its comment is placed on", (
   };
   assert.equal(anchored.file, "src/ui/card.ts");
   assert.equal(anchored.line, 88);
+});
+
+test("a finding scoped to a file carries the file its thread goes on, and no line", () => {
+  const unbounded: FileFinding = {
+    scope: "file",
+    file: "src/sync/queue.ts",
+    severity: "medium",
+    headline: "The queue is unbounded",
+    reasoning: ["`enqueue()` never drops, so a stalled consumer grows it without limit."],
+    suggestedFix: "Cap the queue and drop the oldest entry.",
+  };
+  assert.equal(unbounded.file, "src/sync/queue.ts");
+  assert.equal("line" in unbounded, false, "a finding scoped to a file names no line");
 });
 
 test("a finding scoped to the change carries no anchor", () => {
@@ -110,6 +136,47 @@ test("the refusal holds for a finding that reaches the type as a variable", () =
   assert.equal(widened.scope, "change");
 });
 
+test("the type refuses a finding scoped to a file that carries a line", () => {
+  // @ts-expect-error a finding scoped to a file carries no line
+  const withLine: Finding = {
+    scope: "file",
+    file: "src/place.ts",
+    severity: "low",
+    headline: "Named for the shape it must not have",
+    reasoning: ["A finding about a file rather than any line of it has nowhere to put one."],
+    suggestedFix: "Scope it to the line instead.",
+    line: 12,
+  };
+  assert.equal(withLine.scope, "file");
+});
+
+test("the refusal holds for a file-scoped finding that reaches the type as a variable", () => {
+  const built = {
+    scope: "file" as const,
+    file: "src/place.ts",
+    severity: "high" as const,
+    headline: "Built elsewhere, then widened",
+    reasoning: ["The line came from a line-scoped finding it was copied from."],
+    suggestedFix: "Drop the line.",
+    line: 3,
+  };
+  // @ts-expect-error the line survives the widening, and the type refuses it
+  const widened: Finding = built;
+  assert.equal(widened.scope, "file");
+});
+
+test("the type refuses a finding scoped to a file that names no file", () => {
+  // @ts-expect-error a finding scoped to a file carries the file its thread goes on
+  const unnamed: Finding = {
+    scope: "file",
+    severity: "high",
+    headline: "Scoped to a file it never names",
+    reasoning: ["The thread has nowhere to go."],
+    suggestedFix: "Name the file.",
+  };
+  assert.equal(unnamed.scope, "file");
+});
+
 test("the type refuses a finding scoped to a line with no anchor", () => {
   // @ts-expect-error a finding scoped to a line carries a file and a line
   const unanchored: Finding = {
@@ -124,12 +191,12 @@ test("the type refuses a finding scoped to a line with no anchor", () => {
 
 test("the type refuses a scope or a severity outside its union", () => {
   const scope: Finding = {
-    // @ts-expect-error the scopes are "line" and "change"
-    scope: "file",
+    // @ts-expect-error the scopes are "line", "file" and "change"
+    scope: "hunk",
     severity: "high",
     headline: "A scope the router has no branch for",
     reasoning: ["Nothing routes it."],
-    suggestedFix: "Scope it to the line or to the change.",
+    suggestedFix: "Scope it to a line, a file, or the change.",
   };
 
   const severity: Finding = {
@@ -145,11 +212,11 @@ test("the type refuses a scope or a severity outside its union", () => {
   assert.equal(severity.scope, "change");
 });
 
-test("`Scope` names the two scopes a finding declares and no third", () => {
-  const both: readonly Scope[] = ["line", "change"];
+test("`Scope` names every scope a finding declares and no other", () => {
+  const declared: readonly Scope[] = ["line", "file", "change"];
   // @ts-expect-error a scope no finding declares is not a `Scope`
-  const third: Scope = "hunk";
-  assert.equal(both.includes(third), false, "`hunk` is not one of the two scopes");
+  const undeclared: Scope = "hunk";
+  assert.equal(declared.includes(undeclared), false, "`hunk` is not one of the scopes");
 });
 
 test("the type refuses reasoning written as one paragraph", () => {
@@ -228,6 +295,30 @@ test("findings of one severity keep the order the reviewer returned them in", ()
     finding("medium", "bravo", 10),
   ];
   assert.deepEqual(headlines(orderBySeverity(returned)), ["zulu", "alpha", "mike", "bravo"]);
+});
+
+test("a file-scoped finding ties with any other of its severity, and keeps its place", () => {
+  for (const severity of ["high", "medium", "low"] as const) {
+    assert.equal(
+      bySeverity(fileFinding(severity, "on a file"), finding(severity, "on a line")),
+      0,
+      `a file-scoped ${severity} finding must tie with a line-scoped one`,
+    );
+  }
+  const returned = [
+    fileFinding("medium", "file-zulu"),
+    finding("medium", "line-alpha", 30),
+    fileFinding("high", "file-yankee"),
+    fileFinding("medium", "file-mike"),
+    finding("high", "line-bravo", 10),
+  ];
+  assert.deepEqual(headlines(orderBySeverity(returned)), [
+    "file-yankee",
+    "line-bravo",
+    "file-zulu",
+    "line-alpha",
+    "file-mike",
+  ]);
 });
 
 test("the returned order survives inside each severity when the severities mix", () => {

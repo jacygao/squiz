@@ -7,7 +7,7 @@
  */
 
 import { type ChangedLines, DiffParseError, parseDiff, touchesLine } from "./diff.ts";
-import type { ChangeFinding, Finding, LineFinding } from "./finding.ts";
+import type { ChangeFinding, LineFinding } from "./finding.ts";
 
 /** A finding that becomes a review comment thread on the line it names. */
 export type InlineRouting = {
@@ -43,6 +43,14 @@ export type UnplacedRouting = {
 
 export type Routing = InlineRouting | ChangeRouting | UnplacedRouting;
 
+/**
+ * The scopes this router places.
+ *
+ * A finding scoped to a file is refused at the type rather than falling through
+ * to the summary carrying half an anchor.
+ */
+export type RoutableFinding = LineFinding | ChangeFinding;
+
 /** One round's findings, each routed, and the diff failure where there was one. */
 export type Routed = {
   readonly routings: readonly Routing[];
@@ -68,7 +76,7 @@ export type Routed = {
  * Nothing here throws, and no finding is dropped. A diff that cannot be read
  * routes every finding general and is reported in `unreadableDiff`.
  */
-export function routeFindings(findings: readonly Finding[], diff: string): Routed {
+export function routeFindings(findings: readonly RoutableFinding[], diff: string): Routed {
   let changed: ChangedLines;
   try {
     changed = parseDiff(diff);
@@ -81,7 +89,7 @@ export function routeFindings(findings: readonly Finding[], diff: string): Route
   return { routings: findings.map((finding) => routeOne(finding, changed)) };
 }
 
-function routeOne(finding: Finding, changed: ChangedLines): Routing {
+function routeOne(finding: RoutableFinding, changed: ChangedLines): Routing {
   // Only a line the change added is anchored to. GitHub would take a context
   // line too, but no finding is anchored to one: a finding is anchored to the
   // changed line that caused it.
@@ -92,7 +100,7 @@ function routeOne(finding: Finding, changed: ChangedLines): Routing {
 }
 
 /** The routing a finding takes when no anchor is placed for it. */
-function general(finding: Finding): ChangeRouting | UnplacedRouting {
+function general(finding: RoutableFinding): ChangeRouting | UnplacedRouting {
   if (finding.scope === "change") return { placement: "general", finding };
   return { placement: "general", finding, unplacedAnchor: `${finding.file}:${finding.line}` };
 }
