@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.5 (draft)
+**Version:** 0.6 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -123,7 +123,7 @@ carrying the pull request and the existing threads. Depth `read` only: the
 
 - [ ] Run against a fixture repository with a seeded defect, the reviewer
       returns findings in M2's shape.
-- [ ] A JSONL fixture at the scale the specification records parses with flat
+- [ ] A JSONL fixture at the scale `docs/notes/` records parses with flat
       memory. Individual lines are large, so cheap type discrimination comes
       before `JSON.parse`.
 - [ ] The command line carries the `read` grant and no `bash`, and the adapter
