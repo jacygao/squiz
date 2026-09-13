@@ -22,10 +22,6 @@ recheck-when: pi upgrades, or the reviewer's model changes
 - **`agent_end` is the line the adapter must not hold.** § 4 already required
   reading incrementally, and did not say which line makes that matter.
 
-- **194MB across roughly 19,800 lines must not be quoted as current.** It was
-  `pi` 0.74.2's, and what replaced it is not what the earlier correction
-  assumed.
-
 - **A fixture at review scale is generated at test time; a fixture for shape is
   recorded whole and committed.** A capture at that scale is not a contract, and
   could not prove flat memory anyway, because a fixed length cannot tell flat
@@ -85,7 +81,12 @@ wall time.
 - `agent_end` is 3.7% of the bytes in a single line, and the largest line in the
   stream.
 - `agent_end`, `turn_end`, `message_start`, `message_end` and
-  `tool_execution_end` together are 15.1% of the bytes.
+  `tool_execution_end` together are 15.1% of the bytes. They are the largest
+  lines and they are not the bulk, which is what an earlier correction, drawn
+  from probes of a few hundred lines, had the wrong way round.
+
+The retired figure was 194MB across roughly 19,800 lines, at `pi` 0.74.2, where
+`message_update` repeated the whole partial message rather than a delta.
 
 **`agent_end` is not once per run.** `pi` restarts the agent on a failed
 request, and every attempt emits its own `agent_start` and `agent_end`. One run
