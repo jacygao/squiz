@@ -31,7 +31,8 @@ recheck-when: pi upgrades
 
 ## Decisions
 
-<What to do. One or two sentences each, and never the reason.>
+<What to do, never why. Ask "so what do I do?" of each: a different sentence
+back means you wrote the reason, and that sentence is the decision.>
 
 ## Needs your input
 
@@ -56,37 +57,10 @@ nothing being needed and the author forgetting to ask.
 `issue` points back, at what commissioned it. `recheck-when` names the upgrade
 that would invalidate the finding, so `grep -L` finds what to re-run.
 
-## What counts as a decision
-
-**A decision is what to do. A fact is why.**
-
-Every useful fact leads to an action, which is why facts end up under Decisions.
-The question is not whether a bullet leads to an action. It is whether the
-bullet *is* the action or the *reason* for it.
-
-Ask of every bullet: **so what do I do?**
-
-- The answer is the same sentence — it is a decision.
-- The answer is a different sentence — that different sentence is the decision.
-  Write that instead, and move the bullet you had to Reference.
-
-"The stream is 9.8MB across 33,000 lines" is a reason: asked what to do about
-it, the answer is a different sentence. "Read the stream incrementally and never
-hold `agent_end`" is the decision it argues for. Both point at one action, and
-only one of them is it.
-
-Two limits follow:
-
-- **State a decision, do not argue it.** One or two sentences. The case for it,
-  and the alternative it beat, go in the pull request.
-- **More than about five and some of them are facts.** Decisions is what a
-  person reads in order to review the work. A section that takes ten minutes is
-  one nobody reviews.
-
 ## Principles
 
-- **Record what was settled, not how** — method, evidence, tables and what was
-  tried go in the pull request
+- **Record the decision, not the case for it** — method, evidence, tables and
+  what was tried go in the pull request
 - **Never summarise an exact field name, endpoint or id** — the string is the
   deliverable
 - **Mark a reference value you did not see in output** as `(unverified)`, so a
