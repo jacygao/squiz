@@ -31,25 +31,7 @@ recheck-when: pi upgrades, or the reviewer's model changes
 
 ## Needs your input
 
-**Whether the specification should say what a retried request is.** § 7 gives
-"the model API is unavailable" a behaviour, and the signal § 4's adapter has for
-it — an assistant message whose `stopReason` is `"error"` and whose usage is all
-zero — also fires inside a round that is working. One run carried 22 such
-messages and still completed 34 tool calls, because `pi` retried each failed
-request and succeeded on all but the last. The cost arithmetic is unaffected,
-since those messages carry zero usage. What breaks is a round reporting the API
-as unavailable when it was briefly rate-limited.
-
-Recommended: say a round failed when the last `auto_retry_end` carries
-`success: false`, or when no assistant message completed with non-zero usage,
-rather than on the first errored message. Both were observed and either
-distinguishes the two cases.
-
-Also for you: **a clean measurement of the `openai-responses` path needs a
-higher rate limit than this account has.** The run exhausted a 200,000
-tokens-per-minute ceiling and `pi` gave up after three retries with no review.
-Filed as `needs-human`. Not worth buying: the fixture is generated from a shape,
-and the shape is the same on both paths.
+Nothing.
 
 ## Reference
 
