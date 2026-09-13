@@ -10,22 +10,24 @@ recheck-when: pi upgrades, or the reviewer's model changes
 
 ## Intent
 
-- **§ 4 records no scale for the reviewer's JSONL stream.** The figure it used
-  to carry was `pi` 0.74.2's and was retired, so nothing said what the adapter
-  has to survive, or which line is the one that would sink it.
-- **A test cannot prove flat memory without a fixture, and no fixture could be
-  chosen.** Committing a capture, generating one, and recording a short run are
-  three different answers, and nothing said which.
+- **Nothing said how much output a real review produces.** The figure § 4 used
+  to carry came from an old `pi` and was retired, so the code that reads the
+  output had no idea what it has to cope with.
+- **Nothing said what test data to check that code against.** Commit a real
+  capture, build a fake one in the test, or commit a short real run — three
+  answers, and the choice decides whether the test proves anything at all.
 
 ## Decisions
 
-- **`agent_end` is the line the adapter must not hold.** § 4 already required
-  reading incrementally, and did not say which line makes that matter.
+- **Never hold `agent_end` in memory.** § 4 already said to read the output a
+  line at a time. What it did not say is that one line is big enough to break
+  the adapter on its own.
 
-- **A fixture at review scale is generated at test time; a fixture for shape is
-  recorded whole and committed.** A capture at that scale is not a contract, and
-  could not prove flat memory anyway, because a fixed length cannot tell flat
-  from linear.
+- **Commit one small real capture, and let the tests build the big ones.** The
+  committed run is small enough to live in the repository and proves the parser
+  handles what `pi` really emits. The big streams are built by the test at
+  whatever length it asks for, because memory is only proven flat by running two
+  different lengths and comparing.
 
 ## Needs your input
 
