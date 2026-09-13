@@ -20,37 +20,16 @@ recheck-when: pi upgrades, or the reviewer's model changes
 ## Decisions
 
 - **`agent_end` is the line the adapter must not hold.** § 4 already required
-  reading incrementally; what it did not say is which line makes that matter.
-  There are two failure modes and this is the second: an adapter that
-  accumulates fails on the count of small lines, and an adapter that holds one
-  line fails on this one.
+  reading incrementally, and did not say which line makes that matter.
 
-- **194MB across roughly 19,800 lines must not be quoted as current.** That was
-  `pi` 0.74.2, where `message_update` repeated the whole partial message. What
-  replaced it is not that the bulk moved into the message-carrying events, which
-  is what the earlier correction assumed: those are the largest lines and they
-  are not the bulk.
+- **194MB across roughly 19,800 lines must not be quoted as current.** It was
+  `pi` 0.74.2's, and what replaced it is not what the earlier correction
+  assumed.
 
-- **A fixture at review scale is generated at test time. A fixture for shape is
-  recorded whole and committed.** No capture at review scale is committed, and
-  no figure here bounds a round: the stream is the length of the round rather
-  than the size of the diff, so every figure below is a floor.
-
-  | | Recorded | Generated |
-  |---|---|---|
-  | **Proves** | that the parse matches what `pi` emits | that peak memory does not grow with the stream's length |
-  | **Source** | one short `pi` run, committed byte for byte | built in the test from the shape below |
-  | **Size** | 135 lines, 73,332 bytes | whatever length the test asks for |
-  | **Reaches the test** | as a file in the repository | as an in-process stream, never written to disk |
-
-  Nothing in the recorded fixture is edited, because a hand-written fixture is
-  what is wrong when the parser is right. Nothing in the generated one is real,
-  because nothing about a 10MB capture is a contract and it would sit in every
-  clone forever.
-
-  The large fixture has to be generated in order to prove what it exists to
-  prove. A single capture of a fixed length cannot tell flat memory from linear.
-  The length has to be a parameter for that comparison to exist at all.
+- **A fixture at review scale is generated at test time; a fixture for shape is
+  recorded whole and committed.** A capture at that scale is not a contract, and
+  could not prove flat memory anyway, because a fixed length cannot tell flat
+  from linear.
 
 ## Needs your input
 
@@ -75,6 +54,24 @@ Filed as `needs-human`. Not worth buying: the fixture is generated from a shape,
 and the shape is the same on both paths.
 
 ## Reference
+
+### The two fixtures
+
+| | Recorded | Generated |
+|---|---|---|
+| **Proves** | that the parse matches what `pi` emits | that peak memory does not grow with the stream's length |
+| **Source** | one short `pi` run, committed byte for byte | built in the test from the shape below |
+| **Size** | 135 lines, 73,332 bytes | whatever length the test asks for |
+| **Reaches the test** | as a file in the repository | as an in-process stream, never written to disk |
+
+Nothing in the recorded fixture is edited, because a hand-written fixture is
+what is wrong when the parser is right. Nothing in the generated one is real,
+because nothing about a 10MB capture is a contract and it would sit in every
+clone forever.
+
+The generated fixture's length has to be a parameter. A single capture of a
+fixed length cannot tell flat memory from linear; two lengths can, and that
+comparison does not exist unless the length can vary.
 
 ### The scale
 

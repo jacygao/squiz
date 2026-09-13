@@ -29,13 +29,12 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
   event, so the adapter does the addition.
 - **A killed round yields a floor, not a figure.** The tokens of the request in
   flight are spent, billed, and never reported.
-- **A zero cost is not proof of a free round.** `pi` prices runs from its own
-  catalog, so an unpriced model reports zero cost against non-zero tokens.
-  Treat that as unknown, and keep both fields in the episode state file.
-- **A provider that never ran also reports zero.** Cost and tokens are both
-  zero, exit status is 0 and stderr is empty; the only signal is a `stopReason`
-  of `"error"` on the assistant message. The adapter reads that field, because
-  cost and tokens alone cannot tell a failed round from a free one.
+- **A zero cost against non-zero tokens is unknown, not free, and both fields go
+  in the episode state file.** `pi` prices from its own catalog, so a model it
+  cannot price reports nothing against real spend.
+- **The adapter reads `stopReason` as well as the cost.** A provider that never
+  ran reports zero for both fields, so cost and tokens alone cannot tell a
+  failed round from a free one.
 - **`message_end` is the only event to read the cost from.** What
   `message_update` holds depends on the API path, and on one of the two measured
   it holds zero for the whole of the message.
