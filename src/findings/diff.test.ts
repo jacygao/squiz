@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type ChangedLines, DiffParseError, parseDiff, touchesLine } from "./diff.ts";
+import { type ChangedLines, DiffParseError, parseDiff, touchesFile, touchesLine } from "./diff.ts";
 
 /**
  * Every fixture below is `git diff` output, copied from a scratch repository
@@ -14,6 +14,10 @@ function parse(fixture: string): ChangedLines {
 
 function touches(fixture: string, file: string, line: number): boolean {
   return touchesLine(parse(fixture), file, line);
+}
+
+function carries(fixture: string, file: string): boolean {
+  return touchesFile(parse(fixture), file);
 }
 
 function refusal(fixture: string, what: string): DiffParseError {
@@ -87,6 +91,26 @@ index 624b469..3d2d767 100644
  line 11
 -line 12
 +line 12 CHANGED
+`;
+
+/**
+ * A change that only removed lines, whose hunk therefore carries no `+` at all.
+ *
+ * The file is in the diff and has no line anything can be anchored to, which is
+ * the one shape that separates the file a comment can hang on from the line it
+ * cannot.
+ */
+const removalsOnly = `
+diff --git a/shrunk.txt b/shrunk.txt
+index b2f931a..3f9c607 100644
+--- a/shrunk.txt
++++ b/shrunk.txt
+@@ -1,5 +1,2 @@
+ one
+-two
+-three
+-four
+ five
 `;
 
 const newFile = `
@@ -298,6 +322,32 @@ test("a path git quoted is read back as the name it stands for", () => {
 
 test("a file the diff does not mention answers no rather than throwing", () => {
   assert.equal(touches(driftingHunks, "untouched.ts", 10), false);
+  assert.equal(carries(driftingHunks, "untouched.ts"), false);
+});
+
+/**
+ * A comment on a file as a whole hangs on the file rather than on a line, so a
+ * change that removed lines and added none still carries somewhere to put one.
+ */
+test("a file the change only removed lines from is carried, with no line to anchor to", () => {
+  assert.equal(carries(removalsOnly, "shrunk.txt"), true);
+  assert.equal(touches(removalsOnly, "shrunk.txt", 1), false);
+  assert.equal(touches(removalsOnly, "shrunk.txt", 2), false);
+});
+
+test("a file with lines to anchor to is carried too", () => {
+  assert.equal(carries(driftingHunks, "drift.txt"), true);
+  assert.equal(carries(newFile, "added.txt"), true);
+});
+
+test("a file the change left with no new side is not carried", () => {
+  assert.equal(carries(deletedFile, "doomed.txt"), false);
+  assert.equal(carries(pureRename, "renamed-to.txt"), false);
+});
+
+test("a renamed file is carried under the name it now has", () => {
+  assert.equal(carries(renameWithEdits, "new-name.txt"), true);
+  assert.equal(carries(renameWithEdits, "old-name.txt"), false);
 });
 
 test("a line number no file could have answers no", () => {
