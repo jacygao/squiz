@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { postThread, type ThreadRequest } from "./post-thread.ts";
+import {
+  postFileThread,
+  postThread,
+  type FileThreadRequest,
+  type ThreadRequest,
+} from "./post-thread.ts";
 
 /** One `gh` invocation's answer, in the order the fake serves them. */
 type Reply = {
@@ -131,6 +136,13 @@ const request: ThreadRequest = {
   body: "**Squiz reviewer · low — the line is wrong**",
 };
 
+const fileRequest: FileThreadRequest = {
+  pullRequest: 80,
+  headSha: HEAD_SHA,
+  path: "scratch/target.txt",
+  body: "**Squiz reviewer · low — the file has no tests**",
+};
+
 /**
  * The REST create response, as GitHub sent it. It carries no `in_reply_to_id`:
  * a comment that opened a thread has no such field, and a fixture that adds one
@@ -145,6 +157,27 @@ const CREATED = {
   subject_type: "line",
   commit_id: HEAD_SHA,
   html_url: "https://github.com/jacygao/squiz/pull/80#discussion_r3993908108",
+};
+
+/**
+ * The response to a file-scoped create, as GitHub sent it.
+ *
+ * It carries `line: 1` and `side: "RIGHT"` though neither was asked for, and
+ * `subject_type` is the only field that tells it from a comment on the first
+ * line of the file.
+ */
+const CREATED_ON_FILE = {
+  id: 3994572932,
+  node_id: "PRRC_kwDOUEd2qM7uGFiE",
+  path: "scratch/target.txt",
+  line: 1,
+  original_line: 1,
+  side: "RIGHT",
+  start_line: null,
+  diff_hunk: "",
+  subject_type: "file",
+  commit_id: HEAD_SHA,
+  html_url: "https://github.com/jacygao/squiz/pull/80#discussion_r3994572932",
 };
 
 /** One page of `reviewThreads`, each entry a thread id under its opening comment's database id. */
@@ -386,5 +419,102 @@ test("the comment and its path reach gh unchanged, whatever the reviewer wrote",
       line: 1,
       side: "RIGHT",
     });
+  });
+});
+
+const CREATED_ON_FILE_OK: Reply = { stdout: response(201, CREATED_ON_FILE) };
+const FILE_THREAD_FOUND: Reply = {
+  stdout: response(200, threadPage([[3994572932, "PRRT_kwDOUEd2qM6hrybE"]], null)),
+};
+
+test("a file-scoped thread is created over REST, carrying no line and no side", async () => {
+  await withFakeGh([CREATED_ON_FILE_OK, FILE_THREAD_FOUND], (gh) => {
+    postFileThread(fileRequest, { directory: tmpdir() });
+
+    assert.deepEqual(gh.argumentsOf(1), [
+      "api",
+      "--include",
+      "--method",
+      "POST",
+      "repos/{owner}/{repo}/pulls/80/comments",
+      "--input",
+      "-",
+    ]);
+    // The exact key set, not a superset: a line beside `subject_type` is
+    // refused outright, and a reply key would put the comment in someone
+    // else's thread.
+    assert.deepEqual(JSON.parse(gh.stdinOf(1)), {
+      body: "**Squiz reviewer · low — the file has no tests**",
+      commit_id: HEAD_SHA,
+      path: "scratch/target.txt",
+      subject_type: "file",
+    });
+  });
+});
+
+test("a file-scoped thread's node id is read back the way a line-anchored one's is", async () => {
+  await withFakeGh([CREATED_ON_FILE_OK, FILE_THREAD_FOUND], (gh) => {
+    const posting = postFileThread(fileRequest, { directory: tmpdir() });
+
+    assert.deepEqual(posting, {
+      outcome: "posted",
+      threadId: "PRRT_kwDOUEd2qM6hrybE",
+      commentId: 3994572932,
+      url: "https://github.com/jacygao/squiz/pull/80#discussion_r3994572932",
+    });
+    const sent: unknown = JSON.parse(gh.stdinOf(2));
+    assert.deepEqual(
+      (sent as { variables: unknown }).variables,
+      { comment: "PRRC_kwDOUEd2qM7uGFiE", cursor: null },
+      "no REST response carries the thread id, so the created comment is what it is reached from",
+    );
+  });
+});
+
+test("a file GitHub refuses is routed rather than reported as a failure", async () => {
+  const refusal = validationFailed("pull_request_review_thread.path", "could not be resolved");
+  await withFakeGh([errored(422, refusal, "Validation Failed")], (gh) => {
+    const posting = postFileThread(fileRequest, { directory: tmpdir() });
+
+    assert.equal(posting.outcome, "anchor-refused");
+    const reason = posting.outcome === "anchor-refused" ? posting.reason : "";
+    assert.match(reason, /scratch\/target\.txt/u);
+    assert.doesNotMatch(
+      reason,
+      /scratch\/target\.txt:\d/u,
+      "there is no line to report, and a refusal naming one sends the reader to a line",
+    );
+    assert.equal(gh.calls(), 1, "there is no thread to read back for");
+  });
+});
+
+test("a 422 refusing a file-scoped comment's body is a failure", async () => {
+  // The same prefix as a refused file, and it means a malformed comment rather
+  // than a file the diff does not carry.
+  const refusal = validationFailed(
+    "pull_request_review_thread.body",
+    "required when requesting changes",
+  );
+  await withFakeGh([errored(422, refusal, "Validation Failed")], () => {
+    const posting = postFileThread(fileRequest, { directory: tmpdir() });
+
+    assert.equal(posting.outcome, "failed");
+  });
+});
+
+test("a file-scoped comment that joined an existing thread is never reported as posted", async () => {
+  const reply = { ...CREATED_ON_FILE, in_reply_to_id: 3993937859 };
+  await withFakeGh([{ stdout: response(201, reply) }, FILE_THREAD_FOUND], () => {
+    const posting = postFileThread(fileRequest, { directory: tmpdir() });
+
+    assert.equal(posting.outcome, "failed");
+  });
+});
+
+test("a gh that is not installed fails a file-scoped post rather than throwing", async () => {
+  await withNoGh(() => {
+    const posting = postFileThread(fileRequest, { directory: tmpdir() });
+
+    assert.equal(posting.outcome, "failed");
   });
 });
