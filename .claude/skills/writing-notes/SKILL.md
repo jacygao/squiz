@@ -33,9 +33,10 @@ recheck-when: pi upgrades
 
 ## Decisions
 
-<What to do about them, never why. Every decision answers a question above; one
-that answers none was invented. Ask "so what do I do?" of each — a different
-sentence back means you wrote the reason, and that sentence is the decision.>
+<What to do, then a sentence on why. Lead with the decision: if "so what do I
+do?" returns a different sentence, you led with the reason. Every decision
+answers a question above; one that answers none was invented. Detail stays in
+Reference.>
 
 ## Needs your input
 
