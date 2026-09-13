@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.16 (draft)
+**Version:** 0.17 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -431,10 +431,6 @@ the episode closes.
 | `open` | Still unresolved at the close of the episode, with no reply from the coding agent. | Yes |
 | `disputed` | Still unresolved at the close of the episode, and the coding agent replied. There is a disagreement for a person to settle. | Yes |
 
-A thread the reviewer closed and later ruled `open` is counted separately. It is
-a counter and not a status: such a thread still ends its episode in one of the
-four above.
-
 ### The comment format
 
 Every comment follows one template: the marker and a headline naming the problem
@@ -513,10 +509,9 @@ review passes.
 Three blocks, in this order.
 
 1. **The counts and the cost.** Rounds run, findings raised, how many ended
-   `fixed`, `withdrawn`, `open` and `disputed`, how many threads were re-opened,
-   and the cost of each round with the total for the episode and the tokens it
-   consumed. Findings raised counts the general findings too, which carry no
-   status.
+   `fixed`, `withdrawn`, `open` and `disputed`, and the cost of each round with
+   the total for the episode and the tokens it consumed. Findings raised counts
+   the general findings too, which carry no status.
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its headline and where it sits: `file:line` for a
    thread anchored to a line, and the file alone for one anchored to the file.
@@ -533,7 +528,7 @@ Three blocks, in this order.
 ```markdown
 **Squiz review — 3 rounds, 7 findings**
 
-Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1 · 2 re-opened
+Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1
 Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
 
 **Needs a person**
