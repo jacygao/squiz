@@ -8,11 +8,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DiffParseError } from "./diff.ts";
-import type { ChangeFinding, LineFinding } from "./finding.ts";
+import type { ChangeFinding, FileFinding, Finding, LineFinding } from "./finding.ts";
 import {
   type ChangeRouting,
+  type DegradedRouting,
+  type FileRouting,
   type InlineRouting,
-  type RoutableFinding,
   type Routed,
   routeFindings,
   type Routing,
@@ -60,6 +61,17 @@ function lineFinding(headline: string, file: string, line: number): LineFinding 
   };
 }
 
+function fileFinding(headline: string, file: string): FileFinding {
+  return {
+    scope: "file",
+    file,
+    severity: "medium",
+    headline,
+    reasoning: ["The file as a whole, which no single line of it owns."],
+    suggestedFix: "Split it.",
+  };
+}
+
 function changeFinding(headline: string): ChangeFinding {
   return {
     scope: "change",
@@ -73,6 +85,8 @@ function changeFinding(headline: string): ChangeFinding {
 const onAChangedLine = lineFinding("on a changed line", "src/ui/card.ts", 88);
 const onAContextLine = lineFinding("on a context line", "src/ui/card.ts", 85);
 const inAnUntouchedFile = lineFinding("in an untouched file", "src/sync/queue.ts", 134);
+const aboutAChangedFile = fileFinding("about a changed file", "src/ui/card.ts");
+const aboutAnUntouchedFile = fileFinding("about an untouched file", "src/sync/queue.ts");
 const aboutTheChange = changeFinding("about the change as a whole");
 
 function only(routed: Routed): Routing {
@@ -85,6 +99,12 @@ function only(routed: Routed): Routing {
 function inlineOnly(routed: Routed): InlineRouting {
   const routing = only(routed);
   assert.ok(routing.placement === "inline", `${routing.finding.headline} must route inline`);
+  return routing;
+}
+
+function fileOnly(routed: Routed): FileRouting | DegradedRouting {
+  const routing = only(routed);
+  assert.ok(routing.placement === "file", `${routing.finding.headline} must route to its file`);
   return routing;
 }
 
@@ -115,6 +135,25 @@ test("a finding scoped to a line the change touched routes inline", () => {
   assert.equal(routed.unreadableDiff, undefined, "the diff was read");
 });
 
+test("a finding scoped to a file the diff carries routes to that file", () => {
+  const routing = fileOnly(routeFindings([aboutAChangedFile], cardDiff));
+
+  // The path the thread hangs on is read off the finding without a cast.
+  assert.equal(routing.finding.file, "src/ui/card.ts");
+  assert.equal(routing.finding, aboutAChangedFile);
+  assert.equal(routing.finding.scope, "file", "the reviewer's scope is not rewritten");
+  assert.equal(
+    routing.unplacedAnchor,
+    undefined,
+    "a finding the reviewer scoped to a file placed no line to fail to place",
+  );
+  assert.equal(
+    Object.hasOwn(routing.finding, "line"),
+    false,
+    "routing must not give a finding scoped to a file a line",
+  );
+});
+
 test("a finding scoped to the change routes general and acquires no anchor", () => {
   const routing = generalOnly(routeFindings([aboutTheChange], cardDiff));
 
@@ -133,22 +172,39 @@ test("a finding scoped to the change routes general and acquires no anchor", () 
 });
 
 /**
- * A general finding naming no location is one a person cannot act on, and the
- * summary's Notes records exactly the location this carries.
+ * A thread is ruled on in every later round and a line in the summary is read
+ * once, so the file is where a refused anchor goes. The comment hangs on the
+ * file and carries the line in its text, which is the only thing left saying
+ * where the defect is.
  */
-test("a finding whose anchor is rejected routes general, carrying its `file:line`", () => {
-  const context = generalOnly(routeFindings([onAContextLine], cardDiff));
+test("a finding whose anchor is rejected routes to its file, carrying its `file:line`", () => {
+  const routing = fileOnly(routeFindings([onAContextLine], cardDiff));
+
   assert.equal(
-    context.unplacedAnchor,
+    routing.unplacedAnchor,
     "src/ui/card.ts:85",
     "a finding on a line the change did not add keeps its own file:line",
   );
+  assert.equal(routing.finding, onAContextLine, "the finding itself is unchanged by routing");
+  assert.equal(routing.finding.scope, "line", "the reviewer's scope is not rewritten");
+});
 
-  const untouched = generalOnly(routeFindings([inAnUntouchedFile], cardDiff));
-  assert.equal(untouched.unplacedAnchor, "src/sync/queue.ts:134");
+/**
+ * A general finding naming no location is one a person cannot act on, and the
+ * summary's Notes records exactly the location this carries.
+ */
+test("a finding the diff carries no file for routes general, carrying its location", () => {
+  const line = generalOnly(routeFindings([inAnUntouchedFile], cardDiff));
+  assert.equal(line.unplacedAnchor, "src/sync/queue.ts:134");
+  assert.equal(line.finding, inAnUntouchedFile);
 
-  assert.equal(context.finding, onAContextLine, "the finding itself is unchanged by routing");
-  assert.equal(context.finding.scope, "line", "the reviewer's scope is not rewritten");
+  const file = generalOnly(routeFindings([aboutAnUntouchedFile], cardDiff));
+  assert.equal(
+    file.unplacedAnchor,
+    "src/sync/queue.ts",
+    "a finding scoped to a file names the file alone, having no line to name",
+  );
+  assert.equal(file.finding, aboutAnUntouchedFile);
 });
 
 /**
@@ -157,17 +213,27 @@ test("a finding whose anchor is rejected routes general, carrying its `file:line
  * exactly like a round that found nothing.
  */
 test("no finding is dropped: the count out is the count in", () => {
-  const findings: readonly RoutableFinding[] = [
+  const findings: readonly Finding[] = [
     onAChangedLine,
     aboutTheChange,
     onAContextLine,
     inAnUntouchedFile,
+    aboutAChangedFile,
+    aboutAnUntouchedFile,
     lineFinding("on the same changed line again", "src/ui/card.ts", 88),
   ];
   const routed = routeFindings(findings, cardDiff);
 
   assert.equal(routed.routings.length, findings.length, "every finding must route somewhere");
-  assert.deepEqual(placements(routed), ["inline", "general", "general", "general", "inline"]);
+  assert.deepEqual(placements(routed), [
+    "inline",
+    "general",
+    "file",
+    "general",
+    "file",
+    "general",
+    "inline",
+  ]);
   assert.deepEqual(
     routed.routings.map((routing) => routing.finding),
     findings,
@@ -188,11 +254,20 @@ test("an empty batch routes to an empty batch rather than to nothing", () => {
  * healthy.
  */
 test("an unreadable diff routes every finding general and is reported as such", () => {
-  const findings: readonly RoutableFinding[] = [onAChangedLine, aboutTheChange, onAContextLine];
+  const findings: readonly Finding[] = [
+    onAChangedLine,
+    aboutTheChange,
+    onAContextLine,
+    aboutAChangedFile,
+  ];
   const routed = routeFindings(findings, cutOffDiff);
 
   assert.equal(routed.routings.length, findings.length, "an unreadable diff drops no finding");
-  assert.deepEqual(placements(routed), ["general", "general", "general"]);
+  assert.deepEqual(
+    placements(routed),
+    ["general", "general", "general", "general"],
+    "a diff that could not be read is no evidence that GitHub would take the file",
+  );
   assert.ok(
     routed.unreadableDiff instanceof DiffParseError,
     `the diff failure must be reported, and was ${String(routed.unreadableDiff)}`,
@@ -204,9 +279,9 @@ test("an unreadable diff routes every finding general and is reported as such", 
   );
 });
 
-test("a diff that was read and rejected an anchor is not an unreadable diff", () => {
-  const rejected = routeFindings([onAContextLine], cardDiff);
-  const unreadable = routeFindings([onAContextLine], cutOffDiff);
+test("a diff that was read and carried no file is not an unreadable diff", () => {
+  const rejected = routeFindings([inAnUntouchedFile], cardDiff);
+  const unreadable = routeFindings([inAnUntouchedFile], cutOffDiff);
 
   assert.deepEqual(placements(rejected), placements(unreadable), "both route general");
   assert.equal(
@@ -217,9 +292,15 @@ test("a diff that was read and rejected an anchor is not an unreadable diff", ()
   assert.ok(unreadable.unreadableDiff !== undefined);
 });
 
-test("a finding routed general by an unreadable diff still carries its `file:line`", () => {
-  const routing = generalOnly(routeFindings([onAChangedLine], cutOffDiff));
-  assert.equal(routing.unplacedAnchor, "src/ui/card.ts:88");
+test("a finding routed general by an unreadable diff still carries its location", () => {
+  assert.equal(
+    generalOnly(routeFindings([onAChangedLine], cutOffDiff)).unplacedAnchor,
+    "src/ui/card.ts:88",
+  );
+  assert.equal(
+    generalOnly(routeFindings([aboutAChangedFile], cutOffDiff)).unplacedAnchor,
+    "src/ui/card.ts",
+  );
 });
 
 /**
@@ -228,7 +309,7 @@ test("a finding routed general by an unreadable diff still carries its `file:lin
  * hand the summary an order nobody chose.
  */
 test("the order the findings arrived in is the order they are routed in", () => {
-  const findings: readonly RoutableFinding[] = [
+  const findings: readonly Finding[] = [
     changeFinding("first"),
     onAChangedLine,
     changeFinding("third"),
@@ -244,11 +325,11 @@ test("the order the findings arrived in is the order they are routed in", () => 
     "on a context line",
     "fifth",
   ]);
-  assert.deepEqual(placements(routed), ["general", "inline", "general", "general", "inline"]);
+  assert.deepEqual(placements(routed), ["general", "inline", "general", "file", "inline"]);
 });
 
 test("routing leaves the findings and the array it was handed as they were", () => {
-  const findings = [onAChangedLine, aboutTheChange];
+  const findings = [onAChangedLine, aboutAChangedFile, aboutTheChange];
   const before = structuredClone(findings);
   routeFindings(findings, cardDiff);
   assert.deepEqual(findings, before);
@@ -264,8 +345,8 @@ test("a diff that is not a diff at all is reported rather than thrown", () => {
 });
 
 test("an empty diff is a diff with no changes, not one that could not be read", () => {
-  const routed = routeFindings([onAChangedLine, aboutTheChange], "");
-  assert.deepEqual(placements(routed), ["general", "general"]);
+  const routed = routeFindings([onAChangedLine, aboutAChangedFile, aboutTheChange], "");
+  assert.deepEqual(placements(routed), ["general", "general", "general"]);
   assert.equal(routed.unreadableDiff, undefined, "a change touching nothing is readable");
 });
 
@@ -309,7 +390,7 @@ test("the type refuses a routing that anchors a finding scoped to the change", (
 });
 
 test("the type refuses a rejected anchor that reports no location", () => {
-  // @ts-expect-error a finding routed general off a rejected anchor carries `file:line`
+  // @ts-expect-error a finding routed general off a rejected anchor carries its location
   const missing: UnplacedRouting = { placement: "general", finding: onAContextLine };
   assert.equal(missing.placement, "general");
 });
@@ -318,4 +399,27 @@ test("the type refuses an inline routing of a finding scoped to the change", () 
   // @ts-expect-error only a finding naming a file and a line can be anchored to one
   const anchored: InlineRouting = { placement: "inline", finding: aboutTheChange };
   assert.equal(anchored.placement, "inline");
+});
+
+test("the type refuses a file routing of a finding that names no file", () => {
+  // @ts-expect-error a thread on no file is one GitHub has nowhere to put
+  const nowhere: FileRouting = { placement: "file", finding: aboutTheChange };
+  assert.equal(nowhere.placement, "file");
+});
+
+test("the type refuses a finding sent to its file without the line it names", () => {
+  // @ts-expect-error the file thread's text is the only thing left naming the line
+  const silent: DegradedRouting = { placement: "file", finding: onAContextLine };
+  assert.equal(silent.placement, "file");
+});
+
+test("the type refuses a location on a finding the reviewer scoped to its file", () => {
+  const built = {
+    placement: "file" as const,
+    finding: aboutAChangedFile,
+    unplacedAnchor: "src/ui/card.ts",
+  };
+  // @ts-expect-error a finding scoped to a file placed no line to have failed to place
+  const widened: Routing = built;
+  assert.equal(widened.placement, "file");
 });
