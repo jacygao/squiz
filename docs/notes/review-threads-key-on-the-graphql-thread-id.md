@@ -345,3 +345,7 @@ A file-scoped create is refused in the same terms. It sends no `line` and no
   hunk, which is what this note records. How wide GitHub draws a hunk was not
   varied, so a client should treat a rejected anchor as the signal rather than
   computing the window itself.
+- **Whether a line thread can carry neither `line` nor `originalLine`.** The
+  schema makes both nullable, and a reader has to answer for it, but no such
+  thread was produced here *(unverified)*. Editing the anchored line nulls
+  `line` alone, which is the only way either was observed to go null.
