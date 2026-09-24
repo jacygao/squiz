@@ -44,6 +44,32 @@ index d3d0cb2..6db135b 100644
  // line 91
 `.slice(1);
 
+/**
+ * `git diff` of a changed binary file, copied from a scratch repository too.
+ *
+ * git writes one line saying the two sides differ and no hunk at all, so the
+ * file has no line anything can be anchored to and is still a file a thread can
+ * hang on.
+ */
+const logoDiff = `
+diff --git a/src/ui/logo.png b/src/ui/logo.png
+index c06048b..2247581 100644
+Binary files a/src/ui/logo.png and b/src/ui/logo.png differ
+`.slice(1);
+
+/**
+ * `git diff` of an empty file the change added, copied from a scratch
+ * repository too.
+ *
+ * git writes the mode and the index and stops, so the entry has no `+++` header
+ * and no hunk, and the file still has a new side a thread can hang on.
+ */
+const placeholderDiff = `
+diff --git a/src/ui/icons/.gitkeep b/src/ui/icons/.gitkeep
+new file mode 100644
+index 0000000..e69de29
+`.slice(1);
+
 // The same diff cut off inside its hunk, which is what one truncated in transit
 // looks like: the header declares seven new lines and the body delivers four.
 const cutOffDiff = cardDiff.split("\n").slice(0, 9).join("\n");
@@ -187,6 +213,30 @@ test("a finding whose anchor is rejected routes to its file, carrying its `file:
   );
   assert.equal(routing.finding, onAContextLine, "the finding itself is unchanged by routing");
   assert.equal(routing.finding.scope, "line", "the reviewer's scope is not rewritten");
+});
+
+/**
+ * A binary file is a file the change touched, and the summary is where a
+ * finding about one went while the diff read as carrying no such file.
+ */
+test("a finding about a binary file routes to that file rather than to the summary", () => {
+  const aboutTheLogo = fileFinding("about a changed binary file", "src/ui/logo.png");
+  const routing = fileOnly(routeFindings([aboutTheLogo], logoDiff));
+  assert.equal(routing.finding, aboutTheLogo);
+  assert.equal(routing.unplacedAnchor, undefined);
+
+  // A binary file has no line to anchor to, so a finding naming one hangs on
+  // the file and carries the line in its text.
+  const onALineOfTheLogo = lineFinding("on a line of a binary file", "src/ui/logo.png", 1);
+  const degraded = fileOnly(routeFindings([onALineOfTheLogo], logoDiff));
+  assert.equal(degraded.unplacedAnchor, "src/ui/logo.png:1");
+});
+
+test("a finding about an empty file the change added routes to that file", () => {
+  const aboutThePlaceholder = fileFinding("about an added placeholder", "src/ui/icons/.gitkeep");
+  const routing = fileOnly(routeFindings([aboutThePlaceholder], placeholderDiff));
+  assert.equal(routing.finding, aboutThePlaceholder);
+  assert.equal(routing.unplacedAnchor, undefined);
 });
 
 /**

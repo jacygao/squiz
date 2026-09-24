@@ -34,14 +34,18 @@ export class DiffParseError extends Error {
  * it now stands. A removed line is in no set here: it exists only on the old
  * side, so nothing can be anchored to it.
  *
- * A key is every file the diff gives a new side, so a file whose change only
- * removed lines is present with an empty set. The keys therefore answer which
+ * A key is every file the diff leaves a new side of, so a file whose change
+ * added no line is present with an empty set. The keys therefore answer which
  * files the diff carries, which is what a comment on a file as a whole needs.
  */
 export type ChangedLines = ReadonlyMap<string, ReadonlySet<number>>;
 
 /**
  * Read a unified diff into the lines it added, keyed by the files it carries.
+ *
+ * A file is keyed whether or not it has a `+++` header. A binary file, a mode
+ * change and an added empty file carry none, and all three are files a comment
+ * can hang on.
  *
  * Throws `DiffParseError` on anything it cannot account for: a hunk header it
  * cannot read, a hunk that delivers a different number of lines than it
@@ -59,6 +63,10 @@ export function parseDiff(diff: string): ChangedLines {
   let sawNewSide = false;
   let sawFile = false;
   let hunk: Hunk | null = null;
+  // The file entry being read, while it has shown no `+++` header. Held to the
+  // end of the entry, because the headers that decide whether it has a new side
+  // arrive in no fixed order.
+  let entry: Entry | null = null;
 
   for (const line of splitLines(diff)) {
     if (hunk !== null) {
@@ -113,10 +121,17 @@ export function parseDiff(diff: string): ChangedLines {
       if (path !== null) linesOf(added, path);
       sawNewSide = true;
       sawFile = true;
+      // The header says what the file is called and whether it has a new side,
+      // so the entry's other headers decide nothing.
+      entry = null;
     } else if (line.startsWith("diff --git ")) {
+      keyEntry(added, entry);
+      entry = { name: sameNameOf(line), changed: false, deleted: false };
       path = null;
       sawNewSide = false;
       sawFile = true;
+    } else if (entry !== null) {
+      readEntryHeader(entry, line);
     }
   }
 
@@ -125,6 +140,7 @@ export function parseDiff(diff: string): ChangedLines {
       "the diff ends inside a hunk that has not delivered the lines it declares",
     );
   }
+  keyEntry(added, entry);
   // A diff with no changes is empty. Text that is neither is not a diff, and
   // answering "no" for every line of it would hide that.
   if (!sawFile && diff.trim() !== "") {
@@ -158,6 +174,53 @@ export function touchesLine(changed: ChangedLines, file: string, line: number): 
  */
 export function touchesFile(changed: ChangedLines, file: string): boolean {
   return changed.has(file);
+}
+
+/**
+ * What a file entry's headers say, while it has shown no `+++` of its own.
+ *
+ * `changed` is true once a header shows the file was added, or that its content
+ * or its mode changed. It is what separates a file that has a new side to
+ * comment on from a rename that moved the same bytes to a new name.
+ */
+type Entry = {
+  name: string | null;
+  changed: boolean;
+  deleted: boolean;
+};
+
+/** Take what one header line of a file entry says about the file's new side. */
+function readEntryHeader(entry: Entry, line: string): void {
+  if (line.startsWith("deleted file mode ")) {
+    entry.deleted = true;
+  } else if (line.startsWith("rename to ")) {
+    // Where the new side of a rename is named, since no other header of one
+    // yields it.
+    entry.name = pathOf(line.slice("rename to ".length));
+  } else if (
+    line.startsWith("Binary files ") ||
+    line.startsWith("new mode ") ||
+    line.startsWith("new file mode ")
+  ) {
+    // An added empty file is all header: git writes its mode and its index and
+    // stops, having no content to show.
+    entry.changed = true;
+  }
+}
+
+/**
+ * Key a file the diff carries with no `+++` header: a binary file, a mode
+ * change, or an added empty file.
+ *
+ * A deletion keys nothing, because it leaves no new side to comment on, and
+ * neither does an entry showing no change at all, which is what a rename that
+ * moved the file unaltered is. A file whose name could not be read keys
+ * nothing either: that costs one finding its thread, where a throw would cost
+ * the round every thread it had.
+ */
+function keyEntry(added: Map<string, Set<number>>, entry: Entry | null): void {
+  if (entry === null || entry.deleted || !entry.changed || entry.name === null) return;
+  linesOf(added, entry.name);
 }
 
 /** What a hunk header declares, counted down as the hunk's body is read. */
@@ -197,10 +260,43 @@ function newSidePathOf(header: string): string | null {
   // Git appends a tab to a name holding a space, quoted or not, so that the
   // name's end can be found. Verified against git 2.50.1.
   const tab = rest.indexOf("\t");
-  const name = tab === -1 ? rest : rest.slice(0, tab);
-
-  const path = name.startsWith(`"`) ? unquote(name) : name;
+  const path = pathOf(tab === -1 ? rest : rest.slice(0, tab));
   if (path === "/dev/null") return null;
+  return unprefixed(path);
+}
+
+/**
+ * The path a `diff --git` line names, where both of its sides name the same
+ * one, and null where they do not.
+ *
+ * Neither side is terminated, so the space between them reads like one inside a
+ * name that holds a space. Splitting the line down its middle finds the
+ * separator for a file named the same on both sides, which is every entry but a
+ * rename. A rename is read from its `rename to` header instead.
+ */
+function sameNameOf(header: string): string | null {
+  const rest = header.slice("diff --git ".length);
+  const middle = (rest.length - 1) / 2;
+  if (!Number.isInteger(middle) || rest.charAt(middle) !== " ") return null;
+
+  const oldSide = rest.slice(0, middle);
+  const newSide = rest.slice(middle + 1);
+  // Where the split landed right, the two sides are the same text but for the
+  // letter git prefixes each with, which follows the quote on a quoted name.
+  const letter = newSide.startsWith(`"`) ? 1 : 0;
+  if (oldSide.charAt(letter) !== "a" || newSide.charAt(letter) !== "b") return null;
+  if (oldSide.slice(letter + 1) !== newSide.slice(letter + 1)) return null;
+
+  return unprefixed(pathOf(newSide));
+}
+
+/** A path as a diff header wrote it, with git's quoting read where it quoted. */
+function pathOf(name: string): string {
+  return name.startsWith(`"`) ? unquote(name) : name;
+}
+
+/** A path on the new side, with the `b/` prefix git gives that side removed. */
+function unprefixed(path: string): string {
   return path.startsWith("b/") ? path.slice(2) : path;
 }
 

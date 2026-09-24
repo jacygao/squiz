@@ -237,6 +237,110 @@ index af70335,f794161..121cba9
   c
 `;
 
+/**
+ * One diff carrying every kind of entry git writes with no `+++` header,
+ * beside a text file that has one.
+ *
+ * A binary file is a single line saying the two sides differ, a mode change is
+ * the two mode lines and nothing else, and a deleted binary file is both at
+ * once. The text file is there because an entry is only finished by the next
+ * one starting.
+ */
+const binaryAndModeChanges = `
+diff --git a/gone.png b/gone.png
+deleted file mode 100644
+index 19fb45b..0000000
+Binary files a/gone.png and /dev/null differ
+diff --git a/notes.txt b/notes.txt
+index 85c3040..e50310a 100644
+--- a/notes.txt
++++ b/notes.txt
+@@ -1,3 +1,3 @@
+ alpha
+-beta
++BETA
+ gamma
+diff --git a/pic.png b/pic.png
+index 59dfb45..0b41954 100644
+Binary files a/pic.png and b/pic.png differ
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+`;
+
+const newBinaryFile = `
+diff --git a/fresh.png b/fresh.png
+new file mode 100644
+index 0000000..0616feb
+Binary files /dev/null and b/fresh.png differ
+`;
+
+// An added empty file is all header: git writes its mode and its index and
+// stops, having no content to show. A placeholder is an ordinary thing to add.
+const addedEmptyFile = `
+diff --git a/pkg/__init__.py b/pkg/__init__.py
+new file mode 100644
+index 0000000..e69de29
+`;
+
+/**
+ * Two entries naming one file: the first carries its added line, the second is
+ * a mode change carrying none.
+ *
+ * Each half is `git diff` of one commit. A file already keyed with lines must
+ * not be emptied by a later entry that keys the same name.
+ */
+const oneFileTwice = `
+diff --git a/run.sh b/run.sh
+index 85c3040..e50310a 100644
+--- a/run.sh
++++ b/run.sh
+@@ -1,3 +1,3 @@
+ alpha
+-beta
++BETA
+ gamma
+diff --git a/run.sh b/run.sh
+old mode 100644
+new mode 100755
+`;
+
+// The two sides of a `diff --git` line are separated by a space, and neither
+// side is terminated. A name holding a space is told from the separator only
+// by the two sides being the same length.
+const binaryPathWithASpace = `
+diff --git a/a pic.png b/a pic.png
+index dfe5dbf..177aee7 100644
+Binary files a/a pic.png and b/a pic.png differ
+`;
+
+// A quoted name puts git's prefix letter after the opening quote.
+const quotedBinaryPath = `
+diff --git "a/caf\\303\\251.png" "b/caf\\303\\251.png"
+index f1eef04..2a332be 100644
+Binary files "a/caf\\303\\251.png" and "b/caf\\303\\251.png" differ
+`;
+
+// A rename's two sides are different names, so its `diff --git` line cannot be
+// split down the middle. "rename to" names the new side on its own.
+const renameWithModeChange = `
+diff --git a/old.png b/new.png
+old mode 100644
+new mode 100755
+similarity index 100%
+rename from old.png
+rename to new.png
+`;
+
+const binaryRename = `
+diff --git a/logo.png b/brand/logo.png
+similarity index 94%
+rename from logo.png
+rename to brand/logo.png
+index 056a573..d7f5212 100644
+Binary files a/logo.png and b/brand/logo.png differ
+`;
+
 test("an added line is one the change touched", () => {
   assert.equal(touches(driftingHunks, "drift.txt", 10), true);
   assert.equal(touches(driftingHunks, "drift.txt", 11), true);
@@ -343,6 +447,69 @@ test("a file with lines to anchor to is carried too", () => {
 test("a file the change left with no new side is not carried", () => {
   assert.equal(carries(deletedFile, "doomed.txt"), false);
   assert.equal(carries(pureRename, "renamed-to.txt"), false);
+  assert.equal(carries(binaryAndModeChanges, "gone.png"), false);
+});
+
+/**
+ * A binary file and a mode change are files the change touched, and git writes
+ * both with no `+++` header. A comment on the file as a whole is all either can
+ * take, because nothing in the entry numbers a line.
+ */
+test("a file the diff carries with no `+++` header is carried, with no line to anchor to", () => {
+  assert.equal(carries(binaryAndModeChanges, "pic.png"), true);
+  assert.equal(carries(binaryAndModeChanges, "script.sh"), true);
+  assert.deepEqual([...(parse(binaryAndModeChanges).get("pic.png") ?? [])], []);
+  assert.equal(touches(binaryAndModeChanges, "pic.png", 1), false);
+  assert.equal(touches(binaryAndModeChanges, "script.sh", 1), false);
+});
+
+test("a file with a `+++` header is carried beside the files with none", () => {
+  assert.equal(touches(binaryAndModeChanges, "notes.txt", 2), true);
+  assert.deepEqual(
+    [...parse(binaryAndModeChanges).keys()].sort(),
+    ["notes.txt", "pic.png", "script.sh"],
+    "the deleted binary file is the only entry of the four with no new side",
+  );
+});
+
+test("a binary file the change added is carried, with no line to anchor to", () => {
+  assert.equal(carries(newBinaryFile, "fresh.png"), true);
+  assert.equal(touches(newBinaryFile, "fresh.png", 1), false);
+
+  // Its entry says both that the file is new and that it is binary, and one
+  // file entry is one key however many of its headers name it.
+  assert.deepEqual([...parse(newBinaryFile).keys()], ["fresh.png"]);
+});
+
+/**
+ * An empty file the change added, which git writes as a mode and an index and
+ * nothing else.
+ *
+ * It is neither a deletion nor a rename, so it is a file a comment can hang on,
+ * and a placeholder like this is an ordinary thing for a change to add.
+ */
+test("an empty file the change added is carried, with no line to anchor to", () => {
+  assert.equal(carries(addedEmptyFile, "pkg/__init__.py"), true);
+  assert.deepEqual([...(parse(addedEmptyFile).get("pkg/__init__.py") ?? [])], []);
+  assert.equal(touches(addedEmptyFile, "pkg/__init__.py", 1), false);
+});
+
+test("a second entry for a file already keyed does not take its lines away", () => {
+  assert.deepEqual(
+    [...(parse(oneFileTwice).get("run.sh") ?? [])],
+    [2],
+    "the mode change below the hunk must not empty the set the hunk filled",
+  );
+});
+
+test("a binary file is carried under a name holding a space, and under a quoted name", () => {
+  assert.deepEqual([...parse(binaryPathWithASpace).keys()], ["a pic.png"]);
+  assert.deepEqual([...parse(quotedBinaryPath).keys()], ["café.png"]);
+});
+
+test("a renamed file git wrote no `+++` for is carried under the name it now has", () => {
+  assert.deepEqual([...parse(renameWithModeChange).keys()], ["new.png"]);
+  assert.deepEqual([...parse(binaryRename).keys()], ["brand/logo.png"]);
 });
 
 test("a renamed file is carried under the name it now has", () => {
@@ -452,4 +619,18 @@ diff --git a/x.txt b/x.txt
     "a hunk under a file entry that has lost its +++ header",
   );
   assert.match(stray.message, /before any file/);
+
+  // A binary file is keyed off its entry's headers, and that must not let its
+  // file stand in for the `+++` header a hunk is counted against.
+  const afterBinary = refusal(
+    `
+diff --git a/pic.png b/pic.png
+index 59dfb45..0b41954 100644
+Binary files a/pic.png and b/pic.png differ
+@@ -1,1 +1,1 @@
+ one
+`,
+    "a hunk under a binary file entry",
+  );
+  assert.match(afterBinary.message, /before any file/);
 });
