@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type OutputRead, type RoundOutput, readOutput, verdictFor } from "./output.ts";
+import type { RoundOutput } from "../adapter.ts";
+import { type OutputRead, readOutput, verdictFor } from "./output.ts";
 import { type PiEvent, readEvents } from "./stream.ts";
 
 /**

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { type RoundCost, costOf, costWith, unspent } from "./cost.ts";
+import { type RoundCost, unspent } from "../adapter.ts";
+import { costWith } from "./cost.ts";
 import { type PiEvent, readEvents } from "./stream.ts";
 
 /** One short `pi` run, committed as it was emitted, and what it really cost. */
@@ -143,8 +144,11 @@ async function* oneChunk(text: string): AsyncGenerator<string> {
   yield text;
 }
 
-function costOfText(text: string): Promise<RoundCost> {
-  return costOf(readEvents(oneChunk(text)));
+/** The round's cost, folded over the stream the way one pass over it does. */
+async function costOfText(text: string): Promise<RoundCost> {
+  let total = unspent;
+  for await (const event of readEvents(oneChunk(text))) total = costWith(total, event);
+  return total;
 }
 
 async function eventsOf(text: string): Promise<readonly PiEvent[]> {

@@ -115,9 +115,12 @@ unverified rows: closing it would exercise code already exercised.
 
 ### A provider that cannot run
 
-A misconfigured provider fails inside the stream rather than around it. `pi`
-exits 0, writes nothing to stderr, and emits a complete assistant message whose
-`stopReason` is `"error"` and whose `errorMessage` holds the reason. Every usage
+A provider `pi` reached and could not use fails inside the stream rather than
+around it. `pi` exits 0, writes nothing to stderr, and emits a complete
+assistant message whose `stopReason` is `"error"` and whose `errorMessage` holds
+the reason. A provider `pi` never got as far as using takes the other path
+entirely: it exits non-zero, writes nothing to stdout, and puts the whole
+explanation on stderr, so reading only the stream loses it. Every usage
 field on it is zero, `totalTokens` included, so it is indistinguishable by cost
 from both a free round and a round `pi` could not price.
 
