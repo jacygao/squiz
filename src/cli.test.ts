@@ -221,9 +221,9 @@ test("the shim is executable", async () => {
  * A thread as the reader hands one over, with `overrides` naming what the case
  * is about.
  *
- * `line` is already the line to report on: the reader puts `originalLine` in
- * its place when GitHub nulls the live one, and nulls it outright on a thread
- * whose subject is the file.
+ * The anchor is already settled: the reader puts `originalLine` in the line's
+ * place when GitHub nulls the live one, and anchors a thread whose subject is
+ * the file to the file.
  */
 function thread(overrides: Partial<ReviewThread>): ReviewThread {
   return {
@@ -231,8 +231,7 @@ function thread(overrides: Partial<ReviewThread>): ReviewThread {
     isResolved: false,
     isOutdated: false,
     path: "src/cli.ts",
-    subjectType: "line",
-    line: 7,
+    anchor: { at: "line", line: 7 },
     comments: [],
     ...overrides,
   };
@@ -240,8 +239,8 @@ function thread(overrides: Partial<ReviewThread>): ReviewThread {
 
 test("the listing names each open thread by its id and its file and line", () => {
   const printed = threadListing(80, [
-    thread({ id: "PRRT_one", path: "scratch/target.txt", line: 7 }),
-    thread({ id: "PRRT_two", path: "scratch/target.txt", line: 12 }),
+    thread({ id: "PRRT_one", path: "scratch/target.txt", anchor: { at: "line", line: 7 } }),
+    thread({ id: "PRRT_two", path: "scratch/target.txt", anchor: { at: "line", line: 12 } }),
   ]);
 
   assert.equal(
@@ -254,8 +253,8 @@ test("the listing names each open thread by its id and its file and line", () =>
 
 test("a resolved thread is not on the listing", () => {
   const printed = threadListing(80, [
-    thread({ id: "PRRT_open", line: 7 }),
-    thread({ id: "PRRT_closed", isResolved: true, line: 19 }),
+    thread({ id: "PRRT_open", anchor: { at: "line", line: 7 } }),
+    thread({ id: "PRRT_closed", isResolved: true, anchor: { at: "line", line: 19 } }),
   ]);
 
   assert.equal(
@@ -279,10 +278,13 @@ test("a thread on the file as a whole is listed as its file, not as its first li
     thread({
       id: "PRRT_kwDOUEd2qM6hqMTt",
       path: "scratch/target.txt",
-      subjectType: "file",
-      line: null,
+      anchor: { at: "file" },
     }),
-    thread({ id: "PRRT_kwDOUEd2qM6hqQd7", path: "scratch/a file with spaces.txt", line: 1 }),
+    thread({
+      id: "PRRT_kwDOUEd2qM6hqQd7",
+      path: "scratch/a file with spaces.txt",
+      anchor: { at: "line", line: 1 },
+    }),
   ]);
 
   assert.equal(
@@ -298,7 +300,7 @@ test("a thread on the file as a whole is listed as its file, not as its first li
 });
 
 test("a thread on a line GitHub would not name says so rather than claiming the file", () => {
-  const printed = threadListing(80, [thread({ id: "PRRT_lost", line: null })]);
+  const printed = threadListing(80, [thread({ id: "PRRT_lost", anchor: { at: "unnamed-line" } })]);
 
   assert.equal(
     printed,
@@ -308,7 +310,9 @@ test("a thread on a line GitHub would not name says so rather than claiming the 
 });
 
 test("a thread whose anchored line was edited is listed on the line it was anchored to", () => {
-  const printed = threadListing(80, [thread({ id: "PRRT_old", isOutdated: true, line: 12 })]);
+  const printed = threadListing(80, [
+    thread({ id: "PRRT_old", isOutdated: true, anchor: { at: "line", line: 12 } }),
+  ]);
 
   assert.match(printed, /^PRRT_old src\/cli\.ts:12$/mu);
 });
@@ -318,8 +322,8 @@ test("the identifier is the whole of the first field, so it copies into squiz re
   // The paths #80 carries: a space, so the location cannot be split on the
   // first field, and a path outside ASCII.
   const printed = threadListing(80, [
-    thread({ id: ids[0], path: "scratch/a file with spaces.txt", line: 1 }),
-    thread({ id: ids[1], path: "scratch/ünïcödé.txt", line: 1 }),
+    thread({ id: ids[0], path: "scratch/a file with spaces.txt", anchor: { at: "line", line: 1 } }),
+    thread({ id: ids[1], path: "scratch/ünïcödé.txt", anchor: { at: "line", line: 1 } }),
   ]);
 
   const listed = printed.trimEnd().split("\n").slice(1);

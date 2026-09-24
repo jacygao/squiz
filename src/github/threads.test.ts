@@ -196,8 +196,7 @@ test("a thread comes back with its node id, its state, its anchor and its commen
         isResolved: false,
         isOutdated: false,
         path: "scratch/target.txt",
-        subjectType: "line",
-        line: 4,
+        anchor: { at: "line", line: 4 },
         comments: [
           {
             databaseId: 3942350907,
@@ -333,18 +332,21 @@ test("an outdated thread reports the line it was anchored to", async () => {
     () => {
       const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
-      assert.equal(thread.line, 12);
+      assert.deepEqual(thread.anchor, { at: "line", line: 12 });
       assert.equal(thread.isOutdated, true);
     },
   );
 });
 
-test("a thread anchored to no line at all reports no line", async () => {
+test("a thread GitHub named no line for is still anchored to a line", async () => {
   await withFakeGh([threadsPage([threadNode({ line: null, originalLine: null })])], () => {
     const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
-    assert.equal(thread.line, null);
-    assert.equal(thread.subjectType, "line", "a line GitHub would not name is still a line thread");
+    assert.deepEqual(
+      thread.anchor,
+      { at: "unnamed-line" },
+      "a line GitHub would not name is still a thread about a line, not about the file",
+    );
   });
 });
 
@@ -374,11 +376,8 @@ test("a thread on the file as a whole is told from a thread on the first line", 
       const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.deepEqual(
-        listed(result).map((thread) => [thread.subjectType, thread.line]),
-        [
-          ["file", null],
-          ["line", 1],
-        ],
+        listed(result).map((thread) => thread.anchor),
+        [{ at: "file" }, { at: "line", line: 1 }],
         "a comment about a whole file read as a comment on line 1 sends the agent to the wrong place",
       );
     },

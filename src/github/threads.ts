@@ -22,13 +22,53 @@ export type ThreadComment = {
 };
 
 /**
- * What a thread is about: one line of a file, or the file as a whole.
+ * How GitHub spells what a thread is about: one line of a file, or the file as
+ * a whole.
  *
  * GitHub reads a file-scoped thread back carrying `line: 1` and
  * `originalLine: 1`, which is what a thread on the first line carries too. This
  * is the only field that tells the two apart.
  */
-export type ThreadSubject = "line" | "file";
+type ThreadSubject = "line" | "file";
+
+/** A thread anchored to a line of its file, which is the line to report it on. */
+type LineAnchor = {
+  readonly at: "line";
+  readonly line: number;
+};
+
+/**
+ * A thread anchored to the file rather than to any line of it.
+ *
+ * `line` is declared absent rather than left out. Leaving it out bars only a
+ * fresh object literal, so an anchor built elsewhere and widened to
+ * `ThreadAnchor` would still carry a line this case never has.
+ */
+type FileAnchor = {
+  readonly at: "file";
+  readonly line?: never;
+};
+
+/**
+ * A thread anchored to a line GitHub named neither a live nor an original line
+ * for.
+ *
+ * An ordinary state of a healthy thread rather than a fault: it is about a
+ * line, and only the number is missing. Modelled because the answer permits it.
+ */
+type UnnamedLineAnchor = {
+  readonly at: "unnamed-line";
+  readonly line?: never;
+};
+
+/**
+ * What a thread is anchored to: one of three things, and never two of them at
+ * once.
+ *
+ * A reader takes the case first and the line only from the case that has one,
+ * so it cannot report a thread about a file on a line of that file.
+ */
+export type ThreadAnchor = LineAnchor | FileAnchor | UnnamedLineAnchor;
 
 export type ReviewThread = {
   /**
@@ -40,15 +80,7 @@ export type ReviewThread = {
   readonly isResolved: boolean;
   readonly isOutdated: boolean;
   readonly path: string;
-  readonly subjectType: ThreadSubject;
-  /**
-   * The line to report the thread on, which is the live one or, once the file
-   * has changed under it, the line it was anchored to.
-   *
-   * Null on a thread whose subject is the file, and null on one GitHub gave
-   * neither a live line nor an original one. Never a thread whose line moved.
-   */
-  readonly line: number | null;
+  readonly anchor: ThreadAnchor;
   /** Every comment, in the order GitHub returns them, replies included. */
   readonly comments: readonly ThreadComment[];
 };
@@ -285,8 +317,7 @@ function readThread(node: unknown): PartialThread | null {
       isResolved,
       isOutdated,
       path,
-      subjectType,
-      line: lineOf(node, subjectType),
+      anchor: anchorOf(node, subjectType),
       comments,
     },
     commentsNext: page.next,
@@ -323,16 +354,17 @@ function subjectOf(node: unknown): ThreadSubject | null {
 }
 
 /**
- * The line a thread is reported on.
+ * What a thread is anchored to, read off its subject type and its two lines.
  *
  * `line` goes null the moment the anchored line is edited, and those are the
  * threads a person most wants to look at, so the line it was anchored to stands
  * in for it.
  */
-function lineOf(node: unknown, subject: ThreadSubject): number | null {
+function anchorOf(node: unknown, subject: ThreadSubject): ThreadAnchor {
   // A thread about the file is about no line of it, whatever GitHub answers here.
-  if (subject === "file") return null;
-  return integerOf(fieldOf(node, "line")) ?? integerOf(fieldOf(node, "originalLine"));
+  if (subject === "file") return { at: "file" };
+  const line = integerOf(fieldOf(node, "line")) ?? integerOf(fieldOf(node, "originalLine"));
+  return line === null ? { at: "unnamed-line" } : { at: "line", line };
 }
 
 /**

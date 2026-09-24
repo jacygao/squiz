@@ -155,16 +155,26 @@ export function threadListing(pullRequest: number, threads: readonly ReviewThrea
 /**
  * Where a thread is, as `file:line`.
  *
- * A thread whose subject is the file is named by its file. GitHub reads one
- * back on line 1, and printing that sends the agent to a line nobody said
- * anything about.
- *
- * A line thread GitHub named no line for is named by its file in different
- * words, because it is about a line and that line is not printed.
+ * The two anchors carrying no line are told apart in words rather than both
+ * being named by their file alone. An agent sent to a line the thread is not on
+ * reads code nobody said anything about.
  */
 function locationOf(thread: ReviewThread): string {
-  if (thread.subjectType === "file") return `${thread.path} (whole file)`;
-  return thread.line === null ? `${thread.path} (line unknown)` : `${thread.path}:${thread.line}`;
+  const { anchor } = thread;
+  switch (anchor.at) {
+    case "line":
+      return `${thread.path}:${anchor.line}`;
+    case "file":
+      return `${thread.path} (whole file)`;
+    case "unnamed-line":
+      return `${thread.path} (line unknown)`;
+    default: {
+      // An anchor case none of the above names. `anchor` is `never` only
+      // while those three are all there is, so a fourth stops this compiling.
+      const unhandled: never = anchor;
+      return unhandled;
+    }
+  }
 }
 
 // The dispatch runs only where this file is the process's entry point, so that
