@@ -84,17 +84,29 @@ function where(thread: ReviewThread): string {
 /**
  * The code a thread was opened against.
  *
- * A thread whose subject is the file is about no line of it. A thread about a
- * line GitHub named no line for is still about that line, and telling the
- * reviewer it is about the file asks for a verdict on the wrong thing.
+ * A thread about a line GitHub named no line for is still about that line, and
+ * telling the reviewer it is about the file asks for a verdict on the wrong
+ * thing.
  *
  * The reviewer reads this and the coding agent reads the thread listing, about
  * the same thread, so the two keep these three cases apart the same way.
  */
 function locationOf(thread: ReviewThread): string {
-  if (thread.subjectType === "file") return `\`${thread.path}\` as a whole`;
-  if (thread.line === null) return `\`${thread.path}\`, line unknown`;
-  return `\`${thread.path}\` line ${thread.line}`;
+  const { anchor } = thread;
+  switch (anchor.at) {
+    case "line":
+      return `\`${thread.path}\` line ${anchor.line}`;
+    case "file":
+      return `\`${thread.path}\` as a whole`;
+    case "unnamed-line":
+      return `\`${thread.path}\`, line unknown`;
+    default: {
+      // An anchor case none of the above names. `anchor` is `never` only
+      // while those three are all there is, so a fourth stops this compiling.
+      const unhandled: never = anchor;
+      return unhandled;
+    }
+  }
 }
 
 /** One comment, said by whoever wrote it. The first opened the thread. */

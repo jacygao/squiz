@@ -40,8 +40,7 @@ const finding: ReviewThread = {
   isResolved: false,
   isOutdated: false,
   path: "src/ui/card.ts",
-  subjectType: "line",
-  line: 88,
+  anchor: { at: "line", line: 88 },
   comments: [
     {
       databaseId: 3942350907,
@@ -61,8 +60,7 @@ const settled: ReviewThread = {
   isResolved: true,
   isOutdated: false,
   path: "src/ui/card.ts",
-  subjectType: "line",
-  line: 12,
+  anchor: { at: "line", line: 12 },
   comments: [{ databaseId: 3942350900, author: null, body: "The import is unused." }],
 };
 
@@ -231,15 +229,15 @@ test("a fence inside the diff does not close the block it is carried in", () => 
 });
 
 test("a thread whose subject is the file is on that file as a whole", () => {
-  const whole: ReviewThread = { ...settled, subjectType: "file", line: null, comments: [] };
+  const whole: ReviewThread = { ...settled, anchor: { at: "file" }, comments: [] };
 
   assert.match(round([whole]), /^Resolved\. On `src\/ui\/card\.ts` as a whole\.$/mu);
 });
 
-// Both threads carry `line: null`, and describing them alike asks the reviewer
-// to rule on a file when the finding is about a line nobody can name.
+// The two anchors that name no line, and describing them alike asks the
+// reviewer to rule on a file when the finding is about a line nobody can name.
 test("a thread on a line GitHub named no line for is not called the file", () => {
-  const lost: ReviewThread = { ...settled, line: null, comments: [] };
+  const lost: ReviewThread = { ...settled, anchor: { at: "unnamed-line" }, comments: [] };
 
   assert.match(
     round([lost]),
