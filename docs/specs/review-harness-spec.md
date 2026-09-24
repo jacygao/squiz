@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.17 (draft)
+**Version:** 0.18 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -487,6 +487,11 @@ An anchor the harness cannot place is posted on the file instead, with
 `file:line` written in the text. Where the diff does not carry the file either,
 the finding is reported as general and the summary's Notes records that it could
 not be anchored.
+
+A finding scoped to `file` is reported general on the same terms: where the diff
+does not carry its file, the finding goes to Notes carrying the file alone. What
+the diff carries decides where a comment can hang, and the scope the reviewer
+chose does not change that.
 
 A file-scoped comment is a thread. It is resolved, re-opened and ruled on the
 way an inline one is, and it carries across rounds.
