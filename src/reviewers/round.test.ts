@@ -314,12 +314,10 @@ test("a reviewer that complains at length is drained as it goes, and only the en
  */
 test("a killed reviewer takes the processes it started with it", async () => {
   await inATree(async (tree) => {
-    const pidFile = join(tree, "pids");
-    const round = await runRound(reviewer(deaf(pidFile)).adapter, at(tree), BOUND);
+    const round = await runRound(reviewer(deaf(tree)).adapter, at(tree), BOUND);
     assert.equal(round.outcome, "timed-out");
 
-    const descendant = Number(readFileSync(pidFile, "utf8").split(" ")[1]);
-    assert.ok(Number.isInteger(descendant), "the reviewer must have recorded what it started");
+    const descendant = toolIn(tree);
     assert.ok(
       await gone(descendant),
       `the process the reviewer started is still running ${descendant} after the round reported itself stopped`,
@@ -365,6 +363,47 @@ test("an adapter that throws before it returns still stops the reviewer", async 
   });
 });
 
+/**
+ * A tool outlives the reviewer that started it, and stopping the reviewer is
+ * not what stops it. `pi` starts ripgrep for `grep` and for `find` without
+ * detaching it, so a reviewer that finishes while ripgrep is still running
+ * leaves it in the round's own process group.
+ *
+ * At `read` a tool of that grant cannot write to the tree. The hole is the
+ * mechanism rather than that tool, and what the grant allows is not what this
+ * is entitled to rely on.
+ */
+test("a tool still running when the reviewer finishes is stopped with the round", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(leavingEarly(tree)).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", "the reviewer finished, and its round stands");
+    assert.ok(
+      await gone(toolIn(tree)),
+      "the reviewer exited first, so nothing of the round was ever signalled",
+    );
+  });
+});
+
+/**
+ * The reviewer taking the signal is not the round being over either. A round
+ * that stopped waiting the moment the reviewer answered would never escalate
+ * for the tool that did not.
+ */
+test("a tool that outlives a reviewer which took the signal is stopped too", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(obedient(tree)).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "timed-out");
+    assert.ok(await gone(toolIn(tree)), "the tool outlived the round that started it");
+  });
+});
+
+/** The identifier of the tool the reviewer started, as the reviewer recorded it. */
+function toolIn(tree: string): number {
+  const tool = Number(readFileSync(join(tree, "pids"), "utf8").split(" ")[1]);
+  assert.ok(Number.isInteger(tool), "the reviewer must have recorded what it started");
+  return tool;
+}
+
 /** Whether nothing is left running the command the marker names. */
 async function nothingRuns(marker: string, milliseconds = 5_000): Promise<boolean> {
   const until = Date.now() + milliseconds;
@@ -392,18 +431,55 @@ async function gone(pid: number, milliseconds = 5_000): Promise<boolean> {
 }
 
 /**
- * A reviewer that answers no signal and starts something else that answers
- * none either, recording both process identifiers.
+ * Something that answers no signal, which only the escalation removes.
+ *
+ * It says it is up only once its handler is installed, so that a test never
+ * passes because the signal arrived before the tool was deaf to it.
  */
-function deaf(pidFile: string): string {
-  const ignoring = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+function deafly(readyFile: string): string {
+  return [
+    "process.on('SIGTERM', () => {});",
+    `require("node:fs").writeFileSync(${JSON.stringify(readyFile)}, "up");`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+}
+
+/**
+ * A reviewer that starts a tool answering no signal, waits for it to be up,
+ * records both process identifiers, and then does what it is told.
+ *
+ * The tool is what `pi` leaves behind: its `grep` and its `find` both start
+ * ripgrep without detaching it, so a tool of a round sits in the round's own
+ * process group.
+ */
+function withTool(tree: string, andThen: string): string {
+  const pidFile = join(tree, "pids");
+  const readyFile = join(tree, "ready");
   return [
     'const { spawn } = require("node:child_process");',
     'const fs = require("node:fs");',
-    `const kid = spawn(process.execPath, ["-e", ${JSON.stringify(ignoring)}], { stdio: "ignore" });`,
-    `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + kid.pid);`,
-    ignoring,
+    `const tool = spawn(process.execPath, ["-e", ${JSON.stringify(deafly(readyFile))}], { stdio: "ignore" });`,
+    `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + tool.pid);`,
+    `const until = Date.now() + 10000;`,
+    `while (!fs.existsSync(${JSON.stringify(readyFile)}) && Date.now() < until) {}`,
+    andThen,
   ].join("\n");
+}
+
+/** A reviewer that answers no signal either, so that both need the escalation. */
+function deaf(tree: string): string {
+  return withTool(tree, "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);");
+}
+
+/** A reviewer that reviews and leaves while its tool is still running. */
+function leavingEarly(tree: string): string {
+  const answer = JSON.stringify(said(JSON.stringify(review), "stop", 0.002));
+  return withTool(tree, `process.stdout.write(${answer}, () => process.exit(0));`);
+}
+
+/** A reviewer that answers the signal, while the tool it started does not. */
+function obedient(tree: string): string {
+  return withTool(tree, "setInterval(() => {}, 1000);");
 }
 
 /** A reviewer that never reached the model, which says so on stderr and exits. */

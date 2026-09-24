@@ -32,12 +32,19 @@ recheck-when: Node's major version changes, or the reviewer's output stops arriv
   stopped leaves its tools running otherwise, and a tool still running can write
   to the tree the coding agent is about to commit. The reviewer is started as
   its own group leader so that its identifier names the group.
+- **The reviewer's own exit does not end the round's cleanup.** A tool sits in
+  the reviewer's group and can outlive it, whether because the reviewer finished
+  first or because the reviewer took the signal and the tool did not. Both
+  finishing and escalating are decided by whether anything of the group is left,
+  and the reviewer's lifetime is only part of that answer.
 - **`SIGTERM`, then `SIGKILL` after a grace, and wait for neither longer than the
   grace.** A round that reaches its bound returns within twice the grace of
   reaching it, which is what the margin left for posting has to cover.
-- **Send both while the reviewer is still alive.** A group is named by its
-  leader's process identifier, and naming it after the leader is gone can name a
-  group the system has since given to somebody else.
+- **Ask the group whether it has members, and only once the reviewer has been
+  reaped.** The system keeps a group's identifier reserved while the group has
+  members, so an empty group answers no rather than answering for whoever holds
+  the identifier next. Before it is reaped the reviewer is itself a member, and
+  the answer is always yes.
 - **Treat a signal the system refuses as a process that cannot be stopped from
   here.** `child.kill` throws for some errors, and a throw there would turn a
   round that ran into a round the harness could not run.
@@ -74,6 +81,16 @@ identifier is then the child's own. `process.kill(-pid, signal)` sends to the
 group; `child.kill(signal)` sends only to the child. Both throw rather than
 emitting an error event when the system refuses them.
 
+`process.kill(-pid, 0)` asks whether the group could be signalled and sends
+nothing. It throws `ESRCH` for a group with no members left and `EPERM` for one
+that is there and not ours, so only the first of those two means gone. There is
+no event for the last member of a group leaving, so the question is asked at
+intervals rather than waited on.
+
+A reviewer that has exited is still a member of its group until it is reaped. It
+is reaped by the time `exitCode` or `signalCode` is set, so asking after either
+is set is asking about everything except the reviewer.
+
 `child.exitCode` and `child.signalCode` are both `null` while the process is
 alive, and one of them is set once it is gone. They are what tells a signal that
 is still needed from one that would be sent to a process already stopped.
@@ -86,9 +103,12 @@ and `error` are the other two ways the same fact arrives.
 
 - **One machine, one Node version.** The phase ordering is Node's own and not
   this machine's, but the figures above were taken here.
-- **A group is not a fence.** A process that leaves the group by making one of
-  its own is not signalled with it, and a harness killed outright by the runtime
-  signals nothing at all.
+- **A group is not a fence.** A tool that makes a process group of its own is
+  not signalled with the reviewer's. `pi`'s shell tool detaches every command it
+  runs and reaps them from a handler of its own, so a shell tool outliving the
+  reviewer is outside what this reaches; its read-grant tools do not detach, and
+  `grep` and `find` both start ripgrep inside the reviewer's own group. A
+  harness killed outright by the runtime signals nothing at all.
 - **`SIGKILL` was exercised only against a process built to ignore `SIGTERM`.**
   Nothing establishes that a real reviewer ever needs it.
 - **Nothing here was measured against `pi` itself.** The reviewers in the tests
