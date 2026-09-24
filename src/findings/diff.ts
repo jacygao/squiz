@@ -43,8 +43,9 @@ export type ChangedLines = ReadonlyMap<string, ReadonlySet<number>>;
 /**
  * Read a unified diff into the lines it added, keyed by the files it carries.
  *
- * A file is keyed whether or not it has a `+++` header. A binary file and a
- * mode change carry none, and both are files a comment can hang on.
+ * A file is keyed whether or not it has a `+++` header. A binary file, a mode
+ * change and an added empty file carry none, and all three are files a comment
+ * can hang on.
  *
  * Throws `DiffParseError` on anything it cannot account for: a hunk header it
  * cannot read, a hunk that delivers a different number of lines than it
@@ -178,9 +179,9 @@ export function touchesFile(changed: ChangedLines, file: string): boolean {
 /**
  * What a file entry's headers say, while it has shown no `+++` of its own.
  *
- * `changed` is true once a header shows the file's content or mode changed. It
- * is what separates a file that has a new side to comment on from a rename that
- * moved the same bytes to a new name.
+ * `changed` is true once a header shows the file was added, or that its content
+ * or its mode changed. It is what separates a file that has a new side to
+ * comment on from a rename that moved the same bytes to a new name.
  */
 type Entry = {
   name: string | null;
@@ -196,14 +197,20 @@ function readEntryHeader(entry: Entry, line: string): void {
     // Where the new side of a rename is named, since no other header of one
     // yields it.
     entry.name = pathOf(line.slice("rename to ".length));
-  } else if (line.startsWith("Binary files ") || line.startsWith("new mode ")) {
+  } else if (
+    line.startsWith("Binary files ") ||
+    line.startsWith("new mode ") ||
+    line.startsWith("new file mode ")
+  ) {
+    // An added empty file is all header: git writes its mode and its index and
+    // stops, having no content to show.
     entry.changed = true;
   }
 }
 
 /**
- * Key a file the diff carries with no `+++` header: a binary file, or a mode
- * change.
+ * Key a file the diff carries with no `+++` header: a binary file, a mode
+ * change, or an added empty file.
  *
  * A deletion keys nothing, because it leaves no new side to comment on, and
  * neither does an entry showing no change at all, which is what a rename that

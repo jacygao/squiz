@@ -275,6 +275,36 @@ index 0000000..0616feb
 Binary files /dev/null and b/fresh.png differ
 `;
 
+// An added empty file is all header: git writes its mode and its index and
+// stops, having no content to show. A placeholder is an ordinary thing to add.
+const addedEmptyFile = `
+diff --git a/pkg/__init__.py b/pkg/__init__.py
+new file mode 100644
+index 0000000..e69de29
+`;
+
+/**
+ * Two entries naming one file: the first carries its added line, the second is
+ * a mode change carrying none.
+ *
+ * Each half is `git diff` of one commit. A file already keyed with lines must
+ * not be emptied by a later entry that keys the same name.
+ */
+const oneFileTwice = `
+diff --git a/run.sh b/run.sh
+index 85c3040..e50310a 100644
+--- a/run.sh
++++ b/run.sh
+@@ -1,3 +1,3 @@
+ alpha
+-beta
++BETA
+ gamma
+diff --git a/run.sh b/run.sh
+old mode 100644
+new mode 100755
+`;
+
 // The two sides of a `diff --git` line are separated by a space, and neither
 // side is terminated. A name holding a space is told from the separator only
 // by the two sides being the same length.
@@ -445,6 +475,31 @@ test("a file with a `+++` header is carried beside the files with none", () => {
 test("a binary file the change added is carried, with no line to anchor to", () => {
   assert.equal(carries(newBinaryFile, "fresh.png"), true);
   assert.equal(touches(newBinaryFile, "fresh.png", 1), false);
+
+  // Its entry says both that the file is new and that it is binary, and one
+  // file entry is one key however many of its headers name it.
+  assert.deepEqual([...parse(newBinaryFile).keys()], ["fresh.png"]);
+});
+
+/**
+ * An empty file the change added, which git writes as a mode and an index and
+ * nothing else.
+ *
+ * It is neither a deletion nor a rename, so it is a file a comment can hang on,
+ * and a placeholder like this is an ordinary thing for a change to add.
+ */
+test("an empty file the change added is carried, with no line to anchor to", () => {
+  assert.equal(carries(addedEmptyFile, "pkg/__init__.py"), true);
+  assert.deepEqual([...(parse(addedEmptyFile).get("pkg/__init__.py") ?? [])], []);
+  assert.equal(touches(addedEmptyFile, "pkg/__init__.py", 1), false);
+});
+
+test("a second entry for a file already keyed does not take its lines away", () => {
+  assert.deepEqual(
+    [...(parse(oneFileTwice).get("run.sh") ?? [])],
+    [2],
+    "the mode change below the hunk must not empty the set the hunk filled",
+  );
 });
 
 test("a binary file is carried under a name holding a space, and under a quoted name", () => {
