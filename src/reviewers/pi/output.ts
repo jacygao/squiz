@@ -19,22 +19,8 @@
 
 import type { Finding } from "../../findings/finding.ts";
 import type { Verdict } from "../../findings/status.ts";
+import type { RoundOutput, ThreadVerdict } from "../adapter.ts";
 import type { PiEvent, PiMessage } from "./stream.ts";
-
-/** The reviewer's ruling on one thread it was handed. */
-export type ThreadVerdict = {
-  /** The identifier the thread was handed over under, copied back. */
-  readonly thread: string;
-  readonly verdict: Verdict;
-};
-
-/** What one round of review returned. */
-export type RoundOutput = {
-  /** Empty where the reviewer found nothing, which is a result and not a failure. */
-  readonly findings: readonly Finding[];
-  /** Only the threads the reviewer ruled on. A thread it passed over has no entry. */
-  readonly verdicts: readonly ThreadVerdict[];
-};
 
 /** Why the output could not be read. One line, which is what the caller reports. */
 type Failure = { readonly outcome: "failed"; readonly reason: string };

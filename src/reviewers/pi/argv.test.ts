@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Depth } from "../../config/config.ts";
-import { argv, type CommandLine, grants, type Invocation } from "./argv.ts";
+import type { CommandLine, Invocation } from "../adapter.ts";
+import { argv, grants } from "./argv.ts";
 
 /**
  * An invocation whose paths and prompt spell no tool name, so the only place a
@@ -13,6 +14,7 @@ const invocation: Invocation = {
   charterFile: "/tmp/squiz/plugin/charter.md",
   prompt: "Review pull request 142.",
   sessionDirectory: ".squiz/agent-7/session",
+  scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
 };
 

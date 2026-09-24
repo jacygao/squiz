@@ -12,6 +12,7 @@
  */
 
 import type { Depth } from "../../config/config.ts";
+import type { CommandLine, Invocation } from "../adapter.ts";
 
 const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
 
@@ -27,32 +28,6 @@ export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze(
   // The shell is all `deep` adds, and it is the one granted tool that writes.
   deep: Object.freeze([...readGrant, "bash"]),
 });
-
-/** What the harness hands the reviewer for one round. */
-export type Invocation = {
-  /**
-   * The git work tree holding the change under review. `pi` runs with this as
-   * its current directory.
-   */
-  readonly directory: string;
-  /** The charter file, whose contents `pi` appends to its system prompt. */
-  readonly charterFile: string;
-  /** The task prompt, carrying the pull request and the threads already on it. */
-  readonly prompt: string;
-  readonly sessionDirectory: string;
-  /**
-   * How much the reviewer is allowed to do. The harness decides it; the adapter
-   * turns it into the grant and never chooses a value of its own.
-   */
-  readonly depth: Depth;
-};
-
-/** A process to start: what to run, what to pass it, and where it runs. */
-export type CommandLine = {
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly directory: string;
-};
 
 /**
  * Build the command line for one round at the depth given.

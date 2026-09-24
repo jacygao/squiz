@@ -17,24 +17,8 @@
  * is unaffected.
  */
 
+import type { RoundCost } from "../adapter.ts";
 import type { PiEvent } from "./stream.ts";
-
-/** What a round spent: the dollars `pi` priced it at, and the tokens behind them. */
-export type RoundCost = {
-  /** US dollars. Zero against a non-zero `tokens` is unknown rather than free. */
-  readonly dollars: number;
-  readonly tokens: number;
-  /** How many assistant messages the two figures cover. */
-  readonly messages: number;
-};
-
-/**
- * A round that has reported nothing yet.
- *
- * It is also what a round killed before its first assistant message completed
- * comes back as, which is a fact about that round rather than a missing figure.
- */
-export const unspent: RoundCost = Object.freeze({ dollars: 0, tokens: 0, messages: 0 });
 
 /**
  * The round's cost with one more event counted.
@@ -54,17 +38,4 @@ export function costWith(total: RoundCost, event: PiEvent): RoundCost {
     tokens: total.tokens + usage.totalTokens,
     messages: total.messages + 1,
   };
-}
-
-/**
- * What a round spent, over the whole of its stream.
- *
- * A stream that stops early — the reviewer killed at the time bound — yields
- * what the completed messages carry. That figure is a floor rather than the
- * round's cost: the request in flight is spent, billed and never reported.
- */
-export async function costOf(events: AsyncIterable<PiEvent>): Promise<RoundCost> {
-  let total = unspent;
-  for await (const event of events) total = costWith(total, event);
-  return total;
 }
