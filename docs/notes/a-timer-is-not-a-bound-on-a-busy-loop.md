@@ -28,9 +28,16 @@ recheck-when: Node's major version changes, or the reviewer's output stops arriv
   well below the bound and the moment is compared against `Date.now()` at every
   look, so a wait that ran long, a clock that jumped, or a timer that fired early
   costs one more look rather than the round.
+- **Signal the reviewer's process group, not the reviewer.** A reviewer that is
+  stopped leaves its tools running otherwise, and a tool still running can write
+  to the tree the coding agent is about to commit. The reviewer is started as
+  its own group leader so that its identifier names the group.
 - **`SIGTERM`, then `SIGKILL` after a grace, and wait for neither longer than the
   grace.** A round that reaches its bound returns within twice the grace of
   reaching it, which is what the margin left for posting has to cover.
+- **Send both while the reviewer is still alive.** A group is named by its
+  leader's process identifier, and naming it after the leader is gone can name a
+  group the system has since given to somebody else.
 - **Treat a signal the system refuses as a process that cannot be stopped from
   here.** `child.kill` throws for some errors, and a throw there would turn a
   round that ran into a round the harness could not run.
@@ -59,21 +66,31 @@ and the clock read in that work's own path is what bounds it.
 
 ### Stopping the process
 
-`stdio` of `["ignore", "pipe", "ignore"]` is what gives the child `/dev/null` on
-stdin, which is required unconditionally. stderr goes nowhere for the same
-reason a pipe would be wrong: nobody drains it, and a full pipe stops the
-process it was meant to be reading.
+`stdio` of `["ignore", "pipe", "pipe"]` is what gives the child `/dev/null` on
+stdin, which is required unconditionally.
+
+`detached: true` makes the child a process group leader, and the group's
+identifier is then the child's own. `process.kill(-pid, signal)` sends to the
+group; `child.kill(signal)` sends only to the child. Both throw rather than
+emitting an error event when the system refuses them.
 
 `child.exitCode` and `child.signalCode` are both `null` while the process is
 alive, and one of them is set once it is gone. They are what tells a signal that
 is still needed from one that would be sent to a process already stopped.
 
+A process that never started emits no `exit`, so a wait that listens only for
+that one waits out its whole length on a reviewer that is not installed. `close`
+and `error` are the other two ways the same fact arrives.
+
 ## Limits
 
 - **One machine, one Node version.** The phase ordering is Node's own and not
   this machine's, but the figures above were taken here.
-- **`SIGKILL` was never needed.** Every process measured stopped on `SIGTERM`,
-  so the escalation is built and unexercised against a reviewer that ignores one.
+- **A group is not a fence.** A process that leaves the group by making one of
+  its own is not signalled with it, and a harness killed outright by the runtime
+  signals nothing at all.
+- **`SIGKILL` was exercised only against a process built to ignore `SIGTERM`.**
+  Nothing establishes that a real reviewer ever needs it.
 - **Nothing here was measured against `pi` itself.** The reviewers in the tests
   are scripts that flood, go quiet, or answer, chosen to be the shapes a real one
   fails in.

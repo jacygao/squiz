@@ -28,7 +28,9 @@ import type { Readable } from "node:stream";
 
 import {
   type Adapter,
+  type CostSoFar,
   type Invocation,
+  type ParsedRun,
   type RoundCost,
   type RoundOutput,
   type RunResult,
@@ -130,6 +132,15 @@ type Attempt = { readonly cost: RoundCost } & (
 );
 
 /**
+ * As much of the reviewer's stderr as a reason carries.
+ *
+ * A startup failure says one line and stops, so this is generous enough to hold
+ * it whole and small enough that a reviewer writing to stderr for the length of
+ * a round cannot grow it.
+ */
+const COMPLAINT_LIMIT = 2_000;
+
+/**
  * One process, read to the end or stopped at the bound.
  *
  * Three things confine it, and none is conditional. It runs in the work tree
@@ -150,20 +161,30 @@ async function attempt(
   bound: Deadline,
 ): Promise<Attempt> {
   const line = adapter.argv(invocation);
-  const options: SpawnOptionsWithStdioTuple<StdioNull, StdioPipe, StdioNull> = {
+  const options: SpawnOptionsWithStdioTuple<StdioNull, StdioPipe, StdioPipe> = {
     cwd: line.directory,
     env: { ...process.env, TMPDIR: scratch },
-    // stderr goes nowhere: the reviewer writes none, and a pipe nobody drains
-    // fills and stops the process it was meant to be reading.
-    stdio: ["ignore", "pipe", "ignore"],
+    // The reviewer leads its own process group, so that stopping it stops the
+    // tools it started. At depth `read` the grant is the only thing keeping the
+    // reviewer off the code under review, and a tool outliving the round that
+    // launched it is outside the grant as much as outside the bound.
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
   };
 
-  let child: ChildProcessByStdio<null, Readable, null>;
+  let child: ChildProcessByStdio<null, Readable, Readable>;
   try {
     child = spawn(line.command, [...line.args], options);
   } catch (cause) {
     return { cost: unspent, kind: "unstartable", reason: startFailed(line.command, cause) };
   }
+
+  // A startup failure never reaches the stream: the process exits non-zero with
+  // an empty stdout, and its only account of itself is here. Read as it
+  // arrives, because a pipe nobody drains fills and stops the process it was
+  // meant to be reading.
+  const complaint = drain(child.stderr);
+  const closing = ending(child);
 
   // The last figure reported before the process is stopped is what a killed
   // round records, so it is tracked here rather than taken from the parse.
@@ -189,18 +210,16 @@ async function attempt(
     }
   };
 
-  const parsing = adapter
-    .parse(bounded(), (reported) => {
-      cost = reported;
-    })
-    .then(
-      (run): Attempt => ({ cost: run.cost, ...run.result }),
-      (cause): Attempt => ({
-        cost,
-        kind: "unparsed",
-        reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
-      }),
-    );
+  const parsing = read(adapter, bounded(), (reported) => {
+    cost = reported;
+  }).then(
+    (run): Attempt => ({ cost: run.cost, ...run.result }),
+    (cause): Attempt => ({
+      cost,
+      kind: "unparsed",
+      reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
+    }),
+  );
 
   let cancel = (): void => {};
   const expiry = new Promise<"expired">((settle) => {
@@ -213,29 +232,100 @@ async function attempt(
   if (ended === "expired" || overran) {
     finished = true;
     await stop(child);
-    // The parse is left mid-stream, so the stream is closed under it rather
+    // The parse is left mid-stream, so the streams are closed under it rather
     // than waiting on a process that has been told to go.
     child.stdout.destroy();
+    child.stderr.destroy();
     return { cost, kind: "killed" };
   }
 
-  // A spawn that failed reports it around the time stdout closes, so a failure
-  // waits one turn for it rather than reporting an empty stream as a reviewer
-  // that ran and said nothing.
-  if (ended.kind !== "reviewed") await nextTurn();
+  // The reviewer is stopped before its account is read, and whatever the
+  // account turns out to be. One still running would never close its output, so
+  // there would be nothing to wait for; one already gone is not signalled at
+  // all; and no reviewer outlives the round that started it.
+  await stop(child);
+  // Its exit status and the last of stderr are both there only once its output
+  // has closed. A spawn that failed reports itself here too, rather than an
+  // empty stream being read as a reviewer that ran and said nothing.
+  await within(closing, GRACE_MS);
   const failure = startFailure;
   finished = true;
-  await stop(child);
   if (failure !== undefined) return { cost: ended.cost, kind: "unstartable", reason: failure };
-  return ended;
+  if (ended.kind !== "unparsed" && ended.kind !== "incomplete") return ended;
+
+  // A run that completed a message explained itself in the stream, and stderr
+  // would only say the same thing a second way.
+  const said = complaint();
+  if (ended.cost.messages > 0 || said === "") return ended;
+  return {
+    ...ended,
+    reason: `${ended.reason}: ${endedAs(line.command, child)}, and said: ${said}`,
+  };
 }
 
 /**
- * Stop the reviewer, and do not return while it might still be running.
+ * The adapter's read of the output, as a promise however it fails.
  *
- * `SIGTERM` first, which makes the reviewer kill its own children and exit. One
- * still there after the grace is killed outright, and the wait for each is
- * bounded, so a reviewer that answers neither signal cannot hold the round open.
+ * An adapter need not be written as an async function, and one that throws
+ * before it returns its promise would otherwise throw past the bound and the
+ * cleanup both, leaving a reviewer running and its cost unrecorded.
+ */
+async function read(
+  adapter: Adapter,
+  stdout: AsyncIterable<Uint8Array>,
+  costSoFar: CostSoFar,
+): Promise<ParsedRun> {
+  return adapter.parse(stdout, costSoFar);
+}
+
+/**
+ * Read stderr as it arrives, keeping the end of it.
+ *
+ * Draining is not optional: a pipe nobody reads fills, and the reviewer stops
+ * on the write that fills it. Keeping only the end is what stops a reviewer
+ * that complains for a whole round from being held in memory.
+ */
+function drain(stderr: Readable): () => string {
+  let tail = "";
+  stderr.setEncoding("utf8");
+  stderr.on("data", (chunk: string) => {
+    tail = (tail + chunk).slice(-COMPLAINT_LIMIT);
+  });
+  // A pipe closed under a reviewer that is still writing, which is not a
+  // failure of the round.
+  stderr.on("error", () => {});
+  return () => tail.trim();
+}
+
+/** Resolves once the process is gone and its output is closed, however it ended. */
+function ending(child: ChildProcess): Promise<void> {
+  return new Promise((settle) => {
+    child.once("close", () => settle());
+    // A process that never started emits no close of its own.
+    child.once("error", () => settle());
+  });
+}
+
+/** How the process ended, named for the reason a reader is given. */
+function endedAs(command: string, child: ChildProcess): string {
+  if (child.signalCode !== null) return `${command} was stopped by ${child.signalCode}`;
+  if (child.exitCode !== null) return `${command} exited ${child.exitCode}`;
+  return `${command} did not run`;
+}
+
+/**
+ * Stop the reviewer and everything it started, and do not return while any of
+ * it might still be running.
+ *
+ * `SIGTERM` to the process group first, which makes the reviewer kill its own
+ * children and exit. A group still there after the grace is killed outright,
+ * and the wait for each is bounded, so a reviewer that answers neither signal
+ * cannot hold the round open.
+ *
+ * Both signals go to the group while the reviewer is still alive, which is what
+ * makes the group's own identifier safe to name: it is the reviewer's process
+ * identifier, and naming it after the reviewer is gone could name a group that
+ * the system has since given to somebody else.
  */
 async function stop(child: ChildProcess): Promise<void> {
   if (hasStopped(child)) return;
@@ -246,12 +336,24 @@ async function stop(child: ChildProcess): Promise<void> {
 }
 
 /**
- * Send the signal, and carry on where the system refuses it.
+ * Send the signal to the reviewer's process group, and carry on where the
+ * system refuses it.
  *
  * A refused signal is a process that cannot be stopped from here, which the
  * grace then covers. It is not a round that failed to run.
  */
 function signal(child: ChildProcess, sent: NodeJS.Signals): void {
+  const { pid } = child;
+  if (pid !== undefined) {
+    try {
+      // A negative identifier is the group rather than the one process, so a
+      // tool the reviewer started is stopped with the reviewer.
+      process.kill(-pid, sent);
+      return;
+    } catch {
+      // No group of its own, or none left. The reviewer itself may still be there.
+    }
+  }
   try {
     child.kill(sent);
   } catch {
@@ -264,7 +366,13 @@ function hasStopped(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
-/** Resolves true where the process exited inside the wait, false where it did not. */
+/**
+ * Resolves true where the process is gone inside the wait, false where it is
+ * not.
+ *
+ * `close` counts as well as `exit`, and so does the error a process that never
+ * started reports, because neither of those two emits an exit to wait for.
+ */
 function exited(child: ChildProcess, milliseconds: number): Promise<boolean> {
   return new Promise((settle) => {
     if (hasStopped(child)) {
@@ -272,16 +380,31 @@ function exited(child: ChildProcess, milliseconds: number): Promise<boolean> {
       return;
     }
     let cancel = (): void => {};
-    const onExit = (): void => {
+    const gone = (): void => {
       cancel();
+      child.off("exit", gone);
+      child.off("close", gone);
+      child.off("error", gone);
       settle(true);
     };
-    child.once("exit", onExit);
+    child.once("exit", gone);
+    child.once("close", gone);
+    child.once("error", gone);
     cancel = deadlineIn(milliseconds).whenPassed(() => {
-      child.off("exit", onExit);
+      child.off("exit", gone);
+      child.off("close", gone);
+      child.off("error", gone);
       settle(false);
     });
   });
+}
+
+/** Wait for it to settle, or for the wait to run out, whichever comes first. */
+async function within(settling: Promise<void>, milliseconds: number): Promise<void> {
+  const waited = new Promise<void>((settle) => {
+    deadlineIn(milliseconds).whenPassed(settle);
+  });
+  await Promise.race([settling, waited]);
 }
 
 /** The scratch space, made before the reviewer starts, or why it could not be. */

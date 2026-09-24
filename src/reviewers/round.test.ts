@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -264,6 +265,162 @@ test("an adapter that throws reading the output is output that could not be read
     assert.equal(starts, 2);
   });
 });
+
+/**
+ * A startup failure takes a different path from a provider that was reached and
+ * failed. It never gets as far as the stream: the process exits non-zero with
+ * an empty stdout, and its only account of itself is on stderr. Discarding that
+ * leaves a typo in a model name reported as a generic bad round, every round,
+ * forever.
+ */
+test("a reviewer that never started has its complaint carried, not discarded", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(refusingToStart).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup");
+    const reason = round.outcome === "setup" ? round.reason : "";
+    assert.match(
+      reason,
+      /Unknown provider "nosuchprovider"/u,
+      "the check that failed must be named",
+    );
+    assert.match(reason, /exited 1/u, "how it ended is what says the stream was never reached");
+  });
+});
+
+/**
+ * stderr is drained as it arrives rather than read at the end. A pipe nobody
+ * reads fills at about 64KB and stops the process on the write that fills it,
+ * which would turn a diagnostic into a hang, and holding all of it would put
+ * back the memory problem the incremental reader exists to avoid.
+ */
+test("a reviewer that complains at length is drained as it goes, and only the end kept", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(complainingAtLength).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup");
+    const reason = round.outcome === "setup" ? round.reason : "";
+    assert.match(reason, /the last thing it said/u, "the end of stderr is what is kept");
+    assert.ok(
+      reason.length < 2_500,
+      `the reason ran to ${reason.length} characters, so stderr is being held rather than tailed`,
+    );
+  });
+});
+
+/**
+ * A reviewer that ignores the signal is killed, and the tools it started go
+ * with it. At depth `read` the grant is the only confinement there is, and a
+ * subprocess outliving the round can still write to the tree the coding agent
+ * is about to commit.
+ */
+test("a killed reviewer takes the processes it started with it", async () => {
+  await inATree(async (tree) => {
+    const pidFile = join(tree, "pids");
+    const round = await runRound(reviewer(deaf(pidFile)).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "timed-out");
+
+    const descendant = Number(readFileSync(pidFile, "utf8").split(" ")[1]);
+    assert.ok(Number.isInteger(descendant), "the reviewer must have recorded what it started");
+    assert.ok(
+      await gone(descendant),
+      `the process the reviewer started is still running ${descendant} after the round reported itself stopped`,
+    );
+  });
+});
+
+/**
+ * An adapter need not be an async function, and one that throws before
+ * returning its promise threw past the bound and the cleanup both: the round
+ * came back as a setup problem with no cost, and the reviewer went on running.
+ *
+ * The reviewer here is stopped before it finishes starting, which is why what
+ * is checked is that no process is left running it rather than a pid it never
+ * got as far as recording.
+ */
+test("an adapter that throws before it returns still stops the reviewer", async () => {
+  await inATree(async (tree) => {
+    const marker = `squiz-probe-${process.pid}-${Date.now()}`;
+    let starts = 0;
+    const throwingSynchronously: Adapter = {
+      argv: (invocation) => {
+        starts += 1;
+        return {
+          command: process.execPath,
+          args: ["-e", `/* ${marker} */ setInterval(() => {}, 1000);`],
+          directory: invocation.directory,
+        };
+      },
+      // Not an async function: the throw happens before any promise exists.
+      parse: (_stdout, costSoFar) => {
+        costSoFar?.({ dollars: 0.004, tokens: 100, messages: 1 });
+        throw new Error("the adapter fell over before it started");
+      },
+      grants,
+    };
+
+    const round = await runRound(throwingSynchronously, at(tree), 10);
+    assert.equal(round.outcome, "unavailable", "a throw is output that could not be read");
+    assert.deepEqual(round.cost, { dollars: 0.008, tokens: 200, messages: 2 });
+    assert.equal(starts, 2);
+    assert.ok(await nothingRuns(marker), "the reviewer was left running");
+  });
+});
+
+/** Whether nothing is left running the command the marker names. */
+async function nothingRuns(marker: string, milliseconds = 5_000): Promise<boolean> {
+  const until = Date.now() + milliseconds;
+  for (;;) {
+    const listed = execFileSync("ps", ["-A", "-ww", "-o", "args="], { encoding: "utf8" });
+    if (!listed.includes(marker)) return true;
+    if (Date.now() > until) return false;
+    await new Promise((settle) => setTimeout(settle, 25));
+  }
+}
+
+/** Whether the process is gone, waited for rather than assumed. */
+async function gone(pid: number, milliseconds = 5_000): Promise<boolean> {
+  const until = Date.now() + milliseconds;
+  for (;;) {
+    try {
+      // Signal 0 asks whether it could be signalled, and sends nothing.
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    if (Date.now() > until) return false;
+    await new Promise((settle) => setTimeout(settle, 25));
+  }
+}
+
+/**
+ * A reviewer that answers no signal and starts something else that answers
+ * none either, recording both process identifiers.
+ */
+function deaf(pidFile: string): string {
+  const ignoring = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+  return [
+    'const { spawn } = require("node:child_process");',
+    'const fs = require("node:fs");',
+    `const kid = spawn(process.execPath, ["-e", ${JSON.stringify(ignoring)}], { stdio: "ignore" });`,
+    `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + kid.pid);`,
+    ignoring,
+  ].join("\n");
+}
+
+/** A reviewer that never reached the model, which says so on stderr and exits. */
+const refusingToStart = [
+  "process.stderr.write('Error: Unknown provider \"nosuchprovider\". Use --list-models to see available providers/models.\\n');",
+  "process.exit(1);",
+].join("\n");
+
+/**
+ * A reviewer that writes far more to stderr than a pipe holds before it exits,
+ * and whose last line is the one worth keeping.
+ */
+const complainingAtLength = [
+  'const noise = "a reviewer complaining\\n".repeat(50000);',
+  "process.stderr.write(noise);",
+  'process.stderr.write("the last thing it said\\n", () => process.exit(1));',
+].join("\n");
 
 /** What one attempt spent in the scripts that report one message. */
 const spentOnce = { dollars: 0.002, tokens: 100, messages: 1 };
