@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.6 (draft)
+**Version:** 0.7 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -59,7 +59,7 @@ later milestone writes through.
 - [ ] The hook exits 0 and posts nothing when the branch has no pull request,
       and finds the pull request when it has one.
 - [ ] `.squiz.json` with no keys yields rounds 3, depth `read`, timeout 420,
-      budget 0.10 and no test command. An out-of-range `rounds` is rejected with
+      budget 0.50 and no test command. An out-of-range `rounds` is rejected with
       a readable error.
 - [ ] CI runs `tsc --noEmit` and the tests green, with no runtime dependencies.
 

@@ -38,7 +38,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   depth: "read",
   test: null,
   timeout: 420,
-  budget: 0.1,
+  budget: 0.5,
 });
 
 /**

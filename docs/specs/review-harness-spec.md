@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.18 (draft)
+**Version:** 0.19 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -643,7 +643,7 @@ The review budget bounds a review two ways. Both are configurable.
 | Bound | Default | When it is reached |
 |---|---|---|
 | **Time**, per round | 420 seconds | The reviewer process is killed and the round records no findings. |
-| **Cost**, per episode | $0.10 | The episode closes without starting another round. |
+| **Cost**, per episode | $0.50 | The episode closes without starting another round. |
 
 Killing the reviewer yields no findings rather than a partial review, because
 the findings arrive in the last message of the run. It does yield a cost: the
@@ -749,7 +749,7 @@ until something asks.
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
-| **P1** | The cost bound | $0.10 per episode, checked when a round records its cost |
+| **P1** | The cost bound | $0.50 per episode, checked when a round records its cost |
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
@@ -839,7 +839,7 @@ on its own branch. Squiz does not create them.
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 420 | Seconds one round's reviewer may run, settable 1 to 480 |
-| `budget` | 0.10 | Dollars an episode may cost, settable above 0 to 5.00 |
+| `budget` | 0.50 | Dollars an episode may cost, settable above 0 to 5.00 |
 
 A setting outside its range, or of a type the table does not give it, is
 rejected with an error naming the setting, the value given and what was
