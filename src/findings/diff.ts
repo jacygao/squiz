@@ -1,10 +1,12 @@
 /**
  * The anchor validator: a unified-diff parser answering whether a `file` and
- * `line` is one the change touched.
+ * `line` is one the change touched, and whether the diff carries the file at
+ * all.
  *
  * An inline comment is anchored to a line the change touched, and GitHub
  * refuses an anchor outside the diff, so a finding whose anchor this rejects is
- * reported as a general finding instead.
+ * posted on its file instead, and on nothing where the diff does not carry the
+ * file either.
  *
  * The diff arrives as a string. Nothing here reaches GitHub, the network or the
  * filesystem.
@@ -31,11 +33,15 @@ export class DiffParseError extends Error {
  * Line numbers are the new file's, because an anchor is a line in the file as
  * it now stands. A removed line is in no set here: it exists only on the old
  * side, so nothing can be anchored to it.
+ *
+ * A key is every file the diff gives a new side, so a file whose change only
+ * removed lines is present with an empty set. The keys therefore answer which
+ * files the diff carries, which is what a comment on a file as a whole needs.
  */
 export type ChangedLines = ReadonlyMap<string, ReadonlySet<number>>;
 
 /**
- * Read a unified diff into the lines it added.
+ * Read a unified diff into the lines it added, keyed by the files it carries.
  *
  * Throws `DiffParseError` on anything it cannot account for: a hunk header it
  * cannot read, a hunk that delivers a different number of lines than it
@@ -102,6 +108,9 @@ export function parseDiff(diff: string): ChangedLines {
       if (hunk.fromOld === 0 && hunk.fromNew === 0) hunk = null;
     } else if (line.startsWith("+++ ")) {
       path = newSidePathOf(line);
+      // A file the change only removed lines from is still a file a comment can
+      // hang on, and it would reach no hunk body that keys it.
+      if (path !== null) linesOf(added, path);
       sawNewSide = true;
       sawFile = true;
     } else if (line.startsWith("diff --git ")) {
@@ -137,6 +146,18 @@ export function parseDiff(diff: string): ChangedLines {
  */
 export function touchesLine(changed: ChangedLines, file: string, line: number): boolean {
   return changed.get(file)?.has(line) ?? false;
+}
+
+/**
+ * Whether the change touched this file, on any line of it.
+ *
+ * True for a file the diff gives a new side, whether or not the change added a
+ * line to it, because a comment on a file as a whole hangs on the file rather
+ * than on a line. A file the change deleted answers false: it has no new side
+ * left to comment on.
+ */
+export function touchesFile(changed: ChangedLines, file: string): boolean {
+  return changed.has(file);
 }
 
 /** What a hunk header declares, counted down as the hunk's body is read. */
