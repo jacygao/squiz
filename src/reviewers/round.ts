@@ -190,12 +190,24 @@ async function attempt(
   // round records, so it is tracked here rather than taken from the parse.
   let cost = unspent;
   let startFailure: string | undefined;
+  let unstarted = false;
   let finished = false;
   child.on("error", (cause) => {
+    // A process that never started emits no exit, so this is the only word that
+    // it is not running.
+    unstarted = true;
     // Once the attempt is over the only signals left are this module's own, and
     // a refused one says nothing about whether the reviewer started.
     if (!finished) startFailure = startFailed(line.command, cause);
   });
+
+  // The reviewer leads the group, so its identifier names the group. What the
+  // round owns is the group rather than the one process in it that it started.
+  const owned: Owned = {
+    child,
+    group: child.pid,
+    gone: () => hasStopped(child) || unstarted,
+  };
 
   // Read as the chunks arrive, so that a reviewer flooding its output is
   // stopped by the bound even where the loop never reaches a timer.
@@ -231,7 +243,7 @@ async function attempt(
 
   if (ended === "expired" || overran) {
     finished = true;
-    await stop(child);
+    await stop(owned);
     // The parse is left mid-stream, so the streams are closed under it rather
     // than waiting on a process that has been told to go.
     child.stdout.destroy();
@@ -243,7 +255,7 @@ async function attempt(
   // account turns out to be. One still running would never close its output, so
   // there would be nothing to wait for; one already gone is not signalled at
   // all; and no reviewer outlives the round that started it.
-  await stop(child);
+  await stop(owned);
   // Its exit status and the last of stderr are both there only once its output
   // has closed. A spawn that failed reports itself here too, rather than an
   // empty stream being read as a reviewer that ran and said nothing.
@@ -313,26 +325,82 @@ function endedAs(command: string, child: ChildProcess): string {
   return `${command} did not run`;
 }
 
+/** How often the reviewer's group is asked whether anything of it is left. */
+const POLL_MS = 25;
+
+/** What one round owns: the reviewer, and the process group it leads. */
+type Owned = {
+  readonly child: ChildProcess;
+  /**
+   * The group's identifier, which is the reviewer's own. Absent where the
+   * reviewer never got as far as having one.
+   */
+  readonly group: number | undefined;
+  /** Whether the reviewer itself is gone, including where it never started. */
+  readonly gone: () => boolean;
+};
+
 /**
  * Stop the reviewer and everything it started, and do not return while any of
  * it might still be running.
  *
  * `SIGTERM` to the process group first, which makes the reviewer kill its own
- * children and exit. A group still there after the grace is killed outright,
- * and the wait for each is bounded, so a reviewer that answers neither signal
- * cannot hold the round open.
+ * children and exit. Anything of the group still there after the grace is
+ * killed outright, and each wait is bounded, so a reviewer that answers neither
+ * signal cannot hold the round open.
  *
- * Both signals go to the group while the reviewer is still alive, which is what
- * makes the group's own identifier safe to name: it is the reviewer's process
- * identifier, and naming it after the reviewer is gone could name a group that
- * the system has since given to somebody else.
+ * **The reviewer's own exit does not end this.** A tool it started sits in the
+ * same group and can outlive it, whether because the reviewer finished first or
+ * because the reviewer took the signal and the tool did not. At depth `read`
+ * the grant is the only thing keeping the round off the code under review, and
+ * a tool that outlives the round is outside the grant as much as outside the
+ * bound.
  */
-async function stop(child: ChildProcess): Promise<void> {
-  if (hasStopped(child)) return;
-  signal(child, "SIGTERM");
-  if (await exited(child, GRACE_MS)) return;
-  signal(child, "SIGKILL");
-  await exited(child, GRACE_MS);
+async function stop(owned: Owned): Promise<void> {
+  if (owned.gone() && !groupRuns(owned)) return;
+  signal(owned, "SIGTERM");
+  if (await settled(owned, GRACE_MS)) return;
+  signal(owned, "SIGKILL");
+  await settled(owned, GRACE_MS);
+}
+
+/**
+ * Whether anything is still running in the reviewer's group.
+ *
+ * Asked only once the reviewer itself is gone, because until then it is in the
+ * group and the answer is always yes.
+ *
+ * A group is named by its leader's identifier, and the system keeps that
+ * identifier reserved while the group has members. An empty group therefore
+ * answers no here rather than answering for whoever holds the identifier next.
+ */
+function groupRuns(owned: Owned): boolean {
+  const { group } = owned;
+  if (group === undefined) return false;
+  try {
+    // Signal 0 asks whether the group could be signalled, and sends nothing.
+    process.kill(-group, 0);
+    return true;
+  } catch (cause) {
+    // Refused rather than absent means it is there and not ours to signal.
+    return refused(cause);
+  }
+}
+
+/**
+ * Wait for the reviewer and its group both to be gone, for as long as the wait
+ * allows. Resolves false where either is still there.
+ *
+ * The reviewer's exit arrives as an event; a tool of its group outliving it
+ * does not, so the group is asked at intervals rather than waited on.
+ */
+async function settled(owned: Owned, milliseconds: number): Promise<boolean> {
+  const bound = deadlineIn(milliseconds);
+  for (;;) {
+    if (owned.gone() && !groupRuns(owned)) return true;
+    if (bound.passed()) return false;
+    await pause(POLL_MS);
+  }
 }
 
 /**
@@ -342,23 +410,28 @@ async function stop(child: ChildProcess): Promise<void> {
  * A refused signal is a process that cannot be stopped from here, which the
  * grace then covers. It is not a round that failed to run.
  */
-function signal(child: ChildProcess, sent: NodeJS.Signals): void {
-  const { pid } = child;
-  if (pid !== undefined) {
+function signal(owned: Owned, sent: NodeJS.Signals): void {
+  const { group } = owned;
+  if (group !== undefined) {
     try {
       // A negative identifier is the group rather than the one process, so a
-      // tool the reviewer started is stopped with the reviewer.
-      process.kill(-pid, sent);
+      // tool the reviewer started is stopped whether or not the reviewer is.
+      process.kill(-group, sent);
       return;
     } catch {
       // No group of its own, or none left. The reviewer itself may still be there.
     }
   }
   try {
-    child.kill(sent);
+    owned.child.kill(sent);
   } catch {
     // Nothing to do with it: the wait below is what bounds this either way.
   }
+}
+
+/** Whether the system refused the signal rather than finding nothing to send it to. */
+function refused(cause: unknown): boolean {
+  return cause instanceof Error && "code" in cause && cause.code === "EPERM";
 }
 
 /** Whether the process is gone, by its own exit or by a signal. */
@@ -366,36 +439,9 @@ function hasStopped(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
-/**
- * Resolves true where the process is gone inside the wait, false where it is
- * not.
- *
- * `close` counts as well as `exit`, and so does the error a process that never
- * started reports, because neither of those two emits an exit to wait for.
- */
-function exited(child: ChildProcess, milliseconds: number): Promise<boolean> {
+function pause(milliseconds: number): Promise<void> {
   return new Promise((settle) => {
-    if (hasStopped(child)) {
-      settle(true);
-      return;
-    }
-    let cancel = (): void => {};
-    const gone = (): void => {
-      cancel();
-      child.off("exit", gone);
-      child.off("close", gone);
-      child.off("error", gone);
-      settle(true);
-    };
-    child.once("exit", gone);
-    child.once("close", gone);
-    child.once("error", gone);
-    cancel = deadlineIn(milliseconds).whenPassed(() => {
-      child.off("exit", gone);
-      child.off("close", gone);
-      child.off("error", gone);
-      settle(false);
-    });
+    setTimeout(settle, milliseconds);
   });
 }
 
