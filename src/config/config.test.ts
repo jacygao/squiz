@@ -51,7 +51,7 @@ test("an absent .squiz.json is not an error, and yields the five defaults", () =
     depth: "read",
     test: null,
     timeout: 420,
-    budget: 0.1,
+    budget: 0.5,
   });
 });
 
