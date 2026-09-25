@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.19 (draft)
+**Version:** 0.20 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -290,6 +290,13 @@ else. A new adapter implements three things:
 
 The harness passes `read` or `deep`, and the adapter turns that into the right
 flags for its CLI. The adapter must not choose for itself.
+
+**A reviewer CLI must exit on `SIGTERM`, and so must every process it starts.**
+That is what the time bound rests on: the round signals the reviewer's process
+group and waits a grace before escalating, and the runtime's own kill escalates
+only while the session outlives the grace. A CLI that ignores `SIGTERM` runs on
+after the round that started it, spending against the model API with no episode
+left to record it. An adapter for such a CLI is not one this harness can hold.
 
 ### The `pi` adapter
 
@@ -650,9 +657,15 @@ the findings arrive in the last message of the run. It does yield a cost: the
 assistant messages that completed carry their own, and the round records that
 sum as its last tracked cost.
 
-The hook gets 600 seconds from Claude Code, and the harness posts the round's
-comments inside that. The time bound sits below the hook's ceiling: it is
-settable to 480 seconds at most, which leaves two minutes for posting.
+**The harness declares the hook's ceiling at 600 seconds**, in the registration
+rather than by taking the runtime's default, so the deadline every other bound
+sits below is stated where a reader can find it. The harness posts the round's
+comments inside it. The time bound sits below it: settable to 480 seconds at
+most, which leaves two minutes for posting.
+
+Reaching the ceiling is the harness's last resort rather than its plan. The
+runtime signals the hook and everything below it at once, so a round that
+reaches the ceiling has no chance to stop the reviewer itself.
 
 **No single call to GitHub may take more than 30 seconds.** Those two minutes
 are shared by every call a round makes, and a round makes one for each finding
