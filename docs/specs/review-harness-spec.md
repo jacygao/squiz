@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.20 (draft)
+**Version:** 0.22 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -678,6 +678,10 @@ being unreachable, so the round exits 0 and the comments that landed stay.
 This bound is not configurable. It is not a budget a project chooses but a
 guard on the one deadline the harness does not own.
 
+The cost bound reads what the episode spent, which is more than its rounds cost:
+an attempt that failed before it was a round may still have been paid for, and
+that spend counts against the bound even though it consumed no round of the cap.
+
 The cost bound is checked when a round records its cost, so it stops the next
 round rather than the running one. A round already running is never killed for
 cost. An episode that reaches the bound closes with the findings it has, and the
@@ -757,7 +761,7 @@ until something asks.
 | **P0** | The coding agent's commands | `squiz threads` and `squiz reply`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
-| **P0** | The episode state file | Round count, pull request number, per-round cost, keyed by the subagent's id and living in the worktree |
+| **P0** | The episode state file | Round count, pull request number, per-round cost, what the episode spent on attempts that were no round, keyed by the subagent's id and living in the worktree |
 | **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison or not at all |
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
