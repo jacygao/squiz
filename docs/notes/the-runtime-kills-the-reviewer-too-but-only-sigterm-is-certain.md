@@ -1,9 +1,9 @@
 ---
-settles: "§ 7 — what becomes of a detached reviewer when the runtime kills the hook, and whether anything is left to stop it"
+settles: "§ 7 — what becomes of a detached reviewer when the runtime kills the hook, what is left to stop it, and what sets the 600-second ceiling"
 issue: 142
 recorded: 2026-09-25
 versions: { claude-code: 2.1.270, node: 24.15.0, pi: 0.85.1 }
-recheck-when: Claude Code changes how it kills a hook that reaches its timeout
+recheck-when: Claude Code changes how it kills a hook that reaches its timeout, or changes the subagent stall watchdog
 ---
 
 # The runtime kills the reviewer too, but only its `SIGTERM` is certain
@@ -19,6 +19,11 @@ recheck-when: Claude Code changes how it kills a hook that reaches its timeout
   against the model API with no episode left to record it, and at depth `deep` it
   goes on running shell commands in the work tree after everything that would
   have noticed is gone.
+- **Nothing said whether 600 seconds is the runtime's default or its maximum.**
+  If it is a default a project can raise, the review budget is a trade a project
+  chooses rather than a wall, and a large diff can be reviewed properly. If it is
+  a maximum, a review that outlives it can never complete, and the only remedy
+  left is the reviewer reporting each finding as it makes it.
 
 ## Decisions
 
@@ -43,27 +48,79 @@ recheck-when: Claude Code changes how it kills a hook that reaches its timeout
   reviewer, and a Node process with no handler for `SIGTERM` exits on it. None of
   the round's own cleanup runs. Such a reviewer spends with no episode left to
   record it, and at depth `deep` goes on running commands in the work tree.
-- **§ 7's failure row for the hook timeout holds as written, and its account of
-  the ceiling does not.** The runtime does kill the hook and the turn does end
-  with nothing posted. But "The review budget" calls the 600-second ceiling a
-  deadline the harness does not own, and the hook's own registration sets it: a
-  `timeout` of 5 declared in `hooks/hooks.json` was honoured to the millisecond.
-  600 seconds is the default the runtime uses when a hook declares nothing.
-  Recorded rather than reconciled; the reconciliation is the owner's.
+- **The 600-second ceiling is the runtime's subagent stall watchdog, not the
+  hook's `timeout`, and raising the declared timeout on its own moves nothing.**
+  A hook declaring 900 was killed at 599.9 seconds, twice. The declared value is
+  neither clamped nor rejected; it is simply never reached. A subagent that makes
+  no progress for 600 seconds is failed, and a hook the runtime is waiting on is
+  cancelled with it — and a `SubagentStop` hook that runs long is exactly a
+  subagent making no progress, because the subagent cannot finish while the hook
+  holds it. With the watchdog moved out of the way the same hook, declaring the
+  same 900, ran past 600 seconds and past 900 without being signalled at all.
+- **A round that reaches the ceiling fails the coding agent's subagent, rather
+  than only losing the review.** The subagent is recorded as failed, and the
+  parent turn is told the subagent call was interrupted and that nothing ran. The
+  coding agent is left believing the work it dispatched did not happen.
 
 ## Needs your input
 
-- **Whether § 7 should go on calling the hook's ceiling a deadline the harness
-  does not own.** It is a number the plugin's own hook registration declares.
-  Recommendation: correct the wording and change nothing else. Lowering the
-  ceiling would only narrow the margin the round already has, and whether a
-  value above 600 is honoured was not tested.
+- **Whether § 7 should go on saying that the harness declares the hook's
+  ceiling.** The harness does declare 600 in its own registration, and that
+  declaration is not what ends a round at 600 seconds. Recommendation: say the
+  ceiling is the runtime's subagent stall watchdog, keep the declared 600 as the
+  statement of what a round budgets for, and change no number. A declared value
+  below the watchdog is honoured exactly, so the registration still bounds a
+  round that would otherwise run away inside the window.
+- **Whether § 7 should say that reaching the ceiling fails the subagent.** Its
+  failure row says only that the turn ends with nothing posted. The coding agent
+  is also told its subagent stalled and that nothing ran. Recommendation: add it
+  to the row, because a reader sizing the time bound is choosing how likely that
+  is.
+- **Whether to raise the ceiling, now that it is known to be raisable.** It moves
+  with an environment variable rather than with anything in `hooks/hooks.json`,
+  so raising it means every developer's shell has to carry a setting, and a
+  review that outlives 600 seconds still fails the coding agent's subagent rather
+  than finishing quietly. Recommendation: leave the ceiling where it is and go on
+  having the reviewer report each finding as it makes it. That the ceiling can be
+  raised makes reporting-as-you-go a choice rather than the only remedy, which is
+  worth knowing, and it does not make raising the ceiling the better one.
 - **Whether the adapter contract in § 4 should require a reviewer that exits on
   `SIGTERM`.** Recommendation: yes. It is the only bound on a reviewer once the
   runtime has killed the hook, and an adapter for a reviewer that ignores the
   signal cannot be made safe from inside this harness.
 
 ## Reference
+
+### What ends a round at 600 seconds
+
+The runtime's subagent stall watchdog, whose threshold was 600 seconds. It is
+read from `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`, in milliseconds, when that is
+set; setting it to 1800000 moved the ceiling to 1800 seconds.
+
+What the runtime says when the watchdog fires, all of it in the stream:
+
+- `task_updated` carries `"status": "failed"` and the error
+  `Agent stalled: no progress for 600s (stream watchdog did not recover)`
+- `task_notification` repeats that sentence as its `summary`
+- the hook's own `hook_response` says only `"outcome": "cancelled"`
+
+Nothing else announces it. The hook's stderr is empty, the session's stderr is
+empty, and no message anywhere says that the hook's declared timeout was not
+reached.
+
+The watchdog defers while the subagent has a tool call in flight *(unverified —
+read out of the 2.1.270 binary rather than run)*.
+
+### The hook's own `timeout`, and what it is worth
+
+`timeout`, in seconds, on the hook's entry in `hooks/hooks.json`. Below the
+watchdog it is honoured exactly: a declared 5 brought `SIGTERM` between 4.92 and
+4.98 seconds every time, and the subagent then finished normally. Above the
+watchdog it is worth nothing, because the watchdog cancels the hook first.
+
+The field takes any positive number *(unverified — read out of the 2.1.270
+binary, where it carries no maximum)*, so a declared 900 is accepted rather than
+refused.
 
 ### What the runtime does at the ceiling
 
@@ -83,18 +140,16 @@ signal can reach; and a child of that grandchild, in the grandchild's group. The
 detached grandchild stands for the reviewer and its child for a tool the reviewer
 started.
 
-### The ceiling, and how to set it
-
-`timeout`, in seconds, on the hook's entry in `hooks/hooks.json`. Absent, the
-runtime uses 600 seconds. A declared 5 was honoured: `SIGTERM` arrived between
-4.92 and 4.98 seconds every time. The default was honoured too, at 599.8
-seconds.
-
 ### What the runtime reports about a hook it killed
 
 A `hook_response` event carries `"outcome": "cancelled"`, and `exit_code` 143
 where the hook exited on the `SIGTERM` or 1 where it ignored the signal and was
 killed outright. `stdout` was empty in both cases.
+
+**`outcome` does not tell a killed hook from one that ran to the end.** The hook
+that was never signalled, and that exited 0 of its own accord after 1118 seconds,
+was also reported `"outcome": "cancelled"` — with `exit_code` 0. Read the exit
+code, not the outcome.
 
 **Anything the hook wrote to stderr before the kill is kept.** It comes back in
 that event's `stderr` and `output` fields, verbatim.
@@ -134,10 +189,28 @@ then exited on its own.
   rather than the hook's. So this is a gap in the runtime's cleanup at the
   ceiling rather than in the round's. Measuring that topology is what would close
   it.
-- **Whether a `timeout` above 600 is honoured.** Only lowering it was tested.
+- **The runtime's default hook timeout was never measured.** The run that
+  declared no `timeout` was killed at 599.8 seconds by the watchdog, which fires
+  at very nearly the same number. Nothing here separates the two, so whether the
+  default is also 600 seconds is unestablished.
+- **Whether a declared timeout above 600 is ever enforced.** Once the watchdog
+  was moved, a declared 900 was not enforced within 1118 seconds — 1.24 times its
+  own value — and the run ended because the hook exited rather than because
+  anything stopped it. That the runtime reported the outcome as cancelled leaves
+  it open that it had given up on the hook earlier and merely never killed it.
+- **No timing past 600 seconds in that run is precise.** Its probe's
+  200-millisecond heartbeat fired 2093 times across 1118 seconds, and its
+  1000-second lifetime timer fired at 1118 seconds, so the process's timers were
+  being starved by more than half. That nothing was ever signalled is read from
+  the process's own log and from sampling `ps` from outside it, neither of which
+  is a timing measurement; the 1118 itself is soft.
+- **Only `SubagentStop` was measured.** The watchdog belongs to a subagent, so a
+  `Stop` or `PreToolUse` hook that runs long has no stalling subagent behind it
+  and may reach its own declared timeout instead. Untested, and the harness does
+  not use those events.
 - **`pi`'s answer to `SIGTERM` is one observation.** One prompt, the `read`
   grant, killed 0.9 seconds into the request: gone within 51 milliseconds, status
   143. Whether a `bash` tool subprocess in flight changes it was not measured.
 - **Nothing here says what the runtime does to a hook it cancels for a reason
-  other than the timeout.** An interrupted session and an abandoned turn both end
-  a hook that is still running, and neither was run.
+  other than the timeout or the watchdog.** An interrupted session and an
+  abandoned turn both end a hook that is still running, and neither was run.
