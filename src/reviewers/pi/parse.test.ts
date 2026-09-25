@@ -106,11 +106,11 @@ test("the cost is reported as each assistant message completes", async () => {
     ),
     (progress) => told.push(progress),
   );
-  // Two messages, then the finding and the verdict, each told with the cost as
-  // it stood when it arrived.
+  // Two messages, then the finding, the verdict and the finish, each told with
+  // the cost as it stood when it arrived.
   assert.deepEqual(
     told.map((progress) => progress.cost.messages),
-    [1, 2, 2, 2],
+    [1, 2, 2, 2, 2],
   );
   assert.deepEqual(told.at(-1)?.cost, run.cost);
 });

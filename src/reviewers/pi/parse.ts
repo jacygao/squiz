@@ -22,8 +22,8 @@
 import {
   type ParsedRun,
   type ProgressSoFar,
+  type Reported,
   type RoundCost,
-  type RoundOutput,
   type RunResult,
   unspent,
 } from "../adapter.ts";
@@ -46,7 +46,7 @@ type Tally = {
   reason: string | undefined;
 };
 
-const nothingReported: RoundOutput = { findings: [], verdicts: [] };
+const nothingReported: Reported = { findings: [], verdicts: [], finished: false };
 
 /**
  * Read one run's whole output.
@@ -61,7 +61,7 @@ export async function parse(
   soFar?: ProgressSoFar,
 ): Promise<ParsedRun> {
   const tally: Tally = { cost: unspent, stopped: false, reason: undefined };
-  let reported: RoundOutput = nothingReported;
+  let reported: Reported = nothingReported;
   // One figure for the two halves, so a caller never holds a cost from one
   // moment of the run beside findings from another.
   const tell = (): void => soFar?.({ cost: tally.cost, ...reported });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { RoundOutput } from "../adapter.ts";
+import type { Reported, RoundOutput } from "../adapter.ts";
 import { type OutputRead, readOutput, verdictFor } from "./output.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import { type PiEvent, readEvents } from "./stream.ts";
@@ -181,7 +181,7 @@ test("a tool the reviewer read the code with reports nothing", async () => {
 });
 
 test("each report is told to the caller as it arrives", async () => {
-  const told: RoundOutput[] = [];
+  const told: Reported[] = [];
   const result = await readOutput(
     streamed([
       reported(REPORT_FINDING, lineFinding),
@@ -194,19 +194,30 @@ test("each report is told to the caller as it arrives", async () => {
 
   readingOf(result);
   assert.deepEqual(
-    told.map((output) => [output.findings.length, output.verdicts.length]),
+    told.map((output) => [output.findings.length, output.verdicts.length, output.finished]),
     [
-      [1, 0],
-      [1, 1],
-      [2, 1],
+      [1, 0, false],
+      [1, 1, false],
+      [2, 1, false],
+      [2, 1, true],
     ],
     "a caller stopped mid-stream keeps what it was last told",
   );
   assert.deepEqual(told.at(-1)?.findings, [lineFinding, changeFinding]);
 });
 
+/**
+ * The cue the caller stops the reviewer on. It is told separately from the
+ * reports, because a review finished with nothing found adds no report to tell.
+ */
+test("the caller is told when the reviewer reports the review complete", async () => {
+  const told: boolean[] = [];
+  await readOutput(streamed([finished]), (output) => told.push(output.finished));
+  assert.deepEqual(told, [true]);
+});
+
 test("what the caller was told is not changed by what arrives after it", async () => {
-  const told: RoundOutput[] = [];
+  const told: Reported[] = [];
   await readOutput(
     streamed([reported(REPORT_FINDING, lineFinding), reported(REPORT_FINDING, changeFinding)]),
     (output) => told.push(output),

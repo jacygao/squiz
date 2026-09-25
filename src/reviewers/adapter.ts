@@ -83,8 +83,20 @@ export type RoundOutput = {
   readonly verdicts: readonly ThreadVerdict[];
 };
 
+/** What the reviewer has reported, and whether it has said the review is complete. */
+export type Reported = RoundOutput & {
+  /**
+   * Whether the reviewer has reported its review complete.
+   *
+   * It is the caller's cue to stop the reviewer. A CLI given a run to end may
+   * not end it, and a round that waited to be told would pay for whatever the
+   * run did next.
+   */
+  readonly finished: boolean;
+};
+
 /** What a round has so far: what it has spent, and what the reviewer has reported. */
-export type RoundProgress = { readonly cost: RoundCost } & RoundOutput;
+export type RoundProgress = { readonly cost: RoundCost } & Reported;
 
 /**
  * Told what the round has so far, each time the run adds to it.

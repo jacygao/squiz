@@ -79,9 +79,15 @@ export type Round =
   /**
    * Something that will fail the same way next round: the reviewer would not
    * start, or it ran and completed no message. Reported as a setup problem
-   * rather than as a bad round, and not retried.
+   * rather than as a bad round, and not retried. It keeps what the reviewer
+   * reported, because a reviewer whose provider gave out after three findings
+   * made those three.
    */
-  | { readonly outcome: "setup"; readonly cost: RoundCost; readonly reason: string };
+  | ({
+      readonly outcome: "setup";
+      readonly cost: RoundCost;
+      readonly reason: string;
+    } & RoundOutput);
 
 /**
  * Run one round, at most `seconds` of wall clock for the whole of it.
@@ -100,7 +106,9 @@ export async function runRound(
   // changes directory, and so the directory is made wherever the harness runs.
   const scratch = resolve(invocation.directory, invocation.scratchDirectory);
   const unmade = makeScratch(scratch);
-  if (unmade !== null) return { outcome: "setup", cost: unspent, reason: unmade };
+  if (unmade !== null) {
+    return { outcome: "setup", cost: unspent, reason: unmade, ...nothingReported };
+  }
 
   let spent = unspent;
   let held: RoundOutput = nothingReported;
@@ -114,6 +122,7 @@ export async function runRound(
         outcome: "setup",
         cost: spent,
         reason: `the round could not be run: ${reasonFor(cause)}`,
+        ...held,
       };
     }
     spent = plus(spent, ran.cost);
@@ -129,7 +138,7 @@ export async function runRound(
     }
     if (ran.kind === "killed") return { outcome: "timed-out", cost: spent, seconds, ...held };
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
-      return { outcome: "setup", cost: spent, reason: ran.reason };
+      return { outcome: "setup", cost: spent, reason: ran.reason, ...held };
     }
     if (attempts > 1) {
       return { outcome: "unavailable", cost: spent, reason: ran.reason, ...held };
@@ -228,7 +237,7 @@ async function attempt(
   // The last the parse reported before the process is stopped is the whole of
   // what a killed round has, so it is tracked here rather than taken from the
   // parse's return, which a killed attempt never reaches.
-  let progress: RoundProgress = { cost: unspent, ...nothingReported };
+  let progress: RoundProgress = { cost: unspent, finished: false, ...nothingReported };
   let startFailure: string | undefined;
   let unstarted = false;
   let finished = false;
@@ -262,8 +271,20 @@ async function attempt(
     }
   };
 
+  let stopping = false;
   const parsing = read(adapter, bounded(), (reached) => {
     progress = reached;
+    // The reviewer has said its review is complete, so the round stops it here.
+    // Asking the reviewer's CLI to end the run on that call would not be
+    // enough: `pi` ends a run on a call only where every call of the same
+    // message asked it to, so a reviewer that reports a finding and finishes in
+    // one message would go on to another model request with the review already
+    // complete. The parse reads on until the output closes, so a report that
+    // was already on its way is still read.
+    if (reached.finished && !stopping) {
+      stopping = true;
+      void stop(owned);
+    }
   }).then(
     (run): Attempt => ({ cost: run.cost, reported: reportedIn(progress), ...run.result }),
     (cause): Attempt => ({

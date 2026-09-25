@@ -31,8 +31,6 @@ type TextContent = { readonly type: "text"; readonly text: string };
 type ToolResult = {
   readonly content: readonly TextContent[];
   readonly details?: unknown;
-  /** Ends the run on this call, rather than paying for one more turn to end it. */
-  readonly terminate?: boolean;
 };
 
 /** One tool, as `pi` registers it. `parameters` is the JSON Schema it validates against. */
@@ -174,7 +172,7 @@ export default function reportAsYouGo(pi: Registrar): void {
     name: FINISH_REVIEW,
     label: "Finish review",
     description:
-      "End the review. Call it exactly once, after the last finding and the last verdict, and call it even where you found nothing. A review that ends without it is a review that was cut short.",
+      "End the review. Call it exactly once, after the last finding and the last verdict, and call it even where you found nothing. It ends your run, so nothing you report after it is reported. A review that ends without it is a review that was cut short.",
     promptSnippet: "End the review",
     promptGuidelines: [
       `Use ${FINISH_REVIEW} as the last action of the review, including where there was nothing to report.`,
@@ -183,7 +181,6 @@ export default function reportAsYouGo(pi: Registrar): void {
     execute: async () => ({
       content: [{ type: "text", text: "The review is complete." }],
       details: {},
-      terminate: true,
     }),
   });
 }

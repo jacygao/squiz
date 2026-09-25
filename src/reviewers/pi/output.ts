@@ -24,7 +24,7 @@
 import type { Finding } from "../../findings/finding.ts";
 import { readFinding, readVerdict } from "../../findings/reported.ts";
 import type { Verdict } from "../../findings/status.ts";
-import type { RoundOutput, ThreadVerdict } from "../adapter.ts";
+import type { Reported, RoundOutput, ThreadVerdict } from "../adapter.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import type { PiEvent } from "./stream.ts";
 
@@ -35,15 +35,17 @@ type Failure = { readonly outcome: "failed"; readonly reason: string };
 export type OutputRead = ({ readonly outcome: "read" } & RoundOutput) | Failure;
 
 /** Told what the reviewer has reported so far, each time a report is added to it. */
-export type ReportedSoFar = (output: RoundOutput) => void;
+export type ReportedSoFar = (reported: Reported) => void;
 
 /**
  * Read the findings and the verdicts out of a round's events.
  *
- * `reportedSoFar` is told after each one, which is what a caller that will stop
- * the process mid-stream keeps. The whole stream is read whatever goes wrong in
- * it, because a reader that stopped early would leave the reviewer writing into
- * a pipe nobody drains.
+ * `reportedSoFar` is told after each one, and again when the reviewer reports
+ * the review complete. That is what a caller that will stop the process
+ * mid-stream keeps, and the cue it stops the process on. The whole stream is
+ * read whatever goes wrong in it and whatever the caller does with that cue,
+ * because a reader that stopped early would leave a report that was already on
+ * its way unread, and the reviewer writing into a pipe nobody drains.
  *
  * A line the reader could not turn into an event does not fail this on its own.
  * It is counted, and a failure names how many were dropped, since one of them
@@ -63,6 +65,8 @@ export async function readOutput(
   let dropped = 0;
   // The first report that was answered and could not be read back.
   let broken: string | undefined;
+  const tell = (): void =>
+    reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts], finished });
 
   for await (const event of events) {
     if (event.type === "unreadable") {
@@ -76,6 +80,7 @@ export async function readOutput(
 
     if (event.toolName === FINISH_REVIEW) {
       finished = true;
+      tell();
       continue;
     }
     if (event.toolName === REPORT_FINDING) {
@@ -85,7 +90,7 @@ export async function readOutput(
         continue;
       }
       findings.push(finding.value);
-      reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts] });
+      tell();
       continue;
     }
     if (event.toolName === REPORT_VERDICT) {
@@ -99,7 +104,7 @@ export async function readOutput(
       if (ruled.has(verdict.value.thread)) continue;
       ruled.add(verdict.value.thread);
       verdicts.push(verdict.value);
-      reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts] });
+      tell();
     }
   }
 

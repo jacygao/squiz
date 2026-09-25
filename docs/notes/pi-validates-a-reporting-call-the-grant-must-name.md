@@ -20,6 +20,9 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   whether a grant that leaves such a tool out says anything.
 - **Nothing said where a report is read back from**, or whether what the model
   sent and what the tool received are the same value.
+- **Nothing said what ends the run once the review is complete.** A run that goes
+  on after the last finding spends the round's remaining time on a review that is
+  already finished.
 - **Nothing said whether an extension may share code with the harness.** The
   harness has no runtime dependencies, and an extension that needed `typebox`
   would give it one.
@@ -46,6 +49,14 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
 - **Answer with a short line and carry the report in `details`.** No provider
   serialises `details`, so the report goes back to the harness whole without
   being paid for a second time in the reviewer's context.
+- **End the run from the round, once the reviewer has reported the review
+  complete, and ask `pi` for nothing.** `terminate: true` on a tool's result ends
+  the run only where every call of the same assistant message carries it, so a
+  reviewer that reports a finding and finishes its review in one message is not
+  obeyed and goes on to another model request. An instruction to finish last is
+  not a guard: the model can obey it and still put both calls in one message.
+  The round keeps reading the output until it closes, so a report already on its
+  way is still read.
 - **Write the extension against structural types and a plain JSON Schema
   object.** `pi` validates a schema that is not a TypeBox value through its own
   JSON Schema path, so `typebox` need not be imported and the harness keeps no
@@ -60,11 +71,6 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   Recommended: run one round against a real model before relying on a round's
   findings, since a reviewer that reports in prose now returns nothing at all
   rather than something the harness could still parse.
-- **Whether `finish_review` should end the run on the call.** It is answered
-  with `terminate: true`, which saves the turn that would otherwise be paid for
-  to end the run, and which means a call made too early ends the review early.
-  Recommended: keep it. The charter instructs that the call comes last, and the
-  saved turn is time against a bound that cannot be raised.
 
 ## Reference
 
@@ -84,6 +90,10 @@ bullets to its `Guidelines`, and each bullet must name its own tool.
 How a call refuses: `execute` throws. The message becomes the call's answer,
 `tool_execution_end` carries `"isError": true`, and the model reads it. A tool
 cannot mark its own answer as an error by returning a flag.
+
+What `terminate: true` on a result does: it ends the run only where every
+finalized result of the same assistant message carries it. One call of a batch
+asking for it has no effect at all, and nothing in the stream says so.
 
 What the harness reads a report out of:
 `tool_execution_end.result.details`. The event also carries `toolCallId`,
@@ -107,9 +117,9 @@ What validation does and does not refuse, measured against the shipped schema:
   from calling `pi`'s own argument validator directly. Nothing establishes that
   a reviewer uses these calls, in what order, or how often it gets a finding's
   shape wrong.
-- **`terminate: true` was not observed ending a run.** That it ends the run
-  without a further turn is read from `pi`'s own example and its loop, not from
-  a measured round.
+- **What `terminate: true` does was read out of `pi`'s agent loop and driven
+  offline**, with the loop's own tool executor over two batches. No live round
+  was run against a provider to watch it.
 - **One machine, macOS, `pi` 0.85.1.** The tool registry, the grant filter and
   the argument conversion are all `pi` internals, and none of them is in its
   documented interface.

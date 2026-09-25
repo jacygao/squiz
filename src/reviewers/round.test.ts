@@ -99,6 +99,54 @@ test("a reviewer that says nothing and does not stop is killed at the bound", as
 });
 
 /**
+ * The round ends the run itself once the reviewer has reported the review
+ * complete, rather than waiting for the run to end. A reviewer that reports a
+ * finding and finishes in one message leaves a run whose review is complete and
+ * which has not ended, so a round that waited would pay for whatever that run did
+ * next and would return a finished review at its time bound.
+ */
+test("a finished review comes back at once from a run that has not ended", async () => {
+  await inATree(async (tree) => {
+    const started = Date.now();
+    const round = await runRound(reviewer(finishingWithoutEnding).adapter, at(tree), 10);
+    const elapsed = Date.now() - started;
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], review.findings);
+    assert.ok(
+      elapsed < 5_000,
+      `the round took ${elapsed}ms against a bound of 10000ms, so it waited on a run whose review was already complete`,
+    );
+  });
+});
+
+/**
+ * A reviewer can report a finding and then exhaust its provider's retries before
+ * it finishes the review. The finding was confirmed and answered, so the round
+ * has it; the round is still the setup problem the run turned into.
+ */
+test("a reviewer whose provider gave out after reporting keeps what it reported", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(reportingThenFailing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(
+      round.outcome === "setup" ? round.findings : [],
+      review.findings,
+      "a finding reported before the provider gave out is a finding the round has",
+    );
+    assert.match(round.outcome === "setup" ? round.reason : "", /no credential/u);
+  });
+});
+
+test("the first attempt's findings survive a retry that completed no message", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(halfway, refusing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.outcome === "setup" ? round.findings : [], review.findings);
+  });
+});
+
+/**
  * A killed round is a failed round, which is not the same as a round that
  * honestly found nothing. Nothing may read one as the other, and what it keeps
  * is what the reviewer reported rather than a review it finished.
@@ -197,6 +245,8 @@ test("a run that completed no message is not tried again", async () => {
       outcome: "setup",
       cost: { dollars: 0, tokens: 0, messages: 1 },
       reason: "no credential for the provider",
+      findings: [],
+      verdicts: [],
     });
     assert.equal(running.starts(), 1);
   });
@@ -438,6 +488,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
           cost: { dollars: 0.004, tokens: 100, messages: 1 },
           findings: [],
           verdicts: [],
+          finished: false,
         });
         throw new Error("the adapter fell over before it started");
       },
@@ -654,6 +705,11 @@ async function inATree(run: (tree: string) => Promise<void>): Promise<void> {
   }
 }
 
+/** What a round said for itself, so a refusal is read rather than guessed. */
+function accountOf(round: Round): string {
+  return `the round came back as ${JSON.stringify(round)}`;
+}
+
 function headlineOf(round: Round): string {
   assert.equal(round.outcome, "reviewed");
   const finding = round.outcome === "reviewed" ? round.findings[0] : undefined;
@@ -743,6 +799,27 @@ const halfway = writing(
   reportingMessage +
     called(REPORT_FINDING, review.findings[0]) +
     said("that is what I have so far", "stop", 0),
+);
+
+/**
+ * A reviewer that reports a finding, finishes the review, and whose run does not
+ * end there.
+ *
+ * It is what a finish made in the same message as a report leaves behind: the
+ * review is complete, and the process is still going.
+ */
+const finishingWithoutEnding = [
+  writing(
+    reportingMessage + called(REPORT_FINDING, review.findings[0]) + called(FINISH_REVIEW, {}),
+  ),
+  "setInterval(() => {}, 1000);",
+].join("\n");
+
+/** A reviewer that reports a finding and whose provider then gives out. */
+const reportingThenFailing = writing(
+  reportingMessage +
+    called(REPORT_FINDING, review.findings[0]) +
+    said("", "error", 0, "no credential for the provider"),
 );
 
 /** A reviewer that reports one finding, then floods and never stops. */

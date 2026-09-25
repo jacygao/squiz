@@ -392,10 +392,16 @@ either way, and the reason sits in the errored message's `errorMessage`. The
 adapter reports that rather than a review it could not read, and does not spawn
 a second run, because `pi` has already retried the request itself.
 
-A finished review is a review whatever the messages around it stopped for. The
-call that finishes it ends the run on the call rather than paying for one more
-turn, so the run of a completed review carries no assistant message that stopped
-for an answer.
+A finished review is a review whatever the messages around it stopped for, so
+the run of a completed review need carry no assistant message that stopped for
+an answer.
+
+**The round stops the reviewer as soon as it is told the review is complete.**
+`pi` ends a run on a tool call only where every call of the same message asks it
+to, so a reviewer that reports a finding and finishes its review in one message
+goes on to another model request with the review already complete. The round
+therefore ends the run itself rather than asking `pi` to, and goes on reading the
+output until it closes, so a report already on its way is still read.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -469,9 +475,11 @@ nothing else. What the reviewer does after a refusal is its own: the call can be
 made again.
 
 **A round keeps every finding reported before it ended, however it ended.** A
-round killed at its time bound keeps what it was told, and so does a round whose
-reviewer never finished its review. Neither is a review: what the reviewer never
-got to is not a thing the round has, and § 7 records both as failed rounds.
+round killed at its time bound keeps what it was told; so does a round whose
+reviewer never finished its review, and so does one whose reviewer reported three
+findings and then could not reach its model again. None of them is a review: what
+the reviewer never got to is not a thing the round has, and § 7 records each as
+the failure it was.
 
 **The call that finishes the review is what tells an empty review from an
 unfinished one.** A round that reported nothing and finished found nothing,
@@ -700,7 +708,7 @@ carries what could not be posted.
 | Failure | Behaviour |
 |---|---|
 | The reviewer is not installed, or has no API key | Exit 0, nothing posted, and stderr names the check that failed. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
-| The reviewer runs, exits cleanly, and completes no message | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
+| The reviewer runs, exits cleanly, and completes no message | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round, and it keeps the findings the reviewer reported before its provider gave out. An errored message in a round that completed others is a retry rather than a failure. |
 | The model API is unavailable or rate-limited | Exit 0 and nothing is posted. stderr says the review did not run. |
 | The reviewer stops without finishing its review | Retried once, then treated as an unavailable API. Both rounds keep the findings the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. |
 | The reviewer exceeds the review budget | The reviewer process is killed and the round keeps the findings reported before the kill, with how many arrived. The round is recorded as a failed round rather than a clean one, whatever it kept. |

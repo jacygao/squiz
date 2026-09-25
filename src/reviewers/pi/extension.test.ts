@@ -132,10 +132,17 @@ test("a malformed verdict is refused with the reason", async () => {
   assert.match(refused, /the verdict names no thread/);
 });
 
-/** The run ends on the call, rather than paying for one more turn to end it. */
-test("finishing the review ends the run", async () => {
-  const answer = await toolNamed(FINISH_REVIEW).execute("call_1", {});
-  assert.equal(answer.terminate, true);
+/**
+ * What ends the run is the round, which stops the reviewer once it has been told
+ * the review is complete. The call asks `pi` for nothing: `pi` ends a run on a
+ * call only where every call of the same message asked it to, so a reviewer that
+ * reports a finding and finishes in one message would be asking for nothing.
+ */
+test("finishing the review is answered, and asks for nothing of its own", async () => {
+  const tool = toolNamed(FINISH_REVIEW);
+  assert.equal(schemaOf(tool)["required"], undefined, "the call takes no arguments");
+  const answer = await tool.execute("call_1", {});
+  assert.equal(answer.content[0]?.type, "text");
 });
 
 test("every call describes itself to the reviewer", () => {
