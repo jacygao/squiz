@@ -78,7 +78,7 @@ export function failureIn(conclusion: RoundConclusion): string | null {
     case "close":
       // An episode that closed at its cap or its budget has not failed. What it
       // could not put on the pull request is the only thing left to say.
-      return unposted(conclusion);
+      return closingFailure(conclusion);
     // A blocked round's stderr is its reason alone, and a branch nobody opened a
     // pull request for had nothing to run.
     case "block":
@@ -91,21 +91,32 @@ export function failureIn(conclusion: RoundConclusion): string | null {
 type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
 
 /**
- * A round that found defects and put none of them on the pull request.
+ * What a closing round failed to put on the pull request, or `null` where it
+ * failed at nothing.
  *
- * Nothing is stored to post them again, so findings that reached nobody are
- * lost with the episode. Silence here would read as a review that found
- * nothing.
+ * A close is the end of the episode. Nothing is stored to retry, and no later
+ * round reads the same code to make the same comment again, so both kinds of
+ * failure here end as defects nobody was told about: a finding that reached no
+ * thread, and a verdict that did not reach the thread it named, which leaves a
+ * thread closed over a defect that still stands. A closing round is also the
+ * shape a healthy episode ends in, so silence is read as a clean review.
+ *
+ * The counts come from what the round did. Both kinds share one line, because
+ * the pointer is a pointer and a second format has nowhere to grow.
  */
-function unposted(round: ClosedRound): string | null {
-  const outcomes = round.findings.outcomes;
-  const failed = outcomes.filter((outcome) => outcome.outcome === "failed").length;
-  const threaded = outcomes.filter((outcome) => outcome.outcome === "threaded").length;
-  if (failed === 0 || threaded > 0) return null;
+function closingFailure(round: ClosedRound): string | null {
+  const findings = round.findings.outcomes;
+  const unposted = findings.filter((outcome) => outcome.outcome === "failed").length;
+  const ruled = round.verdicts.threads;
+  const unapplied = ruled.filter((thread) => thread.outcome === "failed").length;
+  if (unposted === 0 && unapplied === 0) return null;
 
-  const them = outcomes.length === 1 ? "it" : "them";
-  const found = `${outcomes.length} finding${outcomes.length === 1 ? "" : "s"}`;
-  return `the round found ${found} and could not post ${them} to PR #${round.pullRequest}`;
+  const failures = [
+    ...(unposted === 0 ? [] : [`post ${unposted} of ${findings.length} findings`]),
+    ...(unapplied === 0 ? [] : [`apply ${unapplied} of ${ruled.length} verdicts`]),
+  ];
+  const at = `PR #${round.pullRequest}`;
+  return `the round closed the episode on ${at} having failed to ${failures.join(" and to ")}`;
 }
 
 /**

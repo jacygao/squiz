@@ -29,6 +29,7 @@ import type { Episode } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import type { RoundConclusion, RoundFailure } from "../loop/round.ts";
+import type { AppliedVerdict } from "../loop/verdicts.ts";
 import { failureIn } from "./hook.ts";
 import { failureLine } from "./report.ts";
 
@@ -69,6 +70,7 @@ function failedRound(failure: RoundFailure, reason: string): RoundConclusion {
 function closedRound(
   because: ClosingReason,
   outcomes: readonly FindingOutcome[] = [],
+  ruled: readonly AppliedVerdict[] = [],
 ): RoundConclusion {
   return {
     outcome: "close",
@@ -76,7 +78,11 @@ function closedRound(
     pullRequest: PULL_REQUEST,
     posted: [],
     findings: { outcomes },
-    verdicts: { threads: [], unapplied: [], reopened: 0 },
+    verdicts: {
+      threads: ruled,
+      unapplied: [],
+      reopened: ruled.filter((thread) => thread.outcome === "reopened").length,
+    },
   };
 }
 
@@ -123,6 +129,21 @@ function unpostable(headline: string): FindingOutcome {
 
 function noted(headline: string): FindingOutcome {
   return { outcome: "noted", finding: finding(headline), location: "src/ui/card.ts:88" };
+}
+
+/** A thread the reviewer ruled settled, closed as it ruled. */
+function applied(thread: string): AppliedVerdict {
+  return { thread, ruled: "fixed", outcome: "closed" };
+}
+
+/** A thread the reviewer ruled still wrong, which GitHub would not re-open. */
+function refused(thread: string): AppliedVerdict {
+  return {
+    thread,
+    ruled: "open",
+    outcome: "failed",
+    reason: "gh exited 1: HTTP 502: Bad gateway",
+  };
 }
 
 /** The pointer for `conclusion`, or the assertion that it composed none. */
@@ -208,14 +229,7 @@ test("a round that could post none of its findings says so", () => {
 
   assert.equal(
     pointerFor(conclusion),
-    "the round found 3 findings and could not post them to PR #142",
-  );
-});
-
-test("one finding that could not be posted reads as one", () => {
-  assert.equal(
-    pointerFor(closedRound("nothing-open", [unpostable("the anchor is off the diff")])),
-    "the round found 1 finding and could not post it to PR #142",
+    "the round closed the episode on PR #142 having failed to post 3 of 3 findings",
   );
 });
 
@@ -225,19 +239,50 @@ test("a finding the summary carries is not a finding that failed to post", () =>
   assert.equal(failureIn(closedRound("nothing-open", [noted("the change needs a test")])), null);
 });
 
-test("a round that posted some of its findings leaves the rest to the summary", () => {
-  // The comments that landed stay and a later round makes the rest again, so
-  // the pull request carries this and stderr does not.
-  const conclusion = closedRound("nothing-open", [
+test("a closing round that posted some of its findings still says so", () => {
+  // A comment that landed stays, and on a closing round there is no later round
+  // to make the missing one again. Silence would leave a defect nobody was told
+  // about behind an episode that looks like it ended healthy.
+  const conclusion = closedRound("round-cap", [
     threaded("the caller cannot tell the two apart"),
     unpostable("the retry runs on a spent bound"),
   ]);
 
-  assert.equal(failureIn(conclusion), null);
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to post 1 of 2 findings",
+  );
 });
 
-test("a round that posted everything it found says nothing", () => {
-  assert.equal(failureIn(closedRound("nothing-open", [threaded("the anchor is off")])), null);
+test("a verdict that did not reach its thread is said, where the close reads clean", () => {
+  // A re-open GitHub refused leaves the thread closed over a defect that still
+  // stands, and the round then closes because it counts nothing open.
+  const conclusion = closedRound("nothing-open", [], [applied("PRRT_1"), refused("PRRT_2")]);
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to apply 1 of 2 verdicts",
+  );
+});
+
+test("both kinds of failure share the one line", () => {
+  const conclusion = closedRound(
+    "round-cap",
+    [threaded("the caller cannot tell the two apart"), unpostable("the anchor is off")],
+    [refused("PRRT_1"), applied("PRRT_2")],
+  );
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to post 1 of 2 findings " +
+      "and to apply 1 of 2 verdicts",
+  );
+});
+
+test("a round that posted everything it found and applied every verdict says nothing", () => {
+  const conclusion = closedRound("nothing-open", [threaded("the anchor is off")], [applied("PRRT_1")]);
+
+  assert.equal(failureIn(conclusion), null);
 });
 
 test("every pointer the hook composes is one line", () => {
@@ -249,6 +294,7 @@ test("every pointer the hook composes is one line", () => {
     failedRound("unavailable", "the review did not run: 429\nrate limited"),
     failedRound("harness", "nothing was posted: EACCES: permission denied"),
     closedRound("nothing-open", [unpostable("one"), unpostable("two")]),
+    closedRound("round-cap", [threaded("one"), unpostable("two")], [refused("PRRT_1")]),
   ];
 
   for (const conclusion of conclusions) {
@@ -478,6 +524,34 @@ test("a closing round exits 0 and says nothing", async () => {
   });
 });
 
+test("a closing round that carried a failure exits 0 and is not silent", async () => {
+  // The exit code was never the bug: a close exits 0 and looks like the end of a
+  // healthy episode, so a failure it carried out with it reads as a clean
+  // review. Both shapes of that are here.
+  const cases = [
+    {
+      conclusion: closedRound("nothing-open", [], [applied("PRRT_1"), refused("PRRT_2")]),
+      pointer:
+        "squiz: the round closed the episode on PR #142 having failed to apply 1 of 2 verdicts\n",
+    },
+    {
+      conclusion: closedRound("round-cap", [threaded("one"), unpostable("two")]),
+      pointer:
+        "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings\n",
+    },
+  ];
+
+  await withRepository(async (worktree) => {
+    for (const { conclusion, pointer } of cases) {
+      const fired = await fire({ directory: worktree, round: { returns: conclusion } });
+
+      assert.equal(fired.code, 0, "a round that closed must not stop the coding agent finishing");
+      assert.equal(fired.stderr, pointer);
+      assert.equal(fired.stdout, "");
+    }
+  });
+});
+
 test("a round that failed exits 0 with the pointer on stderr", async () => {
   await withRepository(async (worktree) => {
     const fired = await fire({
@@ -528,6 +602,7 @@ test("every way a round can fail exits 0", async () => {
     { returns: closedRound("cost-bound") },
     { returns: closedRound("nothing-open", [unpostable("the anchor is off")]) },
     { returns: closedRound("nothing-open", [threaded("one"), unpostable("two")]) },
+    { returns: closedRound("nothing-open", [], [refused("PRRT_1")]) },
     { throws: "the round read a thread that was not there" },
   ];
 
