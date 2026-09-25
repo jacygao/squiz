@@ -15,7 +15,10 @@ const manifest = readJson("../.claude-plugin/plugin.json") as {
 };
 
 const registration = readJson("../hooks/hooks.json") as {
-  hooks?: Record<string, { hooks?: { type?: string; command?: string }[] }[]>;
+  hooks?: Record<
+    string,
+    { hooks?: { type?: string; command?: string; timeout?: number }[] }[]
+  >;
 };
 
 const packageVersion = (readJson("../package.json") as { version?: string }).version;
@@ -40,7 +43,7 @@ test("SubagentStop runs the binary through the plugin root", () => {
 
   assert.deepEqual(
     commands,
-    [{ type: "command", command: "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook" }],
+    [{ type: "command", command: "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook", timeout: 600 }],
     "the registration goes through the root the runtime gives it, never an install path",
   );
 });
