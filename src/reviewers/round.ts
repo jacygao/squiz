@@ -28,11 +28,12 @@ import type { Readable } from "node:stream";
 
 import {
   type Adapter,
-  type CostSoFar,
   type Invocation,
   type ParsedRun,
+  type ProgressSoFar,
   type RoundCost,
   type RoundOutput,
+  type RoundProgress,
   type RunResult,
   unspent,
 } from "./adapter.ts";
@@ -52,17 +53,29 @@ export type Round =
   /** The reviewer ran and returned a review. Empty findings is a review that found nothing. */
   | ({ readonly outcome: "reviewed"; readonly cost: RoundCost } & RoundOutput)
   /**
-   * The time bound passed and the reviewer was killed. A failed round rather
-   * than a round that found nothing, and its cost is a floor: the messages that
-   * completed carry theirs, and the request in flight is spent and never
-   * reported.
+   * The time bound passed and the reviewer was killed.
+   *
+   * A failed round rather than a round that found nothing, and it keeps what
+   * the reviewer had reported by then: those findings were confirmed and
+   * reported before the kill, and the review they belong to is the one that did
+   * not finish. Its cost is a floor, because the messages that completed carry
+   * theirs and the request in flight is spent and never reported.
    */
-  | { readonly outcome: "timed-out"; readonly cost: RoundCost; readonly seconds: number }
+  | ({
+      readonly outcome: "timed-out";
+      readonly cost: RoundCost;
+      readonly seconds: number;
+    } & RoundOutput)
   /**
    * Output no fresh process could be read either, which is as good as an API
-   * that is not answering.
+   * that is not answering. It keeps what the reviewer reported on the same
+   * terms as a round that was killed.
    */
-  | { readonly outcome: "unavailable"; readonly cost: RoundCost; readonly reason: string }
+  | ({
+      readonly outcome: "unavailable";
+      readonly cost: RoundCost;
+      readonly reason: string;
+    } & RoundOutput)
   /**
    * Something that will fail the same way next round: the reviewer would not
    * start, or it ran and completed no message. Reported as a setup problem
@@ -90,6 +103,7 @@ export async function runRound(
   if (unmade !== null) return { outcome: "setup", cost: unspent, reason: unmade };
 
   let spent = unspent;
+  let held: RoundOutput = nothingReported;
   for (let attempts = 1; ; attempts += 1) {
     let ran: Attempt;
     try {
@@ -103,27 +117,47 @@ export async function runRound(
       };
     }
     spent = plus(spent, ran.cost);
+    // Two attempts are two readings of the same change, so what the second
+    // reported is what the first would have reported again. The first attempt's
+    // reports stand only where the second got to none of its own.
+    if (ran.reported.findings.length > 0 || ran.reported.verdicts.length > 0) {
+      held = ran.reported;
+    }
 
     if (ran.kind === "reviewed") {
       return { outcome: "reviewed", cost: spent, findings: ran.findings, verdicts: ran.verdicts };
     }
-    if (ran.kind === "killed") return { outcome: "timed-out", cost: spent, seconds };
+    if (ran.kind === "killed") return { outcome: "timed-out", cost: spent, seconds, ...held };
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
       return { outcome: "setup", cost: spent, reason: ran.reason };
     }
-    if (attempts > 1) return { outcome: "unavailable", cost: spent, reason: ran.reason };
+    if (attempts > 1) {
+      return { outcome: "unavailable", cost: spent, reason: ran.reason, ...held };
+    }
     if (bound.passed()) {
       return {
         outcome: "unavailable",
         cost: spent,
         reason: `${ran.reason}; no time was left in the round to run the reviewer again`,
+        ...held,
       };
     }
   }
 }
 
-/** How one attempt ended, and what it spent getting there. */
-type Attempt = { readonly cost: RoundCost } & (
+/** No findings and no verdicts: what an attempt the reviewer told nothing carries. */
+const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] });
+
+/** How one attempt ended, what it spent getting there, and what it got through. */
+type Attempt = {
+  readonly cost: RoundCost;
+  /**
+   * What the reviewer reported before the attempt ended, whether or not it
+   * finished the review. On an attempt that reviewed it is that review; on
+   * every other it is what an outcome carrying no review of its own keeps.
+   */
+  readonly reported: RoundOutput;
+} & (
   | RunResult
   /** The time bound passed and the process was stopped. */
   | { readonly kind: "killed" }
@@ -176,7 +210,12 @@ async function attempt(
   try {
     child = spawn(line.command, [...line.args], options);
   } catch (cause) {
-    return { cost: unspent, kind: "unstartable", reason: startFailed(line.command, cause) };
+    return {
+      cost: unspent,
+      reported: nothingReported,
+      kind: "unstartable",
+      reason: startFailed(line.command, cause),
+    };
   }
 
   // A startup failure never reaches the stream: the process exits non-zero with
@@ -186,9 +225,10 @@ async function attempt(
   const complaint = drain(child.stderr);
   const closing = ending(child);
 
-  // The last figure reported before the process is stopped is what a killed
-  // round records, so it is tracked here rather than taken from the parse.
-  let cost = unspent;
+  // The last the parse reported before the process is stopped is the whole of
+  // what a killed round has, so it is tracked here rather than taken from the
+  // parse's return, which a killed attempt never reaches.
+  let progress: RoundProgress = { cost: unspent, ...nothingReported };
   let startFailure: string | undefined;
   let unstarted = false;
   let finished = false;
@@ -222,12 +262,13 @@ async function attempt(
     }
   };
 
-  const parsing = read(adapter, bounded(), (reported) => {
-    cost = reported;
+  const parsing = read(adapter, bounded(), (reached) => {
+    progress = reached;
   }).then(
-    (run): Attempt => ({ cost: run.cost, ...run.result }),
+    (run): Attempt => ({ cost: run.cost, reported: reportedIn(progress), ...run.result }),
     (cause): Attempt => ({
-      cost,
+      cost: progress.cost,
+      reported: reportedIn(progress),
       kind: "unparsed",
       reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
     }),
@@ -248,7 +289,7 @@ async function attempt(
     // than waiting on a process that has been told to go.
     child.stdout.destroy();
     child.stderr.destroy();
-    return { cost, kind: "killed" };
+    return { cost: progress.cost, reported: reportedIn(progress), kind: "killed" };
   }
 
   // The reviewer is stopped before its account is read, and whatever the
@@ -262,7 +303,9 @@ async function attempt(
   await within(closing, GRACE_MS);
   const failure = startFailure;
   finished = true;
-  if (failure !== undefined) return { cost: ended.cost, kind: "unstartable", reason: failure };
+  if (failure !== undefined) {
+    return { cost: ended.cost, reported: ended.reported, kind: "unstartable", reason: failure };
+  }
   if (ended.kind !== "unparsed" && ended.kind !== "incomplete") return ended;
 
   // A run that completed a message explained itself in the stream, and stderr
@@ -285,9 +328,14 @@ async function attempt(
 async function read(
   adapter: Adapter,
   stdout: AsyncIterable<Uint8Array>,
-  costSoFar: CostSoFar,
+  soFar: ProgressSoFar,
 ): Promise<ParsedRun> {
-  return adapter.parse(stdout, costSoFar);
+  return adapter.parse(stdout, soFar);
+}
+
+/** What the reviewer had reported, taken off everything else the round tracks. */
+function reportedIn(progress: RoundProgress): RoundOutput {
+  return { findings: progress.findings, verdicts: progress.verdicts };
 }
 
 /**

@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.21 (draft)
+**Version:** 0.22 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -216,15 +216,16 @@ tracked-file comparison under Confinement is disabled for that round.
 
 The reviewer is a second agent that reads the code the coding agent has just
 written and reports what is wrong with it. It has no GitHub access of its own:
-it returns findings, and the harness turns each one into a comment on the pull
-request.
+it reports each finding as it confirms it, and the harness turns each one into a
+comment on the pull request.
 
 ### Invocation
 
-The reviewer is a subprocess the harness spawns once per round. It returns
-findings, and a cost where its CLI reports one. It never edits the code it is
-reviewing, and it holds no state between rounds: each round is a fresh process,
-and everything it knows about earlier rounds arrives in what it is handed.
+The reviewer is a subprocess the harness spawns once per round. It reports its
+findings as it makes them, and a cost where its CLI reports one. It never edits
+the code it is reviewing, and it holds no state between rounds: each round is a
+fresh process, and everything it knows about earlier rounds arrives in what it
+is handed.
 
 Five things are handed to it:
 
@@ -251,6 +252,11 @@ CLI's names.
 | `read` *(default)* | `read`, `grep`, `find`, `ls` | Anything the code can be read for. |
 | `deep` | the above, plus `bash` | Also whether the tests actually pass, whether a line was deliberate (`git log -S`, `git blame`), and whether a hypothesis holds when run. |
 
+**The calls the reviewer reports through are granted at both depths**, alongside
+the tools in the table. Depth decides how much the reviewer may read and run.
+Reporting is not a depth: a reviewer with no way to report returns nothing
+whatever it was allowed to look at. The three calls are named under Findings.
+
 `deep` depends on the tracked-file comparison described under Confinement, which
 is the only mechanism that catches a write made through the shell.
 
@@ -264,7 +270,8 @@ What holds this depends on the depth.
 
 **At `read` the tool grant holds it.** The reviewer is given no tool that
 writes: `edit` and `write` are withheld, and so is the shell. Nothing it can
-reach for touches the tree.
+reach for touches the tree, the reporting calls included: what a report reaches
+is the round that is reading the reviewer's output, and nothing on disk.
 
 **At `deep` the grant includes `bash`, which is itself a write primitive.** A
 reviewer at `deep` can write to a tracked file, and three mechanisms bound what
@@ -288,11 +295,22 @@ else. A new adapter implements three things:
 | | |
 |---|---|
 | `argv(opts)` | Build the command line from a working directory, a charter file, a prompt, a session directory, and the depth. |
-| `parse(stdout)` | Return the findings, and the run's cost where the CLI reports one. A run the CLI reports as failed is told apart from one that returned no findings. |
-| `grants` | Which tools the CLI is given at each depth. |
+| `parse(stdout)` | Report each finding and each verdict as the run makes it, and return the run's cost where the CLI reports one. A run the CLI reports as failed is told apart from one that reported no findings. |
+| `grants` | Which tools the CLI is given at each depth, the calls the reviewer reports through among them. |
 
 The harness passes `read` or `deep`, and the adapter turns that into the right
 flags for its CLI. The adapter must not choose for itself.
+
+**An adapter may ship a file its CLI loads**, where that is what turns reporting
+a finding into a call the CLI validates. Such a file is the adapter's own, it is
+named on the command line `argv` builds, and the names it registers are in
+`grants`. Nothing above the adapter knows it exists. The `pi` adapter ships one;
+a CLI that validates a reporting call without being handed anything ships none.
+
+**A finding reaches the harness as `parse` reads it out of the run.** An adapter
+whose CLI has no way to report a finding before the run ends reports them all at
+the end, which is a working adapter whose rounds keep nothing when they are
+killed.
 
 **A reviewer CLI must exit on `SIGTERM`, and so must every process it starts.**
 That is what the time bound rests on: the round signals the reviewer's process
@@ -308,7 +326,8 @@ The adapter that ships. It builds this command line:
 ```bash
 pi --print --mode json --no-session \
    --session-dir .squiz/<episode>/session \
-   --tools read,grep,find,ls \
+   --no-extensions --extension <reporting-extension> \
+   --tools read,grep,find,ls,report_finding,report_verdict,finish_review \
    --thinking medium \
    --append-system-prompt <charter-file> \
    <task-prompt> < /dev/null
@@ -320,6 +339,16 @@ enabled.
 
 `--no-session` is what keeps each round stateless, and `--session-dir` contains
 what `pi` writes so it lands under `.squiz/` rather than in interactive history.
+
+`--extension` names the file that registers the three reporting calls. It ships
+with the adapter, and `pi` compiles it and the modules it imports when it loads
+it. The call refuses a report the harness could not compose a comment or a
+mutation from, and the refusal reaches the reviewer as that call's error.
+
+`--no-extensions` turns off discovery, so the extension named on the command
+line is the only one loaded. An extension installed on the machine or sitting in
+the tree under review could otherwise register a tool under a reporting call's
+name and take the round's reports.
 
 The JSONL stream is large, and its length follows the round rather than the size
 of the diff: it grows with every tool call the reviewer makes and every token it
@@ -340,21 +369,42 @@ catalogue, so a model the catalogue does not cover reports a zero cost against a
 non-zero token count. The adapter returns the token count alongside the cost,
 which is what tells that case apart from a round that cost nothing.
 
+**A report is read out of the `tool_execution_end` of the call that made it**,
+where the extension put it. The event carries the call's own answer, and the
+answer carries the report as the extension accepted it. The arguments the model
+sent are in the earlier `tool_execution_start` and are not what the adapter
+reads: `pi` converts an argument to the type the schema declares before the call
+runs, so the two differ wherever a conversion rescued a report, and reading the
+arguments would drop a finding the reviewer was told had landed. A call the
+event marks as an error reported nothing, and the reviewer has been told so.
+
+The adapter passes each report on as it reads it, so the round holds what the
+reviewer has at every moment of the run rather than only at the end of it.
+
 An assistant message carries a `stopReason`, and a value of `error` on one of
 them does not mean the run failed: `pi` retries a failed request, so a round that
 completes a review can carry errored messages among its working ones. Each
 carries zero usage, and the cost sum is unaffected.
 
-The run failed where no assistant message carries a `stopReason` of `stop`. `pi`
-exits 0 and writes nothing to stderr either way, and the reason sits in the
-errored message's `errorMessage`. The adapter reads this before it looks for
-findings, and does not spawn a second run, because `pi` has already retried the
-request itself.
+The run reached no reviewer where no assistant message carries a `stopReason` of
+`stop` and no review was finished. `pi` exits 0 and writes nothing to stderr
+either way, and the reason sits in the errored message's `errorMessage`. The
+adapter reports that rather than a review it could not read, and does not spawn
+a second run, because `pi` has already retried the request itself.
+
+A finished review is a review whatever the messages around it stopped for. The
+call that finishes it ends the run on the call rather than paying for one more
+turn, so the run of a completed review carries no assistant message that stopped
+for an answer.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
 
-`--tools` sets the grant. The list above is `read`; `deep` adds `bash`.
+`--tools` sets the grant, and it filters the extension's calls the same way it
+filters the built-in tools. The list above is `read`; `deep` adds `bash`. A name
+the grant does not carry is dropped with exit status 0 and an empty stderr, so a
+grant short of a reporting call leaves the reviewer no way to report and says
+nothing about it.
 
 `--thinking` sets the reasoning effort, and is on every command line at both
 depths. Without it `pi` takes the level from `~/.pi/agent/settings.json`, and the
@@ -380,9 +430,14 @@ The standing rules:
   the authority on intended behaviour. It extends what counts as a finding; it
   does not change these rules, the requirement to verify, or the shape of a
   comment.
-- **From round 2 on:** return a verdict on every thread you were handed. The
-  coding agent's replies say where to look; they never settle anything. Re-read
-  the code as it now stands and rule from that.
+- Report each finding with the call for it, as soon as it is confirmed. A
+  finding held back until the end of the review is a finding lost if the review
+  is cut short.
+- Finish the review with the call for that, once, after the last finding and the
+  last verdict, and finish it even where there was nothing to report.
+- **From round 2 on:** return a verdict on every thread you were handed, one
+  call each. The coding agent's replies say where to look; they never settle
+  anything. Re-read the code as it now stands and rule from that.
 - The suggested fix is one way to address a finding. Rule on whether the defect
   is gone, not on whether the suggestion was taken.
 - Scope a finding to `line` where a single line owns the defect, and anchor it to
@@ -397,8 +452,31 @@ The standing rules:
 
 ### Findings
 
-The reviewer returns two things each round: the findings it made, and a verdict
-on every thread it was handed.
+The reviewer reports two things each round: each finding as it confirms it, and
+a verdict on every thread it was handed. It makes three calls, and returns
+nothing any other way. A last message is not read.
+
+| Call | |
+|---|---|
+| Report a finding | One finding, carrying the fields below. Made as soon as the finding is confirmed. |
+| Report a verdict | One ruling on one thread, naming the thread by the identifier it was handed under. One ruling per thread: a second on the same thread is refused. |
+| Finish the review | The review is complete. Made once, after the last finding and the last verdict, and made even where there was nothing to report. |
+
+**A call whose arguments are not the shape a finding takes is refused where it
+is made**, and the reviewer is told what was wrong with it. The round keeps
+every other report of that round: one malformed finding costs that finding and
+nothing else. What the reviewer does after a refusal is its own: the call can be
+made again.
+
+**A round keeps every finding reported before it ended, however it ended.** A
+round killed at its time bound keeps what it was told, and so does a round whose
+reviewer never finished its review. Neither is a review: what the reviewer never
+got to is not a thing the round has, and § 7 records both as failed rounds.
+
+**The call that finishes the review is what tells an empty review from an
+unfinished one.** A round that reported nothing and finished found nothing,
+which is a result. A round that reported nothing and did not finish reached the
+end of nothing, which is a failure. No count of findings separates the two.
 
 The pull request holds the record, so a finding carries only what composes a
 comment and what the harness needs in order to route it:
@@ -423,11 +501,11 @@ comment and what the harness needs in order to route it:
 
 Every finding holds the work whatever its severity. Severity orders the
 findings; it does not decide whether they count. The order runs `high` to
-`low`, and findings of one severity keep the order the reviewer returned them
+`low`, and findings of one severity keep the order the reviewer reported them
 in.
 
 From round 2 on the reviewer is handed the threads already on the pull request,
-and returns one verdict for each. It rules by reading the code as it now stands.
+and reports one verdict for each. It rules by reading the code as it now stands.
 
 | Verdict | What it means | The harness |
 |---|---|---|
@@ -624,8 +702,8 @@ carries what could not be posted.
 | The reviewer is not installed, or has no API key | Exit 0, nothing posted, and stderr names the check that failed. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
 | The reviewer runs, exits cleanly, and completes no message | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The model API is unavailable or rate-limited | Exit 0 and nothing is posted. stderr says the review did not run. |
-| The reviewer returns output the adapter cannot parse | Retried once, then treated as an unavailable API. A failed parse and an honest finding of nothing are distinguished before anything is posted. |
-| The reviewer exceeds the review budget | The reviewer process is killed and the round records no findings. The round is recorded as a failed round rather than a clean one. |
+| The reviewer stops without finishing its review | Retried once, then treated as an unavailable API. Both rounds keep the findings the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. |
+| The reviewer exceeds the review budget | The reviewer process is killed and the round keeps the findings reported before the kill, with how many arrived. The round is recorded as a failed round rather than a clean one, whatever it kept. |
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
@@ -659,13 +737,19 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 480 seconds | The reviewer process is killed and the round records no findings. |
+| **Time**, per round | 480 seconds | The reviewer process is killed and the round keeps the findings reported before the kill. |
 | **Cost**, per episode | $0.50 | The episode closes without starting another round. |
 
-Killing the reviewer yields no findings rather than a partial review, because
-the findings arrive in the last message of the run. It does yield a cost: the
-assistant messages that completed carry their own, and the round records that
-sum as its last tracked cost.
+Killing the reviewer yields the findings it had reported by then, because a
+finding arrives in the call that reports it rather than at the end of the run. A
+round killed a second after a finding was confirmed has that finding. It is a
+failed round even so: the review was not finished, and what the reviewer had not
+got to is not a thing the round has.
+
+The kill also yields a cost: the assistant messages that completed carry their
+own, and the round records that sum as its last tracked cost. The findings and
+the figure are read from the same moment of the run, so a round never reports a
+cost from one moment beside findings from another.
 
 **The ceiling every other bound sits below is the runtime's subagent stall
 watchdog, at 600 seconds.** A subagent that makes no progress for that long is
@@ -744,9 +828,9 @@ src/
   hook/                      the SubagentStop entry point and its translation
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution, shared-tree detection, removal
-  reviewers/                 one adapter per reviewer CLI; pi/ is the first
+  reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first
   github/                    the pull request, threads, replies, resolve and re-open, summary
-  findings/                  the finding contract, severity, the anchor validator, and where a finding's comment goes
+  findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
 ```
@@ -769,7 +853,7 @@ until something asks.
 | | | |
 |---|---|---|
 | **P0** | The hook and the loop | The `SubagentStop` registration, the pull request gate, the round cap, the exit-code decisions, and the time bound on the reviewer |
-| **P0** | The `pi` adapter | The command line, the parse of its output, and the `read` grant |
+| **P0** | The `pi` adapter | The command line, the extension the reviewer reports through, the read of its output, and the `read` grant |
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<episode>/scratch/` |
 | **P0** | The charter | The standing rules handed to the reviewer every round |
 | **P0** | The finding contract | `file`, `line`, `severity`, the body fields, the rule routing a finding inline, onto its file, or general, and the per-thread verdicts |

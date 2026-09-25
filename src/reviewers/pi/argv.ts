@@ -8,6 +8,11 @@
  * filtering the registered tools, so a name outside the grant has no definition
  * and no implementation.
  *
+ * The grant is also how the reviewer reports. The reporting calls are tools
+ * like any other, and `--tools` filters them the same way, so a grant that does
+ * not name them leaves the reviewer with nothing to report through and says
+ * nothing about it.
+ *
  * `--thinking` is on every command line, at both depths. Without it `pi` takes
  * the level from `~/.pi/agent/settings.json`, a file the harness does not own,
  * and the same change gets a different review on two machines. A level `pi` does
@@ -17,8 +22,11 @@
  * Nothing here runs a process.
  */
 
+import { fileURLToPath } from "node:url";
+
 import type { Depth } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
+import { reportingTools } from "./reporting.ts";
 
 const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
 
@@ -30,10 +38,19 @@ const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
  * misspelling costs the reviewer a tool and says nothing.
  */
 export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze({
-  read: readGrant,
+  read: Object.freeze([...readGrant, ...reportingTools]),
   // The shell is all `deep` adds, and it is the one granted tool that writes.
-  deep: Object.freeze([...readGrant, "bash"]),
+  deep: Object.freeze([...readGrant, ...reportingTools, "bash"]),
 });
+
+/**
+ * The file `pi` loads the reporting calls from, which ships beside this.
+ *
+ * Absolute, and resolved against this module rather than the working directory,
+ * because the reviewer runs in the tree under review and the harness runs from
+ * wherever the runtime put it.
+ */
+export const extensionFile = fileURLToPath(new URL("extension.ts", import.meta.url));
 
 /**
  * Build the command line for one round at the depth given.
@@ -54,6 +71,12 @@ export function argv(invocation: Invocation): CommandLine {
       // What pi writes lands under .squiz/ rather than in interactive history.
       "--session-dir",
       invocation.sessionDirectory,
+      // Only the harness's own extension loads. Whatever the machine or the
+      // tree under review has installed could otherwise register a tool of the
+      // reporting calls' names and take the round's findings.
+      "--no-extensions",
+      "--extension",
+      extensionFile,
       "--tools",
       grants[invocation.depth].join(","),
       "--thinking",

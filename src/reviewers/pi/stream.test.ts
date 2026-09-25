@@ -171,6 +171,14 @@ test("the recorded run's tool execution carries the call, the tool and the error
   assert.equal(ended?.toolCallId, started?.toolCallId);
 });
 
+// What a custom tool answered is how a report reaches the harness, and it is the
+// whole of what a built-in tool was asked for.
+test("the answer a tool gave comes through as it arrived", async () => {
+  const ended = only(await collect(createReadStream(recordedRun)), "tool_execution_end")[0];
+  const result = ended?.result as { readonly content?: readonly { readonly text: string }[] };
+  assert.match(result.content?.[0]?.text ?? "", /The pull request whose head is a branch/);
+});
+
 test("the recorded run reads the same however the chunks fall", async () => {
   const text = readFileSync(recordedRun, "utf8");
   const whole = await eventsOf(text);

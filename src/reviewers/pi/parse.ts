@@ -7,17 +7,23 @@
  * read together as the events go past rather than one after the other: a second
  * reader would find an exhausted stream and report that the reviewer completed
  * nothing, and buffering the events for it would hold the whole stream. What is
- * held here is three numbers, a flag and one reason.
+ * held here is three numbers, a flag, one reason, and the reports the reviewer
+ * has made.
  *
- * The stop reasons are read before the findings. A run that completed no
- * message has no review in it to find, and the reason it gives for that is the
- * one worth reporting.
+ * Both halves are passed on as they arrive, as one figure for what the round
+ * has so far. A caller that stops the process mid-stream keeps that, and it is
+ * the whole of what a killed round has.
+ *
+ * The stop reasons are read before the review. A run that completed no message
+ * reached no reviewer at all, and the reason it gives for that is the one worth
+ * reporting.
  */
 
 import {
-  type CostSoFar,
   type ParsedRun,
+  type ProgressSoFar,
   type RoundCost,
+  type RoundOutput,
   type RunResult,
   unspent,
 } from "../adapter.ts";
@@ -40,20 +46,30 @@ type Tally = {
   reason: string | undefined;
 };
 
+const nothingReported: RoundOutput = { findings: [], verdicts: [] };
+
 /**
  * Read one run's whole output.
  *
- * `costSoFar` is told the running total as each assistant message completes,
- * which is what a caller that stops the process mid-stream reports. Never
- * throws on the stream's content; a stream that fails at its source still
- * raises through the iteration.
+ * `soFar` is told the running total and the reports so far as each arrives,
+ * which is what a caller that stops the process mid-stream keeps. Never throws
+ * on the stream's content; a stream that fails at its source still raises
+ * through the iteration.
  */
 export async function parse(
   stdout: AsyncIterable<string | Uint8Array>,
-  costSoFar?: CostSoFar,
+  soFar?: ProgressSoFar,
 ): Promise<ParsedRun> {
   const tally: Tally = { cost: unspent, stopped: false, reason: undefined };
-  const output = await readOutput(counting(readEvents(stdout), tally, costSoFar));
+  let reported: RoundOutput = nothingReported;
+  // One figure for the two halves, so a caller never holds a cost from one
+  // moment of the run beside findings from another.
+  const tell = (): void => soFar?.({ cost: tally.cost, ...reported });
+
+  const output = await readOutput(counting(readEvents(stdout), tally, tell), (made) => {
+    reported = made;
+    tell();
+  });
   return { cost: tally.cost, result: resultOf(tally, output) };
 }
 
@@ -67,12 +83,12 @@ export async function parse(
 async function* counting(
   events: AsyncIterable<PiEvent>,
   tally: Tally,
-  costSoFar: CostSoFar | undefined,
+  tell: () => void,
 ): AsyncGenerator<PiEvent> {
   for await (const event of events) {
     tally.cost = costWith(tally.cost, event);
     if (event.type === "message_end" && event.message.role === "assistant") {
-      costSoFar?.(tally.cost);
+      tell();
       if (event.message.stopReason === "stop") tally.stopped = true;
       if (event.message.errorMessage !== undefined) tally.reason = event.message.errorMessage;
     }
@@ -85,12 +101,19 @@ async function* counting(
  *
  * An errored message is not a failed run. `pi` retries a failed request itself,
  * so one sits among the working messages of a round that reviewed, and a run
- * that completed a message is read for its findings whatever else it carries.
+ * that completed a message is read for what the reviewer reported whatever else
+ * it carries.
+ *
+ * A review the reviewer finished is a review whatever the messages around it
+ * stopped for, so the output is read first. It is the reviewer's own word that
+ * it was done, and nothing else in the run says as much.
  */
 function resultOf(tally: Tally, output: OutputRead): RunResult {
+  if (output.outcome === "read") {
+    return { kind: "reviewed", findings: output.findings, verdicts: output.verdicts };
+  }
   if (!tally.stopped) {
     return { kind: "incomplete", reason: tally.reason ?? "the reviewer completed no message" };
   }
-  if (output.outcome === "failed") return { kind: "unparsed", reason: output.reason };
-  return { kind: "reviewed", findings: output.findings, verdicts: output.verdicts };
+  return { kind: "unparsed", reason: output.reason };
 }

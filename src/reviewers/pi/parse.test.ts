@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { type ParsedRun, type RoundCost, unspent } from "../adapter.ts";
+import { type ParsedRun, type RoundCost, type RoundProgress, unspent } from "../adapter.ts";
 import { costWith } from "./cost.ts";
 import { readOutput } from "./output.ts";
 import { parse } from "./parse.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import { type PiEvent, readEvents } from "./stream.ts";
 
 /** One short `pi` run, committed as it was emitted. */
@@ -33,6 +34,32 @@ const review = {
   verdicts: [{ thread: "PRRT_kwDO", verdict: "fixed" }],
 };
 
+/** One reporting call answered, as the lines the extension's answer arrives on. */
+function reported(toolName: string, details: unknown): string {
+  return line({
+    type: "tool_execution_end",
+    toolCallId: "call_1",
+    toolName,
+    isError: false,
+    result: { content: [{ type: "text", text: "Reported" }], details },
+  });
+}
+
+/**
+ * The review returned in full, as the calls it arrives in.
+ *
+ * Nothing follows `finish_review`: it ends the run on the call rather than
+ * paying for one more turn, so a completed review need carry no message that
+ * stopped.
+ */
+function returned(): string {
+  return (
+    review.findings.map((finding) => reported(REPORT_FINDING, finding)).join("") +
+    review.verdicts.map((verdict) => reported(REPORT_VERDICT, verdict)).join("") +
+    reported(FINISH_REVIEW, {})
+  );
+}
+
 /**
  * The hazard the one pass exists for.
  *
@@ -44,11 +71,22 @@ test("the cost and the review both come back from one pass over the stream", asy
   const run = await parseText(
     session() +
       assistant("thinking", { stopReason: "toolUse", spend: 0.001 }) +
-      assistant(JSON.stringify(review), { stopReason: "stop", spend: 0.002 }),
+      assistant("reporting", { stopReason: "toolUse", spend: 0.002 }) +
+      returned(),
   );
   assert.equal(run.result.kind, "reviewed");
   assert.deepEqual(run.result.kind === "reviewed" ? run.result.findings : [], review.findings);
   assert.deepEqual(run.cost, { dollars: 0.003, tokens: 200, messages: 2 });
+});
+
+/**
+ * The review the reviewer finished is the review, whatever the messages around
+ * it stopped for. `finish_review` ends the run on the call, so a completed
+ * review is the one shape that carries no message with a stop reason of `stop`.
+ */
+test("a review the reviewer finished is a review with no message stopping the run", async () => {
+  const run = await parseText(assistant("reporting", { stopReason: "toolUse" }) + returned());
+  assert.equal(run.result.kind, "reviewed");
 });
 
 test("the recorded run's cost and its answer are both read from its own bytes", async () => {
@@ -59,25 +97,43 @@ test("the recorded run's cost and its answer are both read from its own bytes", 
 });
 
 test("the cost is reported as each assistant message completes", async () => {
-  const reported: RoundCost[] = [];
+  const told: RoundProgress[] = [];
   const run = await parse(
     oneChunk(
       assistant("first", { stopReason: "toolUse", spend: 0.004 }) +
-        assistant(JSON.stringify(review), { stopReason: "stop", spend: 0.006 }),
+        assistant("second", { stopReason: "toolUse", spend: 0.006 }) +
+        returned(),
     ),
-    (cost) => reported.push(cost),
+    (progress) => told.push(progress),
   );
+  // Two messages, then the finding and the verdict, each told with the cost as
+  // it stood when it arrived.
   assert.deepEqual(
-    reported.map((cost) => cost.messages),
-    [1, 2],
+    told.map((progress) => progress.cost.messages),
+    [1, 2, 2, 2],
   );
-  assert.deepEqual(reported.at(-1), run.cost);
+  assert.deepEqual(told.at(-1)?.cost, run.cost);
+});
+
+/**
+ * What a killed round keeps. The findings and the figure are told as one, so
+ * that a caller stopped mid-stream never holds a cost from one moment of the run
+ * beside findings from another.
+ */
+test("the findings so far are told with the cost so far", async () => {
+  const told: RoundProgress[] = [];
+  await parse(
+    oneChunk(assistant("first", { stopReason: "toolUse", spend: 0.004 }) + returned()),
+    (progress) => told.push(progress),
+  );
+  const reporting = told.filter((progress) => progress.findings.length > 0);
+  assert.deepEqual(reporting.at(0)?.findings, review.findings);
+  assert.deepEqual(reporting.at(0)?.cost, { dollars: 0.004, tokens: 100, messages: 1 });
+  assert.deepEqual(told.at(-1)?.verdicts, review.verdicts);
 });
 
 test("a review that found nothing is a result rather than a failure", async () => {
-  const run = await parseText(
-    assistant(JSON.stringify({ findings: [], verdicts: [] }), { stopReason: "stop" }),
-  );
+  const run = await parseText(reported(FINISH_REVIEW, {}));
   assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [] });
 });
 
@@ -88,7 +144,7 @@ test("a review that found nothing is a result rather than a failure", async () =
 test("an errored message among the working ones leaves the run reviewed", async () => {
   const errored = assistant("", { stopReason: "error", errorMessage: "503 from the provider" });
   const run = await parseText(
-    errored.repeat(22) + assistant(JSON.stringify(review), { stopReason: "stop", spend: 0.002 }),
+    errored.repeat(22) + assistant("reporting", { stopReason: "toolUse", spend: 0.002 }) + returned(),
   );
   assert.equal(run.result.kind, "reviewed");
 });
@@ -101,13 +157,13 @@ test("a run where no message stopped is incomplete, and carries the reason given
 });
 
 /**
- * The stop reasons are read first. A run that completed no message has no
- * review in it, and reporting its output as unparseable would send it for a
- * retry that `pi` has already made three times itself.
+ * A run that completed no message reached no reviewer, and reporting its output
+ * as unparseable would send it for a retry that `pi` has already made three
+ * times itself.
  */
-test("a message that never stopped is incomplete even where its text is a review", async () => {
+test("a run that reported nothing and stopped nothing is incomplete rather than retried", async () => {
   const run = await parseText(
-    assistant(JSON.stringify(review), { stopReason: "error", errorMessage: "context exceeded" }),
+    assistant("", { stopReason: "error", errorMessage: "context exceeded" }),
   );
   assert.deepEqual(run.result, { kind: "incomplete", reason: "context exceeded" });
 });
@@ -117,14 +173,22 @@ test("a run that completed nothing and gave no reason says that much", async () 
   assert.deepEqual(run.result, { kind: "incomplete", reason: "the reviewer completed no message" });
 });
 
-test("output that completed but reads as no review is the case that is retried", async () => {
+test("a reviewer that stopped without finishing its review is the case that is retried", async () => {
   const run = await parseText(assistant("I had a look and it seems fine.", { stopReason: "stop" }));
   assert.equal(run.result.kind, "unparsed");
   assert.match(
     run.result.kind === "unparsed" ? run.result.reason : "",
-    /not JSON/u,
+    /did not finish its review/u,
     "the reason must name what was wrong with the output, since it is what stderr carries",
   );
+});
+
+test("a reviewer that reported and then stopped without finishing is retried too", async () => {
+  const run = await parseText(
+    reported(REPORT_FINDING, review.findings[0]) + assistant("done", { stopReason: "stop" }),
+  );
+  assert.equal(run.result.kind, "unparsed");
+  assert.match(run.result.kind === "unparsed" ? run.result.reason : "", /reported 1 finding/u);
 });
 
 test("a killed run's cost covers the messages that completed before the stream stopped", async () => {
@@ -279,7 +343,8 @@ function* run(cycles: number): Generator<string> {
     // agent_end repeats the whole transcript, and is the largest line in the stream.
     if (cycle % 8 === 7) yield line({ type: "agent_end", messages: transcript, willRetry: true });
   }
-  yield assistant(JSON.stringify(review), { stopReason: "stop", spend: 0.002 });
+  yield assistant("reporting", { stopReason: "toolUse", spend: 0.002 });
+  yield returned();
   yield line({ type: "agent_settled" });
 }
 
