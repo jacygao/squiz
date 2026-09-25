@@ -77,6 +77,13 @@ type Reviewer = {
 
 type Setup = {
   readonly answers: Answers;
+  /**
+   * Answers served in order for one kind, the first call taking the first entry.
+   * A call past the end falls back to that kind's single answer.
+   */
+  readonly sequences?: Partial<Record<Kind, readonly string[]>>;
+  /** Seconds a kind of call takes before it answers, for a call that has to be slow. */
+  readonly delays?: Partial<Record<Kind, string>>;
   readonly reviewer: Reviewer;
   readonly config?: Partial<Config>;
   /** Rounds already recorded, which is what makes the round a later one. */
@@ -200,7 +207,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
-    await writeFake(binaries, setup.answers);
+    await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {});
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     const episode = episodeAt(worktree, AGENT_ID);
@@ -280,7 +287,12 @@ function git(directory: string, args: readonly string[]): void {
  * A kind with no answer exits 1, so a test whose fixture does not cover a call
  * fails on that call rather than on one answer standing in for another.
  */
-async function writeFake(directory: string, answers: Answers): Promise<void> {
+async function writeFake(
+  directory: string,
+  answers: Answers,
+  sequences: Partial<Record<Kind, readonly string[]>>,
+  delays: Partial<Record<Kind, string>>,
+): Promise<void> {
   const script = [
     "#!/bin/sh",
     `dir=${quote(directory)}`,
@@ -303,11 +315,19 @@ async function writeFake(directory: string, answers: Answers): Promise<void> {
     "  *'v3.diff'*) kind=diff ;;",
     "esac",
     'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
-    'if [ ! -f "$dir/answer-$kind" ]; then',
+    // Which call of this kind it is, so that a paging read-back can answer
+    // differently each time.
+    'k=$(cat "$dir/count-$kind" 2>/dev/null || echo 0)',
+    "k=$((k + 1))",
+    'printf %s "$k" > "$dir/count-$kind"',
+    'if [ -f "$dir/delay-$kind" ]; then sleep "$(cat "$dir/delay-$kind")"; fi',
+    'answer="$dir/answer-$kind-$k"',
+    '[ -f "$answer" ] || answer="$dir/answer-$kind"',
+    'if [ ! -f "$answer" ]; then',
     '  printf \'no answer fixtured for %s\\n\' "$kind" >&2',
     "  exit 1",
     "fi",
-    'cat "$dir/answer-$kind"',
+    'cat "$answer"',
     "exit 0",
     "",
   ].join("\n");
@@ -316,6 +336,14 @@ async function writeFake(directory: string, answers: Answers): Promise<void> {
   await chmod(join(directory, "gh"), 0o755);
   for (const [kind, answer] of Object.entries(answers)) {
     await writeFile(join(directory, `answer-${kind}`), answer, "utf8");
+  }
+  for (const [kind, ordered] of Object.entries(sequences)) {
+    for (const [index, answer] of ordered.entries()) {
+      await writeFile(join(directory, `answer-${kind}-${index + 1}`), answer, "utf8");
+    }
+  }
+  for (const [kind, seconds] of Object.entries(delays)) {
+    await writeFile(join(directory, `delay-${kind}`), seconds, "utf8");
   }
 }
 
@@ -734,5 +762,127 @@ test("the posting margin bounds every call the round makes after the review", as
     outcome?.outcome === "failed" ? outcome.reason : "",
     /did not answer within/u,
     "a round that kept posting past the margin would be killed by the runtime with nothing reported at all",
+  );
+});
+
+/**
+ * One page of the read-back after a create, naming a thread this comment did not
+ * open and claiming another page follows.
+ */
+function paging(cursor: string): string {
+  return included(
+    "200 OK",
+    JSON.stringify({
+      data: {
+        node: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: true, endCursor: cursor },
+              nodes: [{ id: "PRRT_other", comments: { nodes: [{ databaseId: 7 }] } }],
+            },
+          },
+        },
+      },
+    }),
+  );
+}
+
+test("a cap already spent closes the episode before a reviewer is started", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 3 },
+    // Three rounds recorded and the episode firing again, which is what an
+    // interruption after a round recorded its cost leaves behind.
+    rounds: [ANSWER_COST, ANSWER_COST, ANSWER_COST],
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "round-cap");
+  assert.equal(
+    ran.invocations.length,
+    0,
+    "a cap read only after the reviewer has run is not a bound: it bills for the round it was there to stop",
+  );
+  assert.deepEqual(ran.kinds, ["prlist"]);
+  assert.equal(ran.state?.rounds.length, 3, "and no fourth round is appended to the count");
+});
+
+test("an exhausted cap whose last recorded round failed closes the episode too", async () => {
+  const killed: RoundCost = { dollars: 0, tokens: 0, messages: 0 };
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    rounds: [ANSWER_COST, killed],
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "round-cap");
+  assert.equal(
+    ran.invocations.length,
+    0,
+    "a round the reviewer failed is a round that ran, and it counts against the cap like any other",
+  );
+});
+
+test("a budget already spent closes the episode before a reviewer is started", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 8, budget: 0.5 },
+    rounds: [{ dollars: 0.5, tokens: 20_000, messages: 40 }],
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "cost-bound");
+  assert.equal(ran.invocations.length, 0, "the bound stops the next round, so it is read before it");
+});
+
+test("a read-back that pages is stopped by the margin, not by its own page limit", async () => {
+  const ran = await runInFixture({
+    marginMs: 500,
+    delays: { lookup: "0.1" },
+    answers: { ...POSTING, lookup: paging("cursor-spare") },
+    // Nineteen pages that name no thread, and a twentieth that names it. A
+    // read-back that runs to its own page limit reaches the twentieth.
+    sequences: {
+      lookup: [...Array.from({ length: 19 }, (_, at) => paging(`cursor-${at + 1}`)), LOOKUP],
+    },
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  const lookups = ran.kinds.filter((kind) => kind === "lookup").length;
+  assert.ok(
+    lookups < 20,
+    `the read-back made all ${lookups} of its pages, so the margin bounded each request and none of them together`,
+  );
+  assert.ok(ran.conclusion.outcome === "close");
+  const outcome = ran.conclusion.findings.outcomes[0];
+  assert.equal(
+    outcome?.outcome,
+    "threaded",
+    "the create completed, and an outcome already completed is kept when the margin runs out",
+  );
+  assert.equal(
+    outcome?.outcome === "threaded" ? outcome.threadId : "unread",
+    null,
+    "the pages that would have named the thread were past the margin, so nothing can be addressed to it",
+  );
+});
+
+test("a reviewer that started and completed no message is recorded as a round", async () => {
+  const nothing: RoundCost = { dollars: 0, tokens: 0, messages: 0 };
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: completesNothing(nothing),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "setup");
+  assert.deepEqual(
+    ran.state?.rounds,
+    [nothing],
+    "a process that ran and reported no usage is still a round: counting it as none makes the next firing round 1 again, which is the cap gone",
   );
 });

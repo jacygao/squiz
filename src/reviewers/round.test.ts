@@ -144,8 +144,38 @@ test("a run that completed no message is not tried again", async () => {
       outcome: "setup",
       cost: { dollars: 0, tokens: 0, messages: 1 },
       reason: "no credential for the provider",
+      started: true,
     });
     assert.equal(running.starts(), 1);
+  });
+});
+
+/**
+ * A reviewer killed before its first completed message reports no usage, and so
+ * does one that never started. A caller that told the two apart by what they
+ * cost would read the first as no round at all, start its count again on the
+ * next firing, and lose the only bound the loop has.
+ */
+test("a process that ran and said nothing is told apart from a spawn that failed", async () => {
+  await inATree(async (tree) => {
+    const ran = await runRound(reviewer(sayingNothing).adapter, at(tree), 10);
+    assert.equal(ran.outcome, "setup");
+    assert.deepEqual(ran.cost, unspent, "the fixture has to report no usage, or it proves nothing");
+    assert.equal(ran.outcome === "setup" ? ran.started : null, true);
+
+    const missing: Adapter = {
+      argv: (invocation) => ({
+        command: join(tree, "no-such-reviewer"),
+        args: [],
+        directory: invocation.directory,
+      }),
+      parse,
+      grants,
+    };
+    const never = await runRound(missing, at(tree), 10);
+    assert.equal(never.outcome, "setup");
+    assert.deepEqual(never.cost, unspent, "neither of them cost anything, which is the point");
+    assert.equal(never.outcome === "setup" ? never.started : null, false);
   });
 });
 
@@ -613,6 +643,9 @@ const reviewing = writing(said(JSON.stringify(review), "stop", 0.002));
 
 /** A reviewer whose request failed every time, and that completed no message. */
 const refusing = writing(said("", "error", 0, "no credential for the provider"));
+
+/** A reviewer that starts, writes nothing at all and exits cleanly. */
+const sayingNothing = "process.exit(0);";
 
 /** A reviewer whose request failed and was retried, and which then reviewed. */
 const recovering = writing(

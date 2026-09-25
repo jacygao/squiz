@@ -68,7 +68,21 @@ export type Round =
    * start, or it ran and completed no message. Reported as a setup problem
    * rather than as a bad round, and not retried.
    */
-  | { readonly outcome: "setup"; readonly cost: RoundCost; readonly reason: string };
+  | {
+      readonly outcome: "setup";
+      readonly cost: RoundCost;
+      readonly reason: string;
+      /**
+       * Whether a reviewer process ran.
+       *
+       * The two failures under this outcome are opposite: one never started, and
+       * one started and completed no message. A reviewer killed before its first
+       * message reports no cost at all, so a caller that read a cost of nothing
+       * as a reviewer that never ran would leave a round that really ran
+       * unaccounted for. This is the only thing that separates them.
+       */
+      readonly started: boolean;
+    };
 
 /**
  * Run one round, at most `seconds` of wall clock for the whole of it.
@@ -87,7 +101,9 @@ export async function runRound(
   // changes directory, and so the directory is made wherever the harness runs.
   const scratch = resolve(invocation.directory, invocation.scratchDirectory);
   const unmade = makeScratch(scratch);
-  if (unmade !== null) return { outcome: "setup", cost: unspent, reason: unmade };
+  if (unmade !== null) {
+    return { outcome: "setup", cost: unspent, reason: unmade, started: false };
+  }
 
   let spent = unspent;
   for (let attempts = 1; ; attempts += 1) {
@@ -100,6 +116,9 @@ export async function runRound(
         outcome: "setup",
         cost: spent,
         reason: `the round could not be run: ${reasonFor(cause)}`,
+        // Whether the process was started before the throw is not knowable here,
+        // and a round left unaccounted for is the loop's only bound gone.
+        started: true,
       };
     }
     spent = plus(spent, ran.cost);
@@ -109,7 +128,14 @@ export async function runRound(
     }
     if (ran.kind === "killed") return { outcome: "timed-out", cost: spent, seconds };
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
-      return { outcome: "setup", cost: spent, reason: ran.reason };
+      // A run that completed no message reached the stream, so a process ran.
+      // Only a spawn that failed did not.
+      return {
+        outcome: "setup",
+        cost: spent,
+        reason: ran.reason,
+        started: ran.kind === "incomplete",
+      };
     }
     if (attempts > 1) return { outcome: "unavailable", cost: spent, reason: ran.reason };
     if (bound.passed()) {

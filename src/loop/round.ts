@@ -31,7 +31,11 @@ import { readState, recordRound, writeState, type EpisodeState } from "./episode
 import type { Episode } from "./episode.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { blockingReason } from "./reason.ts";
-import { decideAfterRound, type ClosingReason } from "./round-decision.ts";
+import {
+  decideAfterRound,
+  type ClosingReason,
+  type EpisodeBounds,
+} from "./round-decision.ts";
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 
 /**
@@ -39,8 +43,10 @@ import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verd
  *
  * Under the runtime's kill of the hook with the reviewer's own bound spent,
  * which is what the hook's ceiling leaves for posting. Every call the round
- * makes after the review is bounded out of it, because no single call is bounded
- * at less than 30 seconds and a round with many findings makes two calls each.
+ * makes after the review runs under it as a shared deadline, because how many
+ * calls the posting makes is not known in advance: one finding is a create and
+ * up to twenty pages of read-back, and a bound per call would let each of those
+ * pages have the whole of one.
  */
 const POSTING_MARGIN_MS = 120_000;
 
@@ -138,6 +144,12 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   if ("ended" in stateRead) return stateRead.ended;
   const state = stateRead.step;
 
+  const bounds: EpisodeBounds = { rounds: config.rounds, budget: config.budget };
+  const over = exhausted(state, bounds);
+  if (over !== null) {
+    return { outcome: "close", because: over, ...nothingDone(pullRequest.number) };
+  }
+
   // Round 1 hands the reviewer nothing to rule on. From round 2 on every thread
   // on the pull request goes over with its comments and resolved state, which is
   // the whole of what a reviewer holding no state knows about the rounds before
@@ -190,6 +202,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   // the next round reads the same code and makes again.
   const verdicts = applyVerdicts(handedOver, review.verdicts, {
     directory,
+    until: margin,
     boundMs: share(margin, calls),
   });
 
@@ -200,7 +213,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
       pullRequest: pullRequest.number,
       headSha: pullRequest.headSha,
     },
-    { directory, boundMs: share(margin, 2 * review.findings.length) },
+    { directory, until: margin, boundMs: share(margin, 2 * review.findings.length) },
   );
 
   const newThreads = threadsOpened(findings);
@@ -221,7 +234,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
       roundsRun: recorded.rounds.length,
       spent: spentBy(recorded),
     },
-    { rounds: config.rounds, budget: config.budget },
+    bounds,
   );
 
   if (decision.next === "close") {
@@ -290,6 +303,39 @@ function openState(episode: Episode, pullRequest: number): Step<EpisodeState> {
   return { step: { pullRequest, rounds: read.state.rounds } };
 }
 
+/**
+ * Why the episode is over before this round runs, or `null` where a round is
+ * left to run.
+ *
+ * Read from the state as it stands, before a reviewer is spawned. A bound
+ * checked only once the round has finished is not a bound: the money is spent by
+ * the time the arithmetic sees it, and a round the reviewer failed never reaches
+ * the arithmetic at all. Both are reachable — an episode that recorded a round
+ * and fired again, and a cap or a budget lowered between firings — and nothing
+ * outside this stops a hook that keeps reviewing.
+ *
+ * A cap of R allows R rounds, so the round about to run is the one after the
+ * count already recorded. A cap that is not a whole number leaves no round,
+ * because nothing here may spend a review on a number it cannot count.
+ */
+function exhausted(state: EpisodeState, bounds: EpisodeBounds): ClosingReason | null {
+  if (spentBy(state) >= bounds.budget) return "cost-bound";
+  if (!Number.isInteger(bounds.rounds) || state.rounds.length >= bounds.rounds) {
+    return "round-cap";
+  }
+  return null;
+}
+
+/** What a round that ran nothing did, which is nothing, said rather than implied. */
+function nothingDone(pullRequest: number): RoundAccount {
+  return {
+    pullRequest,
+    posted: [],
+    findings: { outcomes: [] },
+    verdicts: { threads: [], unapplied: [], reopened: 0 },
+  };
+}
+
 /** What round 1 hands over: nothing, because no round has opened a thread yet. */
 const noThreads: Step<readonly ReviewThread[]> = { step: [] };
 
@@ -340,12 +386,12 @@ function makeDirectories(episode: Episode): string | null {
  * cost bound. A killed round's floor goes in for the same reason: what the
  * reviewer reported before it was stopped is what there is.
  *
- * A reviewer that never ran and spent nothing is not recorded as a round at all.
- * It fails the same way every firing until someone fixes the install, and a cap
+ * A reviewer whose process never started is not recorded as a round at all. It
+ * fails the same way every firing until someone fixes the install, and a cap
  * spent on it would leave the episode no rounds once they had.
  */
 function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<EpisodeState> {
-  if (!spentAnything(review)) return { step: state };
+  if (!attempted(review)) return { step: state };
 
   const recorded = recordRound(state, review.cost);
   const written = writeState(episode, recorded);
@@ -358,13 +404,19 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
   return { step: recorded };
 }
 
-/** Whether the reviewer got as far as spending anything on the round. */
-function spentAnything(review: Review): boolean {
-  // Only a setup problem can have spent nothing at all. Every other outcome is
-  // a round that ran, including one a reviewer no price could be read for.
-  if (review.outcome !== "setup") return true;
-  const { dollars, tokens, messages } = review.cost;
-  return dollars > 0 || tokens > 0 || messages > 0;
+/**
+ * Whether a reviewer process ran, which is what makes the attempt a round.
+ *
+ * Taken from the reviewer's own account of whether it started, never from what
+ * it cost. A process killed before its first completed message reports no cost
+ * at all, and reading that as a reviewer that never ran would leave a round that
+ * really ran out of the count: the next firing would be round 1 again, which is
+ * the loop with its only bound gone.
+ */
+function attempted(review: Review): boolean {
+  // Only a setup problem can be a reviewer that never started. Every other
+  // outcome is a process that ran, whatever it cost.
+  return review.outcome !== "setup" || review.started;
 }
 
 type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
@@ -470,11 +522,17 @@ function spentBy(state: EpisodeState): number {
 }
 
 /**
- * The bound one of `calls` GitHub calls gets out of what is left of the margin.
+ * One call's fair share of what is left of the margin, where `calls` is what the
+ * phase is expected to make.
  *
- * Never zero. A bound that is not a positive number is read as no bound asked
- * for and falls back to the ceiling on a single call, and a phase with no time
- * left has to fail its calls rather than run to that ceiling.
+ * A share and not the bound. The margin is enforced as a deadline every call
+ * runs under, and this only stops one slow call from spending what the rest of
+ * the phase needs. The count is an estimate, and the read-back after a create
+ * can page, so a phase may make more calls than its share was split for and the
+ * deadline is what holds either way.
+ *
+ * Never zero: a bound that is not a positive number is read as no bound asked
+ * for and falls back to the ceiling on a single call.
  */
 function share(margin: Deadline, calls: number): number {
   return Math.max(1, Math.floor(margin.remaining() / Math.max(1, calls)));
