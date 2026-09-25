@@ -71,13 +71,14 @@ function closedRound(
   because: ClosingReason,
   outcomes: readonly FindingOutcome[] = [],
   ruled: readonly AppliedVerdict[] = [],
+  unreadableDiff?: Error,
 ): RoundConclusion {
   return {
     outcome: "close",
     because,
     pullRequest: PULL_REQUEST,
     posted: [],
-    findings: { outcomes },
+    findings: unreadableDiff === undefined ? { outcomes } : { outcomes, unreadableDiff },
     verdicts: {
       threads: ruled,
       unapplied: [],
@@ -239,6 +240,22 @@ test("a finding the summary carries is not a finding that failed to post", () =>
   assert.equal(failureIn(closedRound("nothing-open", [noted("the change needs a test")])), null);
 });
 
+test("a diff nothing could be anchored against is announced", () => {
+  // Every finding that named a place went to the summary rather than to a
+  // thread, so none of them failed to post and the round posted nothing.
+  const conclusion = closedRound(
+    "nothing-open",
+    [noted("the caller cannot tell the two apart")],
+    [],
+    new Error("the diff carries no hunk header"),
+  );
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to read the diff its comments anchor to",
+  );
+});
+
 test("a closing round that posted some of its findings still says so", () => {
   // A comment that landed stays, and on a closing round there is no later round
   // to make the missing one again. Silence would leave a defect nobody was told
@@ -295,6 +312,7 @@ test("every pointer the hook composes is one line", () => {
     failedRound("harness", "nothing was posted: EACCES: permission denied"),
     closedRound("nothing-open", [unpostable("one"), unpostable("two")]),
     closedRound("round-cap", [threaded("one"), unpostable("two")], [refused("PRRT_1")]),
+    closedRound("nothing-open", [noted("one")], [], new Error("the diff carries no hunk header")),
   ];
 
   for (const conclusion of conclusions) {
@@ -603,6 +621,7 @@ test("every way a round can fail exits 0", async () => {
     { returns: closedRound("nothing-open", [unpostable("the anchor is off")]) },
     { returns: closedRound("nothing-open", [threaded("one"), unpostable("two")]) },
     { returns: closedRound("nothing-open", [], [refused("PRRT_1")]) },
+    { returns: closedRound("nothing-open", [noted("one")], [], new Error("no hunk header")) },
     { throws: "the round read a thread that was not there" },
   ];
 

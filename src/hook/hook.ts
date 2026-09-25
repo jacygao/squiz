@@ -95,23 +95,33 @@ type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
  * failed at nothing.
  *
  * A close is the end of the episode. Nothing is stored to retry, and no later
- * round reads the same code to make the same comment again, so both kinds of
- * failure here end as defects nobody was told about: a finding that reached no
- * thread, and a verdict that did not reach the thread it named, which leaves a
- * thread closed over a defect that still stands. A closing round is also the
- * shape a healthy episode ends in, so silence is read as a clean review.
+ * round reads the same code to make the same comment again, so each of these
+ * ends as a defect nobody was told about:
  *
- * The counts come from what the round did. Both kinds share one line, because
- * the pointer is a pointer and a second format has nowhere to grow.
+ * - a finding that reached no thread,
+ * - a verdict that did not reach the thread it named, which leaves a thread
+ *   closed over a defect that still stands,
+ * - a diff nothing could be anchored against, which leaves every finding that
+ *   named a place with nowhere on the pull request to hang.
+ *
+ * A closing round is also the shape a healthy episode ends in, so silence here
+ * is read as a clean review.
+ *
+ * The counts come from what the round did, and all of it shares one line,
+ * because the pointer is a pointer and a second format has nowhere to grow.
  */
 function closingFailure(round: ClosedRound): string | null {
   const findings = round.findings.outcomes;
   const unposted = findings.filter((outcome) => outcome.outcome === "failed").length;
   const ruled = round.verdicts.threads;
   const unapplied = ruled.filter((thread) => thread.outcome === "failed").length;
-  if (unposted === 0 && unapplied === 0) return null;
+  const unreadableDiff = round.findings.unreadableDiff !== undefined;
+  if (unposted === 0 && unapplied === 0 && !unreadableDiff) return null;
 
   const failures = [
+    // The cause comes first where there is one: findings that would have opened
+    // threads went to the summary instead, and none of them counts as failed.
+    ...(unreadableDiff ? ["read the diff its comments anchor to"] : []),
     ...(unposted === 0 ? [] : [`post ${unposted} of ${findings.length} findings`]),
     ...(unapplied === 0 ? [] : [`apply ${unapplied} of ${ruled.length} verdicts`]),
   ];
