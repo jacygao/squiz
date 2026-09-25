@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.20 (draft)
+**Version:** 0.21 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -52,9 +52,11 @@ Two behaviours were established rather than assumed:
 - **`gh pr comment` and `gh pr review` take a body only.** Neither accepts a
   path or a line, so every inline comment goes through `gh api`. Re-check with
   `gh pr review --help`.
-- **Claude Code gives a command hook 600 seconds.** Read out of the 2.1.228
-  binary; the published documentation does not cover the Stop and SubagentStop
-  events.
+- **Claude Code fails a subagent that makes no progress for 600 seconds**, and
+  cancels the hook it is waiting on with it. Measured against 2.1.270; the
+  threshold is read from `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`. A hook's own
+  declared `timeout` is honoured below that and never reached above it. The
+  published documentation does not cover the Stop and SubagentStop events.
 
 ### GitHub access
 
@@ -616,7 +618,7 @@ carries what could not be posted.
 | The model API is unavailable or rate-limited | Exit 0 and nothing is posted. stderr says the review did not run. |
 | The reviewer returns output the adapter cannot parse | Retried once, then treated as an unavailable API. A failed parse and an honest finding of nothing are distinguished before anything is posted. |
 | The reviewer exceeds the review budget | The reviewer process is killed and the round records no findings. The round is recorded as a failed round rather than a clean one. |
-| The reviewer exceeds the hook timeout | The runtime kills the hook and the turn ends with nothing posted. |
+| The reviewer exceeds the ceiling | The runtime kills the hook and everything below it at once, so none of the round's own cleanup runs. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
 | The local state file cannot be written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. |
@@ -657,11 +659,21 @@ the findings arrive in the last message of the run. It does yield a cost: the
 assistant messages that completed carry their own, and the round records that
 sum as its last tracked cost.
 
-**The harness declares the hook's ceiling at 600 seconds**, in the registration
-rather than by taking the runtime's default, so the deadline every other bound
-sits below is stated where a reader can find it. The harness posts the round's
-comments inside it. The time bound sits below it: settable to 480 seconds at
-most, which leaves two minutes for posting.
+**The ceiling every other bound sits below is the runtime's subagent stall
+watchdog, at 600 seconds.** A subagent that makes no progress for that long is
+failed and the hook the runtime is waiting on is cancelled with it — and a
+`SubagentStop` hook that runs long is exactly a subagent making no progress,
+because the subagent cannot finish while the hook holds it. The watchdog moves
+with an environment variable rather than with anything the harness owns.
+
+The harness declares 600 in its own registration as well, which states what a
+round budgets for and bounds a round that would otherwise run away inside the
+window. A declared value below the watchdog is honoured exactly. Declaring a
+value above it moves nothing.
+
+The harness posts the round's comments inside that window. The time bound sits
+below it: settable to 480 seconds at most, which leaves two minutes for
+posting.
 
 Reaching the ceiling is the harness's last resort rather than its plan. The
 runtime signals the hook and everything below it at once, so a round that
