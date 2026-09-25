@@ -22,12 +22,14 @@ recheck-when: Claude Code changes how it kills a hook that reaches its timeout
 
 ## Decisions
 
-- **Nothing has to be built to stop an orphaned reviewer, because the runtime
-  reaches it.** At the ceiling the runtime sends `SIGTERM` to the hook's process
-  group and, separately, to every descendant of the hook by process id. The
-  reviewer is signalled in its own right, and so is each tool it started.
-  `detached: true` is safe to keep: it takes the reviewer out of the hook's group
-  and does not take it out of the runtime's reach.
+- **Nothing has to be built to stop the reviewer, or a tool it is still running,
+  because the runtime reaches those.** At the ceiling the runtime sends `SIGTERM`
+  to the hook's process group and, separately, to every descendant of the hook by
+  process id. The reviewer is signalled in its own right, and so is each tool it
+  started. `detached: true` is safe to keep on that count: it takes the reviewer
+  out of the hook's group and leaves it a descendant of the hook. What the runtime
+  does not reach is a process that has left the hook's chain of parents, and the
+  limit below says how one arises.
 - **The reviewer, and every tool it starts, has to exit on `SIGTERM`. Nothing
   else about the kill is certain.** The runtime escalates to `SIGKILL` about a
   second and a half later, but only if the runtime is itself still running by
@@ -120,10 +122,18 @@ then exited on its own.
   hook is not spawned in a group of its own *(unverified — read out of the
   2.1.270 binary rather than run)*, so none of the group half of this applies
   there.
-- **A process that has left both the hook's group and its chain of parents is
-  reached by neither signal.** No such process was measured. It cannot arise from
-  the reviewer as the harness starts it, because the reviewer leads the group its
-  tools inherit.
+- **A tool's own background child can leave both of the runtime's targets, and
+  nothing here measured it.** The targets are the hook's process group and the
+  hook's descendants by process id. A tool inherits the *reviewer's* group, which
+  is not the hook's, so a child the tool leaves running and then exits from is
+  reparented away from the hook: outside the descendant walk, and never inside
+  the hook's group. Neither signal reaches it, whether or not it would have
+  obeyed `SIGTERM`.
+
+  The round's own bound does reach it, because that signals the reviewer's group
+  rather than the hook's. So this is a gap in the runtime's cleanup at the
+  ceiling rather than in the round's. Measuring that topology is what would close
+  it.
 - **Whether a `timeout` above 600 is honoured.** Only lowering it was tested.
 - **`pi`'s answer to `SIGTERM` is one observation.** One prompt, the `read`
   grant, killed 0.9 seconds into the request: gone within 51 milliseconds, status
