@@ -18,7 +18,7 @@
 
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
-import type { RoundCost } from "../reviewers/adapter.ts";
+import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
 
 /** What the rounds of one episode have established so far. */
@@ -31,6 +31,18 @@ export type EpisodeState = {
    * run.
    */
   readonly rounds: readonly RoundCost[];
+  /**
+   * What the episode spent on attempts that were not rounds.
+   *
+   * This and the rounds are two ledgers, and they are kept apart because the
+   * bounds count different things. The entry count above is what the round cap
+   * spends, and a setup problem must not spend one: it fails the same way every
+   * firing, so a cap charged for it would leave a project no rounds once it had
+   * fixed the thing. Money is not like that — a dollar spent is spent whatever
+   * the attempt came to — so it goes here, and the cost bound is counted over
+   * both. An episode that dropped it could run past a bound it had crossed.
+   */
+  readonly spentOutsideRounds: RoundCost;
 };
 
 /**
@@ -111,7 +123,28 @@ export function writeState(episode: Episode, state: EpisodeState): StateWrite {
  * still appends one.
  */
 export function recordRound(state: EpisodeState, cost: RoundCost): EpisodeState {
-  return { pullRequest: state.pullRequest, rounds: [...state.rounds, cost] };
+  return { ...state, rounds: [...state.rounds, cost] };
+}
+
+/**
+ * The state with `cost` added to what the episode spent outside its rounds.
+ *
+ * The round count does not move. This is where an attempt that was not a round
+ * puts what it spent, so that the cost bound sees the money and the cap does not.
+ */
+export function recordSpendOutsideRounds(
+  state: EpisodeState,
+  cost: RoundCost,
+): EpisodeState {
+  const spent = state.spentOutsideRounds;
+  return {
+    ...state,
+    spentOutsideRounds: {
+      dollars: spent.dollars + cost.dollars,
+      tokens: spent.tokens + cost.tokens,
+      messages: spent.messages + cost.messages,
+    },
+  };
 }
 
 function discard(path: string): void {
@@ -149,7 +182,26 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     rounds.push(round.cost);
   }
 
-  return { outcome: "read", state: { pullRequest, rounds } };
+  const outside = spentOutsideRoundsIn(parsed, path);
+  if ("problem" in outside) return unreadable(`${path}: ${outside.problem}`);
+
+  return { outcome: "read", state: { pullRequest, rounds, spentOutsideRounds: outside.cost } };
+}
+
+/**
+ * What the file says was spent outside its rounds.
+ *
+ * Absent is nothing, which is what a file written before this figure existed
+ * means. A figure that is there and cannot be read is a failure like any other:
+ * standing it in for zero would understate what the episode has spent, and the
+ * cost bound would then let it spend past a bound it had crossed.
+ */
+function spentOutsideRoundsIn(parsed: Record<string, unknown>, path: string): ReadCost {
+  const spent = parsed["spentOutsideRounds"];
+  if (spent === undefined) return { cost: unspent };
+  const read = costFrom(spent);
+  if ("problem" in read) return { problem: `"spentOutsideRounds" ${read.problem}` };
+  return read;
 }
 
 type ReadCost = { readonly cost: RoundCost } | { readonly problem: string };

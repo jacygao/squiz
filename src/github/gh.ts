@@ -8,6 +8,8 @@
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 
+import type { Deadline } from "../reviewers/deadline.ts";
+
 /**
  * The ceiling on one call to GitHub, in milliseconds.
  *
@@ -36,6 +38,17 @@ export type GhCall = {
    * set it. The ceiling is not a project's to raise.
    */
   readonly boundMs?: number;
+  /**
+   * A moment every call made under this one has to finish by.
+   *
+   * It is the only thing that bounds a *sequence* of calls. A bound per call
+   * bounds each call and none of them together, so a caller that makes an
+   * unknown number of them — one create and up to twenty pages of read-back,
+   * one mutation per thread — can spend any multiple of its own bound without
+   * it. Each call is bounded by what is left of this as well, and a call with
+   * nothing left is not made at all.
+   */
+  readonly until?: Deadline;
 };
 
 /** A REST call: `gh api <path>`. */
@@ -181,7 +194,16 @@ function invoke(
   call: GhCall,
   input: string | undefined,
 ): Completed | GhFailure {
-  const boundMs = boundOf(call.boundMs);
+  const left = call.until?.remaining();
+  // Not made rather than made with no time to answer in. A caller that keeps
+  // calling past its deadline is one the runtime kills with nothing reported.
+  if (left !== undefined && left <= 0) {
+    return {
+      outcome: "unreachable",
+      reason: "the time left for GitHub ran out before this call was made",
+    };
+  }
+  const boundMs = boundOf(call.boundMs, left);
   // The arguments go as an array, so no shell parses them. A branch name, a
   // comment body and a node id are all attacker-influenced, and git alone
   // admits `$( )`, backticks and `;` into a branch name.
@@ -228,14 +250,17 @@ function classify(result: SpawnSyncReturns<string>, boundMs: number): Completed 
 }
 
 /**
- * The bound this call runs under: the ceiling, or a smaller one asked for.
+ * The bound this call runs under: the ceiling, a smaller one asked for, and what
+ * is left of the deadline the caller's calls share.
  *
  * A `timeout` of zero turns spawnSync's timeout off altogether, so zero and
  * anything that is not a positive number fall back to the ceiling.
  */
-function boundOf(asked: number | undefined): number {
-  if (asked === undefined || !Number.isFinite(asked) || asked <= 0) return CALL_CEILING_MS;
-  return Math.min(asked, CALL_CEILING_MS);
+function boundOf(asked: number | undefined, left: number | undefined): number {
+  let bound = CALL_CEILING_MS;
+  if (asked !== undefined && Number.isFinite(asked) && asked > 0) bound = Math.min(bound, asked);
+  if (left !== undefined) bound = Math.min(bound, left);
+  return bound;
 }
 
 /**

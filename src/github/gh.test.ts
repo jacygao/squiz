@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { callGraphql, callRest, runGh } from "./gh.ts";
 
 type FakeGh = {
@@ -318,6 +319,41 @@ test("a gh that hangs is abandoned at the bound and GitHub is unreachable", asyn
   assert.ok(
     Date.now() - started < 10_000,
     "the call must be abandoned at its bound rather than waiting gh out",
+  );
+});
+
+/**
+ * The deadline every call under one `GhCall` shares, which is the only thing that
+ * bounds a sequence of them. A caller that pages makes an unknown number of
+ * calls, and a bound per call bounds each of them and none of them together.
+ */
+test("a call with nothing left on the shared deadline is not made at all", async () => {
+  await withFakeGh({ stdout: included("200 OK", "{}") }, (gh) => {
+    const passed = deadlineIn(0);
+    const result = callRest({ path: "repos/o/r/pulls/1" }, { ...anywhere, until: passed });
+
+    assert.equal(result.outcome, "unreachable");
+    assert.equal(
+      gh.workingDirectory(),
+      null,
+      "a call made with no time to answer in spends the deadline it has already passed",
+    );
+  });
+});
+
+test("the shared deadline holds where it is shorter than the bound asked for", async () => {
+  const started = Date.now();
+  await withFakeGh({ hangSeconds: 30 }, () => {
+    const result = callRest(
+      { path: "repos/o/r/pulls/1" },
+      { ...anywhere, boundMs: 20_000, until: deadlineIn(250) },
+    );
+
+    assert.equal(result.outcome, "unreachable");
+  });
+  assert.ok(
+    Date.now() - started < 10_000,
+    "the call has to end at whichever of the two comes first",
   );
 });
 

@@ -150,6 +150,38 @@ test("a run that completed no message is not tried again", async () => {
 });
 
 /**
+ * The two failures reported as a setup problem rather than as a bad round arrive
+ * as one outcome, each keeping its own account of itself. A reviewer that would
+ * not start and one that ran and said nothing recur identically every firing, and
+ * what separates them is the reason rather than the outcome.
+ */
+test("a process that ran and said nothing and a spawn that failed are both setup", async () => {
+  await inATree(async (tree) => {
+    const ran = await runRound(reviewer(sayingNothing).adapter, at(tree), 10);
+    assert.equal(ran.outcome, "setup");
+    assert.deepEqual(ran.cost, unspent);
+
+    const missing: Adapter = {
+      argv: (invocation) => ({
+        command: join(tree, "no-such-reviewer"),
+        args: [],
+        directory: invocation.directory,
+      }),
+      parse,
+      grants,
+    };
+    const never = await runRound(missing, at(tree), 10);
+    assert.equal(never.outcome, "setup");
+    assert.deepEqual(never.cost, unspent);
+    assert.match(
+      never.outcome === "setup" ? never.reason : "",
+      /could not be started/u,
+      "the reason is the only thing that says which of the two failed",
+    );
+  });
+});
+
+/**
  * An errored message among working ones is a retry rather than a failure. One
  * measured round carried twenty-two of them and still did a real review.
  */
@@ -614,6 +646,9 @@ const reviewing = writing(said(JSON.stringify(review), "stop", 0.002));
 
 /** A reviewer whose request failed every time, and that completed no message. */
 const refusing = writing(said("", "error", 0, "no credential for the provider"));
+
+/** A reviewer that starts, writes nothing at all and exits cleanly. */
+const sayingNothing = "process.exit(0);";
 
 /** A reviewer whose request failed and was retried, and which then reviewed. */
 const recovering = writing(
