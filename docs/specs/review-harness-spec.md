@@ -631,6 +631,7 @@ carries what could not be posted.
 | The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |
 | The threads on the pull request cannot all be listed | Exit 0, nothing posted, and no review runs. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
+| The window is gone before the findings are posted | Exit 0, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window: a call made there is one the runtime kills the hook during, and the round would end having said nothing at all. |
 | The local state file cannot be written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. |
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |
@@ -686,13 +687,15 @@ the number is stated once in the code and the registration is held to it. The
 two saying different things is a failing test rather than a round budgeting
 against a window it no longer has.
 
-**A round divides the window into three shares.**
+**A round divides the window into three shares.** The window is one moment the
+whole round is measured against, and every share is bounded by what is left of
+it rather than by an allowance handed out when the share begins.
 
 | Share | How long | What runs in it |
 |---|---|---|
 | Before the review | 60 seconds | The pull request lookup, the threads listing and the diff |
 | The review | The time bound, and never past what is left of the window | The reviewer |
-| Posting | 120 seconds | The findings, the verdicts and the summary comment |
+| Posting | What is left of the window, and never more than 120 seconds | The findings, the verdicts and the summary comment |
 
 The time bound is the most a reviewer may run rather than a promise of that
 long: it is given what the project configured or what is left of the window,
@@ -700,6 +703,11 @@ whichever is smaller. What the calls before it spend therefore shortens the
 review rather than pushing the round past the ceiling. A round left no time to
 review in reports that and starts no reviewer, because a reviewer killed the
 moment it starts spends a round of the cap on a review nobody could have done.
+
+Stopping the reviewer runs after the moment the review had to be over by, and a
+reviewer that ignores the signal spends the grace and the kill there. That
+overrun comes out of the posting rather than out of the ceiling: a round whose
+window is gone by the time it has findings posts nothing and says so.
 
 Reaching the ceiling is the harness's last resort rather than its plan. The
 runtime signals the hook and everything below it at once, so a round that

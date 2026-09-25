@@ -68,9 +68,8 @@ export type RoundSetup = {
    */
   readonly marginMs?: number;
   /**
-   * The window the calls before the review and the review itself share, below
-   * the round's own, so that a test can reach either share without waiting eight
-   * minutes out.
+   * The round's whole window, below its own, so that a test can reach any of its
+   * shares without waiting ten minutes out.
    *
    * It only lowers, like the posting margin, and for the same reason.
    */
@@ -140,11 +139,17 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   const { episode, config } = setup;
   const directory = episode.worktree;
 
-  // Everything but the posting shares this, measured from the round's start: the
-  // calls before the review, and the review itself. What those calls spend comes
-  // off the reviewer's bound rather than off the posting margin, so a slow
-  // GitHub shortens the review instead of pushing the round past the ceiling.
-  const beforePosting = deadlineIn(lowered(setup.windowMs, HOOK_CEILING_MS - POSTING_MARGIN_MS));
+  // The round's whole window, measured from here. Every phase of the round is
+  // bounded by what is left of this one moment rather than by an allowance handed
+  // out when the phase begins, so no phase can put what it overran on top of the
+  // window instead of inside it.
+  const window = deadlineIn(lowered(setup.windowMs, HOOK_CEILING_MS));
+  const postingMs = lowered(setup.marginMs, POSTING_MARGIN_MS);
+  // The moment the review has to be over by: the window, less what is kept back
+  // to put the review on the pull request. What the calls before the review spend
+  // comes off the reviewer's bound rather than off that, so a slow GitHub
+  // shortens the review instead of pushing the round past the ceiling.
+  const beforePosting = deadlineIn(Math.max(0, window.remaining() - postingMs));
   // One deadline over the whole phase, not a bound on each of its calls. The
   // threads listing pages, so how many calls the phase makes is not known in
   // advance, and a bound per call lets every page have the whole of one.
@@ -219,7 +224,11 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     return failed(review.outcome, reviewerFailed(review));
   }
 
-  const margin = deadlineIn(lowered(setup.marginMs, POSTING_MARGIN_MS));
+  // What is left of the window, and never more than the margin kept back for
+  // posting. The reviewer's own cleanup runs after the moment the review had to
+  // be over by, and a margin that started afresh here would spend that overrun
+  // again past the end of the window.
+  const margin = deadlineIn(Math.min(window.remaining(), postingMs));
   const calls = handedOver.length + 2 * review.findings.length;
 
   // The verdicts go first. One that is not applied leaves a thread in a state

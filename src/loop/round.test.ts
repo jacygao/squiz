@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,6 +156,24 @@ function hangs(cost: RoundCost): Reviewer {
   };
 }
 
+/**
+ * A reviewer that answers inside its bound and then holds on through the round's
+ * cleanup.
+ *
+ * Its output closes at once, so the review is read and the round is left with
+ * findings to post. It then ignores the signal that would stop it, so the round
+ * spends the grace and the kill after the moment the review had to be over by.
+ */
+function answersThenHolds(findings: readonly Finding[]): Reviewer {
+  return {
+    command: "/bin/sh",
+    // The wait is short and repeated, because a shell blocked in one long sleep
+    // reaches its trap only once that sleep is over.
+    args: ["-c", "trap '' TERM; exec 1>&-; while :; do sleep 0.2; done"],
+    parse: reviews({ findings }).parse,
+  };
+}
+
 /** A reviewer whose output cannot be read as a review, however often it is run. */
 function unreadable(cost: RoundCost): Reviewer {
   return {
@@ -234,6 +252,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
     await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {});
+    warm(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     const episode = episodeAt(worktree, AGENT_ID);
@@ -297,6 +316,24 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
     await rm(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Run the fake once, and forget that it ran.
+ *
+ * The system looks a newly written executable over the first time it is run, and
+ * that look costs the best part of a second. A test that times what the round
+ * spends would be timing the look, so it is paid for here instead.
+ */
+function warm(directory: string): void {
+  try {
+    execFileSync(join(directory, "gh"), ["--warm"], { stdio: "ignore" });
+  } catch {
+    // The fake has no answer for this, so it exits 1. Running it is the point.
+  }
+  for (const name of ["count", "kinds", "count-unknown", "stdin-1"]) {
+    rmSync(join(directory, name), { force: true });
   }
 }
 
@@ -840,6 +877,41 @@ test("the posting margin bounds every call the round makes after the review", as
   );
 });
 
+/**
+ * The window is one moment the whole round is measured against, not an allowance
+ * each phase is handed when it starts.
+ *
+ * The reviewer answers inside its bound and the round then spends the grace and
+ * the kill stopping it, which lands past the moment the review had to be over by.
+ * A posting margin that began afresh there would spend those two minutes on the
+ * far side of the window, and what lies on the far side of the window is the
+ * runtime killing the hook with nothing posted and the subagent recorded failed.
+ */
+test("a review that returned late leaves the posting what is left of the window, not a fresh margin", async () => {
+  const ran = await runInFixture({
+    // A window the reviewer's own cleanup is longer than what is left of, so the
+    // round reaches the posting with the window already gone.
+    windowMs: 2_000,
+    marginMs: 500,
+    answers: POSTING,
+    reviewer: answersThenHolds([finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const outcome = ran.conclusion.findings.outcomes[0];
+  assert.equal(outcome?.outcome, "failed", "a round that could not post is never a clean round");
+  assert.match(
+    outcome?.outcome === "failed" ? outcome.reason : "",
+    /ran out before this call was made/u,
+    "the window was gone before the posting started, and the round says so rather than reporting a comment it never wrote",
+  );
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "create"),
+    [],
+    "a call made past the end of the window is one the runtime kills the hook during",
+  );
+});
+
 /** How many pages the threads listing is offered before it must stop itself. */
 const OFFERED_PAGES = 30;
 
@@ -853,6 +925,7 @@ const OFFERED_PAGES = 30;
 test("the calls before the review share one deadline, and the phase ends inside it", async () => {
   const ran = await runInFixture({
     windowMs: 1_000,
+    marginMs: 1,
     delays: { prlist: "0.2", threads: "0.5", diff: "0.5" },
     // A round the listing runs for, which is every round after the first.
     rounds: [ANSWER_COST],
@@ -911,6 +984,7 @@ test("what the calls before the review spend comes off the reviewer's own bound"
   // by the runtime, which posts nothing and fails the coding agent's subagent.
   const ran = await runInFixture({
     windowMs: 3_000,
+    marginMs: 1_000,
     config: { timeout: 5 },
     answers: POSTING,
     reviewer: hangs(ANSWER_COST),
