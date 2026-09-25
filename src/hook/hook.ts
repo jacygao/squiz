@@ -28,7 +28,7 @@ export function runHook(): HookExit {
   // That is an answer of none rather than a failure, and none is silent.
   if (branch.outcome === "detached") return 0;
 
-  const pullRequest = findPullRequestForBranch(branch.name, directory);
+  const pullRequest = findPullRequestForBranch(branch.name, { directory: directory });
   if (pullRequest.outcome === "failed") {
     const named = JSON.stringify(branch.name);
     reportFailure(

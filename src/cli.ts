@@ -63,7 +63,7 @@ function targetOf(directory: string): Target {
   }
 
   const named = JSON.stringify(branch.name);
-  const found = findPullRequestForBranch(branch.name, directory);
+  const found = findPullRequestForBranch(branch.name, { directory: directory });
   if (found.outcome === "failed") {
     return unavailable(`the pull request for ${named} could not be looked up: ${found.reason}`);
   }

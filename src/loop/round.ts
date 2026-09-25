@@ -20,6 +20,7 @@
 import { mkdirSync } from "node:fs";
 
 import type { Config } from "../config/config.ts";
+import type { GhCall } from "../github/gh.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
@@ -43,18 +44,7 @@ import {
   type EpisodeBounds,
 } from "./round-decision.ts";
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
-
-/**
- * How long the round has to put what the review produced on the pull request.
- *
- * Under the runtime's kill of the hook with the reviewer's own bound spent,
- * which is what the hook's ceiling leaves for posting. Every call the round
- * makes after the review runs under it as a shared deadline, because how many
- * calls the posting makes is not known in advance: one finding is a create and
- * up to twenty pages of read-back, and a bound per call would let each of those
- * pages have the whole of one.
- */
-const POSTING_MARGIN_MS = 120_000;
+import { HOOK_CEILING_MS, POSTING_MARGIN_MS, PRE_REVIEW_MARGIN_MS } from "./window.ts";
 
 /** What one round needs to run. */
 export type RoundSetup = {
@@ -77,6 +67,14 @@ export type RoundSetup = {
    * set it. The margin is not a project's to raise.
    */
   readonly marginMs?: number;
+  /**
+   * The window the calls before the review and the review itself share, below
+   * the round's own, so that a test can reach either share without waiting eight
+   * minutes out.
+   *
+   * It only lowers, like the posting margin, and for the same reason.
+   */
+  readonly windowMs?: number;
 };
 
 /** Why a round reported a failure, and whose failure it was. */
@@ -142,7 +140,20 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   const { episode, config } = setup;
   const directory = episode.worktree;
 
-  const gated = gate(directory);
+  // Everything but the posting shares this, measured from the round's start: the
+  // calls before the review, and the review itself. What those calls spend comes
+  // off the reviewer's bound rather than off the posting margin, so a slow
+  // GitHub shortens the review instead of pushing the round past the ceiling.
+  const beforePosting = deadlineIn(lowered(setup.windowMs, HOOK_CEILING_MS - POSTING_MARGIN_MS));
+  // One deadline over the whole phase, not a bound on each of its calls. The
+  // threads listing pages, so how many calls the phase makes is not known in
+  // advance, and a bound per call lets every page have the whole of one.
+  const preReview: GhCall = {
+    directory,
+    until: deadlineIn(Math.min(PRE_REVIEW_MARGIN_MS, beforePosting.remaining())),
+  };
+
+  const gated = gate(preReview);
   if ("ended" in gated) return gated.ended;
   const pullRequest = gated.step;
 
@@ -161,11 +172,11 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   // the whole of what a reviewer holding no state knows about the rounds before
   // it.
   const firstRound = state.rounds.length === 0;
-  const listing = firstRound ? noThreads : handOver(pullRequest, directory);
+  const listing = firstRound ? noThreads : handOver(pullRequest, preReview);
   if ("ended" in listing) return listing.ended;
   const handedOver = listing.step;
 
-  const fetched = fetchDiff(pullRequest.number, directory);
+  const fetched = fetchDiff(pullRequest.number, preReview);
   if (fetched.outcome !== "fetched") {
     return failed(
       "harness",
@@ -175,6 +186,14 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
 
   const unmade = makeDirectories(episode);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
+
+  const seconds = reviewSeconds(config.timeout, beforePosting);
+  if (seconds === null) {
+    return failed(
+      "harness",
+      "no review ran: the calls before it spent the time the round had to review in",
+    );
+  }
 
   const review = await runReview(
     setup.adapter,
@@ -187,7 +206,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
       thinking: config.thinking,
       depth: config.depth,
     },
-    config.timeout,
+    seconds,
   );
 
   const recording = keepCost(episode, state, review);
@@ -200,7 +219,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     return failed(review.outcome, reviewerFailed(review));
   }
 
-  const margin = deadlineIn(marginOf(setup.marginMs));
+  const margin = deadlineIn(lowered(setup.marginMs, POSTING_MARGIN_MS));
   const calls = handedOver.length + 2 * review.findings.length;
 
   // The verdicts go first. One that is not applied leaves a thread in a state
@@ -260,10 +279,11 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
  * A branch with no pull request is silent: no review runs and nothing is posted.
  * A git or a `gh` that could not answer is a failure and is named, because an
  * install that failed and read as a branch with no pull request looks exactly
- * like the harness working normally, every round and forever.
+ * like the harness working normally, every round and forever. The time for
+ * GitHub running out is one of those, and never an answer of none.
  */
-function gate(directory: string): Step<PullRequest> {
-  const branch = currentBranch(directory);
+function gate(call: GhCall): Step<PullRequest> {
+  const branch = currentBranch(call.directory);
   if (branch.outcome === "failed") {
     return {
       ended: failed(
@@ -276,7 +296,7 @@ function gate(directory: string): Step<PullRequest> {
   // answer of none rather than a failure, and none is silent.
   if (branch.outcome === "detached") return { ended: { outcome: "no-pull-request" } };
 
-  const lookup = findPullRequestForBranch(branch.name, directory);
+  const lookup = findPullRequestForBranch(branch.name, call);
   if (lookup.outcome === "failed") {
     const asked = JSON.stringify(branch.name);
     return {
@@ -355,8 +375,8 @@ const noThreads: Step<readonly ReviewThread[]> = { step: [] };
  * instead would ask for a fresh review of code the reviewer has already
  * commented on, and every finding of the round before would go up a second time.
  */
-function handOver(pullRequest: PullRequest, directory: string): Step<readonly ReviewThread[]> {
-  const listed = listReviewThreads(pullRequest.nodeId, { directory });
+function handOver(pullRequest: PullRequest, call: GhCall): Step<readonly ReviewThread[]> {
+  const listed = listReviewThreads(pullRequest.nodeId, call);
   if (listed.outcome !== "listed") {
     return {
       ended: failed(
@@ -583,10 +603,25 @@ function share(margin: Deadline, calls: number): number {
   return Math.max(1, Math.floor(margin.remaining() / Math.max(1, calls)));
 }
 
-/** The posting margin, or a smaller one asked for. It only lowers. */
-function marginOf(asked: number | undefined): number {
-  if (asked === undefined || !Number.isFinite(asked) || asked <= 0) return POSTING_MARGIN_MS;
-  return Math.min(asked, POSTING_MARGIN_MS);
+/**
+ * How long the reviewer may run, in whole seconds: what the project configured,
+ * or what the calls before it left of the window, whichever is smaller. `null`
+ * where nothing is left to review in.
+ *
+ * Whole seconds, because that is what the bound is stated in and what a killed
+ * round reports. A round with no time to review in reports that rather than
+ * starting a reviewer it would kill at once, which would spend a round of the
+ * cap on a review nobody could have done.
+ */
+function reviewSeconds(configured: number, beforePosting: Deadline): number | null {
+  const seconds = Math.min(configured, Math.floor(beforePosting.remaining() / 1_000));
+  return seconds < 1 ? null : seconds;
+}
+
+/** A share of the window, or a smaller one asked for. It only lowers. */
+function lowered(asked: number | undefined, whole: number): number {
+  if (asked === undefined || !Number.isFinite(asked) || asked <= 0) return whole;
+  return Math.min(asked, whole);
 }
 
 function named(pullRequest: PullRequest): string {

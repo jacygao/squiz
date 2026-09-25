@@ -3,12 +3,12 @@
  * it: its number, its refs, its head sha, its description and its diff.
  *
  * A `gh` that could not answer stays distinguishable from an answer of none all
- * the way out to the caller. An install that failed and read as a branch with no
- * pull request would look exactly like the harness working normally, every round
- * and forever.
+ * the way out to the caller, the time left for GitHub running out included. An
+ * install that failed and read as a branch with no pull request would look
+ * exactly like the harness working normally, every round and forever.
  */
 
-import { runGh, saidBy } from "./gh.ts";
+import { runGh, saidBy, type GhCall } from "./gh.ts";
 
 /** The pull request a round reviews. */
 export type PullRequest = {
@@ -64,29 +64,35 @@ const query = [
 const diffHeader = "Accept: application/vnd.github.v3.diff";
 
 /**
- * Ask `gh` for the open pull request whose head is `branch`, from `directory`.
+ * Ask `gh` for the open pull request whose head is `branch`.
  *
- * `directory` decides which repository is asked: `gh` reads the remotes of the
- * working directory it runs in.
+ * `call.directory` decides which repository is asked: `gh` reads the remotes of
+ * the working directory it runs in. `call` also carries the bound, so a caller
+ * that has a phase to finish inside can give this its share of one.
  *
  * Never throws. A `gh` that is missing, unauthenticated, rate-limited or
- * unreadable comes back as `failed`, carrying the reason as a single line.
+ * unreadable comes back as `failed`, carrying the reason as a single line. So
+ * does a call the deadline left no time for: `none` is GitHub saying there is no
+ * pull request and nothing else, because a round reads `none` as nothing to
+ * review and posts nothing at all.
  *
  * `pr list` rather than `api`: one question about the current repository's
  * remotes, which `gh` resolves and the harness would otherwise have to.
  */
-export function findPullRequestForBranch(branch: string, directory: string): PullRequestLookup {
-  const run = runGh([...query, "--head", branch], { directory });
+export function findPullRequestForBranch(branch: string, call: GhCall): PullRequestLookup {
+  const run = runGh([...query, "--head", branch], call);
   if (run.outcome !== "ran") return failed(run.reason);
   return read(run.stdout);
 }
 
 /**
- * Fetch the diff GitHub serves for pull request `number`, from `directory`.
+ * Fetch the diff GitHub serves for pull request `number`.
  *
  * What arrives is byte for byte what `git diff` writes for the same range: a
  * path holding a space carries a trailing tab, and a path outside ASCII is
  * quoted one octal escape per byte. The anchor validator reads it as it stands.
+ *
+ * `call` carries the directory and the bound, as the lookup's does.
  *
  * Never throws, and an empty answer is a failure rather than an empty diff: a
  * `gh` that succeeded and printed nothing establishes nothing.
@@ -94,11 +100,11 @@ export function findPullRequestForBranch(branch: string, directory: string): Pul
  * `api` rather than `pr diff`, which spends a GraphQL call to find a number the
  * caller is holding.
  */
-export function fetchDiff(number: number, directory: string): DiffFetch {
+export function fetchDiff(number: number, call: GhCall): DiffFetch {
   // `gh` fills `{owner}` and `{repo}` in from the remotes of the directory it
   // runs in, which is the same repository the lookup asked.
   const path = `repos/{owner}/{repo}/pulls/${number}`;
-  const run = runGh(["api", path, "--header", diffHeader], { directory });
+  const run = runGh(["api", path, "--header", diffHeader], call);
   if (run.outcome !== "ran") return failed(run.reason);
   if (run.stdout === "") return failed("gh answered with an empty diff");
   return { outcome: "fetched", diff: run.stdout };
