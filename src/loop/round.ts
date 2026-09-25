@@ -184,6 +184,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
       prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }),
       sessionDirectory: episode.sessionDirectory,
       scratchDirectory: episode.scratchDirectory,
+      thinking: config.thinking,
       depth: config.depth,
     },
     config.timeout,
