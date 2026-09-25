@@ -49,7 +49,7 @@ export type Episode = {
   readonly id: string;
   /** `<worktree>/.squiz/<id>`, which holds the whole episode. */
   readonly directory: string;
-  /** The round count, the pull request number and what each round spent. */
+  /** The pull request, what each round spent, and what was spent outside them. */
   readonly stateFile: string;
   /** What the reviewer's CLI is told to write its own session into. */
   readonly sessionDirectory: string;
