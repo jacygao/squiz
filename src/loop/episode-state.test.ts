@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { type RoundCost, unspent } from "../reviewers/adapter.ts";
-import { type EpisodeState, readState, recordRound, writeState } from "./episode-state.ts";
+import {
+  type EpisodeState,
+  readState,
+  recordRound,
+  recordSpendOutsideRounds,
+  writeState,
+} from "./episode-state.ts";
 import { type Episode, episodeAt } from "./episode.ts";
 
 const agentId = "a1e3196c5ad0f2410";
@@ -37,7 +43,11 @@ function refusalOf(t: TestContext, contents: string): string {
 
 test("state written comes back as it was written", (t) => {
   const episode = episodeIn(t);
-  const state: EpisodeState = { pullRequest: 142, rounds: [firstRound, secondRound] };
+  const state: EpisodeState = {
+    pullRequest: 142,
+    rounds: [firstRound, secondRound],
+    spentOutsideRounds: unspent,
+  };
 
   assert.deepEqual(writeState(episode, state), { outcome: "written" });
   assert.deepEqual(readState(episode), { outcome: "read", state });
@@ -45,14 +55,18 @@ test("state written comes back as it was written", (t) => {
 
 test("the episode's directory is made by the write that needs it", (t) => {
   const episode = episodeIn(t);
-  assert.deepEqual(writeState(episode, { pullRequest: 7, rounds: [] }), { outcome: "written" });
+  assert.deepEqual(writeState(episode, { pullRequest: 7, rounds: [], spentOutsideRounds: unspent }), { outcome: "written" });
   assert.deepEqual(readdirSync(episode.directory), ["state.json"]);
 });
 
 test("a later round's state replaces the one before it", (t) => {
   const episode = episodeIn(t);
-  writeState(episode, { pullRequest: 142, rounds: [firstRound] });
-  const second: EpisodeState = { pullRequest: 142, rounds: [firstRound, secondRound] };
+  writeState(episode, { pullRequest: 142, rounds: [firstRound], spentOutsideRounds: unspent });
+  const second: EpisodeState = {
+    pullRequest: 142,
+    rounds: [firstRound, secondRound],
+    spentOutsideRounds: unspent,
+  };
   writeState(episode, second);
 
   assert.deepEqual(readState(episode), { outcome: "read", state: second });
@@ -92,6 +106,11 @@ const unreadableContents: readonly string[] = [
   `{"pullRequest": 142, "rounds": [{"dollars": 0.01, "tokens": 100}]}`,
   `{"pullRequest": 142, "rounds": [{"dollars": "0.01", "tokens": 100, "messages": 1}]}`,
   `{"pullRequest": 142, "rounds": [{"dollars": 0.01, "tokens": -1, "messages": 1}]}`,
+  // A spend that is there and cannot be read must not stand in for zero: the
+  // cost bound would then let the episode spend past a bound it had crossed.
+  `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": 0.04}`,
+  `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": 0.04}}`,
+  `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": "0.04", "tokens": 1, "messages": 1}}`,
 ];
 
 for (const contents of unreadableContents) {
@@ -120,7 +139,11 @@ test("a write that cannot happen carries the error the filesystem gave", (t) => 
   // write fail: no directory can be created underneath it.
   writeFileSync(join(episode.worktree, ".squiz"), "");
 
-  const written = writeState(episode, { pullRequest: 142, rounds: [firstRound] });
+  const written = writeState(episode, {
+    pullRequest: 142,
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+  });
   if (written.outcome !== "failed") {
     assert.fail(`a write that cannot happen came back "${written.outcome}"`);
   }
@@ -133,7 +156,7 @@ test("a write that cannot happen carries the error the filesystem gave", (t) => 
 });
 
 test("a round's spend is appended, and the number of entries is the number of rounds", () => {
-  const start: EpisodeState = { pullRequest: 142, rounds: [] };
+  const start: EpisodeState = { pullRequest: 142, rounds: [], spentOutsideRounds: unspent };
   const afterTwo = recordRound(recordRound(start, firstRound), secondRound);
 
   assert.equal(start.rounds.length, 0, "the state a round was given must not change");
@@ -143,10 +166,40 @@ test("a round's spend is appended, and the number of entries is the number of ro
 
 test("a round that spent nothing is still a round", (t) => {
   const episode = episodeIn(t);
-  writeState(episode, recordRound({ pullRequest: 142, rounds: [] }, unspent));
+  const start: EpisodeState = { pullRequest: 142, rounds: [], spentOutsideRounds: unspent };
+  writeState(episode, recordRound(start, unspent));
 
   assert.deepEqual(readState(episode), {
     outcome: "read",
-    state: { pullRequest: 142, rounds: [unspent] },
+    state: { pullRequest: 142, rounds: [unspent], spentOutsideRounds: unspent },
+  });
+});
+
+/**
+ * The two figures are two ledgers, and this is the one the cap does not count.
+ * An attempt can complete a paid response and still end as something that is no
+ * round, and the money it spent has to survive that.
+ */
+test("spend recorded outside the rounds does not move the round count", () => {
+  const start: EpisodeState = { pullRequest: 142, rounds: [firstRound], spentOutsideRounds: unspent };
+  const after = recordSpendOutsideRounds(recordSpendOutsideRounds(start, firstRound), secondRound);
+
+  assert.equal(after.rounds.length, 1, "no round was run, so the cap has nothing more to spend");
+  assert.deepEqual(after.spentOutsideRounds, {
+    dollars: firstRound.dollars + secondRound.dollars,
+    tokens: firstRound.tokens + secondRound.tokens,
+    messages: firstRound.messages + secondRound.messages,
+  });
+  assert.deepEqual(start.spentOutsideRounds, unspent, "the state it was given must not change");
+});
+
+test("a state file naming no spend outside its rounds has spent none", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(episode.stateFile, `{"pullRequest": 142, "rounds": []}`);
+
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: { pullRequest: 142, rounds: [], spentOutsideRounds: unspent },
   });
 });

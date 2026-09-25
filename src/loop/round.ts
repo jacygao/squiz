@@ -23,11 +23,17 @@ import type { Config } from "../config/config.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
-import type { Adapter } from "../reviewers/adapter.ts";
+import { unspent, type Adapter, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
-import { readState, recordRound, writeState, type EpisodeState } from "./episode-state.ts";
+import {
+  readState,
+  recordRound,
+  recordSpendOutsideRounds,
+  writeState,
+  type EpisodeState,
+} from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { blockingReason } from "./reason.ts";
@@ -299,8 +305,10 @@ function openState(episode: Episode, pullRequest: number): Step<EpisodeState> {
   if (read.outcome === "unreadable") {
     return { ended: failed("harness", `no review ran: ${read.reason}`) };
   }
-  if (read.outcome === "absent") return { step: { pullRequest, rounds: [] } };
-  return { step: { pullRequest, rounds: read.state.rounds } };
+  if (read.outcome === "absent") {
+    return { step: { pullRequest, rounds: [], spentOutsideRounds: unspent } };
+  }
+  return { step: { ...read.state, pullRequest } };
 }
 
 /**
@@ -386,12 +394,15 @@ function makeDirectories(episode: Episode): string | null {
  * cost bound. A killed round's floor goes in for the same reason: what the
  * reviewer reported before it was stopped is what there is.
  *
- * A setup problem is not recorded at all, because it is not a round.
+ * A setup problem records what it spent without recording a round.
  */
 function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<EpisodeState> {
-  if (!isRound(review)) return { step: state };
+  const recorded = withSpend(state, review);
+  // Nothing was spent and no round ran, so there is nothing to keep. Writing
+  // anyway would put a write that could fail in front of the reason the reviewer
+  // gave, and report the wrong failure.
+  if (recorded === null) return { step: state };
 
-  const recorded = recordRound(state, review.cost);
   const written = writeState(episode, recorded);
   if (written.outcome === "failed") {
     // Nothing is posted on a state file that would not take the round. A round
@@ -403,8 +414,29 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
 }
 
 /**
- * Whether the attempt was a round, which is what decides whether it is recorded
- * and so whether it spends one of the cap.
+ * The state with this attempt's spend in it, or `null` where it spent nothing and
+ * was no round.
+ *
+ * Two ledgers, and an attempt goes in exactly one of them. A round appends its
+ * cost, and the entry count is what the cap spends. A setup problem spends no
+ * round, and the dollars it spent are added to the episode's spend all the same:
+ * an attempt can complete a paid response and still end as a setup problem, and
+ * an episode that forgot that money would buy another reviewer past a budget it
+ * had already crossed.
+ */
+function withSpend(state: EpisodeState, review: Review): EpisodeState | null {
+  if (isRound(review)) return recordRound(state, review.cost);
+  if (nothingSpent(review.cost)) return null;
+  return recordSpendOutsideRounds(state, review.cost);
+}
+
+function nothingSpent(cost: RoundCost): boolean {
+  return cost.dollars === 0 && cost.tokens === 0 && cost.messages === 0;
+}
+
+/**
+ * Whether the attempt was a round, which is what decides whether it spends one
+ * of the cap.
  *
  * A reviewer that would not start and one that ran and completed no message are
  * a setup problem rather than a bad round. Both fail the same way every firing
@@ -413,12 +445,13 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
  * away either: a setup problem never blocks, so the coding agent's turn ends and
  * no further round fires.
  *
- * Every other outcome is a round, and is recorded with whatever it spent. A
- * round killed at its bound and output no fresh process could read both got as
- * far as reviewing, and an empty review is a round that did the work and found
- * nothing. Reading the cost instead of the outcome would decide this on a figure
- * that is zero for a reviewer no price can be read for, and the count would then
- * never advance at all.
+ * Every other outcome is a round. A round killed at its bound and output no fresh
+ * process could read both got as far as reviewing, and an empty review is a round
+ * that did the work and found nothing. Reading the cost instead of the outcome
+ * would decide this on a figure that is zero for a reviewer no price can be read
+ * for, and the count would then never advance at all.
+ *
+ * This decides the cap alone. What the attempt spent is recorded either way.
  */
 function isRound(review: Review): boolean {
   return review.outcome !== "setup";
@@ -521,9 +554,15 @@ function anchorOf(outcome: Threaded): ThreadAnchor {
   return { at: "line", line: outcome.finding.line };
 }
 
-/** What the episode has spent, which is every recorded round's dollars added up. */
+/**
+ * What the episode has spent: its rounds, and what it spent outside them.
+ *
+ * Both ledgers, because the bound is on the money and not on what the money was
+ * spent by.
+ */
 function spentBy(state: EpisodeState): number {
-  return state.rounds.reduce((total, cost) => total + cost.dollars, 0);
+  const rounds = state.rounds.reduce((total, cost) => total + cost.dollars, 0);
+  return rounds + state.spentOutsideRounds.dollars;
 }
 
 /**

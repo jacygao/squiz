@@ -21,12 +21,13 @@ import { test } from "node:test";
 
 import { defaultConfig, type Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
-import type {
-  Adapter,
-  Invocation,
-  ParsedRun,
-  RoundCost,
-  ThreadVerdict,
+import {
+  unspent,
+  type Adapter,
+  type Invocation,
+  type ParsedRun,
+  type RoundCost,
+  type ThreadVerdict,
 } from "../reviewers/adapter.ts";
 import { writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
@@ -88,6 +89,8 @@ type Setup = {
   readonly config?: Partial<Config>;
   /** Rounds already recorded, which is what makes the round a later one. */
   readonly rounds?: readonly RoundCost[];
+  /** What the episode already spent on attempts that were no round. */
+  readonly outsideRounds?: RoundCost;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
   readonly marginMs?: number;
@@ -170,6 +173,26 @@ function completesNothing(cost: RoundCost): Reviewer {
   };
 }
 
+/**
+ * A reviewer whose attempts answer differently, in order.
+ *
+ * The round's own retry is what this is for: a first attempt that completed a
+ * paid response the adapter could not read, and a second that failed before
+ * completing one, come back as a setup problem carrying the first one's cost.
+ */
+function attempts(...runs: readonly ParsedRun[]): Reviewer {
+  let at = 0;
+  return {
+    parse: async (stdout): Promise<ParsedRun> => {
+      await drain(stdout);
+      const run = runs[Math.min(at, runs.length - 1)];
+      at += 1;
+      if (run === undefined) throw new Error("the fixture ran out of attempts to answer with");
+      return run;
+    },
+  };
+}
+
 /** A reviewer that is not installed, which is the setup problem a round cannot fix. */
 const notInstalled: Reviewer = {
   command: "/nonexistent/squiz-reviewer",
@@ -212,7 +235,11 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     const episode = episodeAt(worktree, AGENT_ID);
     if (setup.rounds !== undefined) {
-      const written = writeState(episode, { pullRequest: PULL_REQUEST, rounds: setup.rounds });
+      const written = writeState(episode, {
+        pullRequest: PULL_REQUEST,
+        rounds: setup.rounds,
+        spentOutsideRounds: setup.outsideRounds ?? unspent,
+      });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
     }
     if (setup.stateSource !== undefined) {
@@ -483,7 +510,11 @@ test("the round's cost is recorded in the episode state with its token count", a
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.deepEqual(ran.state, { pullRequest: PULL_REQUEST, rounds: [ANSWER_COST] });
+  assert.deepEqual(ran.state, {
+    pullRequest: PULL_REQUEST,
+    rounds: [ANSWER_COST],
+    spentOutsideRounds: unspent,
+  });
   assert.match(ran.stateSource ?? "", /"tokens": 1200/u);
 });
 
@@ -612,7 +643,7 @@ test("a reviewer killed at its bound is a failed round and not an empty review",
   assert.deepEqual(ran.kinds, ["prlist", "diff"], "a round with no review posts nothing");
   assert.deepEqual(
     ran.state,
-    { pullRequest: PULL_REQUEST, rounds: [floor] },
+    { pullRequest: PULL_REQUEST, rounds: [floor], spentOutsideRounds: unspent },
     "a killed round's floor is what it reported before it was stopped, and it counts against the cap",
   );
 });
@@ -655,9 +686,9 @@ test("a reviewer that ran and completed no message spends no round of the cap", 
     assert.ok(ran.conclusion.outcome === "failed");
     assert.equal(ran.conclusion.failure, "setup");
     assert.match(ran.conclusion.reason, /the model refused the request/u);
-    assert.equal(
-      ran.stateSource,
-      null,
+    assert.deepEqual(
+      ran.state?.rounds ?? [],
+      [],
       `a setup problem reporting ${cost.dollars} dollars was recorded as a round, and the cap it spends is one the project does not get back once the credential is fixed`,
     );
   }
@@ -891,3 +922,53 @@ test("a read-back that pages is stopped by the margin, not by its own page limit
   );
 });
 
+
+/**
+ * A paid attempt whose round ended as a setup problem: the money is kept even
+ * though the round is not, and the next invocation is refused by the budget the
+ * money puts it over.
+ *
+ * The exemption is about the round cap, which a setup problem must not spend. It
+ * is not about the dollars, which are spent whatever the attempt came to.
+ */
+test("a paid attempt that ended as a setup problem is what stops the next round", async () => {
+  const paid: RoundCost = { dollars: 0.04, tokens: 1500, messages: 1 };
+  const almostSpent: RoundCost = { dollars: 0.49, tokens: 9000, messages: 20 };
+  const bounds = { rounds: 8, budget: 0.5 };
+
+  const first = await runInFixture({
+    config: bounds,
+    rounds: [almostSpent],
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
+    reviewer: attempts(
+      { cost: paid, result: { kind: "unparsed", reason: "the last message was not a review" } },
+      { cost: unspent, result: { kind: "incomplete", reason: "503 from the provider" } },
+    ),
+  });
+
+  assert.ok(first.conclusion.outcome === "failed");
+  assert.equal(first.conclusion.failure, "setup");
+  assert.deepEqual(first.state?.rounds, [almostSpent], "the setup problem spends no round");
+  assert.deepEqual(
+    first.state?.spentOutsideRounds,
+    paid,
+    "the attempt completed a paid response before it failed, and that money is spent",
+  );
+
+  // The next firing of the same episode, against the state the first one left.
+  const next = await runInFixture({
+    config: bounds,
+    rounds: first.state?.rounds ?? [],
+    ...(first.state === null ? {} : { outsideRounds: first.state.spentOutsideRounds }),
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(next.conclusion.outcome === "close");
+  assert.equal(next.conclusion.because, "cost-bound");
+  assert.equal(
+    next.invocations.length,
+    0,
+    "$0.53 against a $0.50 budget buys no further reviewer, and forgetting the $0.04 is what would buy one",
+  );
+});
