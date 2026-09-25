@@ -27,6 +27,17 @@ let onABranch = "";
 
 const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz"];
 
+/**
+ * One firing, as the runtime writes it to the hook's stdin.
+ *
+ * Only the subagent's id is read from it, and the episode is keyed on that.
+ */
+const PAYLOAD = JSON.stringify({
+  hook_event_name: "SubagentStop",
+  agent_id: "a1e3196c5ad0f2410",
+  stop_hook_active: false,
+});
+
 before(async () => {
   elsewhere = await mkdtemp(join(tmpdir(), "squiz-elsewhere-"));
   git(["init", "--quiet", "--initial-branch", "main"]);
@@ -77,13 +88,16 @@ type Run = {
 async function run(
   command: string,
   args: readonly string[],
-  options: { cwd: string; path?: string },
+  options: { cwd: string; path?: string; input?: string },
 ): Promise<Run> {
   return await new Promise<Run>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: { ...process.env, ...(options.path === undefined ? {} : { PATH: options.path }) },
     });
+    // Written and closed rather than left open. The hook reads its payload from
+    // stdin, and a stdin nobody ends is a hook that never returns.
+    child.stdin.end(options.input ?? "");
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -102,7 +116,7 @@ async function run(
 }
 
 test("the shim resolves the entry point from a working directory that is not the plugin", async () => {
-  const result = await run(shim, ["hook"], { cwd: elsewhere });
+  const result = await run(shim, ["hook"], { cwd: elsewhere, input: PAYLOAD });
 
   assert.equal(result.code, 0, `the shim did not run: ${result.stderr}`);
   assert.equal(result.stdout, "");
@@ -110,7 +124,7 @@ test("the shim resolves the entry point from a working directory that is not the
 });
 
 test("a round that finds nothing to say writes nothing", async () => {
-  const result = await run(shim, ["hook"], { cwd: elsewhere });
+  const result = await run(shim, ["hook"], { cwd: elsewhere, input: PAYLOAD });
 
   assert.equal(result.code, 0);
   assert.equal(result.stderr, "", "silence is what a clean review looks like");
@@ -126,6 +140,7 @@ test("the binary runs by name off PATH, through a symlink to the shim", async ()
     await symlink(shim, join(directory, "squiz"));
     const result = await run("squiz", ["hook"], {
       cwd: elsewhere,
+      input: PAYLOAD,
       // node has to stay reachable: the shim execs it.
       path: `${directory}:${process.env["PATH"] ?? ""}`,
     });
