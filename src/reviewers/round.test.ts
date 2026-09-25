@@ -144,24 +144,22 @@ test("a run that completed no message is not tried again", async () => {
       outcome: "setup",
       cost: { dollars: 0, tokens: 0, messages: 1 },
       reason: "no credential for the provider",
-      started: true,
     });
     assert.equal(running.starts(), 1);
   });
 });
 
 /**
- * A reviewer killed before its first completed message reports no usage, and so
- * does one that never started. A caller that told the two apart by what they
- * cost would read the first as no round at all, start its count again on the
- * next firing, and lose the only bound the loop has.
+ * The two failures reported as a setup problem rather than as a bad round arrive
+ * as one outcome, each keeping its own account of itself. A reviewer that would
+ * not start and one that ran and said nothing recur identically every firing, and
+ * what separates them is the reason rather than the outcome.
  */
-test("a process that ran and said nothing is told apart from a spawn that failed", async () => {
+test("a process that ran and said nothing and a spawn that failed are both setup", async () => {
   await inATree(async (tree) => {
     const ran = await runRound(reviewer(sayingNothing).adapter, at(tree), 10);
     assert.equal(ran.outcome, "setup");
-    assert.deepEqual(ran.cost, unspent, "the fixture has to report no usage, or it proves nothing");
-    assert.equal(ran.outcome === "setup" ? ran.started : null, true);
+    assert.deepEqual(ran.cost, unspent);
 
     const missing: Adapter = {
       argv: (invocation) => ({
@@ -174,8 +172,12 @@ test("a process that ran and said nothing is told apart from a spawn that failed
     };
     const never = await runRound(missing, at(tree), 10);
     assert.equal(never.outcome, "setup");
-    assert.deepEqual(never.cost, unspent, "neither of them cost anything, which is the point");
-    assert.equal(never.outcome === "setup" ? never.started : null, false);
+    assert.deepEqual(never.cost, unspent);
+    assert.match(
+      never.outcome === "setup" ? never.reason : "",
+      /could not be started/u,
+      "the reason is the only thing that says which of the two failed",
+    );
   });
 });
 

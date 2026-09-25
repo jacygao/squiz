@@ -386,12 +386,10 @@ function makeDirectories(episode: Episode): string | null {
  * cost bound. A killed round's floor goes in for the same reason: what the
  * reviewer reported before it was stopped is what there is.
  *
- * A reviewer whose process never started is not recorded as a round at all. It
- * fails the same way every firing until someone fixes the install, and a cap
- * spent on it would leave the episode no rounds once they had.
+ * A setup problem is not recorded at all, because it is not a round.
  */
 function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<EpisodeState> {
-  if (!attempted(review)) return { step: state };
+  if (!isRound(review)) return { step: state };
 
   const recorded = recordRound(state, review.cost);
   const written = writeState(episode, recorded);
@@ -405,18 +403,25 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
 }
 
 /**
- * Whether a reviewer process ran, which is what makes the attempt a round.
+ * Whether the attempt was a round, which is what decides whether it is recorded
+ * and so whether it spends one of the cap.
  *
- * Taken from the reviewer's own account of whether it started, never from what
- * it cost. A process killed before its first completed message reports no cost
- * at all, and reading that as a reviewer that never ran would leave a round that
- * really ran out of the count: the next firing would be round 1 again, which is
- * the loop with its only bound gone.
+ * A reviewer that would not start and one that ran and completed no message are
+ * a setup problem rather than a bad round. Both fail the same way every firing
+ * until someone fixes the install or the credential, and charging the cap for
+ * them would leave a project no rounds once it had. Neither can run the loop
+ * away either: a setup problem never blocks, so the coding agent's turn ends and
+ * no further round fires.
+ *
+ * Every other outcome is a round, and is recorded with whatever it spent. A
+ * round killed at its bound and output no fresh process could read both got as
+ * far as reviewing, and an empty review is a round that did the work and found
+ * nothing. Reading the cost instead of the outcome would decide this on a figure
+ * that is zero for a reviewer no price can be read for, and the count would then
+ * never advance at all.
  */
-function attempted(review: Review): boolean {
-  // Only a setup problem can be a reviewer that never started. Every other
-  // outcome is a process that ran, whatever it cost.
-  return review.outcome !== "setup" || review.started;
+function isRound(review: Review): boolean {
+  return review.outcome !== "setup";
 }
 
 type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;

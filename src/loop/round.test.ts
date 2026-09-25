@@ -562,7 +562,11 @@ test("an honest empty review is a clean round and not a failure", async () => {
   assert.ok(ran.conclusion.outcome === "close");
   assert.equal(ran.conclusion.because, "nothing-open");
   assert.deepEqual(ran.conclusion.findings.outcomes, []);
-  assert.equal(ran.state?.rounds.length, 1);
+  assert.equal(
+    ran.state?.rounds.length,
+    1,
+    "a review that found nothing did the work, so it is a round and it spends one of the cap",
+  );
 });
 
 test("a cap of 1 reviews once and closes rather than blocking", async () => {
@@ -630,17 +634,33 @@ test("a reviewer nothing can be read from is reported unavailable", async () => 
   );
 });
 
-test("a reviewer that completed no message is reported as a setup problem", async () => {
-  const spent: RoundCost = { dollars: 0.005, tokens: 90, messages: 1 };
-  const ran = await runInFixture({
-    answers: POSTING,
-    reviewer: completesNothing(spent),
-  });
+/**
+ * A reviewer that would not start and one that ran and completed no message are
+ * a setup problem rather than a bad round, and neither spends one of the cap.
+ * Both fail the same way every firing until someone fixes the install or the
+ * credential, and a cap charged for them leaves a project no rounds once it has.
+ * Neither can run the loop away: a setup problem never blocks, so the coding
+ * agent's turn ends and no further round fires.
+ *
+ * Asserted for a reviewer that reported a cost as well as for one that reported
+ * none, because what decides is the outcome and not the figure.
+ */
+test("a reviewer that ran and completed no message spends no round of the cap", async () => {
+  for (const cost of [
+    { dollars: 0.005, tokens: 90, messages: 1 },
+    { dollars: 0, tokens: 0, messages: 0 },
+  ] satisfies readonly RoundCost[]) {
+    const ran = await runInFixture({ answers: POSTING, reviewer: completesNothing(cost) });
 
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "setup");
-  assert.match(ran.conclusion.reason, /the model refused the request/u);
-  assert.deepEqual(ran.state?.rounds, [spent]);
+    assert.ok(ran.conclusion.outcome === "failed");
+    assert.equal(ran.conclusion.failure, "setup");
+    assert.match(ran.conclusion.reason, /the model refused the request/u);
+    assert.equal(
+      ran.stateSource,
+      null,
+      `a setup problem reporting ${cost.dollars} dollars was recorded as a round, and the cap it spends is one the project does not get back once the credential is fixed`,
+    );
+  }
 });
 
 test("a reviewer that is not installed spends no round of the cap", async () => {
@@ -871,18 +891,3 @@ test("a read-back that pages is stopped by the margin, not by its own page limit
   );
 });
 
-test("a reviewer that started and completed no message is recorded as a round", async () => {
-  const nothing: RoundCost = { dollars: 0, tokens: 0, messages: 0 };
-  const ran = await runInFixture({
-    answers: POSTING,
-    reviewer: completesNothing(nothing),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "setup");
-  assert.deepEqual(
-    ran.state?.rounds,
-    [nothing],
-    "a process that ran and reported no usage is still a round: counting it as none makes the next firing round 1 again, which is the cap gone",
-  );
-});
