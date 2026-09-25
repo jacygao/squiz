@@ -15,8 +15,9 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's output c
   construction, or from one recorded capture whose last message is prose.
 - **Whether the charter produces a review worth posting was unknown.** A
   reviewer that returns nothing, or returns the formatting and naming notes the
-  charter rules out, or reports what it did not check, is a finding about the
-  charter rather than a passing run.
+  charter rules out, or reports outside the scope the description declares, or
+  reports what it did not check, is a finding about the charter rather than a
+  passing run.
 - **Whether the reviewer verifies before it reports, given no shell.** Depth
   `read` grants `read`, `grep`, `find` and `ls` and nothing else.
 - **Whether the scope and the anchor § 4 asks for are what comes back.**
@@ -29,11 +30,17 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's output c
 ## Decisions
 
 - **Ship the charter as it stands: it produces a review worth posting.** Four
-  runs returned five findings, four of them the same correctness bug and the
-  fifth a suite that never runs the tests it was told about, and not one of the
-  kinds § 4 rules out — no formatting, no naming, no import order, nothing the
-  compiler catches, and no "consider whether". The seeded defect came back in
-  every run.
+  runs returned five findings. Four are within the scope the description
+  declares, all four the same correctness bug, and the seeded defect came back
+  in every run. None of the five is a kind § 4 excludes by category — no
+  formatting, no naming, no import order, nothing the compiler catches, and no
+  "consider whether". The fifth broke § 4's other exclusion, the declared scope,
+  which the next decision is about.
+- **Do not rely on the reviewer honouring the scope the description declares.**
+  One finding in five ignored it. § 4's Charter opens on that rule, and the
+  exclusion is the thing a round has no other guard for: the excluded kinds are
+  recognisable in a finding, and a finding outside the declared scope is
+  correct on its own facts and wrong only against the description.
 - **Treat unparseable output as a round's likeliest failure rather than an edge
   case.** Two of the four runs broke the output contract, in two different ways:
   one wrapped the object in a fence, one omitted the `verdicts` key. § 7 allows
@@ -69,6 +76,13 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's output c
   broke the contract twice had found the defect both times, at `high` the first
   time. Taking the recommendation changes § 4's Charter, under what the reviewer
   returns, and § 7's failure row for output the adapter cannot parse.
+- **Whether anything is to hold the declared scope, now that the reviewer does
+  not always.** Recommended: leave it with the reviewer and let the leakage
+  show. A round holds the description and could weigh a finding against it, but
+  the judgement is the reviewer's under § 4, and a second reader of the
+  description is a second thing that can disagree with it. The cost of leaving
+  it is a comment a person dismisses; the finding was true and merely unasked
+  for.
 - **Whether § 4's severity table needs tightening**, since the same line came
   back `high` twice and `medium` twice and § 5 orders the summary by severity.
   Recommended: accept it. § 4 already says severity orders findings rather than
@@ -103,13 +117,13 @@ retry's was unfenced and carried `findings` alone.
 
 ### What came back
 
-| Run | Scope | Anchor | Severity |
-|---|---|---|---|
-| 1, first attempt | `line` | `scratch/queue/retry.ts:29` | `high` |
-| 1, retry | `line` | `scratch/queue/retry.ts:29` | `medium` |
-| 1, retry | `file` | `scratch/queue/retry.test.ts` | `low` |
-| 2 | `line` | `scratch/queue/retry.ts:16` | `medium` |
-| 3 | `line` | `scratch/queue/retry.ts:30` | `high` |
+| Run | Scope | Anchor | Severity | In the declared scope |
+|---|---|---|---|---|
+| 1, first attempt | `line` | `scratch/queue/retry.ts:29` | `high` | Yes |
+| 1, retry | `line` | `scratch/queue/retry.ts:29` | `medium` | Yes |
+| 1, retry | `file` | `scratch/queue/retry.test.ts` | `low` | **No** |
+| 2 | `line` | `scratch/queue/retry.ts:16` | `medium` | Yes |
+| 3 | `line` | `scratch/queue/retry.ts:30` | `high` | Yes |
 
 The four `line` findings are all the seeded defect: `scheduleFor` loops
 `attempt < attempts`, so it returns one entry fewer than the documentation above
@@ -117,13 +131,24 @@ it promises. Three of the four named the consequence the documentation names —
 `scheduleFor(3)` returns two entries and the wait before the third attempt is
 missing, so a caller summing the schedule underestimates.
 
-The `file` finding is not the seeded defect and is correct: `package.json` runs
-`node --test "src/**/*.test.ts"`, so tests added under `scratch/` never run, and
-the description's claim of three passing tests is not enforced by the suite. It
-came back in the run the harness discarded.
-
 `touchesLine` answers true for lines 16, 29 and 30 of `scratch/queue/retry.ts`
 against the diff GitHub served, and every `line` finding routes inline.
+
+### The one finding outside the declared scope
+
+The `file` finding reported that the tests the change adds are not discovered by
+the project's suite: `package.json` runs `node --test "src/**/*.test.ts"`, so a
+test under `scratch/` never runs. That is true, and it is not a finding.
+
+The description declares its scope as "The backoff arithmetic and the schedule.
+Nothing else in the repository is touched", says of the tests only "three tests,
+all passing", and says of itself "**Not for merging.** It exists to be
+reviewed". Being in the suite is neither claimed nor asked for, and § 4's
+Charter opens on the rule this breaks: a finding that contradicts something the
+description declares out of scope is not a finding.
+
+Accommodating it would make it retroactively right, so the tests stay where they
+are.
 
 ### Where the reviewer's reading diverged
 
@@ -161,7 +186,18 @@ stop reason is what says a capture is a review.
 - **A small change.** The diff was 1,950 bytes and the prompt 2,584. Nothing
   here says what a reviewer does with a large one, or what it costs.
 - **The dollars are `pi`'s arithmetic**, from a catalogue that refreshes itself.
-- **The `file` scope appeared once**, in the run the harness discarded, so no
-  file-scoped finding has been carried any further.
+- **The `file` scope appeared once**, on the one finding outside the declared
+  scope and in the run the harness discarded, so nothing has yet scoped a
+  finding to a file and meant it.
+- **Whether the declared scope holds on a description that declares less.**
+  #162's scope section is explicit and was still overstepped once. A change
+  whose description says nothing about scope was not tried.
 - **Wall times were measured one round at a time** on an otherwise idle machine,
   and provider latency varies.
+- **Every figure here but the anchor checks was read from one recorded stream
+  that is not in the repository.** The stream is too large to commit, so a
+  reader cannot recompute the costs, the token counts, the attempt and tool-call
+  counts or the wall times from anything committed; they are this author's
+  reading of that capture, and re-establishing them means spending another run.
+  The anchors are the exception: `parseDiff`, `touchesLine` and `routeFindings`
+  can be run again over #162's diff.
