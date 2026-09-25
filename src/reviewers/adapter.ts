@@ -9,7 +9,7 @@
  * second reviewer is a second adapter and no other change.
  */
 
-import type { Depth } from "../config/config.ts";
+import type { Depth, Thinking } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { Verdict } from "../findings/status.ts";
 
@@ -36,6 +36,11 @@ export type Invocation = {
    * turns it into the grant and never chooses a value of its own.
    */
   readonly depth: Depth;
+  /**
+   * How hard the reviewer thinks. The harness decides it, and the adapter puts
+   * it on every command line rather than leaving the CLI to its own setting.
+   */
+  readonly thinking: Thinking;
 };
 
 /** A process to start: what to run, what to pass it, and where it runs. */
@@ -114,7 +119,7 @@ export type ParsedRun = {
 
 /** The three parts of driving one reviewer CLI. */
 export type Adapter = {
-  /** Build the command line for one round at the depth the harness set. */
+  /** Build the command line for one round, from what the harness set for it. */
   readonly argv: (invocation: Invocation) => CommandLine;
   /**
    * Read the run's whole output: what it cost, and the review it returned.

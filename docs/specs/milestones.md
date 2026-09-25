@@ -48,7 +48,7 @@ pull request and exit 0.
 
 Covers the plugin manifest, the hook registration, `bin/` and `src/`,
 `tsconfig.json`, `tsc --noEmit` and tests in CI, `.squiz/` in `.gitignore`,
-`.squiz.json` loading with its five defaults and range validation, the top-level
+`.squiz.json` loading with its six defaults and range validation, the top-level
 trap that turns any throw into exit 0, and the single-line stderr reporter every
 later milestone writes through.
 
@@ -58,9 +58,9 @@ later milestone writes through.
       tool's `PATH`.
 - [ ] The hook exits 0 and posts nothing when the branch has no pull request,
       and finds the pull request when it has one.
-- [ ] `.squiz.json` with no keys yields rounds 3, depth `read`, timeout 420,
-      budget 0.50 and no test command. An out-of-range `rounds` is rejected with
-      a readable error.
+- [ ] `.squiz.json` with no keys yields rounds 3, depth `read`, thinking
+      `medium`, timeout 480, budget 0.50 and no test command. An out-of-range
+      `rounds` is rejected with a readable error.
 - [ ] CI runs `tsc --noEmit` and the tests green, with no runtime dependencies.
 
 `bin/squiz` cannot be an extensionless Node file: Node decides to strip types

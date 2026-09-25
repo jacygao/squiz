@@ -45,17 +45,18 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the five defaults", () => {
+test("an absent .squiz.json is not an error, and yields the six defaults", () => {
   assert.deepEqual(load(null), {
     rounds: 3,
     depth: "read",
     test: null,
-    timeout: 420,
+    timeout: 480,
     budget: 0.5,
+    thinking: "medium",
   });
 });
 
-test("a .squiz.json with no keys yields the same five defaults", () => {
+test("a .squiz.json with no keys yields the same six defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -67,8 +68,10 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 
 test("every setting the file names is read", () => {
   assert.deepEqual(
-    load(`{"rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "budget": 1.5}`),
-    { rounds: 5, depth: "read", test: "npm test", timeout: 90, budget: 1.5 },
+    load(
+      `{"rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "budget": 1.5, "thinking": "high"}`,
+    ),
+    { rounds: 5, depth: "read", test: "npm test", timeout: 90, budget: 1.5, thinking: "high" },
   );
 });
 
@@ -89,6 +92,13 @@ test("timeout accepts 1 and 480, and refuses 0 and 481", () => {
   rejection(`{"timeout": 0}`);
   rejection(`{"timeout": 481}`);
   rejection(`{"timeout": -1}`);
+});
+
+// The bound a project inherits is the largest the hook's ceiling leaves room to
+// post inside, so the only direction configuration can move it is down.
+test("the default timeout is the top of its range, so a project can only lower it", () => {
+  assert.equal(defaultConfig.timeout, 480);
+  rejection(`{"timeout": ${defaultConfig.timeout + 1}}`);
 });
 
 test("budget accepts anything above 0 up to 5, and refuses 0 and 5.01", () => {
@@ -144,6 +154,28 @@ test("depth deep is refused, and the refusal says so rather than loading read", 
   assert.match(error.message, /Use "read"/);
 });
 
+// The levels are the reviewer CLI's own names, matched exactly. A name it does
+// not recognise costs nothing but a warning on a stream nothing reads, and the
+// review then runs at whatever level the machine holds.
+test("thinking accepts every level the reviewer has, and refuses anything else", () => {
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    assert.equal(load(`{"thinking": "${level}"}`).thinking, level);
+  }
+  rejection(`{"thinking": "higher"}`);
+  rejection(`{"thinking": "HIGH"}`);
+  rejection(`{"thinking": "xxhigh"}`);
+  rejection(`{"thinking": "medium "}`);
+  rejection(`{"thinking": ""}`);
+});
+
+test("thinking defaults to medium, and no value asks for the machine's own level", () => {
+  assert.equal(load("{}").thinking, "medium");
+  assert.equal(load(`{"rounds": 3}`).thinking, "medium");
+  rejection(`{"thinking": "inherit"}`);
+  rejection(`{"thinking": "default"}`);
+  rejection(`{"thinking": null}`);
+});
+
 test("a value of the wrong type is refused like one out of range", () => {
   rejection(`{"rounds": "3"}`);
   rejection(`{"rounds": null}`);
@@ -153,6 +185,9 @@ test("a value of the wrong type is refused like one out of range", () => {
   rejection(`{"timeout": null}`);
   rejection(`{"budget": "0.10"}`);
   rejection(`{"budget": []}`);
+  rejection(`{"thinking": 3}`);
+  rejection(`{"thinking": true}`);
+  rejection(`{"thinking": ["high"]}`);
 });
 
 test("no test command is null rather than an empty string", () => {
@@ -188,6 +223,8 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 1 to 480/ },
     { contents: `{"budget": 9.99}`, setting: "budget", given: "9.99", expected: /above 0 and at most 5/ },
     { contents: `{"budget": true}`, setting: "budget", given: "true", expected: /above 0 and at most 5/ },
+    { contents: `{"thinking": "higher"}`, setting: "thinking", given: `"higher"`, expected: /"medium".*"high".*"xhigh"/ },
+    { contents: `{"thinking": 3}`, setting: "thinking", given: "3", expected: /one of "off"/ },
   ];
 
   for (const { contents, setting, given, expected } of cases) {
@@ -226,7 +263,7 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"rounds", "depth", "test", "timeout" and "budget"/);
+  assert.match(error.message, /"rounds", "depth", "test", "timeout", "budget" and "thinking"/);
 });
 
 test("a .squiz.json that is there and cannot be read is not read as absent", () => {
