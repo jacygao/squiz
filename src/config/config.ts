@@ -1,5 +1,5 @@
 /**
- * The `.squiz.json` loader: the five settings, their defaults and their ranges.
+ * The `.squiz.json` loader: the six settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
  */
@@ -14,6 +14,13 @@ export const configFileName = ".squiz.json";
  * where an enum would: Node cannot strip an enum.
  */
 export type Depth = "read" | "deep";
+
+/**
+ * How hard the reviewer thinks, which is most of what a round spends. The names
+ * are the reviewer CLI's own, and none of them means "whatever this machine is
+ * set to": the level a project gets is one the harness passes.
+ */
+export type Thinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type Config = {
   // The round cap.
@@ -30,6 +37,7 @@ export type Config = {
   timeout: number;
   // Dollars an episode may cost.
   budget: number;
+  thinking: Thinking;
 };
 
 // Every setting has a default, so a project that writes no file still runs.
@@ -37,8 +45,10 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   rounds: 3,
   depth: "read",
   test: null,
-  timeout: 420,
+  // The top of its own range, so a project can lower this bound and never raise it.
+  timeout: 480,
   budget: 0.5,
+  thinking: "medium",
 });
 
 /**
@@ -55,11 +65,16 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["rounds", "depth", "test", "timeout", "budget"] as const;
+const settingNames = ["rounds", "depth", "test", "timeout", "budget", "thinking"] as const;
 
-const settingList = `"rounds", "depth", "test", "timeout" and "budget"`;
+const settingList = `"rounds", "depth", "test", "timeout", "budget" and "thinking"`;
 
 const depths = ["read", "deep"] as const;
+
+const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+// The levels as a rejection lists them, so no name is spelled twice.
+const thinkingList = thinkingLevels.map((level) => `"${level}"`).join(", ");
 
 /**
  * Reads `.squiz.json` from the root of the repository. Its absence is not an
@@ -136,6 +151,9 @@ function parse(source: string, path: string): Config {
         )
       : defaultConfig.timeout,
     budget: has(raw, "budget") ? budgetOf(path, raw["budget"]) : defaultConfig.budget,
+    thinking: has(raw, "thinking")
+      ? thinkingOf(path, raw["thinking"])
+      : defaultConfig.thinking,
   };
 }
 
@@ -189,6 +207,15 @@ function depthOf(path: string, value: unknown): Depth {
     return depth;
   }
   throw new ConfigError(reject(path, "depth", value, `"read" or "deep"`));
+}
+
+function thinkingOf(path: string, value: unknown): Thinking {
+  for (const level of thinkingLevels) {
+    if (value === level) return level;
+  }
+  // Matched exactly, and refused here because the reviewer CLI will not refuse
+  // it: a level it does not know costs it nothing and changes nothing.
+  throw new ConfigError(reject(path, "thinking", value, `one of ${thinkingList}`));
 }
 
 function testCommandOf(path: string, value: unknown): string {

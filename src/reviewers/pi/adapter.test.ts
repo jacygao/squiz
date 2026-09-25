@@ -15,6 +15,7 @@ const invocation: Invocation = {
   sessionDirectory: ".squiz/agent-7/session",
   scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
+  thinking: "medium",
 };
 
 /**
