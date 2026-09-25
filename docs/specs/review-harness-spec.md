@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.20 (draft)
+**Version:** 0.21 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -224,7 +224,7 @@ findings, and a cost where its CLI reports one. It never edits the code it is
 reviewing, and it holds no state between rounds: each round is a fresh process,
 and everything it knows about earlier rounds arrives in what it is handed.
 
-Four things are handed to it:
+Five things are handed to it:
 
 | | |
 |---|---|
@@ -232,6 +232,7 @@ Four things are handed to it:
 | **The pull request** | Its number, its base and head refs, its description, and every review thread already on it with the replies and resolved state of each. The harness fetches all of this and passes it in. |
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
+| **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
 
 **There is no file-selection or budgeting stage.** The reviewer decides what to
 open, one read at a time.
@@ -306,6 +307,7 @@ The adapter that ships. It builds this command line:
 pi --print --mode json --no-session \
    --session-dir .squiz/<episode>/session \
    --tools read,grep,find,ls \
+   --thinking medium \
    --append-system-prompt <charter-file> \
    <task-prompt> < /dev/null
 ```
@@ -351,6 +353,12 @@ request itself.
 project's conventions reach the reviewer without the charter carrying them.
 
 `--tools` sets the grant. The list above is `read`; `deep` adds `bash`.
+
+`--thinking` sets the reasoning effort, and is on every command line at both
+depths. Without it `pi` takes the level from `~/.pi/agent/settings.json`, and the
+review a change gets depends on the machine it ran on. A level `pi` does not
+recognise is not taken silently: it warns on stderr and is otherwise ignored,
+which leaves the round thinking at the level that file holds.
 
 ### Charter
 
@@ -649,7 +657,7 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 420 seconds | The reviewer process is killed and the round records no findings. |
+| **Time**, per round | 480 seconds | The reviewer process is killed and the round records no findings. |
 | **Cost**, per episode | $0.50 | The episode closes without starting another round. |
 
 Killing the reviewer yields no findings rather than a partial review, because
@@ -851,8 +859,14 @@ on its own branch. Squiz does not create them.
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
-| `timeout` | 420 | Seconds one round's reviewer may run, settable 1 to 480 |
+| `timeout` | 480 | Seconds one round's reviewer may run, settable 1 to 480 |
 | `budget` | 0.50 | Dollars an episode may cost, settable above 0 to 5.00 |
+| `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+
+`timeout` defaults to the most it may be, so a project can lower the time bound
+and cannot raise it. The ceiling is the runtime's rather than a preference: what
+is left of the hook's 600 seconds above the bound is what posting the round's
+comments gets.
 
 A setting outside its range, or of a type the table does not give it, is
 rejected with an error naming the setting, the value given and what was

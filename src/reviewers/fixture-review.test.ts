@@ -282,6 +282,7 @@ function invocationIn(tree: string): Invocation {
     sessionDirectory,
     scratchDirectory,
     depth: "read",
+    thinking: "medium",
   };
 }
 
