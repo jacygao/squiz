@@ -86,6 +86,31 @@ export type ReviewThread = {
 };
 
 /**
+ * Where a thread is, as `file:line`.
+ *
+ * The two anchors carrying no line are told apart in words rather than both
+ * being named by their file alone. An agent sent to a line the thread is not on
+ * reads code nobody said anything about.
+ */
+export function threadLocation(thread: ReviewThread): string {
+  const { anchor } = thread;
+  switch (anchor.at) {
+    case "line":
+      return `${thread.path}:${anchor.line}`;
+    case "file":
+      return `${thread.path} (whole file)`;
+    case "unnamed-line":
+      return `${thread.path} (line unknown)`;
+    default: {
+      // An anchor case none of the above names. `anchor` is `never` only
+      // while those three are all there is, so a fourth stops this compiling.
+      const unhandled: never = anchor;
+      return unhandled;
+    }
+  }
+}
+
+/**
  * Every thread on the pull request, or why there is no answer.
  *
  * `unreadable` is an answer whose shape is not the one asked for. It is

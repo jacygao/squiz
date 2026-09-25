@@ -12,7 +12,7 @@
 
 import { findPullRequestForBranch } from "./github/pull-request.ts";
 import { replyInThread } from "./github/thread-actions.ts";
-import { listReviewThreads, type ReviewThread } from "./github/threads.ts";
+import { listReviewThreads, threadLocation, type ReviewThread } from "./github/threads.ts";
 import { currentBranch } from "./hook/branch.ts";
 import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";
@@ -148,33 +148,8 @@ export function threadListing(pullRequest: number, threads: readonly ReviewThrea
   if (open.length === 0) return `no open threads on #${pullRequest}\n`;
 
   const counted = `${open.length} open thread${open.length === 1 ? "" : "s"} on #${pullRequest}`;
-  const lines = open.map((thread) => `${thread.id} ${locationOf(thread)}`);
+  const lines = open.map((thread) => `${thread.id} ${threadLocation(thread)}`);
   return `${[counted, ...lines].join("\n")}\n`;
-}
-
-/**
- * Where a thread is, as `file:line`.
- *
- * The two anchors carrying no line are told apart in words rather than both
- * being named by their file alone. An agent sent to a line the thread is not on
- * reads code nobody said anything about.
- */
-function locationOf(thread: ReviewThread): string {
-  const { anchor } = thread;
-  switch (anchor.at) {
-    case "line":
-      return `${thread.path}:${anchor.line}`;
-    case "file":
-      return `${thread.path} (whole file)`;
-    case "unnamed-line":
-      return `${thread.path} (line unknown)`;
-    default: {
-      // An anchor case none of the above names. `anchor` is `never` only
-      // while those three are all there is, so a fourth stops this compiling.
-      const unhandled: never = anchor;
-      return unhandled;
-    }
-  }
 }
 
 // The dispatch runs only where this file is the process's entry point, so that
