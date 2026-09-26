@@ -27,6 +27,14 @@ the answer did not vary.
   reviewer that declares itself finished and then does not stop is a reviewer the
   bound kills, which is what it is for.
 
+- **Conclude a round on the reviewer's declaration even when the bound is what
+  ended the run.** Without this, removing the early stop turns a finished review
+  into a timed-out round whenever the closing message crosses the deadline: the
+  run races the whole parse against expiry and returns a killed attempt without
+  consulting the declaration it is already holding, and the loop reads a killed
+  attempt as a round the reviewer failed, which does not block the coding agent.
+  The findings survive that; the block does not.
+
 ## Needs your input
 
 Nothing. The measurement answers the question it was taken for.
@@ -56,12 +64,22 @@ Every one of the three runs ended with exactly one message whose stop reason is
 reviewer against the same pull request recorded 49 messages, all `toolUse`,
 because the round killed it first.
 
-This changes nothing about how a run is read. A finished review is recognised by
-the reviewer's own declaration, which is a validated call, and that is checked
-before any stop reason is. What a stop reason still decides is the run that
+For a run whose output closes before the bound passes, this changes nothing about
+how the run is read. A finished review is recognised by the reviewer's own
+declaration, which is a validated call, and that is checked before any stop
+reason is — but only on the path where the parse completes, which is why the
+expiry path has to consult the declaration too. What a stop reason still decides is the run that
 finished no review: a reviewer that wrote prose and ended its turn carries
 `stop`, and is retried once; one that answered nothing, or only errored, carries
 none, and is a setup problem that is not retried.
+
+### What the tail costs when it crosses the bound
+
+Under a one-second bound, against the real parser, a reviewer that reported a
+finding and finished at about 200 ms and then held its output open: with the
+early stop, `reviewed` at about 258 ms; with it disabled, `timed-out` at about
+1,028 ms. Both carried the same finding. Two seconds of tail is small against a
+480-second bound and decides the outcome entirely at the boundary.
 
 ## Limits
 
