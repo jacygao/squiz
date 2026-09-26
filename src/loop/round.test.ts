@@ -701,21 +701,33 @@ test("a cap of 1 reviews once and closes rather than blocking", async () => {
   assert.deepEqual(ran.conclusion.posted, ["PRRT_new"], "the round still posts what it found");
 });
 
-test("a budget already spent closes the episode", async () => {
+test("a round that reached the token bound closes the episode", async () => {
+  const wide: RoundCost = { dollars: 0.41, tokens: 400_000, messages: 60 };
   const ran = await runInFixture({
-    config: { budget: 0.5 },
-    rounds: [{ dollars: 0.49, tokens: 9000, messages: 20 }],
+    config: { rounds: 8, tokens: 400_000 },
+    // A round under the bound already recorded, so the round that reaches it is
+    // the one just run rather than the one the state file held.
+    rounds: [ANSWER_COST],
     answers: {
       prlist: PR_LIST,
       diff: DIFF,
       threads: listed([{ id: "PRRT_one", isResolved: false }]),
       unresolve: REOPENED,
     },
-    reviewer: reviews({ verdicts: [{ thread: "PRRT_one", verdict: "open" }] }),
+    reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open" }] }),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "cost-bound");
+  assert.equal(
+    ran.conclusion.because,
+    "token-bound",
+    "a round the bound closed must not read as the reviewer having failed",
+  );
+  assert.deepEqual(
+    ran.state?.rounds.at(-1),
+    wide,
+    "the dollars are still recorded beside the tokens the bound was read from",
+  );
 });
 
 test("a reviewer killed at its bound is a failed round and not an empty review", async () => {
@@ -1249,17 +1261,33 @@ test("an exhausted cap whose last recorded round failed closes the episode too",
   );
 });
 
-test("a budget already spent closes the episode before a reviewer is started", async () => {
+test("a recorded round that reached the token bound closes the episode before a reviewer is started", async () => {
   const ran = await runInFixture({
-    config: { rounds: 8, budget: 0.5 },
-    rounds: [{ dollars: 0.5, tokens: 20_000, messages: 40 }],
+    config: { rounds: 8, tokens: 400_000 },
+    rounds: [ANSWER_COST, { dollars: 0.5, tokens: 400_000, messages: 40 }],
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "cost-bound");
+  assert.equal(ran.conclusion.because, "token-bound");
   assert.equal(ran.invocations.length, 0, "the bound stops the next round, so it is read before it");
+});
+
+// A model no price catalogue covers reports its tokens against no dollars, which
+// is the configuration a dollar bound could not see at all.
+test("a round priced at nothing is bounded by its tokens all the same", async () => {
+  const unpriced: RoundCost = { dollars: 0, tokens: 400_000, messages: 40 };
+  const ran = await runInFixture({
+    config: { rounds: 8, tokens: 400_000 },
+    rounds: [unpriced],
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "token-bound");
+  assert.equal(ran.invocations.length, 0);
 });
 
 test("a read-back that pages is stopped by the margin, not by its own page limit", async () => {
@@ -1296,21 +1324,19 @@ test("a read-back that pages is stopped by the margin, not by its own page limit
 
 
 /**
- * A paid attempt whose round ended as a setup problem: the money is kept even
- * though the round is not, and the next invocation is refused by the budget the
- * money puts it over.
+ * A paid attempt whose round ended as a setup problem: what it spent is kept
+ * even though the round is not, and the next invocation is refused by the bound
+ * those tokens reach.
  *
  * The exemption is about the round cap, which a setup problem must not spend. It
- * is not about the dollars, which are spent whatever the attempt came to.
+ * is not about the tokens, which are spent whatever the attempt came to.
  */
 test("a paid attempt that ended as a setup problem is what stops the next round", async () => {
-  const paid: RoundCost = { dollars: 0.04, tokens: 1500, messages: 1 };
-  const almostSpent: RoundCost = { dollars: 0.49, tokens: 9000, messages: 20 };
-  const bounds = { rounds: 8, budget: 0.5 };
+  const paid: RoundCost = { dollars: 0.04, tokens: 410_000, messages: 1 };
+  const bounds = { rounds: 8, tokens: 400_000 };
 
   const first = await runInFixture({
     config: bounds,
-    rounds: [almostSpent],
     answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
     reviewer: attempts(
       { cost: paid, result: { kind: "unparsed", reason: "the last message was not a review" } },
@@ -1320,11 +1346,11 @@ test("a paid attempt that ended as a setup problem is what stops the next round"
 
   assert.ok(first.conclusion.outcome === "failed");
   assert.equal(first.conclusion.failure, "setup");
-  assert.deepEqual(first.state?.rounds, [almostSpent], "the setup problem spends no round");
+  assert.deepEqual(first.state?.rounds, [], "the setup problem spends no round");
   assert.deepEqual(
     first.state?.spentOutsideRounds,
     paid,
-    "the attempt completed a paid response before it failed, and that money is spent",
+    "the attempt completed a paid response before it failed, and those tokens are spent",
   );
 
   // The next firing of the same episode, against the state the first one left.
@@ -1337,10 +1363,10 @@ test("a paid attempt that ended as a setup problem is what stops the next round"
   });
 
   assert.ok(next.conclusion.outcome === "close");
-  assert.equal(next.conclusion.because, "cost-bound");
+  assert.equal(next.conclusion.because, "token-bound");
   assert.equal(
     next.invocations.length,
     0,
-    "$0.53 against a $0.50 budget buys no further reviewer, and forgetting the $0.04 is what would buy one",
+    "410,000 tokens against a 400,000-token bound buys no further reviewer, and forgetting them is what buys a reviewer that burned the bound and reported nothing another try at it",
   );
 });

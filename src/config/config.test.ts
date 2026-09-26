@@ -51,7 +51,7 @@ test("an absent .squiz.json is not an error, and yields the six defaults", () =>
     depth: "read",
     test: null,
     timeout: 480,
-    budget: 0.5,
+    tokens: 1_500_000,
     thinking: "medium",
   });
 });
@@ -69,9 +69,9 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "budget": 1.5, "thinking": "high"}`,
+      `{"rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "tokens": 400000, "thinking": "high"}`,
     ),
-    { rounds: 5, depth: "read", test: "npm test", timeout: 90, budget: 1.5, thinking: "high" },
+    { rounds: 5, depth: "read", test: "npm test", timeout: 90, tokens: 400_000, thinking: "high" },
   );
 });
 
@@ -101,28 +101,35 @@ test("the default timeout is the top of its range, so a project can only lower i
   rejection(`{"timeout": ${defaultConfig.timeout + 1}}`);
 });
 
-test("budget accepts anything above 0 up to 5, and refuses 0 and 5.01", () => {
-  assert.equal(load(`{"budget": 0.01}`).budget, 0.01);
-  assert.equal(load(`{"budget": 5}`).budget, 5);
-  assert.equal(load(`{"budget": 5.00}`).budget, 5);
-  rejection(`{"budget": 0}`);
-  rejection(`{"budget": 5.01}`);
-  rejection(`{"budget": -0.5}`);
+test("tokens accepts 100,000 and 10,000,000, and refuses 99,999 and 10,000,001", () => {
+  assert.equal(load(`{"tokens": 100000}`).tokens, 100_000);
+  assert.equal(load(`{"tokens": 10000000}`).tokens, 10_000_000);
+  rejection(`{"tokens": 99999}`);
+  rejection(`{"tokens": 10000001}`);
+  rejection(`{"tokens": 0}`);
+  rejection(`{"tokens": -100000}`);
+});
+
+// The floor is what a figure written in thousands by mistake lands below, and a
+// bound under a single honest review closes every episode after its first round.
+test("a token bound written in thousands is refused rather than closing every episode", () => {
+  rejection(`{"tokens": 1500}`);
 });
 
 test("a count that is not whole is refused", () => {
   rejection(`{"rounds": 2.5}`);
   rejection(`{"timeout": 90.5}`);
+  rejection(`{"tokens": 150000.5}`);
 });
 
 // A zero is falsy, so a loader deciding presence by truthiness would return the
 // default and report nothing. These are the two settings where that wrong
 // answer is silent.
 
-test("a budget of 0 is refused rather than replaced by the default", () => {
-  const error = rejection(`{"budget": 0}`);
-  assert.match(error.message, /"budget" is 0/);
-  assert.doesNotMatch(error.message, /0\.1\b/);
+test("a token bound of 0 is refused rather than replaced by the default", () => {
+  const error = rejection(`{"tokens": 0}`);
+  assert.match(error.message, /"tokens" is 0/);
+  assert.doesNotMatch(error.message, /1500000/);
 });
 
 test("a timeout of 0 is refused rather than replaced by the default", () => {
@@ -135,7 +142,7 @@ test("a value in range but below the default survives the load", () => {
   // rounded up to the default.
   assert.equal(load(`{"rounds": 1}`).rounds, 1);
   assert.equal(load(`{"timeout": 1}`).timeout, 1);
-  assert.equal(load(`{"budget": 0.01}`).budget, 0.01);
+  assert.equal(load(`{"tokens": 100000}`).tokens, 100_000);
 });
 
 test("depth is read, and anything else is refused", () => {
@@ -183,8 +190,8 @@ test("a value of the wrong type is refused like one out of range", () => {
   rejection(`{"depth": 3}`);
   rejection(`{"test": 5}`);
   rejection(`{"timeout": null}`);
-  rejection(`{"budget": "0.10"}`);
-  rejection(`{"budget": []}`);
+  rejection(`{"tokens": "150000"}`);
+  rejection(`{"tokens": []}`);
   rejection(`{"thinking": 3}`);
   rejection(`{"thinking": true}`);
   rejection(`{"thinking": ["high"]}`);
@@ -221,8 +228,8 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"test": ""}`, setting: "test", given: `""`, expected: /a command to run/ },
     { contents: `{"timeout": 600}`, setting: "timeout", given: "600", expected: /seconds from 1 to 480/ },
     { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 1 to 480/ },
-    { contents: `{"budget": 9.99}`, setting: "budget", given: "9.99", expected: /above 0 and at most 5/ },
-    { contents: `{"budget": true}`, setting: "budget", given: "true", expected: /above 0 and at most 5/ },
+    { contents: `{"tokens": 20000000}`, setting: "tokens", given: "20000000", expected: /tokens from 100,000 to 10,000,000/ },
+    { contents: `{"tokens": true}`, setting: "tokens", given: "true", expected: /tokens from 100,000 to 10,000,000/ },
     { contents: `{"thinking": "higher"}`, setting: "thinking", given: `"higher"`, expected: /"medium".*"high".*"xhigh"/ },
     { contents: `{"thinking": 3}`, setting: "thinking", given: "3", expected: /one of "off"/ },
   ];
@@ -263,7 +270,15 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"rounds", "depth", "test", "timeout", "budget" and "thinking"/);
+  assert.match(error.message, /"rounds", "depth", "test", "timeout", "tokens" and "thinking"/);
+});
+
+// What a project upgrading from the dollar bound meets. Silently ignoring it
+// would leave someone believing a figure in dollars still bounded their episodes.
+test("a .squiz.json still setting budget is refused, and the refusal lists the settings", () => {
+  const error = rejection(`{"rounds": 3, "budget": 0.5}`);
+  assert.match(error.message, /"budget" is not a setting/);
+  assert.match(error.message, /"tokens"/);
 });
 
 test("a .squiz.json that is there and cannot be read is not read as absent", () => {

@@ -35,8 +35,8 @@ export type Config = {
   test: string | null;
   // Seconds one round's reviewer may run.
   timeout: number;
-  // Dollars an episode may cost.
-  budget: number;
+  // Tokens one round may spend.
+  tokens: number;
   thinking: Thinking;
 };
 
@@ -47,7 +47,9 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   test: null,
   // The top of its own range, so a project can lower this bound and never raise it.
   timeout: 480,
-  budget: 0.5,
+  // Well above the widest round a legitimate review has been measured spending,
+  // so a reviewer that reads widely does not reach it.
+  tokens: 1_500_000,
   thinking: "medium",
 });
 
@@ -65,9 +67,9 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["rounds", "depth", "test", "timeout", "budget", "thinking"] as const;
+const settingNames = ["rounds", "depth", "test", "timeout", "tokens", "thinking"] as const;
 
-const settingList = `"rounds", "depth", "test", "timeout", "budget" and "thinking"`;
+const settingList = `"rounds", "depth", "test", "timeout", "tokens" and "thinking"`;
 
 const depths = ["read", "deep"] as const;
 
@@ -150,7 +152,16 @@ function parse(source: string, path: string): Config {
           "a whole number of seconds from 1 to 480",
         )
       : defaultConfig.timeout,
-    budget: has(raw, "budget") ? budgetOf(path, raw["budget"]) : defaultConfig.budget,
+    tokens: has(raw, "tokens")
+      ? wholeNumber(
+          path,
+          "tokens",
+          raw["tokens"],
+          100_000,
+          10_000_000,
+          "a whole number of tokens from 100,000 to 10,000,000",
+        )
+      : defaultConfig.tokens,
     thinking: has(raw, "thinking")
       ? thinkingOf(path, raw["thinking"])
       : defaultConfig.thinking,
@@ -177,16 +188,6 @@ function wholeNumber(
   // the bounds are inclusive on both sides.
   if (typeof value !== "number" || !Number.isInteger(value) || value < low || value > high) {
     throw new ConfigError(reject(path, setting, value, expected));
-  }
-  return value;
-}
-
-function budgetOf(path: string, value: unknown): number {
-  // Above 0 rather than from 0: a budget of 0 buys no round at all.
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 5) {
-    throw new ConfigError(
-      reject(path, "budget", value, "a number of dollars above 0 and at most 5"),
-    );
   }
   return value;
 }

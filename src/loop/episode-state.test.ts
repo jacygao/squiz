@@ -107,7 +107,7 @@ const unreadableContents: readonly string[] = [
   `{"pullRequest": 142, "rounds": [{"dollars": "0.01", "tokens": 100, "messages": 1}]}`,
   `{"pullRequest": 142, "rounds": [{"dollars": 0.01, "tokens": -1, "messages": 1}]}`,
   // A spend that is there and cannot be read must not stand in for zero: the
-  // cost bound would then let the episode spend past a bound it had crossed.
+  // token bound would then let the episode spend past a bound it had reached.
   `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": 0.04}`,
   `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": 0.04}}`,
   `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": "0.04", "tokens": 1, "messages": 1}}`,

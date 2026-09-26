@@ -228,11 +228,11 @@ test("a state file that will not take the round surfaces the underlying error", 
   assert.match(pointer, /EACCES: permission denied/u);
 });
 
-test("the round cap and the cost bound are not failures", () => {
+test("the round cap and the token bound are not failures", () => {
   // Both close the episode with what they have, and the summary comment is
   // where they are reported. A pointer would read as a round that broke.
   assert.equal(failureIn(closedRound("round-cap")), null);
-  assert.equal(failureIn(closedRound("cost-bound")), null);
+  assert.equal(failureIn(closedRound("token-bound")), null);
   assert.equal(failureIn(closedRound("nothing-open")), null);
 });
 
@@ -679,7 +679,7 @@ test("every way a round can fail exits 0", async () => {
     { returns: failedRound("harness", "no review ran: gh exited 1: HTTP 503") },
     { returns: failedRound("harness", "nothing was posted: EACCES: permission denied") },
     { returns: closedRound("round-cap", [threaded("the anchor is off")]) },
-    { returns: closedRound("cost-bound") },
+    { returns: closedRound("token-bound") },
     { returns: closedRound("nothing-open", [unpostable("the anchor is off")]) },
     { returns: closedRound("nothing-open", [threaded("one"), unpostable("two")]) },
     { returns: closedRound("nothing-open", [], [refused("PRRT_1")]) },

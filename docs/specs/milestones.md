@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.7 (draft)
+**Version:** 0.8 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -59,8 +59,8 @@ later milestone writes through.
 - [ ] The hook exits 0 and posts nothing when the branch has no pull request,
       and finds the pull request when it has one.
 - [ ] `.squiz.json` with no keys yields rounds 3, depth `read`, thinking
-      `medium`, timeout 480, budget 0.50 and no test command. An out-of-range
-      `rounds` is rejected with a readable error.
+      `medium`, timeout 480, tokens 1,500,000 and no test command. An
+      out-of-range `rounds` is rejected with a readable error.
 - [ ] CI runs `tsc --noEmit` and the tests green, with no runtime dependencies.
 
 `bin/squiz` cannot be an extensionless Node file: Node decides to strip types
@@ -196,14 +196,14 @@ what detects a write made through the shell it grants.
 
 ## M8 — Episode boundaries
 
-The cost bound checked when a round records its cost, worktree removal at
-episode close, and an audit that every failure path reaches the stderr channel
-with a useful line.
+The token bound read before a round starts and again when one records what it
+spent, worktree removal at episode close, and an audit that every failure path
+reaches the stderr channel with a useful line.
 
 ### Acceptance criteria
 
-- [ ] An episode crossing the cost bound closes with the findings it has, and
-      the summary says the bound was reached.
+- [ ] An episode whose round reached the token bound closes with the findings it
+      has, and the summary says the bound was reached.
 - [ ] A clean, pushed worktree is removed at close. A dirty or unpushed one
       stays and is named on stderr.
 - [ ] No failure path is silent.

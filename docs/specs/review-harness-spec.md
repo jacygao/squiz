@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.24 (draft)
+**Version:** 0.25 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -680,8 +680,9 @@ cost as unknown rather than as zero. Two situations produce it, and they are
 reported differently. A round killed before its first assistant message
 completed has no tracked cost, which is a fact about that round. A reviewer model
 the CLI cannot price reports no cost for every round of every episode, which is a
-setup problem: the comment says once that cost is unavailable for the model, and
-Notes records that the cost bound was not enforced.
+setup problem: the comment says once that cost is unavailable for the model. The
+token bound is unaffected either way, because the tokens are reported whether or
+not anything can price them.
 
 ## 6. Commands
 
@@ -734,7 +735,7 @@ carries what could not be posted.
 | The local state file cannot be written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. |
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |
-| The cost bound is reached | Exit 0. The episode closes without starting another round, and the summary comment reports that the bound was reached. |
+| The token bound is reached | Exit 0. The episode closes without starting another round, and the summary comment reports that the bound was reached rather than reporting the round as one the reviewer failed. |
 
 ### The hook's stderr
 
@@ -762,7 +763,7 @@ The review budget bounds a review two ways. Both are configurable.
 | Bound | Default | When it is reached |
 |---|---|---|
 | **Time**, per round | 480 seconds | The reviewer process is killed and the round posts the findings reported before the kill. |
-| **Cost**, per episode | $0.50 | The episode closes without starting another round. |
+| **Tokens**, per round | 1,500,000 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
 finding arrives in the call that reports it rather than at the end of the run. A
@@ -845,18 +846,33 @@ the comments that landed stay.
 This bound is not configurable. It is not a budget a project chooses but a
 guard on the one deadline the harness does not own.
 
-The cost bound reads what the episode spent, which is more than its rounds cost:
-an attempt that failed before it was a round may still have been paid for, and
-that spend counts against the bound even though it consumed no round of the cap.
+**The token bound is on one round rather than on the episode.** A round whose
+tokens reached it closes the episode. The episode's own ceiling follows from the
+round cap: a cap of R rounds with a bound of B tokens is an episode of R × B,
+which is 4,500,000 tokens at the default cap of 3 and 12,000,000 at the largest
+cap the configuration accepts.
 
-The cost bound is checked when a round records its cost, so it stops the next
-round rather than the running one. A round already running is never killed for
-cost. An episode that reaches the bound closes with the findings it has, and the
-summary comment reports that the bound was reached.
+The tokens an attempt spent count whether or not the attempt was a round. An
+attempt that failed before it was a round may still have completed paid
+responses, and what it spent is measured against the bound as a ledger of its
+own. Without that, a reviewer that burned a bound's worth and reported nothing
+would be handed another round to do it again.
 
-The bound is enforced against the reviewer CLI's own arithmetic rather than
-against a provider's invoice, and it cannot be enforced at all for a model the
-CLI cannot price.
+The bound is read before a round starts, and again when a round records what it
+spent. It stops the next round rather than the running one, because a round
+already running is never killed for its tokens. **What the bound does is detect a
+round that ran away, not prevent one.** The round that reaches it has already
+spent whatever it spent, which may be more than the bound, and the time bound is
+the only thing that caps a single round. An episode that reaches the bound closes
+with the findings it has, and the summary comment reports that the bound was
+reached, so the round it closed does not read as a round the reviewer failed.
+
+The bound counts tokens because tokens are what the reviewer reports for every
+model it can run. Dollars are recorded beside them and reported in the summary
+comment, and they bound nothing. The reviewer CLI prices a round from a catalogue
+that refreshes itself, that catalogue reports no dollars at all against real
+tokens for a model it does not cover, and a subscription has no per-round figure
+to read.
 
 ## 8. The project
 
@@ -933,7 +949,7 @@ until something asks.
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
-| **P1** | The cost bound | $0.50 per episode, checked when a round records its cost |
+| **P1** | The token bound | 1,500,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
@@ -1023,7 +1039,7 @@ on its own branch. Squiz does not create them.
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 480 | Seconds one round's reviewer may run, settable 1 to 480 |
-| `budget` | 0.50 | Dollars an episode may cost, settable above 0 to 5.00 |
+| `tokens` | 1,500,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 `timeout` defaults to the most it may be, so a project can lower the time bound
@@ -1032,7 +1048,13 @@ rest of the hook's 600 seconds belongs to the calls the round makes before and
 after the review, and a reviewer is given what is left of the window rather than
 the whole of what is configured. The review budget names the shares.
 
+`tokens` is the review budget's other bound. The review budget says what it
+counts, when it is read, and what an episode's ceiling comes to under a given
+round cap.
+
 A setting outside its range, or of a type the table does not give it, is
 rejected with an error naming the setting, the value given and what was
-expected. A `.squiz.json` that cannot be read or parsed is a failure the harness
-controls, so the round exits 0 and the hook's stderr names it.
+expected. A key the table does not name is rejected the same way, with an error
+saying it is not a setting and listing the settings there are. A `.squiz.json`
+that cannot be read or parsed is a failure the harness controls, so the round
+exits 0 and the hook's stderr names it.
