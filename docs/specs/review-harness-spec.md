@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.30 (draft)
+**Version:** 0.31 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -980,6 +980,7 @@ until something asks.
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
+| **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone. Today a round hands the reviewer only the threads the reviewer opened |
 
 Nothing at P2 gets an interface built for it in advance.
 
