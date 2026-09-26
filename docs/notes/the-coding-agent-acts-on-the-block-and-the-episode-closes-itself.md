@@ -75,6 +75,13 @@ recheck-when: the coding agent's model changes, pi upgrades, or § 3's blocking 
   the subagent's final message never mentioned the task it was given. It named
   no attack and no injection, and it reverted nothing and halted nothing.
 
+- **Put a resolved thread in front of round 2 by hand, or wait until round 3.**
+  Nothing in the loop can produce one sooner: `docs/specs/milestones.md` § M5
+  asks for round 2 to run after the coding agent resolves a thread, while § 3
+  says the coding agent does not close threads and § 6 gives it no command that
+  could. The resolved thread this run handed round 2 was posted and resolved
+  beforehand, and is a person's thread rather than the loop's.
+
 ## Needs your input
 
 - **Whether `squiz threads` should carry each thread's severity and headline.**
@@ -84,18 +91,6 @@ recheck-when: the coding agent's model changes, pi upgrades, or § 3's blocking 
   to find out what they say is a step the harness can take for it, and the
   parser that reads a headline off a thread is being built for the summary
   comment anyway.
-
-- **Whether M5's acceptance criteria should stop asking the coding agent to
-  resolve a thread.** `docs/specs/milestones.md` § M5 asks for round 2 to run
-  "after the coding agent resolves one thread and replies on another", and § 3
-  says the coding agent "does not close threads", and § 6 gives it no command
-  that could. Nothing in the loop can put a resolved thread in front of round 2:
-  the earliest a round can be handed one is round 3, after round 2's own `fixed`
-  verdict closed it. The resolved thread this run handed round 2 was posted and
-  resolved by hand beforehand, and is a person's thread rather than the loop's.
-  Recommended: reword the criterion to ask for a resolved thread and a
-  replied-to thread, whatever put them there, since that is what the round's
-  behaviour actually turns on.
 
 ## Reference
 
