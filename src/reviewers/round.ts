@@ -48,21 +48,13 @@ import { type Deadline, deadlineIn } from "./deadline.ts";
  */
 const GRACE_MS = 2_000;
 
-/**
- * How long a round whose review is complete waits for the calls of the message
- * that finished it to be answered, before stopping the reviewer anyway.
- *
- * A reporting call is answered at once. A tool of the same message need not be,
- * and one that never answers would otherwise hold the round to its time bound.
- */
-const ANSWERING_MS = 2_000;
-
 /** What one round of review came to. */
 export type Round =
   /** The reviewer ran and returned a review. Empty findings is a review that found nothing. */
   | ({ readonly outcome: "reviewed"; readonly cost: RoundCost } & RoundOutput)
   /**
-   * The time bound passed and the reviewer was killed.
+   * The time bound passed on a review the reviewer had not finished, and it was
+   * killed.
    *
    * A failed round rather than a round that found nothing, and it keeps what
    * the reviewer had reported by then: those findings were confirmed and
@@ -177,7 +169,7 @@ type Attempt = {
   readonly reported: RoundOutput;
 } & (
   | RunResult
-  /** The time bound passed and the process was stopped. */
+  /** The time bound passed with no review finished, and the process was stopped. */
   | { readonly kind: "killed" }
   /** The reviewer never ran: it is not installed, or it could not be executed. */
   | { readonly kind: "unstartable"; readonly reason: string }
@@ -246,22 +238,17 @@ async function attempt(
   // The last the parse reported before the process is stopped is the whole of
   // what a killed round has, so it is tracked here rather than taken from the
   // parse's return, which a killed attempt never reaches.
-  let progress: RoundProgress = {
-    cost: unspent,
-    finished: false,
-    answered: true,
-    ...nothingReported,
-  };
+  let progress: RoundProgress = { cost: unspent, finished: false, ...nothingReported };
   let startFailure: string | undefined;
   let unstarted = false;
-  let finished = false;
+  let over = false;
   child.on("error", (cause) => {
     // A process that never started emits no exit, so this is the only word that
     // it is not running.
     unstarted = true;
     // Once the attempt is over the only signals left are this module's own, and
     // a refused one says nothing about whether the reviewer started.
-    if (!finished) startFailure = startFailed(line.command, cause);
+    if (!over) startFailure = startFailed(line.command, cause);
   });
 
   // The reviewer leads the group, so its identifier names the group. What the
@@ -285,34 +272,8 @@ async function attempt(
     }
   };
 
-  let stopping = false;
-  let unwait: (() => void) | undefined;
-  const stopNow = (): void => {
-    if (stopping) return;
-    stopping = true;
-    unwait?.();
-    void stop(owned);
-  };
-
   const parsing = read(adapter, bounded(), (reached) => {
     progress = reached;
-    if (!reached.finished || stopping) return;
-    // The reviewer has said its review is complete, so the round stops it here.
-    // Asking the reviewer's CLI to end the run on that call would not be
-    // enough: `pi` ends a run on a call only where every call of the same
-    // message asked it to, so a reviewer that reports a finding and finishes in
-    // one message would go on to another model request with the review already
-    // complete.
-    if (reached.answered) {
-      stopNow();
-      return;
-    }
-    // A call the run has not answered may yet report, and a reviewer signalled
-    // before it flushes takes with it whatever it has written: the parse reads
-    // the pipe to the end, and what never left the reviewer is not in it. So the
-    // answers are waited for, and the wait is bounded, because a call that never
-    // answers cannot be allowed to hold a review that is already complete.
-    unwait ??= deadlineIn(ANSWERING_MS).whenPassed(stopNow);
   }).then(
     (run): Attempt => ({ cost: run.cost, reported: reportedIn(progress), ...run.result }),
     (cause): Attempt => ({
@@ -330,16 +291,15 @@ async function attempt(
 
   const ended = await Promise.race([parsing, expiry]);
   cancel();
-  unwait?.();
 
   if (ended === "expired" || overran) {
-    finished = true;
+    over = true;
     await stop(owned);
     // The parse is left mid-stream, so the streams are closed under it rather
     // than waiting on a process that has been told to go.
     child.stdout.destroy();
     child.stderr.destroy();
-    return { cost: progress.cost, reported: reportedIn(progress), kind: "killed" };
+    return atTheBound(progress);
   }
 
   // The reviewer is stopped before its account is read, and whatever the
@@ -352,7 +312,7 @@ async function attempt(
   // empty stream being read as a reviewer that ran and said nothing.
   await within(closing, GRACE_MS);
   const failure = startFailure;
-  finished = true;
+  over = true;
   if (failure !== undefined) {
     return { cost: ended.cost, reported: ended.reported, kind: "unstartable", reason: failure };
   }
@@ -386,6 +346,23 @@ async function read(
 /** What the reviewer had reported, taken off everything else the round tracks. */
 function reportedIn(progress: RoundProgress): RoundOutput {
   return { findings: progress.findings, verdicts: progress.verdicts };
+}
+
+/**
+ * What an attempt the bound ended came to, from what the reviewer had reported
+ * by then.
+ *
+ * The reviewer's declaration is what says a review is finished, so an attempt
+ * holding one is that review however its process came to stop. A reviewer that
+ * declares its review a moment before the deadline and writes its closing
+ * message past it has reviewed, and an attempt that read the stop instead would
+ * keep the findings and throw the review away.
+ */
+function atTheBound(progress: RoundProgress): Attempt {
+  const cost = progress.cost;
+  const reported = reportedIn(progress);
+  if (!progress.finished) return { cost, reported, kind: "killed" };
+  return { cost, reported, kind: "reviewed", ...reported };
 }
 
 /**
@@ -568,10 +545,6 @@ function plus(total: RoundCost, more: RoundCost): RoundCost {
     tokens: total.tokens + more.tokens,
     messages: total.messages + more.messages,
   };
-}
-
-function nextTurn(): Promise<void> {
-  return new Promise((settle) => setImmediate(settle));
 }
 
 function startFailed(command: string, cause: unknown): string {

@@ -207,8 +207,9 @@ test("each report is told to the caller as it arrives", async () => {
 });
 
 /**
- * The cue the caller stops the reviewer on. It is told separately from the
- * reports, because a review finished with nothing found adds no report to tell.
+ * What a caller stopped at its time bound reads the round as a review from. It is
+ * told separately from the reports, because a review finished with nothing found
+ * adds no report to tell.
  */
 test("the caller is told when the reviewer reports the review complete", async () => {
   const told: boolean[] = [];
