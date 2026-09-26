@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.9 (draft)
+**Version:** 0.10 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -146,9 +146,9 @@ a blocking reason or exit 0 at the cap.
 
 - [ ] Round 1 on a real pull request posts inline threads and exits 2, with a
       blocking reason naming the open threads and the commands that work them.
-- [ ] After the coding agent resolves one thread and replies on another, round 2
-      hands both to the reviewer and applies its verdicts: `fixed` and
-      `withdrawn` close, `open` re-opens.
+- [ ] Handed a resolved thread and a replied-to thread, round 2 hands both to
+      the reviewer and applies its verdicts: `fixed` and `withdrawn` close,
+      `open` re-opens.
 - [ ] The coding agent acts on the blocking reason rather than declining it. A
       round whose block is declined is recorded as a failed round rather than
       passing as a round that found nothing to do.
