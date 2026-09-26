@@ -45,6 +45,8 @@ import type { PullRequest } from "../github/pull-request.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import type { Invocation, RoundCost, ThreadVerdict } from "./adapter.ts";
 import { pi } from "./pi/adapter.ts";
+import { extensionFile } from "./pi/argv.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
 import { composePrompt } from "./prompt.ts";
 import { runRound } from "./round.ts";
 
@@ -230,6 +232,7 @@ test("the prompt, the read grant, the charter and the tree all reach the reviewe
     const handed = handedTo(tree);
     assert.equal(handed["cwd"], realpathSync(tree));
     assert.equal(handed["tools"], pi.grants.read.join(","));
+    assert.equal(handed["extension"], extensionFile);
     assert.equal(handed["charterFile"], charterFile);
     assert.equal(handed["charterOpens"], readFileSync(charterFile, "utf8").split("\n")[0]);
     assert.equal(handed["sessionDirectory"], sessionDirectory);
@@ -428,15 +431,15 @@ function message(stopReason: string, content: readonly unknown[]): unknown {
 const reaching = message("toolUse", [{ type: "toolCall", toolName: "read" }]);
 
 /**
- * The message the findings are read out of, whose text the stand-in fills in.
+ * The message the reporting calls hang off.
  *
- * The thinking block before it is what a real message carries and nothing reads:
- * the findings are the message's text, and a reader that took its thinking too
- * would read the reviewer's working out as part of its answer.
+ * It stops for a tool call rather than for an answer, because the review ends
+ * on the call that finishes it and not on a message. The thinking block is what
+ * a real message carries and nothing reads.
  */
-const answering = message("stop", [
+const reporting = message("toolUse", [
   { type: "thinking", thinking: "reading the file" },
-  { type: "text", text: "" },
+  { type: "toolCall", toolName: REPORT_FINDING },
 ]);
 
 /**
@@ -474,10 +477,23 @@ const defect = ${JSON.stringify(defect)};
 const fixedComparison = ${JSON.stringify(fixedComparison)};
 const body = ${JSON.stringify(findingBody)};
 const toolUse = ${JSON.stringify(reaching)};
-const answered = ${JSON.stringify(answering)};
+const reported = ${JSON.stringify(reporting)};
+const reportFinding = ${JSON.stringify(REPORT_FINDING)};
+const reportVerdict = ${JSON.stringify(REPORT_VERDICT)};
+const finishReview = ${JSON.stringify(FINISH_REVIEW)};
+
+/** One reporting call answered, as the harness reads a report back. */
+const answer = (id, toolName, details) =>
+  say({
+    type: "tool_execution_end",
+    toolCallId: id,
+    toolName,
+    isError: false,
+    result: { content: [{ type: "text", text: "Reported" }], details },
+  });
 
 function review() {
-  for (const required of ["--print", "--no-session"]) {
+  for (const required of ["--print", "--no-session", "--no-extensions"]) {
     if (!args.includes(required)) refuse("the command line carries no " + required);
   }
   if (after("--mode") !== "json") refuse("the output mode is not json");
@@ -487,6 +503,15 @@ function review() {
   for (const writer of ["edit", "write", "bash"]) {
     if (tools.split(",").includes(writer)) refuse("the grant carries " + writer);
   }
+  // A reporting call the grant does not carry is withheld in silence, which
+  // leaves the reviewer no way to report and the round no way to know why.
+  for (const call of [reportFinding, reportVerdict, finishReview]) {
+    if (!tools.split(",").includes(call)) refuse("the grant withholds " + call);
+  }
+
+  const extension = after("--extension");
+  if (extension === undefined) refuse("the command line carries no extension");
+  if (fs.readFileSync(extension, "utf8").trim() === "") refuse("the extension is empty");
 
   const sessionDirectory = after("--session-dir");
   if (sessionDirectory === undefined) refuse("the command line carries no session directory");
@@ -517,6 +542,7 @@ function review() {
     JSON.stringify({
       cwd: process.cwd(),
       tools,
+      extension,
       charterFile,
       charterOpens: charter.split("\\n")[0],
       sessionDirectory,
@@ -529,10 +555,6 @@ function review() {
   // The earlier round's finding is ruled on by reading the code as it now
   // stands, which is the only thing that settles it.
   const verdict = lines.includes(fixedComparison) ? "fixed" : "open";
-  answered.message.content[1].text = JSON.stringify({
-    findings: [finding],
-    verdicts: [{ thread: ruled[1], verdict }],
-  });
 
   say({ type: "session", sessionId: "stand-in" });
   say({ type: "agent_start" });
@@ -542,14 +564,23 @@ function review() {
   update({ type: "text_delta", delta: "Reading " + reviewedFile });
   say(toolUse);
   say({ type: "tool_execution_start", toolCallId: "1", toolName: "read", args: { path: read } });
-  say({ type: "tool_execution_end", toolCallId: "1", toolName: "read", isError: false });
+  say({
+    type: "tool_execution_end",
+    toolCallId: "1",
+    toolName: "read",
+    isError: false,
+    result: { content: [{ type: "text", text: "the file it asked for" }] },
+  });
   const result = { type: "text", text: "the file it asked for" };
   say({ type: "message_end", message: { role: "toolResult", content: [result] } });
-  say(answered);
+  say(reported);
+  answer("2", reportFinding, finding);
+  answer("3", reportVerdict, { thread: ruled[1], verdict: verdict });
+  answer("4", finishReview, {});
   say({ type: "turn_end" });
   // The largest line of a real stream, repeating the whole transcript. Nothing
   // reads it, and a reader that held it would hold the round's whole output.
-  say({ type: "agent_end", willRetry: false, messages: [toolUse.message, answered.message] });
+  say({ type: "agent_end", willRetry: false, messages: [toolUse.message, reported.message] });
   say({ type: "agent_settled" });
 }
 

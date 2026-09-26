@@ -77,14 +77,17 @@ export type ToolExecutionStart = {
 /**
  * The tool answered.
  *
- * The answer itself is not carried. It is the tool's whole output, and progress
- * is what these two events are read for.
+ * The answer is carried as it arrived and is never held: a built-in tool's
+ * answer is its whole output, which for a read is the whole file. A consumer
+ * that keeps anything out of one keeps what it read from it and not the answer.
  */
 export type ToolExecutionEnd = {
   readonly type: "tool_execution_end";
   readonly toolCallId: string;
   readonly toolName: string;
   readonly isError: boolean;
+  /** Absent where the tool answered with nothing at all. */
+  readonly result: unknown;
 };
 
 /**
@@ -251,7 +254,7 @@ function interpret(line: string): PiEvent {
           line,
         );
       }
-      return { type: "tool_execution_end", toolCallId, toolName, isError };
+      return { type: "tool_execution_end", toolCallId, toolName, isError, result: event["result"] };
     }
     // A second `type` key is the one way a kept line reads as another event:
     // the discriminator takes the first, and JSON.parse keeps the last.

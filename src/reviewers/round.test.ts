@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { type Adapter, type Invocation, unspent } from "./adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { parse } from "./pi/parse.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
 import { type Round, runRound } from "./round.ts";
 
 /** The scratch space, named relative to the work tree as the harness names it. */
@@ -68,7 +69,13 @@ test("a reviewer that floods and does not stop is killed at the bound", async ()
   await inATree(async (tree) => {
     const started = Date.now();
     const round = await runRound(reviewer(flooding).adapter, at(tree), BOUND);
-    assert.deepEqual(round, { outcome: "timed-out", cost: spentOnce, seconds: BOUND });
+    assert.deepEqual(round, {
+      outcome: "timed-out",
+      cost: spentOnce,
+      seconds: BOUND,
+      findings: review.findings,
+      verdicts: [],
+    });
     assert.ok(
       Date.now() - started < 10_000,
       "the bound has to stop a flooding reviewer, which is the reader's own loop rather than an idle one",
@@ -80,20 +87,126 @@ test("a reviewer that says nothing and does not stop is killed at the bound", as
   await inATree(async (tree) => {
     const started = Date.now();
     const round = await runRound(reviewer(silent).adapter, at(tree), BOUND);
-    assert.deepEqual(round, { outcome: "timed-out", cost: unspent, seconds: BOUND });
+    assert.deepEqual(round, {
+      outcome: "timed-out",
+      cost: unspent,
+      seconds: BOUND,
+      findings: [],
+      verdicts: [],
+    });
     assert.ok(Date.now() - started < 10_000, "a silent reviewer is the hang the bound is for");
   });
 });
 
 /**
- * A killed round is a failed round, which is not the same as a round that
- * honestly found nothing. Nothing may read one as the other.
+ * The round ends the run itself once the reviewer has reported the review
+ * complete, rather than waiting for the run to end. A reviewer that reports a
+ * finding and finishes in one message leaves a run whose review is complete and
+ * which has not ended, so a round that waited would pay for whatever that run did
+ * next and would return a finished review at its time bound.
  */
-test("a killed round reports no findings and is not a review", async () => {
+test("a finished review comes back at once from a run that has not ended", async () => {
+  await inATree(async (tree) => {
+    const started = Date.now();
+    const round = await runRound(reviewer(finishingWithoutEnding).adapter, at(tree), 10);
+    const elapsed = Date.now() - started;
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], review.findings);
+    assert.ok(
+      elapsed < 5_000,
+      `the round took ${elapsed}ms against a bound of 10000ms, so it waited on a run whose review was already complete`,
+    );
+  });
+});
+
+/**
+ * The reports of the message that finished the review.
+ *
+ * A reviewer stopped the moment it finishes takes with it whatever it has
+ * written and not flushed, and what never left it is not in the pipe to be read.
+ * So a round that has been told the review is complete waits for the calls the
+ * run has not answered before it stops anything.
+ */
+test("every report of the message that finished the review comes back", async () => {
+  await inATree(async (tree) => {
+    const started = Date.now();
+    const round = await runRound(reviewer(finishingFirst(batched)).adapter, at(tree), 10);
+    const elapsed = Date.now() - started;
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(
+      round.outcome === "reviewed" ? round.findings : [],
+      batched,
+      "a report accepted in the message that finished the review is a report the round has",
+    );
+    assert.ok(
+      elapsed < 5_000,
+      `the round took ${elapsed}ms against a bound of 10000ms, so it waited on the run rather than on its answers`,
+    );
+  });
+});
+
+/**
+ * What bounds that wait. A call of the finishing message that is never answered
+ * is the one case where waiting for the answers could hold a round whose review
+ * is already complete.
+ */
+test("a call of the finishing message that never answers does not hold the round", async () => {
+  await inATree(async (tree) => {
+    const started = Date.now();
+    const round = await runRound(reviewer(finishingUnanswered).adapter, at(tree), 10);
+    const elapsed = Date.now() - started;
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.ok(elapsed > 1_000, `the round took ${elapsed}ms, so it waited for no answer at all`);
+    assert.ok(
+      elapsed < 8_000,
+      `the round took ${elapsed}ms against a bound of 10000ms, so the wait for an answer is bounded by the round rather than by itself`,
+    );
+  });
+});
+
+/**
+ * A reviewer can report a finding and then exhaust its provider's retries before
+ * it finishes the review. The finding was confirmed and answered, so the round
+ * has it; the round is still the setup problem the run turned into.
+ */
+test("a reviewer whose provider gave out after reporting keeps what it reported", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(reportingThenFailing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(
+      round.outcome === "setup" ? round.findings : [],
+      review.findings,
+      "a finding reported before the provider gave out is a finding the round has",
+    );
+    assert.match(round.outcome === "setup" ? round.reason : "", /no credential/u);
+  });
+});
+
+test("the first attempt's findings survive a retry that completed no message", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(halfway, refusing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.outcome === "setup" ? round.findings : [], review.findings);
+  });
+});
+
+/**
+ * A killed round is a failed round, which is not the same as a round that
+ * honestly found nothing. Nothing may read one as the other, and what it keeps
+ * is what the reviewer reported rather than a review it finished.
+ */
+test("a killed round keeps what was reported and is still not a review", async () => {
   await inATree(async (tree) => {
     const round = await runRound(reviewer(flooding).adapter, at(tree), BOUND);
-    assert.notEqual(round.outcome, "reviewed");
-    assert.ok(!("findings" in round));
+    assert.equal(round.outcome, "timed-out");
+    assert.deepEqual(
+      round.outcome === "timed-out" ? round.findings : [],
+      review.findings,
+      "a finding confirmed and reported before the kill is a finding the round has",
+    );
   });
 });
 
@@ -127,7 +240,42 @@ test("a second unreadable output reports the reviewer unavailable", async () => 
     const running = reviewer(prose, prose);
     const round = await runRound(running.adapter, at(tree), 10);
     assert.equal(round.outcome, "unavailable");
+    assert.deepEqual(round.outcome === "unavailable" ? round.findings : [], []);
     assert.equal(running.starts(), 2, "twice, and no more: a third would be the same again");
+  });
+});
+
+/**
+ * A round that failed twice still keeps what the reviewer got through, on the
+ * same terms as a round that was killed.
+ */
+test("a round the reviewer never finished keeps what it reported", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(halfway, halfway).adapter, at(tree), 10);
+    assert.equal(round.outcome, "unavailable");
+    assert.deepEqual(round.outcome === "unavailable" ? round.findings : [], review.findings);
+  });
+});
+
+/**
+ * Two attempts are two readings of the same change, so the retry's reports are
+ * the ones a round keeps. The first attempt's stand only where the retry got to
+ * none of its own, which is a round that would otherwise throw away a finding
+ * it had.
+ */
+test("the first attempt's findings stand where the retry reported nothing", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(halfway, prose).adapter, at(tree), 10);
+    assert.equal(round.outcome, "unavailable");
+    assert.deepEqual(round.outcome === "unavailable" ? round.findings : [], review.findings);
+  });
+});
+
+test("a review the retry finished is the round's review, not the two together", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(halfway, reviewing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed");
+    assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], review.findings);
   });
 });
 
@@ -144,6 +292,8 @@ test("a run that completed no message is not tried again", async () => {
       outcome: "setup",
       cost: { dollars: 0, tokens: 0, messages: 1 },
       reason: "no credential for the provider",
+      findings: [],
+      verdicts: [],
     });
     assert.equal(running.starts(), 1);
   });
@@ -380,8 +530,14 @@ test("an adapter that throws before it returns still stops the reviewer", async 
         };
       },
       // Not an async function: the throw happens before any promise exists.
-      parse: (_stdout, costSoFar) => {
-        costSoFar?.({ dollars: 0.004, tokens: 100, messages: 1 });
+      parse: (_stdout, soFar) => {
+        soFar?.({
+          cost: { dollars: 0.004, tokens: 100, messages: 1 },
+          findings: [],
+          verdicts: [],
+          finished: false,
+          answered: true,
+        });
         throw new Error("the adapter fell over before it started");
       },
       grants,
@@ -505,7 +661,7 @@ function deaf(tree: string): string {
 
 /** A reviewer that reviews and leaves while its tool is still running. */
 function leavingEarly(tree: string): string {
-  const answer = JSON.stringify(said(JSON.stringify(review), "stop", 0.002));
+  const answer = JSON.stringify(reportingMessage + reported);
   return withTool(tree, `process.stdout.write(${answer}, () => process.exit(0));`);
 }
 
@@ -536,20 +692,23 @@ const spentOnce = { dollars: 0.002, tokens: 100, messages: 1 };
 /** A path under the work tree that a directory cannot be made at. */
 const blocked = "not-a-directory/scratch";
 
+const finding = {
+  scope: "line",
+  file: "src/github/gh.ts",
+  line: 42,
+  severity: "high",
+  headline: "The exit status is read before the process has exited",
+  reasoning: ["`exitCode` is null until the process ends."],
+  suggestedFix: "Await the exit event.",
+};
+
 const review = {
-  findings: [
-    {
-      scope: "line",
-      file: "src/github/gh.ts",
-      line: 42,
-      severity: "high",
-      headline: "The exit status is read before the process has exited",
-      reasoning: ["`exitCode` is null until the process ends."],
-      suggestedFix: "Await the exit event.",
-    },
-  ],
+  findings: [finding],
   verdicts: [{ thread: "PRRT_kwDO", verdict: "fixed" }],
 };
+
+/** Three findings of one message, told apart by the line each is anchored to. */
+const batched = [11, 22, 33].map((line) => ({ ...finding, line }));
 
 type Running = {
   readonly adapter: Adapter;
@@ -597,6 +756,11 @@ async function inATree(run: (tree: string) => Promise<void>): Promise<void> {
   }
 }
 
+/** What a round said for itself, so a refusal is read rather than guessed. */
+function accountOf(round: Round): string {
+  return `the round came back as ${JSON.stringify(round)}`;
+}
+
 function headlineOf(round: Round): string {
   assert.equal(round.outcome, "reviewed");
   const finding = round.outcome === "reviewed" ? round.findings[0] : undefined;
@@ -630,19 +794,47 @@ function writing(text: string): string {
   return `process.stdout.write(${JSON.stringify(text)});`;
 }
 
+/** One reporting call answered, as `pi` writes the line it arrives on. */
+function called(toolName: string, details: unknown, id = "call_1"): string {
+  return `${JSON.stringify({
+    type: "tool_execution_end",
+    toolCallId: id,
+    toolName,
+    isError: false,
+    result: { content: [{ type: "text", text: "Reported" }], details },
+  })}\n`;
+}
+
+/** One call started, as `pi` writes the line it arrives on. */
+function starting(toolName: string, id: string): string {
+  return `${JSON.stringify({ type: "tool_execution_start", toolCallId: id, toolName, args: {} })}\n`;
+}
+
+/** The assistant message the reporting calls hang off, priced at a round. */
+const reportingMessage = said("reporting", "toolUse", 0.002);
+
+/** The whole review reported, as the calls it arrives in. */
+const reported =
+  review.findings.map((finding) => called(REPORT_FINDING, finding)).join("") +
+  review.verdicts.map((verdict) => called(REPORT_VERDICT, verdict)).join("") +
+  called(FINISH_REVIEW, {});
+
 /** A reviewer whose one finding is what it can see of its own process. */
 function reporting(expression: string): string {
+  const finding =
+    '{ scope: "change", severity: "low", headline, reasoning: ["what it could see"], suggestedFix: "none" }';
   return [
     'const fs = require("node:fs");',
     `const headline = String(${expression});`,
-    'const answer = JSON.stringify({ findings: [{ scope: "change", severity: "low", headline, reasoning: ["what it could see"], suggestedFix: "none" }], verdicts: [] });',
-    'const line = { type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: answer }], usage: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 100, cost: { input: 0.002, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.002 } } } };',
-    'process.stdout.write(JSON.stringify(line) + "\\n");',
+    `process.stdout.write(${JSON.stringify(reportingMessage)});`,
+    `const call = { type: "tool_execution_end", toolCallId: "call_1", toolName: ${JSON.stringify(REPORT_FINDING)}, isError: false, result: { content: [], details: ${finding} } };`,
+    'process.stdout.write(JSON.stringify(call) + "\\n");',
+    `process.stdout.write(${JSON.stringify(called(FINISH_REVIEW, {}))});`,
   ].join("\n");
 }
 
-/** A reviewer that reviews and stops. */
-const reviewing = writing(said(JSON.stringify(review), "stop", 0.002));
+/** A reviewer that reports its review through the calls, and finishes it. */
+const reviewing = writing(reportingMessage + reported);
 
 /** A reviewer whose request failed every time, and that completed no message. */
 const refusing = writing(said("", "error", 0, "no credential for the provider"));
@@ -652,15 +844,77 @@ const sayingNothing = "process.exit(0);";
 
 /** A reviewer whose request failed and was retried, and which then reviewed. */
 const recovering = writing(
-  said("", "error", 0, "503 from the provider").repeat(22) +
-    said(JSON.stringify(review), "stop", 0.002),
+  said("", "error", 0, "503 from the provider").repeat(22) + reportingMessage + reported,
 );
 
-/** A reviewer that answered in prose, which is not a review. */
+/** A reviewer that stopped without finishing its review, having reported nothing. */
 const prose = writing(said("I had a look and it seems fine.", "stop", 0.003));
 
-/** A reviewer that reports a message, then floods and never stops. */
-const flooding = `${writing(said(JSON.stringify(review), "toolUse", 0.002))}
+/** A reviewer that reports its one finding and then stops without finishing. */
+const halfway = writing(
+  reportingMessage +
+    called(REPORT_FINDING, review.findings[0]) +
+    said("that is what I have so far", "stop", 0),
+);
+
+/**
+ * A reviewer that reports a finding, finishes the review, and whose run does not
+ * end there.
+ *
+ * It is what a finish made in the same message as a report leaves behind: the
+ * review is complete, and the process is still going.
+ */
+const finishingWithoutEnding = [
+  writing(
+    reportingMessage + called(REPORT_FINDING, review.findings[0]) + called(FINISH_REVIEW, {}),
+  ),
+  "setInterval(() => {}, 1000);",
+].join("\n");
+
+/**
+ * A reviewer that finishes its review in the same message as three reports, and
+ * that answers the finish first.
+ *
+ * It is the order a CLI running the calls of one message together may answer
+ * them in. The reports are answered after, and this reviewer exits on the signal
+ * without writing them, which is what one that does not flush its output does:
+ * the reports were accepted and never left it, so no amount of reading the pipe
+ * finds them.
+ */
+function finishingFirst(reports: readonly unknown[]): string {
+  const started = reports.map((_, at) => starting(REPORT_FINDING, `r${at}`)).join("");
+  const answered = reports.map((report, at) => called(REPORT_FINDING, report, `r${at}`)).join("");
+  return [
+    writing(reportingMessage + starting(FINISH_REVIEW, "f") + started + called(FINISH_REVIEW, {}, "f")),
+    "process.on('SIGTERM', () => process.exit(143));",
+    `setTimeout(() => { ${writing(answered)} }, 300);`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+}
+
+/**
+ * A reviewer that finishes its review with a call of the same message still
+ * unanswered, and that never answers it or exits.
+ */
+const finishingUnanswered = [
+  writing(
+    reportingMessage +
+      starting(FINISH_REVIEW, "f") +
+      starting("bash", "b") +
+      called(FINISH_REVIEW, {}, "f"),
+  ),
+  "setInterval(() => {}, 1000);",
+].join("\n");
+
+/** A reviewer that reports a finding and whose provider then gives out. */
+const reportingThenFailing = writing(
+  reportingMessage +
+    called(REPORT_FINDING, review.findings[0]) +
+    said("", "error", 0, "no credential for the provider"),
+);
+
+/** A reviewer that reports one finding, then floods and never stops. */
+const flooding = `${writing(reportingMessage + called(REPORT_FINDING, review.findings[0]))}
 const padding = ${JSON.stringify(`${JSON.stringify({ type: "message_update", delta: "x".repeat(400) })}\n`)};
 setInterval(() => { for (let at = 0; at < 200; at += 1) process.stdout.write(padding); }, 1);`;
 

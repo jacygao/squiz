@@ -119,6 +119,7 @@ test("the tool events a round reports progress from leave the cost alone", () =>
     toolCallId: "call_0",
     toolName: "read",
     isError: false,
+    result: { content: [{ type: "text", text: "the whole file" }] },
   };
   assert.deepEqual([started, ended].reduce(costWith, recordedCost), recordedCost);
 });

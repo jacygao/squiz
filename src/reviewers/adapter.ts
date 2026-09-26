@@ -3,10 +3,11 @@
  * sides share.
  *
  * An adapter is the whole of what knowing a CLI costs: the command line it
- * takes, the tools it is granted at each depth, and how its output reads back.
- * Everything around it — starting the process, confining it, bounding its time,
- * deciding what the round returned — is written once against these types, so a
- * second reviewer is a second adapter and no other change.
+ * takes, the tools it is granted at each depth, how its output reads back, and
+ * whatever that CLI has to be handed for reporting a finding to be a call it
+ * validates. Everything around it — starting the process, confining it,
+ * bounding its time, deciding what the round returned — is written once against
+ * these types, so a second reviewer is a second adapter and no other change.
  */
 
 import type { Depth, Thinking } from "../config/config.ts";
@@ -82,14 +83,41 @@ export type RoundOutput = {
   readonly verdicts: readonly ThreadVerdict[];
 };
 
+/** What the reviewer has reported, and how far the run has got with reporting it. */
+export type Reported = RoundOutput & {
+  /**
+   * Whether the reviewer has reported its review complete.
+   *
+   * It is the caller's cue to stop the reviewer. A CLI given a run to end may
+   * not end it, and a round that waited to be told would pay for whatever the
+   * run did next.
+   */
+  readonly finished: boolean;
+  /**
+   * Whether every call the run started has been answered.
+   *
+   * A finished review is not the end of what may still be reported. A CLI that
+   * runs the calls of one message together may answer the call that finished the
+   * review before it answers a report of the same message, and a reviewer
+   * stopped in between takes with it whatever it had written and not flushed.
+   * What never left the reviewer cannot be read out of the pipe afterwards, so a
+   * caller that stops it waits for this first.
+   */
+  readonly answered: boolean;
+};
+
+/** What a round has so far: what it has spent, and what the reviewer has reported. */
+export type RoundProgress = { readonly cost: RoundCost } & Reported;
+
 /**
- * Told the round's cost each time an assistant message adds to it.
+ * Told what the round has so far, each time the run adds to it.
  *
- * It is where a killed round's figure comes from. The process is stopped with
- * its output half-read, so the last figure the caller was told is all there is,
- * and waiting for the parse to finish would wait on a stream that has stopped.
+ * It is where a killed round's findings and its figure both come from. The
+ * process is stopped with its output half-read, so the last the caller was told
+ * is all there is, and waiting for the parse to finish would wait on a stream
+ * that has stopped.
  */
-export type CostSoFar = (cost: RoundCost) => void;
+export type ProgressSoFar = (progress: RoundProgress) => void;
 
 /** What one run of the reviewer established, its whole output read. */
 export type RunResult =
@@ -126,15 +154,20 @@ export type Adapter = {
    *
    * One pass, holding nothing. The stream runs to tens of megabytes, so a
    * second reader over a buffer of it is the one implementation ruled out.
-   * `costSoFar` is how a caller that will stop the process mid-stream still has
-   * a figure for it.
+   * `soFar` is how a caller that will stop the process mid-stream still has
+   * what the reviewer had reached.
+   *
+   * Each report is passed on as the run makes it. An adapter for a CLI that
+   * cannot report a finding before its run ends passes them all on at the end,
+   * and rounds of that CLI keep nothing when they are killed.
    */
   readonly parse: (
     stdout: AsyncIterable<string | Uint8Array>,
-    costSoFar?: CostSoFar,
+    soFar?: ProgressSoFar,
   ) => Promise<ParsedRun>;
   /**
-   * Which tools the CLI is given at each depth.
+   * Which tools the CLI is given at each depth, the calls the reviewer reports
+   * through among them.
    *
    * It sits beside the command line rather than only inside it, so that what a
    * round was allowed to do is readable without parsing the arguments back.
