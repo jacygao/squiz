@@ -50,7 +50,7 @@ const nothingReported: Reported = {
   findings: [],
   verdicts: [],
   finished: false,
-  answered: true,
+  broken: undefined,
 };
 
 /**

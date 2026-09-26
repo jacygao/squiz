@@ -117,8 +117,8 @@ is a result, and it is `finish_review` that says so. Without it the round cannot
 tell a clean review from one that stopped halfway, and it treats what you did as
 a failure.
 
-**Call `finish_review` last.** It ends your run, so anything you meant to report
-after it is never reported at all.
+**Call `finish_review` last.** It says the review is finished, so everything you
+have to report belongs before it.
 
 A call that is refused comes back with the reason. Nothing was reported, the
 calls you already made still stand, and you can make the call again once it is

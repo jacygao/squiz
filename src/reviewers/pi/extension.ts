@@ -172,7 +172,7 @@ export default function reportAsYouGo(pi: Registrar): void {
     name: FINISH_REVIEW,
     label: "Finish review",
     description:
-      "End the review. Call it exactly once, after the last finding and the last verdict, and call it even where you found nothing. It ends your run, so nothing you report after it is reported. A review that ends without it is a review that was cut short.",
+      "End the review. Call it exactly once, after the last finding and the last verdict, and call it even where you found nothing. The review is over once you have called it, so report everything you have before it. A review that ends without it is a review that was cut short.",
     promptSnippet: "End the review",
     promptGuidelines: [
       `Use ${FINISH_REVIEW} as the last action of the review, including where there was nothing to report.`,

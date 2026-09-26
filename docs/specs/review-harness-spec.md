@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.27 (draft)
+**Version:** 0.29 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -361,10 +361,10 @@ line is: the largest is `agent_end`, which carries the whole transcript.
 So the adapter reads the stream incrementally, accumulates nothing, and never
 holds a line it does not need. `agent_end` is the line it must not hold.
 
-The adapter reads `tool_execution_start` and `tool_execution_end` for progress,
-and every `message_end` whose message is from the assistant for the round's
-cost. Cost arrives once per assistant message rather than once per run, and a
-round's cost is the sum of them. `pi` prices the run itself from a local
+The adapter reads `tool_execution_end` for the reports, and every `message_end`
+whose message is from the assistant for the round's cost. Cost arrives once per
+assistant message rather than once per run, and a round's cost is the sum of
+them. `pi` prices the run itself from a local
 catalogue, so a model the catalogue does not cover reports a zero cost against a
 non-zero token count. The adapter returns the token count alongside the cost,
 which is what tells that case apart from a round that cost nothing.
@@ -396,21 +396,31 @@ A finished review is a review whatever the messages around it stopped for, so
 the run of a completed review need carry no assistant message that stopped for
 an answer.
 
-**The round ends the run itself once it is told the review is complete.** `pi`
-ends a run on a tool call only where every call of the same message asks it to,
-so a reviewer that reports a finding and finishes its review in one message goes
-on to another model request with the review already complete. The round therefore
-stops the reviewer rather than asking `pi` to.
+**The run ends itself, and the round reads its output to the end.** A reviewer
+that has reported its review complete writes one more message and closes its
+output about two seconds later. What arrives in those two seconds is part of the
+review: `pi` answers the calls of one message in whatever order they complete,
+so a report of the message that finished the review can be answered after the
+call that finished it.
 
-**It waits for the calls of the message that finished the review to be answered
-first.** `pi` answers the calls of one message in whatever order they complete,
-so the call that finished the review can be answered before a report of the same
-message, and a reviewer signalled in between exits without flushing what it has
-already written. What never left the reviewer is not in the pipe to be read
-afterwards. The wait ends when the run has answered every call it started, and
-after two seconds in any case, because a call that never answers cannot hold a
-review that is already complete. The round reads the output until it closes
-either way, so a report on its way is still read.
+**The round's time bound is the only thing that ends a run the reviewer does
+not.** A reviewer that reports its review complete and then does not stop is
+killed at the bound, exactly as one that reported nothing is.
+
+**A round holding the reviewer's declaration is the review it declared, whatever
+ended the run.** The declaration is read before any stop reason, and on the path
+where the bound ended the run as well as the path where the output closed. A
+reviewer that finishes a moment before the deadline and writes its closing
+message past it has reviewed, and a round that read the stop instead would keep
+the findings and throw the review away.
+
+**A report the call accepted and the adapter could not read back fails the
+round, declaration or not.** The two ends of one report disagreeing is not a
+review that came back one finding short: the reviewer was told that finding had
+landed. It is read as output the adapter could not read, on the path where the
+bound ended the run as much as on the path where the output closed, so the same
+output comes to the same thing whether the run stopped or hung. The reports that
+were read stand either way.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -725,7 +735,7 @@ carries what could not be posted.
 | The reviewer runs, exits cleanly, and completes no message | Exit 0, and what the reviewer reported before its provider gave out is posted. stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The model API is unavailable or rate-limited | Exit 0, and what the reviewer reported before the API stopped answering is posted. stderr says the review did not run. |
 | The reviewer stops without finishing its review | Retried once, then treated as an unavailable API. Both rounds post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. |
-| The reviewer exceeds the review budget | The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. |
+| The reviewer exceeds the review budget | The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. |
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |

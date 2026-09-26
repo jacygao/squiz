@@ -48,9 +48,9 @@ function reported(toolName: string, details: unknown): string {
 /**
  * The review returned in full, as the calls it arrives in.
  *
- * Nothing follows `finish_review`: it ends the run on the call rather than
- * paying for one more turn, so a completed review need carry no message that
- * stopped.
+ * Nothing follows `finish_review` here, which is what a run stopped before it
+ * could write its closing message leaves behind: a completed review need carry no
+ * message that stopped.
  */
 function returned(): string {
   return (
@@ -81,8 +81,8 @@ test("the cost and the review both come back from one pass over the stream", asy
 
 /**
  * The review the reviewer finished is the review, whatever the messages around
- * it stopped for. `finish_review` ends the run on the call, so a completed
- * review is the one shape that carries no message with a stop reason of `stop`.
+ * it stopped for. A run stopped before it could close its own output carries no
+ * message with a stop reason of `stop`, and the review it finished stands.
  */
 test("a review the reviewer finished is a review with no message stopping the run", async () => {
   const run = await parseText(assistant("reporting", { stopReason: "toolUse" }) + returned());
