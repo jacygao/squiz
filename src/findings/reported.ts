@@ -13,7 +13,7 @@
  */
 
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
-import type { Finding } from "./finding.ts";
+import { type Finding, severityOf } from "./finding.ts";
 import type { Verdict } from "./status.ts";
 
 /** A report read, or the one line saying why it could not be. */
@@ -110,17 +110,6 @@ function reasoningOf(value: unknown): readonly string[] | null {
     points.push(point);
   }
   return points;
-}
-
-function severityOf(value: unknown): Finding["severity"] | null {
-  switch (value) {
-    case "high":
-    case "medium":
-    case "low":
-      return value;
-    default:
-      return null;
-  }
 }
 
 function verdictOf(value: unknown): Verdict | null {

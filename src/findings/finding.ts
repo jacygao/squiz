@@ -71,6 +71,24 @@ export type Finding = LineFinding | FileFinding | ChangeFinding;
  */
 export type Scope = Finding["scope"];
 
+/**
+ * The severity `value` names, or `null` where it names none of the three.
+ *
+ * One reader for the three words, so that a finding as the reviewer reports it
+ * and a comment read back off the pull request cannot come to disagree about
+ * how they are spelled.
+ */
+export function severityOf(value: unknown): Severity | null {
+  switch (value) {
+    case "high":
+    case "medium":
+    case "low":
+      return value;
+    default:
+      return null;
+  }
+}
+
 // A severity added to the union with no place in the order is a type error,
 // which is what `Record<Severity, number>` is here for.
 const rank: Readonly<Record<Severity, number>> = { high: 0, medium: 1, low: 2 };

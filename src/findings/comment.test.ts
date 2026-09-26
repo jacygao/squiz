@@ -4,17 +4,22 @@
  * gone passes a test that looks for each part on its own. Those assertions
  * carry no message, because the diff between two comments is the output worth
  * reading.
+ *
+ * What is read back is read out of what was rendered wherever it can be, so that
+ * a marker or a separator the two spell differently fails here rather than in a
+ * summary that lists findings nobody raised.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { renderComment } from "./comment.ts";
+import { readComment, renderComment } from "./comment.ts";
 import {
   type ChangeFinding,
   type FileFinding,
   hasReference,
   type LineFinding,
+  type Severity,
 } from "./finding.ts";
 
 // The expected comments are lines joined rather than template literals: the
@@ -212,4 +217,126 @@ test("a blank headline leaves no dash with nothing after it", () => {
       "**Suggested fix:** Call the scheduler the project already has.",
     ),
   );
+});
+
+/**
+ * A first line written out rather than rendered, for the lines the writer here
+ * never produces. `after` follows the marker, whose own trailing space is what
+ * puts two of them before a separator that comes first.
+ */
+function handWrittenFirstLine(after: string): string {
+  return `**Squiz reviewer · ${after}**`;
+}
+
+test("a comment is read back as the severity and the headline it was rendered from", () => {
+  for (const finding of [card, cardWithoutReference, duplicate]) {
+    assert.deepEqual(readComment(renderComment(finding)), {
+      by: "reviewer",
+      severity: finding.severity,
+      headline: finding.headline,
+    });
+  }
+});
+
+test("every severity survives being rendered and read back", () => {
+  const severities: readonly Severity[] = ["high", "medium", "low"];
+  for (const severity of severities) {
+    assert.deepEqual(readComment(renderComment({ ...duplicate, severity })), {
+      by: "reviewer",
+      severity,
+      headline: duplicate.headline,
+    });
+  }
+});
+
+/**
+ * The split is on the first separator after the marker, and the reviewer's own
+ * headline is free to carry more of them.
+ */
+test("a headline carrying the separator keeps every part of it", () => {
+  const dashed = { ...duplicate, headline: "The retry queue — the second one — duplicates the scheduler" };
+  assert.deepEqual(readComment(renderComment(dashed)), {
+    by: "reviewer",
+    severity: "low",
+    headline: dashed.headline,
+  });
+});
+
+test("a headline the writer collapsed to one line reads back collapsed", () => {
+  const wrapped = { ...duplicate, headline: "The retry queue\n  duplicates the scheduler" };
+  assert.deepEqual(readComment(renderComment(wrapped)), {
+    by: "reviewer",
+    severity: "low",
+    headline: "The retry queue duplicates the scheduler",
+  });
+});
+
+/**
+ * `**Squiz review` is a prefix of `**Squiz reviewer`, so the character after the
+ * name is what separates the summary the harness posts at the close from a
+ * finding. A reader that stops at the name counts that summary as a finding.
+ */
+test("the summary the harness posts is not read as the reviewer's", () => {
+  const summary = "**Squiz review — 3 rounds, 7 findings**\n\nFixed 2 · Withdrawn 1 · Open 2";
+  assert.equal(readComment(summary).by, "harness");
+});
+
+test("the coding agent's marker names the coding agent, whatever follows it", () => {
+  assert.equal(readComment("**Squiz coding agent:** fixed in abc1234.").by, "coding agent");
+  assert.equal(readComment("**Squiz coding agent** disagrees, and here is why.").by, "coding agent");
+});
+
+test("a comment carrying no marker was written by a person", () => {
+  assert.equal(readComment("Can you check the line above?").by, "person");
+  assert.equal(readComment("**Note:** the queue is drained elsewhere.").by, "person");
+  assert.equal(readComment("").by, "person");
+});
+
+/**
+ * A blank field contributes no block, so the writer drops a blank headline and
+ * the reader meets a first line that stops at the severity.
+ */
+test("a first line that names no headline is read without one", () => {
+  assert.deepEqual(readComment(renderComment({ ...duplicate, headline: " " })), {
+    by: "reviewer",
+    severity: "low",
+    headline: null,
+  });
+});
+
+test("a first line that names no severity is read without one", () => {
+  assert.deepEqual(readComment(handWrittenFirstLine(" — The retry queue duplicates the scheduler")), {
+    by: "reviewer",
+    severity: null,
+    headline: "The retry queue duplicates the scheduler",
+  });
+  assert.deepEqual(readComment(handWrittenFirstLine("")), {
+    by: "reviewer",
+    severity: null,
+    headline: null,
+  });
+});
+
+/**
+ * A severity is one of three words. Read as text, a fourth would be carried into
+ * a summary that orders findings by it and has nowhere to put it.
+ */
+test("a word that is not one of the three severities is not read as one", () => {
+  assert.deepEqual(readComment(handWrittenFirstLine("critical — The retry queue duplicates the scheduler")), {
+    by: "reviewer",
+    severity: null,
+    headline: "The retry queue duplicates the scheduler",
+  });
+});
+
+// A body stored with CRLF endings has to close its bold span where one stored
+// with LF closes it, or the headline keeps the asterisks.
+test("a first line ending in a carriage return is read no differently", () => {
+  const written = renderComment(card);
+  assert.deepEqual(readComment(written.replaceAll("\n", "\r\n")), readComment(written));
+  assert.deepEqual(readComment(written), {
+    by: "reviewer",
+    severity: "high",
+    headline: card.headline,
+  });
 });

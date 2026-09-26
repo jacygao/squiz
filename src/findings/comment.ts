@@ -1,19 +1,72 @@
 /**
- * A finding rendered as the markdown comment that goes on the pull request.
- * One template serves every scope, and the anchor is not written into the body:
- * an anchored comment is placed where it belongs rather than naming it.
+ * A finding as the markdown comment that goes on the pull request, written and
+ * read back. One template serves every scope, and the anchor is not written into
+ * the body: an anchored comment is placed where it belongs rather than naming it.
+ *
+ * Reading one back is here rather than beside its caller so that the marker, the
+ * separator and the bold span are spelled once. A writer and a reader that spell
+ * them differently make a summary that lists findings nobody raised.
  */
 
-import type { Finding } from "./finding.ts";
+import { type Finding, type Severity, severityOf } from "./finding.ts";
 
 /**
- * What a comment written by the reviewer begins with. A comment carrying none
- * of the specification's markers was written by a person, so this is a contract
- * rather than a label. The table gives it bolded on its own; the template folds
- * it into the first line's bold span, so what a reader or a later matcher has
- * is the prefix.
+ * Who wrote a comment. Every comment is posted under the one GitHub account the
+ * reviewer, the coding agent and the harness share, so the marker at the start
+ * of a comment's first line is the only thing that says which of them wrote it.
+ * A comment carrying none of the markers was written by a person.
  */
-const marker = "Squiz reviewer";
+export type CommentAuthor = "reviewer" | "coding agent" | "harness" | "person";
+
+/**
+ * What a comment the reviewer wrote begins with, the bold span's opening and the
+ * separator after the name included.
+ *
+ * The whole of it is one string because the character after the name is what
+ * tells a finding from the summary the harness posts at the close: `**Squiz
+ * review` is itself a prefix of `**Squiz reviewer`, and a matcher that stops at
+ * the name reads that summary as a finding.
+ */
+const reviewerMarker = "**Squiz reviewer · ";
+
+/** What stands between the severity and the headline on the first line. */
+const headlineSeparator = " — ";
+
+/** What closes the bold span the first line is. */
+const boldClose = "**";
+
+/** A marker, and the author whose comments open with it. */
+type Marked = {
+  readonly author: Exclude<CommentAuthor, "person">;
+  readonly begins: string;
+};
+
+/**
+ * What each author's comment begins with. No marker here is a prefix of another,
+ * which is what lets the first one that matches decide.
+ */
+const markers: readonly Marked[] = [
+  { author: "reviewer", begins: reviewerMarker },
+  { author: "coding agent", begins: "**Squiz coding agent" },
+  { author: "harness", begins: "**Squiz review — " },
+];
+
+/**
+ * The reviewer's own comment, as its first line names the finding.
+ *
+ * Either field is `null` where the first line stopped before it. A field the
+ * reviewer left blank contributes no block to the comment at all, so a first
+ * line naming a severity and nothing after it is one the writer here produces.
+ */
+type ReviewerComment = {
+  readonly by: "reviewer";
+  // Null where the first line named nothing, or named none of the three severities.
+  readonly severity: Severity | null;
+  readonly headline: string | null;
+};
+
+/** A comment read: who wrote it, and what the reviewer's first line named. */
+export type CommentReading = ReviewerComment | { readonly by: Exclude<CommentAuthor, "reviewer"> };
 
 /**
  * The comment for one finding: the marker, the severity and the headline on the
@@ -38,9 +91,63 @@ export function renderComment(finding: Finding): string {
     .join("\n\n");
 }
 
+/**
+ * What the comment `body` says: who wrote it, and for one the reviewer wrote,
+ * the severity and the headline its first line names.
+ *
+ * Nothing is refused and nothing here throws. Any text at all is a comment
+ * somebody wrote, and text carrying no marker is a person's.
+ */
+export function readComment(body: string): CommentReading {
+  const line = firstLineOf(body);
+  const marked = markers.find((marker) => line.startsWith(marker.begins));
+  if (marked === undefined) return { by: "person" };
+  if (marked.author !== "reviewer") return { by: marked.author };
+  return { by: "reviewer", ...severityAndHeadline(line.slice(marked.begins.length)) };
+}
+
 function firstLine(finding: Finding): string {
-  const named = [`${marker} · ${finding.severity}`, oneLine(finding.headline)];
-  return `**${named.filter(nonEmpty).join(" — ")}**`;
+  const parts = [finding.severity, oneLine(finding.headline)].filter(nonEmpty);
+  return `${reviewerMarker}${parts.join(headlineSeparator)}${boldClose}`;
+}
+
+/**
+ * The severity and the headline of what follows the marker on the first line.
+ *
+ * The split is on the first separator: a severity never carries one and a
+ * headline is free to, so a later one belongs to the headline.
+ */
+function severityAndHeadline(rest: string): Omit<ReviewerComment, "by"> {
+  // Only the last of them closes the span, so a headline ending in bold keeps its own.
+  const inside = rest.endsWith(boldClose) ? rest.slice(0, -boldClose.length) : rest;
+  const at = inside.indexOf(headlineSeparator);
+  if (at === -1) return { severity: severityOf(oneLine(inside)), headline: null };
+  return {
+    severity: severityOf(oneLine(inside.slice(0, at))),
+    headline: blankAsNone(inside.slice(at + headlineSeparator.length)),
+  };
+}
+
+/**
+ * The first line of `body`, its trailing whitespace gone.
+ *
+ * Dropped so that a body stored with CRLF endings closes its bold span where one
+ * stored with LF closes it.
+ */
+function firstLineOf(body: string): string {
+  const end = body.indexOf("\n");
+  return (end === -1 ? body : body.slice(0, end)).trimEnd();
+}
+
+/**
+ * The text as one line, or `null` where it is blank.
+ *
+ * An empty headline is not a headline. Answered as the empty string, it has a
+ * summary list a finding with nothing said about it.
+ */
+function blankAsNone(text: string): string | null {
+  const said = oneLine(text);
+  return said === "" ? null : said;
 }
 
 function bullets(reasoning: readonly string[]): string {
