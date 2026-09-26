@@ -121,6 +121,53 @@ test("a finished review comes back at once from a run that has not ended", async
 });
 
 /**
+ * The reports of the message that finished the review.
+ *
+ * A reviewer stopped the moment it finishes takes with it whatever it has
+ * written and not flushed, and what never left it is not in the pipe to be read.
+ * So a round that has been told the review is complete waits for the calls the
+ * run has not answered before it stops anything.
+ */
+test("every report of the message that finished the review comes back", async () => {
+  await inATree(async (tree) => {
+    const started = Date.now();
+    const round = await runRound(reviewer(finishingFirst(batched)).adapter, at(tree), 10);
+    const elapsed = Date.now() - started;
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(
+      round.outcome === "reviewed" ? round.findings : [],
+      batched,
+      "a report accepted in the message that finished the review is a report the round has",
+    );
+    assert.ok(
+      elapsed < 5_000,
+      `the round took ${elapsed}ms against a bound of 10000ms, so it waited on the run rather than on its answers`,
+    );
+  });
+});
+
+/**
+ * What bounds that wait. A call of the finishing message that is never answered
+ * is the one case where waiting for the answers could hold a round whose review
+ * is already complete.
+ */
+test("a call of the finishing message that never answers does not hold the round", async () => {
+  await inATree(async (tree) => {
+    const started = Date.now();
+    const round = await runRound(reviewer(finishingUnanswered).adapter, at(tree), 10);
+    const elapsed = Date.now() - started;
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.ok(elapsed > 1_000, `the round took ${elapsed}ms, so it waited for no answer at all`);
+    assert.ok(
+      elapsed < 8_000,
+      `the round took ${elapsed}ms against a bound of 10000ms, so the wait for an answer is bounded by the round rather than by itself`,
+    );
+  });
+});
+
+/**
  * A reviewer can report a finding and then exhaust its provider's retries before
  * it finishes the review. The finding was confirmed and answered, so the round
  * has it; the round is still the setup problem the run turned into.
@@ -489,6 +536,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
           findings: [],
           verdicts: [],
           finished: false,
+          answered: true,
         });
         throw new Error("the adapter fell over before it started");
       },
@@ -644,20 +692,23 @@ const spentOnce = { dollars: 0.002, tokens: 100, messages: 1 };
 /** A path under the work tree that a directory cannot be made at. */
 const blocked = "not-a-directory/scratch";
 
+const finding = {
+  scope: "line",
+  file: "src/github/gh.ts",
+  line: 42,
+  severity: "high",
+  headline: "The exit status is read before the process has exited",
+  reasoning: ["`exitCode` is null until the process ends."],
+  suggestedFix: "Await the exit event.",
+};
+
 const review = {
-  findings: [
-    {
-      scope: "line",
-      file: "src/github/gh.ts",
-      line: 42,
-      severity: "high",
-      headline: "The exit status is read before the process has exited",
-      reasoning: ["`exitCode` is null until the process ends."],
-      suggestedFix: "Await the exit event.",
-    },
-  ],
+  findings: [finding],
   verdicts: [{ thread: "PRRT_kwDO", verdict: "fixed" }],
 };
+
+/** Three findings of one message, told apart by the line each is anchored to. */
+const batched = [11, 22, 33].map((line) => ({ ...finding, line }));
 
 type Running = {
   readonly adapter: Adapter;
@@ -744,14 +795,19 @@ function writing(text: string): string {
 }
 
 /** One reporting call answered, as `pi` writes the line it arrives on. */
-function called(toolName: string, details: unknown): string {
+function called(toolName: string, details: unknown, id = "call_1"): string {
   return `${JSON.stringify({
     type: "tool_execution_end",
-    toolCallId: "call_1",
+    toolCallId: id,
     toolName,
     isError: false,
     result: { content: [{ type: "text", text: "Reported" }], details },
   })}\n`;
+}
+
+/** One call started, as `pi` writes the line it arrives on. */
+function starting(toolName: string, id: string): string {
+  return `${JSON.stringify({ type: "tool_execution_start", toolCallId: id, toolName, args: {} })}\n`;
 }
 
 /** The assistant message the reporting calls hang off, priced at a round. */
@@ -811,6 +867,41 @@ const halfway = writing(
 const finishingWithoutEnding = [
   writing(
     reportingMessage + called(REPORT_FINDING, review.findings[0]) + called(FINISH_REVIEW, {}),
+  ),
+  "setInterval(() => {}, 1000);",
+].join("\n");
+
+/**
+ * A reviewer that finishes its review in the same message as three reports, and
+ * that answers the finish first.
+ *
+ * It is the order a CLI running the calls of one message together may answer
+ * them in. The reports are answered after, and this reviewer exits on the signal
+ * without writing them, which is what one that does not flush its output does:
+ * the reports were accepted and never left it, so no amount of reading the pipe
+ * finds them.
+ */
+function finishingFirst(reports: readonly unknown[]): string {
+  const started = reports.map((_, at) => starting(REPORT_FINDING, `r${at}`)).join("");
+  const answered = reports.map((report, at) => called(REPORT_FINDING, report, `r${at}`)).join("");
+  return [
+    writing(reportingMessage + starting(FINISH_REVIEW, "f") + started + called(FINISH_REVIEW, {}, "f")),
+    "process.on('SIGTERM', () => process.exit(143));",
+    `setTimeout(() => { ${writing(answered)} }, 300);`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+}
+
+/**
+ * A reviewer that finishes its review with a call of the same message still
+ * unanswered, and that never answers it or exits.
+ */
+const finishingUnanswered = [
+  writing(
+    reportingMessage +
+      starting(FINISH_REVIEW, "f") +
+      starting("bash", "b") +
+      called(FINISH_REVIEW, {}, "f"),
   ),
   "setInterval(() => {}, 1000);",
 ].join("\n");

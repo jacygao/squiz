@@ -48,6 +48,15 @@ import { type Deadline, deadlineIn } from "./deadline.ts";
  */
 const GRACE_MS = 2_000;
 
+/**
+ * How long a round whose review is complete waits for the calls of the message
+ * that finished it to be answered, before stopping the reviewer anyway.
+ *
+ * A reporting call is answered at once. A tool of the same message need not be,
+ * and one that never answers would otherwise hold the round to its time bound.
+ */
+const ANSWERING_MS = 2_000;
+
 /** What one round of review came to. */
 export type Round =
   /** The reviewer ran and returned a review. Empty findings is a review that found nothing. */
@@ -237,7 +246,12 @@ async function attempt(
   // The last the parse reported before the process is stopped is the whole of
   // what a killed round has, so it is tracked here rather than taken from the
   // parse's return, which a killed attempt never reaches.
-  let progress: RoundProgress = { cost: unspent, finished: false, ...nothingReported };
+  let progress: RoundProgress = {
+    cost: unspent,
+    finished: false,
+    answered: true,
+    ...nothingReported,
+  };
   let startFailure: string | undefined;
   let unstarted = false;
   let finished = false;
@@ -272,19 +286,33 @@ async function attempt(
   };
 
   let stopping = false;
+  let unwait: (() => void) | undefined;
+  const stopNow = (): void => {
+    if (stopping) return;
+    stopping = true;
+    unwait?.();
+    void stop(owned);
+  };
+
   const parsing = read(adapter, bounded(), (reached) => {
     progress = reached;
+    if (!reached.finished || stopping) return;
     // The reviewer has said its review is complete, so the round stops it here.
     // Asking the reviewer's CLI to end the run on that call would not be
     // enough: `pi` ends a run on a call only where every call of the same
     // message asked it to, so a reviewer that reports a finding and finishes in
     // one message would go on to another model request with the review already
-    // complete. The parse reads on until the output closes, so a report that
-    // was already on its way is still read.
-    if (reached.finished && !stopping) {
-      stopping = true;
-      void stop(owned);
+    // complete.
+    if (reached.answered) {
+      stopNow();
+      return;
     }
+    // A call the run has not answered may yet report, and a reviewer signalled
+    // before it flushes takes with it whatever it has written: the parse reads
+    // the pipe to the end, and what never left the reviewer is not in it. So the
+    // answers are waited for, and the wait is bounded, because a call that never
+    // answers cannot be allowed to hold a review that is already complete.
+    unwait ??= deadlineIn(ANSWERING_MS).whenPassed(stopNow);
   }).then(
     (run): Attempt => ({ cost: run.cost, reported: reportedIn(progress), ...run.result }),
     (cause): Attempt => ({
@@ -302,6 +330,7 @@ async function attempt(
 
   const ended = await Promise.race([parsing, expiry]);
   cancel();
+  unwait?.();
 
   if (ended === "expired" || overran) {
     finished = true;

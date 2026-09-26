@@ -146,7 +146,7 @@ function hangs(cost: RoundCost): Reviewer {
     args: ["-c", "sleep 30"],
     parse: async (_stdout, progressSoFar): Promise<ParsedRun> => {
       // The round records what the reviewer reported before the bound fired.
-      progressSoFar?.({ cost, findings: [], verdicts: [], finished: false });
+      progressSoFar?.({ cost, findings: [], verdicts: [], finished: false, answered: true });
       // The round races the bound against this, and stops the process instead.
       await new Promise<never>(() => {});
       throw new Error("the round read a parse that never finished");

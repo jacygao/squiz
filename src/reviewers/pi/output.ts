@@ -40,12 +40,13 @@ export type ReportedSoFar = (reported: Reported) => void;
 /**
  * Read the findings and the verdicts out of a round's events.
  *
- * `reportedSoFar` is told after each one, and again when the reviewer reports
- * the review complete. That is what a caller that will stop the process
- * mid-stream keeps, and the cue it stops the process on. The whole stream is
- * read whatever goes wrong in it and whatever the caller does with that cue,
- * because a reader that stopped early would leave a report that was already on
- * its way unread, and the reviewer writing into a pipe nobody drains.
+ * `reportedSoFar` is told as each report arrives, as the reviewer reports the
+ * review complete, and as each call the run started is answered. That is what a
+ * caller that will stop the process mid-stream keeps, and the cue it stops the
+ * process on. The whole stream is read whatever goes wrong in it and whatever
+ * the caller does with that cue, because a reader that stopped early would leave
+ * a report that was already on its way unread, and the reviewer writing into a
+ * pipe nobody drains.
  *
  * A line the reader could not turn into an event does not fail this on its own.
  * It is counted, and a failure names how many were dropped, since one of them
@@ -61,51 +62,55 @@ export async function readOutput(
   const findings: Finding[] = [];
   const verdicts: ThreadVerdict[] = [];
   const ruled = new Set<string>();
+  // The calls the run has started and not answered. Any of them may yet report.
+  const outstanding = new Set<string>();
   let finished = false;
   let dropped = 0;
   // The first report that was answered and could not be read back.
   let broken: string | undefined;
   const tell = (): void =>
-    reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts], finished });
+    reportedSoFar?.({
+      findings: [...findings],
+      verdicts: [...verdicts],
+      finished,
+      answered: outstanding.size === 0,
+    });
 
   for await (const event of events) {
     if (event.type === "unreadable") {
       dropped += 1;
       continue;
     }
+    if (event.type === "tool_execution_start") {
+      outstanding.add(event.toolCallId);
+      continue;
+    }
     if (event.type !== "tool_execution_end") continue;
+    outstanding.delete(event.toolCallId);
+
     // A call the reviewer got wrong was answered with its refusal, so nothing
     // was reported and the reviewer knows it.
-    if (event.isError) continue;
-
-    if (event.toolName === FINISH_REVIEW) {
-      finished = true;
-      tell();
-      continue;
-    }
-    if (event.toolName === REPORT_FINDING) {
-      const finding = readFinding(detailsOf(event.result));
-      if ("reason" in finding) {
-        broken ??= `a finding the reviewer reported ${finding.reason}`;
-        continue;
+    if (!event.isError) {
+      if (event.toolName === FINISH_REVIEW) {
+        finished = true;
+      } else if (event.toolName === REPORT_FINDING) {
+        const finding = readFinding(detailsOf(event.result));
+        if ("reason" in finding) broken ??= `a finding the reviewer reported ${finding.reason}`;
+        else findings.push(finding.value);
+      } else if (event.toolName === REPORT_VERDICT) {
+        const verdict = readVerdict(detailsOf(event.result));
+        if ("reason" in verdict) broken ??= `a verdict the reviewer reported ${verdict.reason}`;
+        // One ruling per thread. A second was refused where it was made, so a
+        // second here is the two ends disagreeing about what was ruled.
+        else if (!ruled.has(verdict.value.thread)) {
+          ruled.add(verdict.value.thread);
+          verdicts.push(verdict.value);
+        }
       }
-      findings.push(finding.value);
-      tell();
-      continue;
     }
-    if (event.toolName === REPORT_VERDICT) {
-      const verdict = readVerdict(detailsOf(event.result));
-      if ("reason" in verdict) {
-        broken ??= `a verdict the reviewer reported ${verdict.reason}`;
-        continue;
-      }
-      // One ruling per thread. A second was refused where it was made, so this
-      // is reached only where the two ends disagree about what was ruled.
-      if (ruled.has(verdict.value.thread)) continue;
-      ruled.add(verdict.value.thread);
-      verdicts.push(verdict.value);
-      tell();
-    }
+    // Every answered call is told, and not only one that reported: what a caller
+    // about to stop the reviewer waits for is a run with nothing outstanding.
+    tell();
   }
 
   if (broken !== undefined) return failed(broken, dropped);

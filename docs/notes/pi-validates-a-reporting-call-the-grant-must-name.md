@@ -55,8 +55,13 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   reviewer that reports a finding and finishes its review in one message is not
   obeyed and goes on to another model request. An instruction to finish last is
   not a guard: the model can obey it and still put both calls in one message.
-  The round keeps reading the output until it closes, so a report already on its
-  way is still read.
+- **Wait for every call the run started to be answered before signalling it.**
+  `pi` answers the calls of one message in whatever order they complete, and its
+  print mode exits on `SIGTERM` without flushing what it has written to stdout.
+  So signalling on the finishing call alone loses a report of the same message
+  that was accepted a moment later, and reading the pipe afterwards cannot
+  recover it: those bytes never left the process. Bound the wait, because a call
+  that never answers would otherwise hold a review that is already complete.
 - **Write the extension against structural types and a plain JSON Schema
   object.** `pi` validates a schema that is not a TypeBox value through its own
   JSON Schema path, so `typebox` need not be imported and the harness keeps no
@@ -94,6 +99,15 @@ cannot mark its own answer as an error by returning a flag.
 What `terminate: true` on a result does: it ends the run only where every
 finalized result of the same assistant message carries it. One call of a batch
 asking for it has no effect at all, and nothing in the stream says so.
+
+What `SIGTERM` costs a run in print mode: `pi` disposes its runtime and exits
+without flushing its stdout queue, so an event it has written and not yet flushed
+is gone. The parent's pipe holds only what was flushed, so draining it after the
+exit recovers nothing.
+
+The order the calls of one message are answered in: whatever order they complete.
+Every `tool_execution_start` of a message is emitted before any of its prepared
+calls is answered, so a run with nothing outstanding has answered all of them.
 
 What the harness reads a report out of:
 `tool_execution_end.result.details`. The event also carries `toolCallId`,

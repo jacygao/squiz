@@ -83,7 +83,7 @@ export type RoundOutput = {
   readonly verdicts: readonly ThreadVerdict[];
 };
 
-/** What the reviewer has reported, and whether it has said the review is complete. */
+/** What the reviewer has reported, and how far the run has got with reporting it. */
 export type Reported = RoundOutput & {
   /**
    * Whether the reviewer has reported its review complete.
@@ -93,6 +93,17 @@ export type Reported = RoundOutput & {
    * run did next.
    */
   readonly finished: boolean;
+  /**
+   * Whether every call the run started has been answered.
+   *
+   * A finished review is not the end of what may still be reported. A CLI that
+   * runs the calls of one message together may answer the call that finished the
+   * review before it answers a report of the same message, and a reviewer
+   * stopped in between takes with it whatever it had written and not flushed.
+   * What never left the reviewer cannot be read out of the pipe afterwards, so a
+   * caller that stops it waits for this first.
+   */
+  readonly answered: boolean;
 };
 
 /** What a round has so far: what it has spent, and what the reviewer has reported. */

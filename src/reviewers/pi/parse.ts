@@ -46,7 +46,12 @@ type Tally = {
   reason: string | undefined;
 };
 
-const nothingReported: Reported = { findings: [], verdicts: [], finished: false };
+const nothingReported: Reported = {
+  findings: [],
+  verdicts: [],
+  finished: false,
+  answered: true,
+};
 
 /**
  * Read one run's whole output.

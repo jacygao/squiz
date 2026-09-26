@@ -396,12 +396,21 @@ A finished review is a review whatever the messages around it stopped for, so
 the run of a completed review need carry no assistant message that stopped for
 an answer.
 
-**The round stops the reviewer as soon as it is told the review is complete.**
-`pi` ends a run on a tool call only where every call of the same message asks it
-to, so a reviewer that reports a finding and finishes its review in one message
-goes on to another model request with the review already complete. The round
-therefore ends the run itself rather than asking `pi` to, and goes on reading the
-output until it closes, so a report already on its way is still read.
+**The round ends the run itself once it is told the review is complete.** `pi`
+ends a run on a tool call only where every call of the same message asks it to,
+so a reviewer that reports a finding and finishes its review in one message goes
+on to another model request with the review already complete. The round therefore
+stops the reviewer rather than asking `pi` to.
+
+**It waits for the calls of the message that finished the review to be answered
+first.** `pi` answers the calls of one message in whatever order they complete,
+so the call that finished the review can be answered before a report of the same
+message, and a reviewer signalled in between exits without flushing what it has
+already written. What never left the reviewer is not in the pipe to be read
+afterwards. The wait ends when the run has answered every call it started, and
+after two seconds in any case, because a call that never answers cannot hold a
+review that is already complete. The round reads the output until it closes
+either way, so a report on its way is still read.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
