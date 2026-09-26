@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.26 (draft)
+**Version:** 0.27 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -629,10 +629,11 @@ review passes.
 
 Three blocks, in this order.
 
-1. **The counts and the cost.** Rounds run, findings raised, how many ended
-   `fixed`, `withdrawn`, `open` and `disputed`, and the cost of each round with
-   the total for the episode and the tokens it consumed. Findings raised counts
-   the general findings too, which carry no status.
+1. **The counts and what the review spent.** Rounds run, findings raised, how
+   many ended `fixed`, `withdrawn`, `open` and `disputed`, and the tokens each
+   round spent with the episode's total, followed by the dollars where the
+   reviewer's CLI priced the model. Findings raised counts the general findings
+   too, which carry no status.
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its headline and where it sits: `file:line` for a
    thread anchored to a line, and the file alone for one anchored to the file.
@@ -650,7 +651,7 @@ Three blocks, in this order.
 **Squiz review — 3 rounds, 7 findings**
 
 Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1
-Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
+48,200 tokens over 3 rounds: 20,100, 16,400, 11,700 · $0.0134
 
 **Needs a person**
 
@@ -667,22 +668,21 @@ Cost $0.0134 over 3 rounds: $0.0061, $0.0044, $0.0029 · 48,200 tokens
 
 Notes is omitted when there is nothing to report.
 
-The cost of each round is written to the episode's local state file as the round
-finishes, with the token count beside it. The comment reports both.
+What each round spent is written to the episode's local state file as the round
+finishes: the tokens, and the dollars where the reviewer's CLI priced the model.
 
-A round the time bound killed reports its **last tracked cost**, which is the
-cost of the assistant messages that completed. The message in flight when the
-reviewer was killed is spent and never reported, so the figure is lower than the
-round truly cost, and the episode's total carries the same understatement.
+The comment leads with the tokens, because every reviewer reports them and not
+every reviewer is priced. A model run on a subscription has no dollar figure at
+all, and the line carries none for it. Where some rounds were priced and others
+were not, the dollar total covers the rounds that carry one.
 
-Where the reviewer's CLI reports no cost at all, the comment gives that round's
-cost as unknown rather than as zero. Two situations produce it, and they are
-reported differently. A round killed before its first assistant message
-completed has no tracked cost, which is a fact about that round. A reviewer model
-the CLI cannot price reports no cost for every round of every episode, which is a
-setup problem: the comment says once that cost is unavailable for the model. The
-token bound is unaffected either way, because the tokens are reported whether or
-not anything can price them.
+A round the time bound killed reports its **last tracked spend**, which covers
+the assistant messages that completed. The message in flight when the reviewer
+was killed is spent and never reported, so the figures are lower than the round
+truly spent, and the episode's totals carry the same understatement.
+
+A round that completed no assistant message is given as unknown rather than as
+zero. Nothing it spent was reported, and zero would say it spent nothing.
 
 ## 6. Commands
 
