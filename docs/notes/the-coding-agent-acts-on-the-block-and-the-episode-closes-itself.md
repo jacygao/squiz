@@ -118,8 +118,8 @@ and messages are the entries the round wrote into
 
 | Round | Wall | Exit | Cost | Tokens | Assistant messages | Findings | Verdicts |
 |---|---|---|---|---|---|---|---|
-| 1 | 18.666 s | 2 | $0.011900 | 26,788 | 4 | 2 | none asked for |
-| 2 | 54.907 s | 0 | $0.030190 | 62,119 | 7 | 0 | 3, all closing |
+| 1 | 18.666 s | 2 | $0.011900 | 26,788 | 4 | 2, both threaded | none asked for |
+| 2 | 54.907 s | 0 | $0.030190 | 62,119 | 7 | none threaded | 3, all closing |
 
 Two rounds came to $0.042090 over 88,907 tokens and 73.6 seconds of hook time,
 inside a session of 182.5 seconds. `spentOutsideRounds` was zero on every field:
