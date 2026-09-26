@@ -69,9 +69,10 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's reportin
   round that found the seeded defect, so a bound under it cuts off a good review.
   A round's size tracks how widely the reviewer reads rather than what it finds:
   cache reads were 819,000 of that round's 874,000 tokens, so every file opened
-  is re-sent on every later request of the round. Dollars stay recorded and
-  reported, and stop being a bound: a subscription puts no price on a round, and
-  this model was repriced within a week.
+  is re-sent on every later request of the round. The check is retrospective, so
+  an episode overshoots by whatever the round that trips the bound spent. Dollars
+  stay recorded and reported, and stop being a bound: a subscription puts no price
+  on a round, and this model was repriced within a week.
 - **Leave the time bound at 480 seconds.** The longest round used 314 of it, and
   a bound below 320 would cut off the widest reading measured with the review
   nearly done.
