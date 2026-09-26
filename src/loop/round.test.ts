@@ -154,7 +154,13 @@ function hangs(cost: RoundCost, reported: Partial<RoundOutput> = {}): Reviewer {
     parse: async (_stdout, progressSoFar): Promise<ParsedRun> => {
       // The round keeps what the reviewer reported before the bound fired, and
       // records the cost it had by then.
-      progressSoFar?.({ cost, ...nothingReported, ...reported, finished: false });
+      progressSoFar?.({
+        cost,
+        ...nothingReported,
+        ...reported,
+        finished: false,
+        broken: undefined,
+      });
       // The round races the bound against this, and stops the process instead.
       await new Promise<never>(() => {});
       throw new Error("the round read a parse that never finished");
@@ -204,7 +210,7 @@ function reportsThenHolds(cost: RoundCost, findings: readonly Finding[]): Review
 function unreadable(cost: RoundCost, findings: readonly Finding[] = []): Reviewer {
   return {
     parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
-      progressSoFar?.({ cost, findings, verdicts: [], finished: false });
+      progressSoFar?.({ cost, findings, verdicts: [], finished: false, broken: undefined });
       await drain(stdout);
       return { cost, result: { kind: "unparsed", reason: "the last message was not a review" } };
     },
@@ -215,7 +221,7 @@ function unreadable(cost: RoundCost, findings: readonly Finding[] = []): Reviewe
 function completesNothing(cost: RoundCost, findings: readonly Finding[] = []): Reviewer {
   return {
     parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
-      progressSoFar?.({ cost, findings, verdicts: [], finished: false });
+      progressSoFar?.({ cost, findings, verdicts: [], finished: false, broken: undefined });
       await drain(stdout);
       return { cost, result: { kind: "incomplete", reason: "the model refused the request" } };
     },

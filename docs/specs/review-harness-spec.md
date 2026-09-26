@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.28 (draft)
+**Version:** 0.29 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -399,9 +399,9 @@ an answer.
 **The run ends itself, and the round reads its output to the end.** A reviewer
 that has reported its review complete writes one more message and closes its
 output about two seconds later. What arrives in those two seconds is part of the
-review: `pi` answers the calls of one message in whatever order they complete, so
-a report of the message that finished the review can be answered after the call
-that finished it.
+review: `pi` answers the calls of one message in whatever order they complete,
+so a report of the message that finished the review can be answered after the
+call that finished it.
 
 **The round's time bound is the only thing that ends a run the reviewer does
 not.** A reviewer that reports its review complete and then does not stop is
@@ -413,6 +413,14 @@ where the bound ended the run as well as the path where the output closed. A
 reviewer that finishes a moment before the deadline and writes its closing
 message past it has reviewed, and a round that read the stop instead would keep
 the findings and throw the review away.
+
+**A report the call accepted and the adapter could not read back fails the
+round, declaration or not.** The two ends of one report disagreeing is not a
+review that came back one finding short: the reviewer was told that finding had
+landed. It is read as output the adapter could not read, on the path where the
+bound ended the run as much as on the path where the output closed, so the same
+output comes to the same thing whether the run stopped or hung. The reports that
+were read stand either way.
 
 `pi` discovers and loads `AGENTS.md` and `CLAUDE.md` on its own, so the host
 project's conventions reach the reviewer without the charter carrying them.
@@ -727,7 +735,7 @@ carries what could not be posted.
 | The reviewer runs, exits cleanly, and completes no message | Exit 0, and what the reviewer reported before its provider gave out is posted. stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The model API is unavailable or rate-limited | Exit 0, and what the reviewer reported before the API stopped answering is posted. stderr says the review did not run. |
 | The reviewer stops without finishing its review | Retried once, then treated as an unavailable API. Both rounds post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. |
-| The reviewer exceeds the review budget | The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached. |
+| The reviewer exceeds the review budget | The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. |
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |

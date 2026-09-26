@@ -138,6 +138,43 @@ test("a round holding the declaration is the review it is, whatever ended the ru
   });
 });
 
+/**
+ * A report the run accepted and the round could not read back is the two ends of
+ * one report disagreeing, and no declaration settles it. A round that read the
+ * declaration alone would come back as a review with that finding silently gone,
+ * and where it was the only one the episode closes as though the reviewer had
+ * found nothing.
+ */
+test("a declared review carrying a report that could not be read back fails at the bound", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(brokenThenHanging(tree)).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "unavailable", accountOf(round));
+    assert.match(
+      round.outcome === "unavailable" ? round.reason : "",
+      /a finding the reviewer reported names no severity/u,
+      "the report the round could not read back is what the reason has to name",
+    );
+    assert.deepEqual(
+      round.outcome === "unavailable" ? round.findings : [],
+      review.findings,
+      "a report the round did read is a report it keeps, whatever the round became",
+    );
+  });
+});
+
+/** The round's conclusion is its output's, and not whether the process stopped. */
+test("the output that fails a round at the bound fails it the same way at its end", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(brokenThenClosing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "unavailable", accountOf(round));
+    assert.match(
+      round.outcome === "unavailable" ? round.reason : "",
+      /a finding the reviewer reported names no severity/u,
+    );
+    assert.deepEqual(round.outcome === "unavailable" ? round.findings : [], review.findings);
+  });
+});
+
 /** Nothing waits without a bound, and a finished review is not a reviewer left running. */
 test("a reviewer that finishes its review and then hangs is stopped at the bound", async () => {
   await inATree(async (tree) => {
@@ -519,6 +556,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
           findings: [],
           verdicts: [],
           finished: false,
+          broken: undefined,
         });
         throw new Error("the adapter fell over before it started");
       },
@@ -860,24 +898,53 @@ function finishingThenClosing(reports: readonly unknown[]): string {
 }
 
 /**
- * A reviewer that reports a finding, finishes its review, and then answers no
- * signal and never closes its output.
+ * A reviewer that writes what it is given, answers no signal and never closes its
+ * output.
  *
  * It goes deaf before it writes anything, so that a round can never end it by
  * signalling a reviewer that had not installed its handler yet. It records its
  * own identifier, so that what the bound did to it is read rather than assumed.
  */
-function finishingThenHanging(tree: string): string {
+function hanging(tree: string, output: string): string {
   const pidFile = join(tree, "pids");
   return [
     "process.on('SIGTERM', () => {});",
     "setInterval(() => {}, 1000);",
     `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
-    writing(
-      reportingMessage + called(REPORT_FINDING, review.findings[0]) + called(FINISH_REVIEW, {}),
-    ),
+    writing(output),
   ].join("\n");
 }
+
+/** A reviewer that reports a finding, finishes its review, and then hangs. */
+function finishingThenHanging(tree: string): string {
+  return hanging(
+    tree,
+    reportingMessage + called(REPORT_FINDING, review.findings[0]) + called(FINISH_REVIEW, {}),
+  );
+}
+
+/** A finding a call accepted and the round cannot read back, its severity unknown. */
+const unreadableFinding = { ...finding, severity: "critical" };
+
+/**
+ * A finished review carrying one report the round can read and one it cannot.
+ *
+ * The unreadable one was accepted where it was made, so the reviewer was told its
+ * finding had landed.
+ */
+const brokenReview =
+  reportingMessage +
+  called(REPORT_FINDING, review.findings[0]) +
+  called(REPORT_FINDING, unreadableFinding, "call_2") +
+  called(FINISH_REVIEW, {});
+
+/** A reviewer whose review is that one, and which then hangs. */
+function brokenThenHanging(tree: string): string {
+  return hanging(tree, brokenReview);
+}
+
+/** A reviewer whose review is that one, and which closes its own output. */
+const brokenThenClosing = writing(brokenReview + said("that is everything", "stop", 0.001));
 
 /** A reviewer that reports a finding and whose provider then gives out. */
 const reportingThenFailing = writing(

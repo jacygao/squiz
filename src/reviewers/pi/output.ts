@@ -40,9 +40,9 @@ export type ReportedSoFar = (reported: Reported) => void;
 /**
  * Read the findings and the verdicts out of a round's events.
  *
- * `reportedSoFar` is told as each report arrives and as the reviewer reports the
- * review complete. That is what a caller whose time bound stops the process
- * mid-stream keeps. The whole stream is read whatever goes wrong in it, because
+ * `reportedSoFar` is told as each report arrives, as one arrives that cannot be
+ * read back, and as the reviewer reports the review complete. That is what a
+ * caller whose time bound stops the process mid-stream keeps. The whole stream is read whatever goes wrong in it, because
  * a reader that stopped early would leave a report that was already on its way
  * unread, and the reviewer writing into a pipe nobody drains.
  *
@@ -65,7 +65,7 @@ export async function readOutput(
   // The first report that was answered and could not be read back.
   let broken: string | undefined;
   const tell = (): void =>
-    reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts], finished });
+    reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts], finished, broken });
 
   for await (const event of events) {
     if (event.type === "unreadable") {

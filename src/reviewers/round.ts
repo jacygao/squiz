@@ -238,7 +238,12 @@ async function attempt(
   // The last the parse reported before the process is stopped is the whole of
   // what a killed round has, so it is tracked here rather than taken from the
   // parse's return, which a killed attempt never reaches.
-  let progress: RoundProgress = { cost: unspent, finished: false, ...nothingReported };
+  let progress: RoundProgress = {
+    cost: unspent,
+    finished: false,
+    broken: undefined,
+    ...nothingReported,
+  };
   let startFailure: string | undefined;
   let unstarted = false;
   let over = false;
@@ -357,11 +362,19 @@ function reportedIn(progress: RoundProgress): RoundOutput {
  * declares its review a moment before the deadline and writes its closing
  * message past it has reviewed, and an attempt that read the stop instead would
  * keep the findings and throw the review away.
+ *
+ * A declaration does not stand in for a report the attempt could not read back.
+ * That is the two ends of one report disagreeing, and it fails the attempt on
+ * this path exactly as it fails one whose output closed: the same bytes must not
+ * come to one thing when the process stopped and another when it hung. Either
+ * way the reports that were readable are kept.
  */
 function atTheBound(progress: RoundProgress): Attempt {
   const cost = progress.cost;
   const reported = reportedIn(progress);
   if (!progress.finished) return { cost, reported, kind: "killed" };
+  const { broken } = progress;
+  if (broken !== undefined) return { cost, reported, kind: "unparsed", reason: broken };
   return { cost, reported, kind: "reviewed", ...reported };
 }
 

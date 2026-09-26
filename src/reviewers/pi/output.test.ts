@@ -217,6 +217,21 @@ test("the caller is told when the reviewer reports the review complete", async (
   assert.deepEqual(told, [true]);
 });
 
+/**
+ * The other half of what a caller stopped at its time bound reads the round from.
+ * A declaration says the review is finished; it says nothing about a report that
+ * was accepted and could not be read back, so the two are told together.
+ */
+test("a report that cannot be read back is told to the caller with the declaration", async () => {
+  const told: Reported[] = [];
+  await readOutput(
+    streamed([reported(REPORT_FINDING, { ...changeFinding, severity: "critical" }), finished]),
+    (output) => told.push(output),
+  );
+  assert.match(told.at(-1)?.broken ?? "", /a finding the reviewer reported names no severity/u);
+  assert.equal(told.at(-1)?.finished, true, "the declaration stands beside the failure");
+});
+
 test("what the caller was told is not changed by what arrives after it", async () => {
   const told: Reported[] = [];
   await readOutput(

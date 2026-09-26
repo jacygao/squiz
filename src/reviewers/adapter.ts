@@ -93,6 +93,15 @@ export type Reported = RoundOutput & {
    * declared its review is that review rather than a round that failed.
    */
   readonly finished: boolean;
+  /**
+   * Why a report the run accepted could not be read back, where one could not.
+   *
+   * The two ends of one report disagreeing, which the reviewer was told had
+   * landed. It fails the output rather than shortening it, and a declaration does
+   * not settle it, so a caller stopped mid-stream needs it beside `finished`.
+   * `undefined` is every report read back as the reviewer made it.
+   */
+  readonly broken: string | undefined;
 };
 
 /** What a round has so far: what it has spent, and what the reviewer has reported. */
