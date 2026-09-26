@@ -12,7 +12,7 @@ import {
 /** Every cap the configuration accepts. */
 const caps = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
-const budget = 0.5;
+const bound = 400_000;
 
 /**
  * How many rounds an episode is driven for before the test gives up on it.
@@ -24,19 +24,16 @@ const RUNAWAY = 100;
 
 /**
  * Drive a whole episode under one cap, each round leaving three threads open and
- * spending `perRound` dollars, and collect the decision each round came to.
+ * spending `perRound` tokens, and collect the decision each round came to.
  *
  * The episode stops at the first decision to close, which is what a real one
  * does, so the number of decisions is the number of rounds the cap bought.
  */
 function episodeUnder(cap: number, perRound = 0): RoundDecision[] {
-  const bounds: EpisodeBounds = { rounds: cap, budget };
+  const bounds: EpisodeBounds = { rounds: cap, tokens: bound };
   const decisions: RoundDecision[] = [];
   for (let roundsRun = 1; roundsRun <= RUNAWAY; roundsRun += 1) {
-    const decision = decideAfterRound(
-      { openThreads: 3, roundsRun, spent: perRound * roundsRun },
-      bounds,
-    );
+    const decision = decideAfterRound({ openThreads: 3, roundsRun, tokens: perRound }, bounds);
     decisions.push(decision);
     if (decision.next === "close") break;
   }
@@ -105,10 +102,10 @@ test("the largest cap blocks seven times, which is what the runtime honours", ()
 // stop here and no episode would ever reach round 2.
 
 test("the loop blocks again from round 2 onward", () => {
-  const bounds: EpisodeBounds = { rounds: 8, budget };
+  const bounds: EpisodeBounds = { rounds: 8, tokens: bound };
   for (const roundsRun of [2, 3, 4, 5, 6, 7]) {
     assert.deepEqual(
-      decideAfterRound({ openThreads: 1, roundsRun, spent: 0 }, bounds),
+      decideAfterRound({ openThreads: 1, roundsRun, tokens: 0 }, bounds),
       { next: "block" },
       `round ${roundsRun} must block: the runtime's loop guard is not part of this`,
     );
@@ -118,75 +115,83 @@ test("the loop blocks again from round 2 onward", () => {
 test("the decision is made from the round's three counts and nothing else", () => {
   // A required field added for anything the runtime reports fails to compile
   // here, and the keys say what the decision is allowed to read.
-  const round: FinishedRound = { openThreads: 1, roundsRun: 1, spent: 0 };
-  assert.deepEqual(Object.keys(round).sort(), ["openThreads", "roundsRun", "spent"]);
+  const round: FinishedRound = { openThreads: 1, roundsRun: 1, tokens: 0 };
+  assert.deepEqual(Object.keys(round).sort(), ["openThreads", "roundsRun", "tokens"]);
 });
 
 test("an episode whose rounds already exceed the cap closes", () => {
   // A cap lowered while the episode was running, which leaves the count above
   // the cap rather than at it.
   assert.deepEqual(
-    decideAfterRound({ openThreads: 4, roundsRun: 5, spent: 0 }, { rounds: 3, budget }),
+    decideAfterRound({ openThreads: 4, roundsRun: 5, tokens: 0 }, { rounds: 3, tokens: bound }),
     { next: "close", because: "round-cap" },
   );
 });
 
 test("a round with no open threads closes the episode whatever the cap allows", () => {
   assert.deepEqual(
-    decideAfterRound({ openThreads: 0, roundsRun: 1, spent: 0 }, { rounds: 8, budget }),
+    decideAfterRound({ openThreads: 0, roundsRun: 1, tokens: 0 }, { rounds: 8, tokens: bound }),
     { next: "close", because: "nothing-open" },
     "blocking with nothing open asks the coding agent to do nothing",
   );
 });
 
-test("the budget being spent closes the episode with rounds still allowed", () => {
-  const bounds: EpisodeBounds = { rounds: 8, budget };
+test("a round reaching the token bound closes the episode with rounds still allowed", () => {
+  const bounds: EpisodeBounds = { rounds: 8, tokens: bound };
   assert.deepEqual(
-    decideAfterRound({ openThreads: 2, roundsRun: 1, spent: budget }, bounds),
-    { next: "close", because: "cost-bound" },
+    decideAfterRound({ openThreads: 2, roundsRun: 1, tokens: bound }, bounds),
+    { next: "close", because: "token-bound" },
     "reaching the figure is reaching the bound",
   );
   assert.deepEqual(
-    decideAfterRound({ openThreads: 2, roundsRun: 1, spent: budget + 0.2 }, bounds),
-    { next: "close", because: "cost-bound" },
+    decideAfterRound({ openThreads: 2, roundsRun: 1, tokens: bound + 90_000 }, bounds),
+    { next: "close", because: "token-bound" },
   );
   assert.deepEqual(
-    decideAfterRound({ openThreads: 2, roundsRun: 1, spent: budget - 0.01 }, bounds),
+    decideAfterRound({ openThreads: 2, roundsRun: 1, tokens: bound - 1 }, bounds),
     { next: "block" },
     "a round under the bound leaves the next round to run",
   );
 });
 
-test("an episode closes on the round that reaches the bound, not the one after", () => {
+test("an episode closes on the round that reached the bound, not the one after", () => {
   // The bound is read from what the round that has just finished recorded, so
   // the episode closes holding the findings that round posted.
-  const decisions = episodeUnder(8, 0.2);
-  assert.deepEqual(decisions, [
-    { next: "block" },
-    { next: "block" },
-    { next: "close", because: "cost-bound" },
-  ]);
+  const decisions = episodeUnder(8, bound);
+  assert.deepEqual(decisions, [{ next: "close", because: "token-bound" }]);
 });
 
-test("a spent budget closes the episode as nothing open where nothing is open", () => {
+// The bound is on a round, so rounds that each stay under it run out the cap
+// however many of them there are. A bound read as the episode's total would
+// close this episode partway through instead.
+test("rounds that each stay under the bound spend the whole cap", () => {
+  const decisions = episodeUnder(8, bound - 1);
+  assert.equal(blocksIn(decisions), 7);
+  assert.deepEqual(decisions.at(-1), { next: "close", because: "round-cap" });
+});
+
+test("a round that reached the bound closes as nothing open where nothing is open", () => {
   // Nothing was stopped by the bound: the episode ran out of work first, and
   // that is what closed it.
   assert.deepEqual(
-    decideAfterRound({ openThreads: 0, roundsRun: 2, spent: budget * 2 }, { rounds: 8, budget }),
+    decideAfterRound(
+      { openThreads: 0, roundsRun: 2, tokens: bound * 2 },
+      { rounds: 8, tokens: bound },
+    ),
     { next: "close", because: "nothing-open" },
   );
 });
 
 test("a count the arithmetic cannot use closes the episode rather than blocking", () => {
-  const bounds: EpisodeBounds = { rounds: 8, budget };
+  const bounds: EpisodeBounds = { rounds: 8, tokens: bound };
   const unusable: readonly FinishedRound[] = [
-    { openThreads: Number.NaN, roundsRun: 1, spent: 0 },
-    { openThreads: -3, roundsRun: 1, spent: 0 },
-    { openThreads: 2, roundsRun: 0, spent: 0 },
-    { openThreads: 2, roundsRun: -1, spent: 0 },
-    { openThreads: 2, roundsRun: 1.5, spent: 0 },
-    { openThreads: 2, roundsRun: Number.NaN, spent: 0 },
-    { openThreads: 2, roundsRun: Number.POSITIVE_INFINITY, spent: 0 },
+    { openThreads: Number.NaN, roundsRun: 1, tokens: 0 },
+    { openThreads: -3, roundsRun: 1, tokens: 0 },
+    { openThreads: 2, roundsRun: 0, tokens: 0 },
+    { openThreads: 2, roundsRun: -1, tokens: 0 },
+    { openThreads: 2, roundsRun: 1.5, tokens: 0 },
+    { openThreads: 2, roundsRun: Number.NaN, tokens: 0 },
+    { openThreads: 2, roundsRun: Number.POSITIVE_INFINITY, tokens: 0 },
   ];
   for (const round of unusable) {
     assert.equal(
@@ -198,7 +203,7 @@ test("a count the arithmetic cannot use closes the episode rather than blocking"
   const unusableCaps = [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY];
   for (const rounds of unusableCaps) {
     assert.deepEqual(
-      decideAfterRound({ openThreads: 2, roundsRun: 1, spent: 0 }, { rounds, budget }),
+      decideAfterRound({ openThreads: 2, roundsRun: 1, tokens: 0 }, { rounds, tokens: bound }),
       { next: "close", because: "round-cap" },
       `a cap of ${rounds} must buy no block`,
     );
@@ -211,7 +216,23 @@ test("the loaded configuration is the bounds an episode runs under", () => {
   const bounds: EpisodeBounds = defaultConfig;
   assert.equal(blocksIn(episodeUnder(bounds.rounds)), 2, "the default cap of 3 blocks twice");
   assert.equal(
-    decideAfterRound({ openThreads: 1, roundsRun: 1, spent: bounds.budget }, bounds).next,
+    decideAfterRound({ openThreads: 1, roundsRun: 1, tokens: bounds.tokens }, bounds).next,
     "close",
+  );
+});
+
+// The measured floor the default sits above: the widest round a legitimate
+// review has been observed spending is the one that found the seeded defect, so
+// a default under it would read as the reviewer failing rather than as the bound
+// firing.
+test("the default bound leaves the widest measured legitimate round room to block", () => {
+  const widestMeasured = 873_569;
+  assert.deepEqual(
+    decideAfterRound(
+      { openThreads: 2, roundsRun: 1, tokens: widestMeasured },
+      defaultConfig,
+    ),
+    { next: "block" },
+    `a round of ${widestMeasured} tokens is a review that found a real defect, and the default bound must not close the episode on it`,
   );
 });

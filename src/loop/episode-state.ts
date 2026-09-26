@@ -38,9 +38,10 @@ export type EpisodeState = {
    * bounds count different things. The entry count above is what the round cap
    * spends, and a setup problem must not spend one: it fails the same way every
    * firing, so a cap charged for it would leave a project no rounds once it had
-   * fixed the thing. Money is not like that — a dollar spent is spent whatever
-   * the attempt came to — so it goes here, and the cost bound is counted over
-   * both. An episode that dropped it could run past a bound it had crossed.
+   * fixed the thing. Spend is not like that — tokens spent are spent whatever
+   * the attempt came to — so it goes here, and the token bound is measured
+   * against this as well as against each round. An episode that dropped it could
+   * run past a bound it had reached.
    */
   readonly spentOutsideRounds: RoundCost;
 };
@@ -130,7 +131,7 @@ export function recordRound(state: EpisodeState, cost: RoundCost): EpisodeState 
  * The state with `cost` added to what the episode spent outside its rounds.
  *
  * The round count does not move. This is where an attempt that was not a round
- * puts what it spent, so that the cost bound sees the money and the cap does not.
+ * puts what it spent, so that the token bound sees it and the cap does not.
  */
 export function recordSpendOutsideRounds(
   state: EpisodeState,
@@ -194,7 +195,7 @@ function stateFrom(parsed: unknown, path: string): StateRead {
  * Absent is nothing, which is what a file written before this figure existed
  * means. A figure that is there and cannot be read is a failure like any other:
  * standing it in for zero would understate what the episode has spent, and the
- * cost bound would then let it spend past a bound it had crossed.
+ * token bound would then let it spend past a bound it had reached.
  */
 function spentOutsideRoundsIn(parsed: Record<string, unknown>, path: string): ReadCost {
   const spent = parsed["spentOutsideRounds"];

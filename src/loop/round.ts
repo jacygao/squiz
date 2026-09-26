@@ -46,6 +46,7 @@ import { postFindings, type PostedFindings, type Threaded } from "./post-finding
 import { blockingReason } from "./reason.ts";
 import {
   decideAfterRound,
+  tokenBoundIsReached,
   type ClosingReason,
   type EpisodeBounds,
 } from "./round-decision.ts";
@@ -185,7 +186,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   if ("ended" in stateRead) return stateRead.ended;
   const state = stateRead.step;
 
-  const bounds: EpisodeBounds = { rounds: config.rounds, budget: config.budget };
+  const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
     return { outcome: "close", because: over, ...nothingDone(pullRequest.number) };
@@ -262,7 +263,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
       // The recorded entries are the rounds that have run, this one included,
       // which is the count the cap does its arithmetic on.
       roundsRun: recorded.rounds.length,
-      spent: spentBy(recorded),
+      tokens: review.cost.tokens,
     },
     bounds,
   );
@@ -323,7 +324,7 @@ function gate(call: GhCall): Step<PullRequest> {
  *
  * The pull request is the one the gate found rather than the one the file names.
  * The rounds recorded are the episode's however many pull requests they read,
- * and the cap and the budget are the episode's too.
+ * and the cap and the token bound are the episode's too.
  */
 function openState(episode: Episode, pullRequest: number): Step<EpisodeState> {
   const read = readState(episode);
@@ -341,18 +342,18 @@ function openState(episode: Episode, pullRequest: number): Step<EpisodeState> {
  * left to run.
  *
  * Read from the state as it stands, before a reviewer is spawned. A bound
- * checked only once the round has finished is not a bound: the money is spent by
- * the time the arithmetic sees it, and a round the reviewer failed never reaches
- * the arithmetic at all. Both are reachable — an episode that recorded a round
- * and fired again, and a cap or a budget lowered between firings — and nothing
- * outside this stops a hook that keeps reviewing.
+ * checked only once the round has finished is not a bound: the tokens are spent
+ * by the time the arithmetic sees it, and a round the reviewer failed never
+ * reaches the arithmetic at all. Both are reachable — an episode that recorded a
+ * round and fired again, and a cap or a token bound lowered between firings —
+ * and nothing outside this stops a hook that keeps reviewing.
  *
  * A cap of R allows R rounds, so the round about to run is the one after the
  * count already recorded. A cap that is not a whole number leaves no round,
  * because nothing here may spend a review on a number it cannot count.
  */
 function exhausted(state: EpisodeState, bounds: EpisodeBounds): ClosingReason | null {
-  if (spentBy(state) >= bounds.budget) return "cost-bound";
+  if (tokenBoundIsReached(widestAttempt(state), bounds.tokens)) return "token-bound";
   if (!Number.isInteger(bounds.rounds) || state.rounds.length >= bounds.rounds) {
     return "round-cap";
   }
@@ -416,7 +417,7 @@ function makeDirectories(episode: Episode): string | null {
  *
  * The runtime can kill the hook during the posting that follows, and a round
  * whose cost was never recorded counts against neither the round cap nor the
- * cost bound. A killed round's floor goes in for the same reason: what the
+ * token bound. A killed round's floor goes in for the same reason: what the
  * reviewer reported before it was stopped is what there is.
  *
  * A setup problem records what it spent without recording a round.
@@ -444,10 +445,10 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
  *
  * Two ledgers, and an attempt goes in exactly one of them. A round appends its
  * cost, and the entry count is what the cap spends. A setup problem spends no
- * round, and the dollars it spent are added to the episode's spend all the same:
- * an attempt can complete a paid response and still end as a setup problem, and
- * an episode that forgot that money would buy another reviewer past a budget it
- * had already crossed.
+ * round, and what it spent is added to the episode's spend all the same: an
+ * attempt can complete a paid response and still end as a setup problem, and an
+ * episode that forgot those tokens would hand another reviewer a bound it had
+ * already reached.
  */
 function withSpend(state: EpisodeState, review: Review): EpisodeState | null {
   if (isRound(review)) return recordRound(state, review.cost);
@@ -706,14 +707,18 @@ function anchorOf(outcome: Threaded): ThreadAnchor {
 }
 
 /**
- * What the episode has spent: its rounds, and what it spent outside them.
+ * The larger of the episode's widest round and everything it spent on attempts
+ * that were no round, in tokens.
  *
- * Both ledgers, because the bound is on the money and not on what the money was
- * spent by.
+ * Both ledgers, because an attempt that failed before it was a round was paid
+ * for all the same. A reviewer that burns the bound's worth and reports nothing
+ * would otherwise be handed another round to do it again. The second ledger is a
+ * running total, so repeated paid attempts reach the bound together where no one
+ * of them would.
  */
-function spentBy(state: EpisodeState): number {
-  const rounds = state.rounds.reduce((total, cost) => total + cost.dollars, 0);
-  return rounds + state.spentOutsideRounds.dollars;
+function widestAttempt(state: EpisodeState): number {
+  const rounds = state.rounds.map((cost) => cost.tokens);
+  return Math.max(0, ...rounds, state.spentOutsideRounds.tokens);
 }
 
 /**

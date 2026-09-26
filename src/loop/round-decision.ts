@@ -25,16 +25,16 @@ export type FinishedRound = {
   readonly openThreads: number;
   /** Rounds the episode has finished, counting from 1 and including this one. */
   readonly roundsRun: number;
-  /** Dollars the episode has spent, including this round. */
-  readonly spent: number;
+  /** Tokens this round spent, which is the figure the token bound is on. */
+  readonly tokens: number;
 };
 
-/** The two bounds an episode runs under. */
+/** The two bounds an episode runs under: how many rounds, and what one may spend. */
 export type EpisodeBounds = {
   /** The round cap: how many rounds the episode may run. */
   readonly rounds: number;
-  /** Dollars the episode may spend. */
-  readonly budget: number;
+  /** Tokens one round may spend. */
+  readonly tokens: number;
 };
 
 /** Why an episode closed rather than running another round. */
@@ -43,8 +43,8 @@ export type ClosingReason =
   | "nothing-open"
   /** The cap is spent. Whatever is still open stays open, for a person to read. */
   | "round-cap"
-  /** The budget is spent, and the episode closes with the findings it has. */
-  | "cost-bound";
+  /** The token bound was reached, and the episode closes with the findings it has. */
+  | "token-bound";
 
 /** What the round concluded. */
 export type RoundDecision =
@@ -55,17 +55,18 @@ export type RoundDecision =
 /**
  * Rule on the round that has just finished.
  *
- * Nothing left open closes the episode whatever the cap and the budget allow,
- * because a block with nothing open asks the coding agent to do nothing. A
- * budget already spent closes it next: the bound stops the round after this one
- * and never the round that has just run. Otherwise the cap decides.
+ * Nothing left open closes the episode whatever the cap and the token bound
+ * allow, because a block with nothing open asks the coding agent to do nothing.
+ * A round that reached the token bound closes it next: the bound stops the round
+ * after this one and never the round that has just run. Otherwise the cap
+ * decides.
  */
 export function decideAfterRound(
   round: FinishedRound,
   bounds: EpisodeBounds,
 ): RoundDecision {
   if (!hasOpenThreads(round.openThreads)) return closing("nothing-open");
-  if (budgetIsSpent(round.spent, bounds.budget)) return closing("cost-bound");
+  if (tokenBoundIsReached(round.tokens, bounds.tokens)) return closing("token-bound");
   if (!blocksRemain(round.roundsRun, bounds.rounds)) return closing("round-cap");
   return { next: "block" };
 }
@@ -85,13 +86,17 @@ function hasOpenThreads(count: number): boolean {
 }
 
 /**
- * Whether the episode has spent its budget. At the figure counts as reaching it.
+ * Whether one attempt's tokens reached the bound. At the figure counts as
+ * reaching it.
  *
- * A reviewer whose cost cannot be priced reports no dollars, so an episode
- * running on one never reaches this and the cap is the whole of its bound.
+ * A tally the reviewer reports rather than a price something else put on it, so
+ * a model no catalogue can price is bounded exactly like one it can.
+ *
+ * Exported because the same comparison rules on a round before it starts, from
+ * the figures the episode's state file holds.
  */
-function budgetIsSpent(spent: number, budget: number): boolean {
-  return spent >= budget;
+export function tokenBoundIsReached(tokens: number, bound: number): boolean {
+  return tokens >= bound;
 }
 
 /**
