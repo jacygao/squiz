@@ -238,10 +238,15 @@ nothing from the tree.
 
 - **The rounds were far cheaper and faster than the rounds measured against pull
   request #162** — 18.7 and 54.9 seconds against 70 to 314, and $0.012 and
-  $0.030 against $0.047 to $0.205 — on a diff of much the same size. The
-  difference is how widely the reviewer read: 4 and 7 assistant messages against
-  4, 29 and 16. Nothing here bounds that spread, and a round's cost is not
-  predictable from the size of its diff.
+  $0.030 against $0.047 to $0.205 — on a diff of much the same size. What
+  produced the gap is not established here. Reading less widely is one
+  explanation and it is an unmeasured one: this run recorded neither the files the
+  reviewer opened nor its tool calls, and the assistant-message counts do not
+  carry the difference on their own, since round one of each ran to four messages
+  and still differs close to fourfold in both time and cost. Provider latency,
+  request size and the thinking level were not separated from each other either.
+  Nothing here bounds the spread, and a round's cost is not predictable from the
+  size of its diff.
 
 - **The dollars are `pi`'s arithmetic**, from a catalogue that refreshes itself.
 
