@@ -25,7 +25,7 @@ const commands = ["hook", "threads", "reply"];
 function dispatch(argv: readonly string[]): HookExit | Promise<HookExit> {
   const command = argv[0];
   if (command === "hook") {
-    return runHook();
+    return runHook({ stdin: process.stdin, directory: process.cwd() });
   }
   if (command === "threads") {
     return listThreads();
