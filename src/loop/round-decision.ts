@@ -43,7 +43,7 @@ export type ClosingReason =
   | "nothing-open"
   /** The cap is spent. Whatever is still open stays open, for a person to read. */
   | "round-cap"
-  /** A round reached the token bound, and the episode closes with the findings it has. */
+  /** The token bound was reached, and the episode closes with the findings it has. */
   | "token-bound";
 
 /** What the round concluded. */

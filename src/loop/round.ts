@@ -707,13 +707,14 @@ function anchorOf(outcome: Threaded): ThreadAnchor {
 }
 
 /**
- * The most any one attempt of the episode has spent, in tokens: its widest
- * round, or what it spent on attempts that were no round.
+ * The larger of the episode's widest round and everything it spent on attempts
+ * that were no round, in tokens.
  *
- * Both ledgers, because the bound is on an attempt and an attempt that failed
- * before it was a round was paid for all the same. A reviewer that burns the
- * bound's worth and reports nothing would otherwise be handed another round to
- * do it again.
+ * Both ledgers, because an attempt that failed before it was a round was paid
+ * for all the same. A reviewer that burns the bound's worth and reports nothing
+ * would otherwise be handed another round to do it again. The second ledger is a
+ * running total, so repeated paid attempts reach the bound together where no one
+ * of them would.
  */
 function widestAttempt(state: EpisodeState): number {
   const rounds = state.rounds.map((cost) => cost.tokens);
