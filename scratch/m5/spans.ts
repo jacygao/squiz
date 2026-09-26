@@ -33,6 +33,15 @@ export function spanStart(number: number, size: number): number {
 }
 
 /**
+ * The 1-based number of the span that holds item `index`.
+ *
+ * Spans count from 1, so item 0 falls in span 1 and item `size` falls in span 2.
+ */
+export function spanOf(index: number, size: number): number {
+  return Math.floor(index / size) + 1;
+}
+
+/**
  * Every span covering `total` items, in order.
  *
  * The last span ends at `total`, so no span reaches past the items it covers
