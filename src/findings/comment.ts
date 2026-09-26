@@ -141,9 +141,23 @@ export function readComment(body: string): CommentReading {
   return { by: "reviewer", ...severityAndHeadline(line.slice(marked.begins.length)) };
 }
 
+/**
+ * What the finding is called: the severity and the headline as one line, the
+ * marker and the bold span left off.
+ *
+ * A field that is absent takes the separator with it, so this never opens or
+ * ends with one. Either can be absent: a comment is read back with its severity
+ * and its headline answered independently.
+ *
+ * The headline is collapsed to one line, so a caller that prints one finding per
+ * line cannot be handed two.
+ */
+export function namedFinding(severity: Severity | null, headline: string | null): string {
+  return [severity ?? "", oneLine(headline ?? "")].filter(nonEmpty).join(headlineSeparator);
+}
+
 function firstLine(finding: Finding): string {
-  const parts = [finding.severity, oneLine(finding.headline)].filter(nonEmpty);
-  return `${reviewerMarker}${parts.join(headlineSeparator)}${boldClose}`;
+  return `${reviewerMarker}${namedFinding(finding.severity, finding.headline)}${boldClose}`;
 }
 
 /**
