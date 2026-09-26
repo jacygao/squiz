@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.23 (draft)
+**Version:** 0.24 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -530,7 +530,11 @@ and reports one verdict for each. It rules by reading the code as it now stands.
 | `withdrawn` | There was no defect. The coding agent's argument was accepted. | Closes the thread |
 | `open` | The defect is still there. | Re-opens the thread, or leaves it open |
 
-A thread the reviewer returns no verdict for is treated as `open`.
+A thread the reviewer returns no verdict for is treated as `open`, where the
+reviewer finished its review. Where the review did not finish, such a thread is
+left in the state it was handed over in. The reviewer was silent about every
+thread it never reached, and the default would read that silence as a ruling on
+code it had not read.
 
 Every finding posted as a thread ends its episode in one of four states. The
 reviewer names the first two; the harness reads the last two off the thread when
@@ -717,10 +721,10 @@ carries what could not be posted.
 | Failure | Behaviour |
 |---|---|
 | The reviewer is not installed, or has no API key | Exit 0, nothing posted, and stderr names the check that failed. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
-| The reviewer runs, exits cleanly, and completes no message | Exit 0, nothing posted, and stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round, and it keeps the findings the reviewer reported before its provider gave out. An errored message in a round that completed others is a retry rather than a failure. |
-| The model API is unavailable or rate-limited | Exit 0 and nothing is posted. stderr says the review did not run. |
-| The reviewer stops without finishing its review | Retried once, then treated as an unavailable API. Both rounds keep the findings the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. |
-| The reviewer exceeds the review budget | The reviewer process is killed and the round keeps the findings reported before the kill, with how many arrived. The round is recorded as a failed round rather than a clean one, whatever it kept. |
+| The reviewer runs, exits cleanly, and completes no message | Exit 0, and what the reviewer reported before its provider gave out is posted. stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
+| The model API is unavailable or rate-limited | Exit 0, and what the reviewer reported before the API stopped answering is posted. stderr says the review did not run. |
+| The reviewer stops without finishing its review | Retried once, then treated as an unavailable API. Both rounds post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. |
+| The reviewer exceeds the review budget | The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. |
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |
@@ -757,19 +761,31 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 480 seconds | The reviewer process is killed and the round keeps the findings reported before the kill. |
+| **Time**, per round | 480 seconds | The reviewer process is killed and the round posts the findings reported before the kill. |
 | **Cost**, per episode | $0.50 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
 finding arrives in the call that reports it rather than at the end of the run. A
-round killed a second after a finding was confirmed has that finding. It is a
-failed round even so: the review was not finished, and what the reviewer had not
-got to is not a thing the round has.
+round killed a second after a finding was confirmed has that finding, and what
+the reviewer had not got to is not a thing the round has.
 
 The kill also yields a cost: the assistant messages that completed carry their
 own, and the round records that sum as its last tracked cost. The findings and
 the figure are read from the same moment of the run, so a round never reports a
 cost from one moment beside findings from another.
+
+**What a failed round salvaged goes on the pull request, and the round is a
+failed round still.** The findings the reviewer confirmed are posted and the
+verdicts it reported are applied, in the posting share and under the same
+deadline a finished review's posting runs under. None of that decides what the
+round became. The outcome is the reviewer's own, the cost is the floor the
+failure left, and the round neither blocks the coding agent nor closes the
+episode over what it managed to put up. A round that posted two findings and
+then reported itself as a review that succeeded would be worse than one that
+posted nothing at all.
+
+A failed round that confirmed nothing posts nothing, and makes no call to GitHub
+at all.
 
 **The ceiling every other bound sits below is the runtime's subagent stall
 watchdog, at 600 seconds.** A subagent that makes no progress for that long is

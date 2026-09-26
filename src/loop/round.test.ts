@@ -27,6 +27,7 @@ import {
   type Invocation,
   type ParsedRun,
   type RoundCost,
+  type RoundOutput,
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
 import { writeState, type EpisodeState } from "./episode-state.ts";
@@ -142,20 +143,27 @@ function reviews(output: {
   };
 }
 
-/** A reviewer that reports a cost and then never finishes, so the bound kills it. */
-function hangs(cost: RoundCost): Reviewer {
+/**
+ * A reviewer that reports a cost and whatever `reported` carries, and then never
+ * finishes, so the bound kills it.
+ */
+function hangs(cost: RoundCost, reported: Partial<RoundOutput> = {}): Reviewer {
   return {
     command: "/bin/sh",
     args: ["-c", "sleep 30"],
     parse: async (_stdout, progressSoFar): Promise<ParsedRun> => {
-      // The round records what the reviewer reported before the bound fired.
-      progressSoFar?.({ cost, findings: [], verdicts: [], finished: false, answered: true });
+      // The round keeps what the reviewer reported before the bound fired, and
+      // records the cost it had by then.
+      progressSoFar?.({ cost, ...nothingReported, ...reported, finished: false, answered: true });
       // The round races the bound against this, and stops the process instead.
       await new Promise<never>(() => {});
       throw new Error("the round read a parse that never finished");
     },
   };
 }
+
+/** What a reviewer that reported nothing has reported. */
+const nothingReported: RoundOutput = { findings: [], verdicts: [] };
 
 /**
  * A reviewer that answers inside its bound and then holds on through the round's
@@ -175,10 +183,28 @@ function answersThenHolds(findings: readonly Finding[]): Reviewer {
   };
 }
 
-/** A reviewer whose output cannot be read as a review, however often it is run. */
-function unreadable(cost: RoundCost): Reviewer {
+/**
+ * A reviewer that reports findings and then ignores both its bound and the signal
+ * that would stop it.
+ *
+ * The round spends the grace and the kill after the moment the review had to be
+ * over by, so it reaches the posting with the window already gone.
+ */
+function reportsThenHolds(cost: RoundCost, findings: readonly Finding[]): Reviewer {
   return {
-    parse: async (stdout): Promise<ParsedRun> => {
+    command: "/bin/sh",
+    // The wait is short and repeated, because a shell blocked in one long sleep
+    // reaches its trap only once that sleep is over.
+    args: ["-c", "trap '' TERM; while :; do sleep 0.2; done"],
+    parse: hangs(cost, { findings }).parse,
+  };
+}
+
+/** A reviewer whose output cannot be read as a review, however often it is run. */
+function unreadable(cost: RoundCost, findings: readonly Finding[] = []): Reviewer {
+  return {
+    parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
+      progressSoFar?.({ cost, findings, verdicts: [], finished: false, answered: true });
       await drain(stdout);
       return { cost, result: { kind: "unparsed", reason: "the last message was not a review" } };
     },
@@ -186,9 +212,10 @@ function unreadable(cost: RoundCost): Reviewer {
 }
 
 /** A reviewer that ran, exited cleanly and completed no message. */
-function completesNothing(cost: RoundCost): Reviewer {
+function completesNothing(cost: RoundCost, findings: readonly Finding[] = []): Reviewer {
   return {
-    parse: async (stdout): Promise<ParsedRun> => {
+    parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
+      progressSoFar?.({ cost, findings, verdicts: [], finished: false, answered: true });
       await drain(stdout);
       return { cost, result: { kind: "incomplete", reason: "the model refused the request" } };
     },
@@ -768,6 +795,167 @@ test("a reviewer that is not installed spends no round of the cap", async () => 
     ran.stateSource,
     null,
     "the same failure recurs every firing, and a cap spent on it would leave the episode no rounds once someone fixed the install",
+  );
+});
+
+/**
+ * Every outcome that is not a finished review carries what the reviewer had
+ * reported before it failed, and each of them puts it on the pull request.
+ *
+ * The cost is asserted beside it, because posting something must not turn a
+ * failed round into a clean one: a killed round and a round nothing could be read
+ * from each record their floor, and a setup problem still spends no round of the
+ * cap however much it salvaged.
+ */
+test("a round posts the findings the reviewer reported before it failed, whatever failed", async () => {
+  const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
+  const found = [finding("The flag is never read")];
+  const failures = [
+    {
+      failure: "timed-out",
+      reviewer: hangs(floor, { findings: found }),
+      config: { timeout: 1 },
+      rounds: [floor],
+    },
+    {
+      failure: "unavailable",
+      reviewer: unreadable(floor, found),
+      config: {},
+      // The retry is a second process on the same round, and both spent the floor.
+      rounds: [{ dollars: 0.04, tokens: 1400, messages: 2 }],
+    },
+    {
+      failure: "setup",
+      reviewer: completesNothing(floor, found),
+      config: {},
+      rounds: [],
+    },
+  ] as const;
+
+  for (const { failure, reviewer, config, rounds } of failures) {
+    const ran = await runInFixture({ answers: POSTING, config, reviewer });
+
+    assert.ok(ran.conclusion.outcome === "failed", `${failure} was not reported as a failed round`);
+    assert.equal(ran.conclusion.failure, failure);
+    assert.deepEqual(
+      ran.conclusion.salvaged?.posted,
+      ["PRRT_new"],
+      `${failure} discarded the finding the reviewer had already confirmed`,
+    );
+    assert.deepEqual(ran.kinds, ["prlist", "diff", "create", "lookup"]);
+    assert.match(ran.conclusion.reason, /kept the 1 finding the reviewer had reported/u);
+    assert.deepEqual(
+      ran.state?.rounds ?? [],
+      rounds,
+      `${failure} recorded a cost that is not what the round had when it failed`,
+    );
+  }
+});
+
+/**
+ * A round that salvaged something is still a failed round, and the decision that
+ * would block or close is never asked.
+ *
+ * The cap is 1 here, so a clean round of this shape would close the episode and
+ * read as a review that ended healthy.
+ */
+test("a round that posted what it salvaged is still a failed round", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 1 },
+    answers: POSTING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+  });
+
+  assert.equal(
+    ran.conclusion.outcome,
+    "failed",
+    "a round that posted its findings and reported itself reviewed is worse than one that posted none",
+  );
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+});
+
+test("the verdicts a failed round reported are applied, and no other thread is touched", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([
+        { id: "PRRT_one", isResolved: false },
+        { id: "PRRT_two", isResolved: true },
+      ]),
+      resolve: RESOLVED,
+      unresolve: REOPENED,
+    },
+    reviewer: hangs(ANSWER_COST, { verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff", "resolve"],
+    "the closed thread the reviewer never ruled on was re-opened, which reads a review that stopped early as a ruling that it is still wrong",
+  );
+  assert.deepEqual(
+    ran.conclusion.salvaged?.verdicts.threads.map((applied) => applied.thread),
+    ["PRRT_one"],
+  );
+});
+
+test("a round that reported nothing before it failed posts nothing and makes no call", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    // Round 2, so a thread was handed over for a verdict the reviewer never gave.
+    rounds: [ANSWER_COST],
+    answers: {
+      ...POSTING,
+      threads: listed([{ id: "PRRT_two", isResolved: true }]),
+      unresolve: REOPENED,
+    },
+    reviewer: hangs(ANSWER_COST),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  assert.equal(ran.conclusion.salvaged, undefined, "there was nothing for the round to salvage");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff"]);
+});
+
+/**
+ * The posting a failed round does runs on what is left of the one window, exactly
+ * as a finished review's does.
+ *
+ * The reviewer here reports a finding, runs past its bound, and then ignores the
+ * signal that would stop it, so the round spends the grace and the kill on the
+ * far side of the moment the review had to be over by. A fresh margin taken here
+ * would spend two more minutes past the end of the window, and what lies past the
+ * window is the runtime killing the hook with nothing reported at all.
+ */
+test("a salvaged round posts on what is left of the window, not on a fresh margin", async () => {
+  const ran = await runInFixture({
+    windowMs: 3_000,
+    marginMs: 500,
+    config: { timeout: 2 },
+    answers: POSTING,
+    reviewer: reportsThenHolds(ANSWER_COST, [finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "create"),
+    [],
+    "a call made past the end of the window is one the runtime kills the hook during",
+  );
+  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
+  assert.equal(outcome?.outcome, "failed", "a round that could not post is never a clean round");
+  assert.match(
+    outcome?.outcome === "failed" ? outcome.reason : "",
+    /ran out before this call was made/u,
+    "the window was gone before the posting started, and the round says so rather than reporting a comment it never wrote",
   );
 });
 

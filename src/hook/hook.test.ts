@@ -67,6 +67,30 @@ function failedRound(failure: RoundFailure, reason: string): RoundConclusion {
   return { outcome: "failed", failure, reason };
 }
 
+/** A round the reviewer failed, carrying what it put on the pull request anyway. */
+function salvagedRound(
+  failure: RoundFailure,
+  reason: string,
+  outcomes: readonly FindingOutcome[] = [],
+  ruled: readonly AppliedVerdict[] = [],
+): RoundConclusion {
+  return {
+    outcome: "failed",
+    failure,
+    reason,
+    salvaged: {
+      pullRequest: PULL_REQUEST,
+      posted: [],
+      findings: { outcomes },
+      verdicts: {
+        threads: ruled,
+        unapplied: [],
+        reopened: ruled.filter((thread) => thread.outcome === "reopened").length,
+      },
+    },
+  };
+}
+
 function closedRound(
   because: ClosingReason,
   outcomes: readonly FindingOutcome[] = [],
@@ -302,6 +326,43 @@ test("a round that posted everything it found and applied every verdict says not
   assert.equal(failureIn(conclusion), null);
 });
 
+/** The reason a killed round that salvaged two findings gives for itself. */
+const KILLED =
+  "the reviewer was killed at its 480-second bound, and the round kept the 2 findings the reviewer had reported";
+
+test("a salvaged round that could not post what it kept says so on the failure's line", () => {
+  // A salvaged finding that reached no thread is as lost as any other, and the
+  // round that failed is the only thing that will ever have held it.
+  const conclusion = salvagedRound("timed-out", KILLED, [
+    threaded("the caller cannot tell the two apart"),
+    unpostable("the retry runs on a spent bound"),
+  ]);
+
+  assert.equal(
+    pointerFor(conclusion),
+    `${KILLED}; it failed to post 1 of 2 findings on PR #142`,
+  );
+});
+
+test("a salvaged round that posted everything it kept reports the reviewer's failure alone", () => {
+  const conclusion = salvagedRound("timed-out", KILLED, [
+    threaded("the caller cannot tell the two apart"),
+    threaded("the retry runs on a spent bound"),
+  ]);
+
+  assert.equal(pointerFor(conclusion), KILLED);
+});
+
+test("a salvaged round that could not apply a verdict says that too", () => {
+  const reason = "the review did not run: the last message was not a review";
+  const conclusion = salvagedRound("unavailable", reason, [], [applied("PRRT_1"), refused("PRRT_2")]);
+
+  assert.equal(
+    pointerFor(conclusion),
+    `${reason}; it failed to apply 1 of 2 verdicts on PR #142`,
+  );
+});
+
 test("every pointer the hook composes is one line", () => {
   // The pointer is a pointer rather than a report, and one place composes all
   // of them so that none can grow into a second output format.
@@ -310,6 +371,7 @@ test("every pointer the hook composes is one line", () => {
     failedRound("timed-out", "the reviewer was killed at its 480-second bound"),
     failedRound("unavailable", "the review did not run: 429\nrate limited"),
     failedRound("harness", "nothing was posted: EACCES: permission denied"),
+    salvagedRound("timed-out", KILLED, [threaded("one"), unpostable("two")], [refused("PRRT_1")]),
     closedRound("nothing-open", [unpostable("one"), unpostable("two")]),
     closedRound("round-cap", [threaded("one"), unpostable("two")], [refused("PRRT_1")]),
     closedRound("nothing-open", [noted("one")], [], new Error("the diff carries no hunk header")),
