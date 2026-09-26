@@ -55,3 +55,10 @@ export function reviewSeconds(configuredSeconds: number, shares: Shares): number
 export function leavesTimeToReview(windowMs: number): boolean {
   return reviewSeconds(Number.MAX_SAFE_INTEGER, sharesOf(windowMs)) >= 1;
 }
+
+/**
+ * The total of the three shares in `shares`.
+ */
+export function windowFor(shares: Shares): number {
+  return shares.beforeReview + shares.review + shares.posting;
+}
