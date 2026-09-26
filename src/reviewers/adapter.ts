@@ -83,27 +83,25 @@ export type RoundOutput = {
   readonly verdicts: readonly ThreadVerdict[];
 };
 
-/** What the reviewer has reported, and how far the run has got with reporting it. */
+/** What the reviewer has reported, and whether it has said the review is done. */
 export type Reported = RoundOutput & {
   /**
    * Whether the reviewer has reported its review complete.
    *
-   * It is the caller's cue to stop the reviewer. A CLI given a run to end may
-   * not end it, and a round that waited to be told would pay for whatever the
-   * run did next.
+   * It is the only thing that says a review is finished, and it is why a caller
+   * stopped mid-stream keeps this: a run the time bound ended after the reviewer
+   * declared its review is that review rather than a round that failed.
    */
   readonly finished: boolean;
   /**
-   * Whether every call the run started has been answered.
+   * Why a report the run accepted could not be read back, where one could not.
    *
-   * A finished review is not the end of what may still be reported. A CLI that
-   * runs the calls of one message together may answer the call that finished the
-   * review before it answers a report of the same message, and a reviewer
-   * stopped in between takes with it whatever it had written and not flushed.
-   * What never left the reviewer cannot be read out of the pipe afterwards, so a
-   * caller that stops it waits for this first.
+   * The two ends of one report disagreeing, which the reviewer was told had
+   * landed. It fails the output rather than shortening it, and a declaration does
+   * not settle it, so a caller stopped mid-stream needs it beside `finished`.
+   * `undefined` is every report read back as the reviewer made it.
    */
-  readonly answered: boolean;
+  readonly broken: string | undefined;
 };
 
 /** What a round has so far: what it has spent, and what the reviewer has reported. */
