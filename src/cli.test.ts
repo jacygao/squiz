@@ -95,6 +95,9 @@ async function run(
       cwd: options.cwd,
       env: { ...process.env, ...(options.path === undefined ? {} : { PATH: options.path }) },
     });
+    // A child that reads no stdin can exit before the write lands, and the
+    // failed write belongs to the pipe rather than to the test.
+    child.stdin.on("error", () => {});
     // Written and closed rather than left open. The hook reads its payload from
     // stdin, and a stdin nobody ends is a hook that never returns.
     child.stdin.end(options.input ?? "");
@@ -114,6 +117,18 @@ async function run(
     });
   });
 }
+
+test("a child that reads no stdin is run rather than failed (#180)", async () => {
+  // More than a pipe buffer, so the write cannot land before a child that reads
+  // nothing has gone. Every other test here spawns something that exits on its
+  // own schedule, and one that exits first used to fail the run with EPIPE.
+  const result = await run(process.execPath, ["-e", "process.exit(0)"], {
+    cwd: elsewhere,
+    input: "x".repeat(10_000_000),
+  });
+
+  assert.equal(result.code, 0, `the child did not exit cleanly: ${result.stderr}`);
+});
 
 test("the shim resolves the entry point from a working directory that is not the plugin", async () => {
   const result = await run(shim, ["hook"], { cwd: elsewhere, input: PAYLOAD });
