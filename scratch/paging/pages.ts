@@ -35,3 +35,14 @@ export function pageAt(number: number, perPage: number, total: number): Page {
   const start = number * perPage;
   return { number, start, end: Math.min(start + perPage, total) };
 }
+
+/**
+ * The number of the page holding the item at `index`, at `perPage` items a
+ * page.
+ *
+ * Indexes count from 0 and pages count from 1, so index 0 falls on page 1
+ * and index `perPage` falls on page 2.
+ */
+export function pageOf(index: number, perPage: number): number {
+  return Math.floor(index / perPage) + 1;
+}
