@@ -24,7 +24,13 @@ import type { GhCall } from "../github/gh.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
-import { unspent, type Adapter, type RoundCost } from "../reviewers/adapter.ts";
+import {
+  unspent,
+  type Adapter,
+  type RoundCost,
+  type RoundOutput,
+  type ThreadVerdict,
+} from "../reviewers/adapter.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
@@ -113,10 +119,23 @@ export type RoundConclusion =
   /** The episode is over, for the reason the decision gave. */
   | ({ readonly outcome: "close"; readonly because: ClosingReason } & RoundAccount)
   /**
-   * The round failed and nothing was posted. Never a clean pass: `failure` says
-   * whose failure it was, and an honest empty review is not one of them.
+   * The round failed. Never a clean pass: `failure` says whose failure it was,
+   * and an honest empty review is not one of them.
    */
-  | { readonly outcome: "failed"; readonly failure: RoundFailure; readonly reason: string };
+  | {
+      readonly outcome: "failed";
+      readonly failure: RoundFailure;
+      readonly reason: string;
+      /**
+       * What the round put on the pull request before it reported the failure.
+       *
+       * Absent where there was nothing to put there: every failure before the
+       * review, and every reviewer that failed having confirmed nothing. A round
+       * carrying one is a failed round that salvaged something, and never a
+       * round that reviewed.
+       */
+      readonly salvaged?: RoundAccount;
+    };
 
 /**
  * Run one round of the loop and return what it concluded.
@@ -218,48 +237,24 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
 
-  if (review.outcome !== "reviewed") {
-    // Reported as the reviewer's own outcome, so that nothing downstream can
-    // read a round that failed as a round that found nothing.
-    return failed(review.outcome, reviewerFailed(review));
-  }
-
   // What is left of the window, and never more than the margin kept back for
   // posting. The reviewer's own cleanup runs after the moment the review had to
   // be over by, and a margin that started afresh here would spend that overrun
   // again past the end of the window.
-  const margin = deadlineIn(Math.min(window.remaining(), postingMs));
-  const calls = handedOver.length + 2 * review.findings.length;
-
-  // The verdicts go first. One that is not applied leaves a thread in a state
-  // the reviewer did not rule on, and the round then blocks the coding agent
-  // over a finding it was told was settled; a finding that is not posted is one
-  // the next round reads the same code and makes again.
-  const verdicts = applyVerdicts(handedOver, review.verdicts, {
+  const posting: Posting = {
+    pullRequest,
+    diff: fetched.diff,
     directory,
-    until: margin,
-    boundMs: share(margin, calls),
-  });
-
-  const findings = postFindings(
-    {
-      findings: review.findings,
-      diff: fetched.diff,
-      pullRequest: pullRequest.number,
-      headSha: pullRequest.headSha,
-    },
-    { directory, until: margin, boundMs: share(margin, 2 * review.findings.length) },
-  );
-
-  const newThreads = threadsOpened(findings);
-  const posted = newThreads.map((thread) => thread.id);
-  const threads = [...settled(handedOver, verdicts.threads), ...newThreads];
-  const account: RoundAccount = {
-    pullRequest: pullRequest.number,
-    posted,
-    findings,
-    verdicts,
+    margin: deadlineIn(Math.min(window.remaining(), postingMs)),
   };
+
+  if (review.outcome !== "reviewed") return salvage(review, handedOver, posting);
+
+  const account = report(review, handedOver, posting);
+  const threads = [
+    ...settled(handedOver, account.verdicts.threads),
+    ...threadsOpened(account.findings),
+  ];
 
   const decision = decideAfterRound(
     {
@@ -277,7 +272,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   }
   return {
     outcome: "block",
-    reason: blockingReason({ pullRequest: pullRequest.number, posted, threads }),
+    reason: blockingReason({ pullRequest: pullRequest.number, posted: account.posted, threads }),
     ...account,
   };
 }
@@ -487,18 +482,139 @@ function isRound(review: Review): boolean {
   return review.outcome !== "setup";
 }
 
+/** Where a round's review goes, and the deadline every call putting it there runs under. */
+type Posting = {
+  readonly pullRequest: PullRequest;
+  /** The pull request's diff, which decides where each finding's comment can hang. */
+  readonly diff: string;
+  readonly directory: string;
+  /**
+   * What is left of the window, capped at the share kept back for posting. One
+   * deadline over the whole phase, and a call with nothing left on it is not made
+   * at all.
+   */
+  readonly margin: Deadline;
+};
+
+/**
+ * Put what the reviewer reported on the pull request: its verdicts, then its
+ * findings.
+ *
+ * The verdicts go first. One that is not applied leaves a thread in a state the
+ * reviewer did not rule on, and the round then blocks the coding agent over a
+ * finding it was told was settled; a finding that is not posted is one the next
+ * round reads the same code and makes again.
+ *
+ * `ruleOn` is the threads a verdict may reach. One in it that the reviewer ruled
+ * on nowhere takes the default verdict, so what a caller passes is what decides
+ * whether the reviewer's silence about a thread counts as a ruling on it.
+ */
+function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
+  const call = { directory: on.directory, until: on.margin };
+  const calls = ruleOn.length + 2 * output.findings.length;
+
+  const verdicts = applyVerdicts(ruleOn, output.verdicts, {
+    ...call,
+    boundMs: share(on.margin, calls),
+  });
+
+  const findings = postFindings(
+    {
+      findings: output.findings,
+      diff: on.diff,
+      pullRequest: on.pullRequest.number,
+      headSha: on.pullRequest.headSha,
+    },
+    { ...call, boundMs: share(on.margin, 2 * output.findings.length) },
+  );
+
+  return {
+    pullRequest: on.pullRequest.number,
+    posted: threadsOpened(findings).map((thread) => thread.id),
+    findings,
+    verdicts,
+  };
+}
+
 type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
 
-/** The one line a round the reviewer failed is reported as. */
-function reviewerFailed(review: FailedReview): string {
+/**
+ * A round the reviewer failed, with what it had reported already on the pull
+ * request.
+ *
+ * **Still a failed round, whatever it posted.** The outcome is the reviewer's
+ * own, the cost recorded before this stands as a floor, and no block-or-close
+ * decision is asked for.
+ *
+ * The posting runs on the round's own margin, which is what is left of the one
+ * window. A round that reached its time bound has spent most of that window, and
+ * a fresh allowance here would put its calls past the ceiling, where the hook
+ * and everything under it are signalled together and nothing is reported at all.
+ *
+ * A reviewer that confirmed nothing before it failed leaves nothing to put up,
+ * and no call is made.
+ */
+function salvage(
+  review: FailedReview,
+  handedOver: readonly ReviewThread[],
+  on: Posting,
+): RoundConclusion {
+  const kept = review.findings.length;
+  if (kept === 0 && review.verdicts.length === 0) {
+    return failed(review.outcome, reviewerFailed(review, 0));
+  }
+  return {
+    outcome: "failed",
+    failure: review.outcome,
+    reason: reviewerFailed(review, kept),
+    salvaged: report(review, ruledOn(handedOver, review.verdicts), on),
+  };
+}
+
+/**
+ * The threads a failed round's verdicts may reach: the ones the reviewer ruled
+ * on, and no others.
+ *
+ * A thread the reviewer returned no verdict for is treated as open, which
+ * re-opens it where it was closed. That default reads the reviewer's silence as a
+ * ruling, and a review that did not finish was silent about every thread it never
+ * got to. Those are left exactly as they were found, for a later round to rule on.
+ */
+function ruledOn(
+  handedOver: readonly ReviewThread[],
+  verdicts: readonly ThreadVerdict[],
+): readonly ReviewThread[] {
+  const ruled = new Set(verdicts.map((verdict) => verdict.thread));
+  return handedOver.filter((thread) => ruled.has(thread.id));
+}
+
+/**
+ * The one line a round the reviewer failed is reported as, `kept` being how many
+ * findings the reviewer had confirmed before it failed.
+ *
+ * What became of those findings is not said here. A round that could not post
+ * one of them is reported where every other failure to post is.
+ */
+function reviewerFailed(review: FailedReview, kept: number): string {
   switch (review.outcome) {
     case "timed-out":
-      return `the reviewer was killed at its ${review.seconds}-second bound, and the round recorded no findings`;
+      return `the reviewer was killed at its ${review.seconds}-second bound, and the round ${keptBy(kept)}`;
     case "unavailable":
-      return `the review did not run: ${review.reason}`;
+      return alsoKept(`the review did not run: ${review.reason}`, kept);
     case "setup":
-      return `the reviewer could not run: ${review.reason}`;
+      return alsoKept(`the reviewer could not run: ${review.reason}`, kept);
   }
+}
+
+/** What a failed round has of the review, as its own line says it. */
+function keptBy(kept: number): string {
+  if (kept === 0) return "recorded no findings";
+  return `kept the ${kept} ${kept === 1 ? "finding" : "findings"} the reviewer had reported`;
+}
+
+/** The reviewer's own words, and what the round kept where it kept anything. */
+function alsoKept(failure: string, kept: number): string {
+  return kept === 0 ? failure : `${failure}; the round ${keptBy(kept)}`;
 }
 
 /**
@@ -507,14 +623,19 @@ function reviewerFailed(review: FailedReview): string {
  * Computed from what the round did rather than read back a second time. Every
  * identifier came from GitHub, so the agent that checks the reason against the
  * pull request finds the threads the reason named.
+ *
+ * A thread finds its verdict by the identifier the verdict names. A round need
+ * not have offered every thread it handed over to a verdict, and one read off its
+ * position in the list would take the ruling on whichever thread sat there.
  */
 function settled(
   handedOver: readonly ReviewThread[],
   ruled: readonly AppliedVerdict[],
 ): readonly ReviewThread[] {
-  return handedOver.map((thread, index) => ({
+  const acted = new Map(ruled.map((verdict) => [verdict.thread, verdict]));
+  return handedOver.map((thread) => ({
     ...thread,
-    isResolved: leftResolved(thread, ruled[index]),
+    isResolved: leftResolved(thread, acted.get(thread.id)),
   }));
 }
 

@@ -17,7 +17,12 @@ import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../config/config.ts";
 import { episodeAt } from "../loop/episode.ts";
-import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
+import {
+  runRound,
+  type RoundAccount,
+  type RoundConclusion,
+  type RoundSetup,
+} from "../loop/round.ts";
 import { pi } from "../reviewers/pi/adapter.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
 import { readPayloadFrom, type PayloadStream } from "./payload.ts";
@@ -74,7 +79,7 @@ export async function runHook(firing: Firing): Promise<HookExit> {
 export function failureIn(conclusion: RoundConclusion): string | null {
   switch (conclusion.outcome) {
     case "failed":
-      return conclusion.reason;
+      return failedFailure(conclusion);
     case "close":
       // An episode that closed at its cap or its budget has not failed. What it
       // could not put on the pull request is the only thing left to say.
@@ -87,16 +92,49 @@ export function failureIn(conclusion: RoundConclusion): string | null {
   }
 }
 
-/** A closing round, which is the only conclusion that can have posted anything. */
+/** A round that failed, which may have salvaged what the reviewer had reported. */
+type FailedRound = Extract<RoundConclusion, { readonly outcome: "failed" }>;
+
+/** A closing round, whose findings and verdicts are the whole of what it did. */
 type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
+
+/**
+ * What the round failed at, and what of the review it could not put up with it.
+ *
+ * The failure is what the line opens on, because nothing a round managed to post
+ * makes it a round that succeeded. What it could not post follows, on the same
+ * terms as a closing round's, because a salvaged finding that reached no thread
+ * is as lost as any other.
+ */
+function failedFailure(round: FailedRound): string {
+  const { salvaged } = round;
+  if (salvaged === undefined) return round.reason;
+  const unreported = unreportedBy(salvaged);
+  if (unreported === null) return round.reason;
+  return `${round.reason}; it failed to ${unreported} on PR #${salvaged.pullRequest}`;
+}
 
 /**
  * What a closing round failed to put on the pull request, or `null` where it
  * failed at nothing.
  *
  * A close is the end of the episode. Nothing is stored to retry, and no later
- * round reads the same code to make the same comment again, so each of these
- * ends as a defect nobody was told about:
+ * round reads the same code to make the same comment again. A closing round is
+ * also the shape a healthy episode ends in, so silence here is read as a clean
+ * review.
+ */
+function closingFailure(round: ClosedRound): string | null {
+  const unreported = unreportedBy(round);
+  if (unreported === null) return null;
+  const at = `PR #${round.pullRequest}`;
+  return `the round closed the episode on ${at} having failed to ${unreported}`;
+}
+
+/**
+ * What the round could not put on the pull request, as the pointer names it, or
+ * `null` where it failed at nothing.
+ *
+ * Each of these ends as a defect nobody was told about:
  *
  * - a finding that reached no thread,
  * - a verdict that did not reach the thread it named, which leaves a thread
@@ -104,13 +142,10 @@ type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
  * - a diff nothing could be anchored against, which leaves every finding that
  *   named a place with nowhere on the pull request to hang.
  *
- * A closing round is also the shape a healthy episode ends in, so silence here
- * is read as a clean review.
- *
- * The counts come from what the round did, and all of it shares one line,
- * because the pointer is a pointer and a second format has nowhere to grow.
+ * The counts come from what the round did, and all of it shares one line, because
+ * the pointer is a pointer and a second format has nowhere to grow.
  */
-function closingFailure(round: ClosedRound): string | null {
+function unreportedBy(round: RoundAccount): string | null {
   const findings = round.findings.outcomes;
   const unposted = findings.filter((outcome) => outcome.outcome === "failed").length;
   const ruled = round.verdicts.threads;
@@ -125,8 +160,7 @@ function closingFailure(round: ClosedRound): string | null {
     ...(unposted === 0 ? [] : [`post ${unposted} of ${findings.length} findings`]),
     ...(unapplied === 0 ? [] : [`apply ${unapplied} of ${ruled.length} verdicts`]),
   ];
-  const at = `PR #${round.pullRequest}`;
-  return `the round closed the episode on ${at} having failed to ${failures.join(" and to ")}`;
+  return failures.join(" and to ");
 }
 
 /**
