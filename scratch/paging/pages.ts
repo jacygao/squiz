@@ -22,7 +22,7 @@ export type Page = {
  * items at 4 a page fill 3 pages.
  */
 export function pageCount(total: number, perPage: number): number {
-  return Math.floor(total / perPage);
+  return Math.ceil(total / perPage);
 }
 
 /**
@@ -32,7 +32,7 @@ export function pageCount(total: number, perPage: number): number {
  * `perPage`.
  */
 export function pageAt(number: number, perPage: number, total: number): Page {
-  const start = number * perPage;
+  const start = (number - 1) * perPage;
   return { number, start, end: Math.min(start + perPage, total) };
 }
 
