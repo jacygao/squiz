@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.29 (draft)
+**Version:** 0.30 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -708,11 +708,23 @@ no such `PATH`, so the `hooks.json` registration reaches the same file through
 | Command | Run by | What it does |
 |---|---|---|
 | `squiz hook` | Claude Code | The `SubagentStop` entry point, named in `hooks.json`. Runs one round. |
-| `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch, each with its identifier. |
+| `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
 
+```
+2 open threads on #185
+PRRT_kwDOUEd2qM6mPuUP scratch/paging/pages.ts:26 high — pageCount drops the partial last page
+PRRT_kwDOUEd2qM6mPuVO scratch/paging/pages.ts:34 high — pageAt starts every page one page too far
+```
+
+A thread whose first comment carries none of § 2 Identity's markers was opened by
+a person rather than by the reviewer. It is no finding, and its line is the
+identifier and the location alone.
+
 `<id>` is whatever `squiz threads` printed for that thread. It round-trips
-between the two commands, and is short enough for an agent to copy.
+between the two commands, and is short enough for an agent to copy. It leads the
+line and is printed undecorated, so a line splits into the identifier and the
+rest of it at the first space.
 
 ### The setup check
 

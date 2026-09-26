@@ -13,7 +13,7 @@ import { test } from "node:test";
 import type { ReviewThread } from "../github/threads.ts";
 import { renderComment } from "./comment.ts";
 import type { LineFinding } from "./finding.ts";
-import { readThread } from "./thread.ts";
+import { namedFindingOn, readThread } from "./thread.ts";
 
 const offScreen: LineFinding = {
   scope: "line",
@@ -130,4 +130,27 @@ test("a finding the reviewer left no headline on is answered without one", () =>
 // a thread with nothing written on it carries no marker to read.
 test("a thread carrying no comments raised nothing", () => {
   assert.deepEqual(readThread(threadOf()), { raised: "nothing" });
+});
+
+test("the finding on a thread is named by its severity and its headline", () => {
+  assert.equal(namedFindingOn(threadOf(renderComment(offScreen))), `high — ${offScreen.headline}`);
+});
+
+/**
+ * A caller adds the name to a line of its own, so a thread that raised nothing
+ * has to answer with nothing at all. A person's thread, the harness's own summary,
+ * and a thread with nothing written on it are the three of them.
+ */
+test("a thread that raised no finding is named nothing at all", () => {
+  assert.equal(namedFindingOn(threadOf("Can you check the line above?")), "");
+  assert.equal(namedFindingOn(threadOf("**Squiz review — 3 rounds, 7 findings**")), "");
+  assert.equal(namedFindingOn(threadOf()), "");
+});
+
+test("a field the reviewer left blank takes the separator with it", () => {
+  const noHeadline = renderComment({ ...offScreen, headline: " " });
+  assert.equal(namedFindingOn(threadOf(noHeadline)), "high");
+  // A first line naming neither field, which the writer never produces: the
+  // severity is taken back out of one that names it alone.
+  assert.equal(namedFindingOn(threadOf(noHeadline.replace(offScreen.severity, ""))), "");
 });

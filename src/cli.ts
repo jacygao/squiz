@@ -11,6 +11,7 @@
  */
 
 import { renderReply } from "./findings/comment.ts";
+import { namedFindingOn } from "./findings/thread.ts";
 import { findPullRequestForBranch } from "./github/pull-request.ts";
 import { replyInThread } from "./github/thread-actions.ts";
 import { listReviewThreads, threadLocation, type ReviewThread } from "./github/threads.ts";
@@ -143,9 +144,10 @@ function postReply(args: readonly string[]): HookExit {
  * Resolved threads are dropped. The listing is the coding agent's queue of what
  * is still open, and a thread the reviewer closed is not on it.
  *
- * The identifier leads each line and is printed as it arrived, undecorated and
- * unwrapped: it is what `squiz reply` takes back, and a line splits into the id
- * and a location even where the path holds a space.
+ * A line carries where the thread is and what the reviewer said about it, and
+ * the identifier leads it, printed as it arrived and undecorated: it is what
+ * `squiz reply` takes back, so the line splits into the identifier and the rest
+ * at its first space, whatever the path or the headline holds.
  */
 export function threadListing(pullRequest: number, threads: readonly ReviewThread[]): string {
   const open = threads.filter((thread) => !thread.isResolved);
@@ -154,8 +156,20 @@ export function threadListing(pullRequest: number, threads: readonly ReviewThrea
   if (open.length === 0) return `no open threads on #${pullRequest}\n`;
 
   const counted = `${open.length} open thread${open.length === 1 ? "" : "s"} on #${pullRequest}`;
-  const lines = open.map((thread) => `${thread.id} ${threadLocation(thread)}`);
+  const lines = open.map(listedThread);
   return `${[counted, ...lines].join("\n")}\n`;
+}
+
+/**
+ * One thread as its line: the identifier, the location, and the finding on it.
+ *
+ * A thread carrying no finding ends at its location. A person can open a thread
+ * on the pull request, and there is no severity and no headline to print for one.
+ */
+function listedThread(thread: ReviewThread): string {
+  const located = `${thread.id} ${threadLocation(thread)}`;
+  const said = namedFindingOn(thread);
+  return said === "" ? located : `${located} ${said}`;
 }
 
 // The dispatch runs only where this file is the process's entry point, so that

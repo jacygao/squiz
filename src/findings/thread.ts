@@ -9,7 +9,7 @@
  */
 
 import type { ReviewThread, ThreadComment } from "../github/threads.ts";
-import { readComment } from "./comment.ts";
+import { namedFinding, readComment } from "./comment.ts";
 import type { Severity } from "./finding.ts";
 
 /** The finding a thread carries, as the comment that opened it named it. */
@@ -51,6 +51,21 @@ export function readThread(thread: ReviewThread): ThreadReading {
     headline: opened.headline,
     codingAgentReplied: thread.comments.some(wroteByCodingAgent),
   };
+}
+
+/**
+ * What to call the finding on `thread`: its severity and its headline, as one
+ * line.
+ *
+ * Empty for a thread the reviewer did not open, and for one whose first line
+ * named neither field. A caller adds it to a line it has composed itself, and
+ * the empty string leaves that line as it stood: a thread a person opened is not
+ * a finding, and an empty severity or a printed `null` after it would say it was.
+ */
+export function namedFindingOn(thread: ReviewThread): string {
+  const reading = readThread(thread);
+  if (reading.raised !== "finding") return "";
+  return namedFinding(reading.severity, reading.headline);
 }
 
 // Only the coding agent's own marker counts. The reviewer may comment on a
