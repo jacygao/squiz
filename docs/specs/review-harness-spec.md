@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.22 (draft)
+**Version:** 0.23 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -628,7 +628,10 @@ carries what could not be posted.
 | The reviewer exceeds the review budget | The reviewer process is killed and the round records no findings. The round is recorded as a failed round rather than a clean one. |
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
+| The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |
+| The threads on the pull request cannot all be listed | Exit 0, nothing posted, and no review runs. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
+| The window is gone before the findings are posted | Exit 0, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window: a call made there is one the runtime kills the hook during, and the round would end having said nothing at all. |
 | The local state file cannot be written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. |
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |
@@ -679,21 +682,48 @@ round budgets for and bounds a round that would otherwise run away inside the
 window. A declared value below the watchdog is honoured exactly. Declaring a
 value above it moves nothing.
 
-The harness posts the round's comments inside that window. The time bound sits
-below it: settable to 480 seconds at most, which leaves two minutes for
-posting.
+Nothing the harness runs can read the ceiling back out of that registration, so
+the number is stated once in the code and the registration is held to it. The
+two saying different things is a failing test rather than a round budgeting
+against a window it no longer has.
+
+**A round divides the window into three shares.** The window is one moment the
+whole round is measured against, and every share is bounded by what is left of
+it rather than by an allowance handed out when the share begins.
+
+| Share | How long | What runs in it |
+|---|---|---|
+| Before the review | 60 seconds | The pull request lookup, the threads listing and the diff |
+| The review | The time bound, and never past what is left of the window | The reviewer |
+| Posting | What is left of the window, and never more than 120 seconds | The findings, the verdicts and the summary comment |
+
+The time bound is the most a reviewer may run rather than a promise of that
+long: it is given what the project configured or what is left of the window,
+whichever is smaller. What the calls before it spend therefore shortens the
+review rather than pushing the round past the ceiling. A round left no time to
+review in reports that and starts no reviewer, because a reviewer killed the
+moment it starts spends a round of the cap on a review nobody could have done.
+
+Stopping the reviewer runs after the moment the review had to be over by, and a
+reviewer that ignores the signal spends the grace and the kill there. That
+overrun comes out of the posting rather than out of the ceiling: a round whose
+window is gone by the time it has findings posts nothing and says so.
 
 Reaching the ceiling is the harness's last resort rather than its plan. The
 runtime signals the hook and everything below it at once, so a round that
 reaches the ceiling has no chance to stop the reviewer itself.
 
-**No single call to GitHub may take more than 30 seconds.** Those two minutes
-are shared by every call a round makes, and a round makes one for each finding
-it posts, one to read each new thread back, one to list the threads it was
-handed, and one for the summary. A call that hangs spends the budget belonging
-to all of them, and what it spends is the runtime's kill — the one failure the
-harness cannot control. A call that reaches the bound is treated as GitHub
-being unreachable, so the round exits 0 and the comments that landed stay.
+**A share is one deadline every call inside it runs under, and a call with
+nothing left on it is not made at all.** How many calls a share holds is not
+known in advance: the threads listing pages, and one finding is a create and up
+to twenty pages of read-back. A bound on each call bounds every call and none of
+them together, so a share bounded that way is no bound.
+
+**No single call to GitHub may take more than 30 seconds.** A call that hangs
+spends the share belonging to every other call in it, and what it spends is the
+runtime's kill — the one failure the harness cannot control. A call that reaches
+either bound is treated as GitHub being unreachable, so the round exits 0 and
+the comments that landed stay.
 
 This bound is not configurable. It is not a budget a project chooses but a
 guard on the one deadline the harness does not own.
@@ -880,9 +910,10 @@ on its own branch. Squiz does not create them.
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 `timeout` defaults to the most it may be, so a project can lower the time bound
-and cannot raise it. The ceiling is the runtime's rather than a preference: what
-is left of the hook's 600 seconds above the bound is what posting the round's
-comments gets.
+and cannot raise it. The ceiling is the runtime's rather than a preference: the
+rest of the hook's 600 seconds belongs to the calls the round makes before and
+after the review, and a reviewer is given what is left of the window rather than
+the whole of what is configured. The review budget names the shares.
 
 A setting outside its range, or of a type the table does not give it, is
 rejected with an error naming the setting, the value given and what was

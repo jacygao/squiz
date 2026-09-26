@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -94,6 +94,7 @@ type Setup = {
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
   readonly marginMs?: number;
+  readonly windowMs?: number;
   readonly detached?: boolean;
 };
 
@@ -109,6 +110,8 @@ type Ran = {
   readonly state: EpisodeState | null;
   /** The state file exactly as it stands, `null` where there is no file at all. */
   readonly stateSource: string | null;
+  /** How long the round itself took, with the fixture's own setup left out. */
+  readonly elapsedMs: number;
 };
 
 const ANSWER_COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
@@ -150,6 +153,24 @@ function hangs(cost: RoundCost): Reviewer {
       await new Promise<never>(() => {});
       throw new Error("the round read a parse that never finished");
     },
+  };
+}
+
+/**
+ * A reviewer that answers inside its bound and then holds on through the round's
+ * cleanup.
+ *
+ * Its output closes at once, so the review is read and the round is left with
+ * findings to post. It then ignores the signal that would stop it, so the round
+ * spends the grace and the kill after the moment the review had to be over by.
+ */
+function answersThenHolds(findings: readonly Finding[]): Reviewer {
+  return {
+    command: "/bin/sh",
+    // The wait is short and repeated, because a shell blocked in one long sleep
+    // reaches its trap only once that sleep is over.
+    args: ["-c", "trap '' TERM; exec 1>&-; while :; do sleep 0.2; done"],
+    parse: reviews({ findings }).parse,
   };
 }
 
@@ -231,6 +252,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
     await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {});
+    warm(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     const episode = episodeAt(worktree, AGENT_ID);
@@ -267,13 +289,16 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       grants: { read: ["read"], deep: ["read", "bash"] },
     };
 
+    const started = Date.now();
     const conclusion = await runRound({
       episode,
       config: { ...defaultConfig, timeout: 5, ...setup.config },
       adapter,
       charterFile,
       ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
+      ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
     });
+    const elapsedMs = Date.now() - started;
 
     const stateSource = existsSync(episode.stateFile)
       ? readFileSync(episode.stateFile, "utf8")
@@ -285,11 +310,30 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       directoriesReady,
       state: stateIn(stateSource),
       stateSource,
+      elapsedMs,
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
     await rm(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Run the fake once, and forget that it ran.
+ *
+ * The system looks a newly written executable over the first time it is run, and
+ * that look costs the best part of a second. A test that times what the round
+ * spends would be timing the look, so it is paid for here instead.
+ */
+function warm(directory: string): void {
+  try {
+    execFileSync(join(directory, "gh"), ["--warm"], { stdio: "ignore" });
+  } catch {
+    // The fake has no answer for this, so it exits 1. Running it is the point.
+  }
+  for (const name of ["count", "kinds", "count-unknown", "stdin-1"]) {
+    rmSync(join(directory, name), { force: true });
   }
 }
 
@@ -458,6 +502,23 @@ function listed(threads: readonly { readonly id: string; readonly isResolved: bo
               },
             })),
           },
+        },
+      },
+    }),
+  );
+}
+
+/**
+ * One page of the threads listing that names no thread and claims another
+ * follows, for a listing that goes on paging until something stops it.
+ */
+function listedPage(cursor: string): string {
+  return included(
+    "200 OK",
+    JSON.stringify({
+      data: {
+        node: {
+          reviewThreads: { pageInfo: { hasNextPage: true, endCursor: cursor }, nodes: [] },
         },
       },
     }),
@@ -813,6 +874,128 @@ test("the posting margin bounds every call the round makes after the review", as
     outcome?.outcome === "failed" ? outcome.reason : "",
     /did not answer within/u,
     "a round that kept posting past the margin would be killed by the runtime with nothing reported at all",
+  );
+});
+
+/**
+ * The window is one moment the whole round is measured against, not an allowance
+ * each phase is handed when it starts.
+ *
+ * The reviewer answers inside its bound and the round then spends the grace and
+ * the kill stopping it, which lands past the moment the review had to be over by.
+ * A posting margin that began afresh there would spend those two minutes on the
+ * far side of the window, and what lies on the far side of the window is the
+ * runtime killing the hook with nothing posted and the subagent recorded failed.
+ */
+test("a review that returned late leaves the posting what is left of the window, not a fresh margin", async () => {
+  const ran = await runInFixture({
+    // A window the reviewer's own cleanup is longer than what is left of, so the
+    // round reaches the posting with the window already gone.
+    windowMs: 2_000,
+    marginMs: 500,
+    answers: POSTING,
+    reviewer: answersThenHolds([finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const outcome = ran.conclusion.findings.outcomes[0];
+  assert.equal(outcome?.outcome, "failed", "a round that could not post is never a clean round");
+  assert.match(
+    outcome?.outcome === "failed" ? outcome.reason : "",
+    /ran out before this call was made/u,
+    "the window was gone before the posting started, and the round says so rather than reporting a comment it never wrote",
+  );
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "create"),
+    [],
+    "a call made past the end of the window is one the runtime kills the hook during",
+  );
+});
+
+/** How many pages the threads listing is offered before it must stop itself. */
+const OFFERED_PAGES = 30;
+
+/**
+ * The calls before the review are bounded as a phase rather than one at a time.
+ *
+ * The listing pages, so the phase makes a number of calls nobody knows in
+ * advance, and a bound per call lets every one of them have the whole of one. A
+ * phase that spends the window leaves nothing for the review it exists to set up.
+ */
+test("the calls before the review share one deadline, and the phase ends inside it", async () => {
+  const ran = await runInFixture({
+    windowMs: 1_000,
+    marginMs: 1,
+    delays: { prlist: "0.2", threads: "0.5", diff: "0.5" },
+    // A round the listing runs for, which is every round after the first.
+    rounds: [ANSWER_COST],
+    answers: { ...POSTING, threads: listed([]) },
+    sequences: {
+      threads: Array.from({ length: OFFERED_PAGES }, (_, at) => listedPage(`cursor-${at + 1}`)),
+    },
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /^no review ran:/u);
+  assert.match(ran.conclusion.reason, /could not be reached|ran out/u);
+  assert.equal(ran.invocations.length, 0, "a phase that ran out of time starts no reviewer");
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "diff"),
+    [],
+    "a call with nothing left on the deadline is not made at all",
+  );
+  const pages = ran.kinds.filter((kind) => kind === "threads").length;
+  assert.ok(
+    pages < OFFERED_PAGES,
+    `the listing took all ${pages} pages it was offered, so each call was bounded and none of them together`,
+  );
+  // Far above the deadline and far below what the same calls cost bounded one at
+  // a time, which is 15 seconds of listing alone. A tight wall-clock budget here
+  // passes alone and fails under a suite running its files at once.
+  assert.ok(
+    ran.elapsedMs < 8_000,
+    `the round took ${ran.elapsedMs}ms, which is a phase spending its calls' bounds one after another`,
+  );
+});
+
+/**
+ * The gate is the round's quietest exit: no pull request means exit 0 with
+ * nothing posted and nothing said. A lookup the deadline stopped must not reach
+ * it, or a round decides in silence that there was nothing to review.
+ */
+test("a pull request lookup that ran out of time fails the round rather than reading as no pull request", async () => {
+  const ran = await runInFixture({
+    windowMs: 1,
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /the pull request for "review-me" could not be looked up/u);
+  assert.equal(ran.invocations.length, 0);
+});
+
+test("what the calls before the review spend comes off the reviewer's own bound", async () => {
+  // The three shares add up to the ceiling only if the review gives back what
+  // the calls before it took. A reviewer still running at the ceiling is killed
+  // by the runtime, which posts nothing and fails the coding agent's subagent.
+  const ran = await runInFixture({
+    windowMs: 3_000,
+    marginMs: 1_000,
+    config: { timeout: 5 },
+    answers: POSTING,
+    reviewer: hangs(ANSWER_COST),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  const bound = /killed at its (\d+)-second bound/u.exec(ran.conclusion.reason)?.[1];
+  assert.ok(
+    bound !== undefined && Number(bound) < 5,
+    `the reviewer was given ${bound ?? "no"} seconds, which is the whole of what the project configured`,
   );
 });
 

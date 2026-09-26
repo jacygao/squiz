@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "./threads.ts";
 
 const pullRequestId = "PR_kwDOUEd2qM8AAAABDNPXSA";
@@ -555,6 +556,32 @@ test("a failure on a later page is a failure for the whole listing", async () =>
       const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
 
       assert.equal(result.outcome, "exited", "a half-read pull request is never a listing");
+    },
+  );
+});
+
+/**
+ * The reviewer rules on the threads it is handed, so a listing the round's
+ * deadline cut short has to fail rather than come back shorter. A reviewer given
+ * a subset rules on a subset, and the round then applies verdicts that close
+ * nothing while reading as a round that settled everything.
+ */
+test("a listing the deadline cut short fails, and the pages that arrived go with it", async () => {
+  await withFakeGh(
+    [
+      threadsPage([threadNode({ id: "PRRT_one" })], { hasNextPage: true, endCursor: "cursor-1" }),
+      threadsPage([threadNode({ id: "PRRT_two" })]),
+    ],
+    (gh) => {
+      // The clock stands still until the first page has been served and then
+      // jumps past the deadline, so the listing is cut at a page boundary
+      // whatever the machine is doing. A wall-clock budget here passes alone and
+      // fails under a suite running its files at once.
+      const until = deadlineIn(1_000, () => (gh.calls() === 0 ? 0 : 10_000));
+      const result = listReviewThreads(pullRequestId, { directory: tmpdir(), until });
+
+      assert.equal(result.outcome, "unreachable", "one page of a pull request is never a listing");
+      assert.equal(gh.calls(), 1, "a call with nothing left on the deadline is not made");
     },
   );
 });

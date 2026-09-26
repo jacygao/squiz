@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { HOOK_CEILING_MS } from "./loop/window.ts";
+
 function readJson(relative: string): unknown {
   const path = fileURLToPath(new URL(relative, import.meta.url));
   return JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -43,7 +45,17 @@ test("SubagentStop runs the binary through the plugin root", () => {
 
   assert.deepEqual(
     commands,
-    [{ type: "command", command: "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook", timeout: 600 }],
+    [
+      {
+        type: "command",
+        command: "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook",
+        // The ceiling the round divides into shares, declared here in seconds.
+        // Nothing at runtime can read it back out of this file, so a second
+        // number here is one the round would go on budgeting against after
+        // someone had changed it.
+        timeout: HOOK_CEILING_MS / 1_000,
+      },
+    ],
     "the registration goes through the root the runtime gives it, never an install path",
   );
 });

@@ -8,6 +8,11 @@
  * would post a second finding on a line that already has one. Both connections
  * are paged to the end for that reason, and an answer that cannot be read fails
  * the whole call rather than standing in for the threads it could not carry.
+ *
+ * A listing the shared deadline cut short fails the same way, and the pages that
+ * did arrive are dropped with it. Handing them over would have the reviewer rule
+ * on a subset of the threads, and the round would then apply verdicts that close
+ * nothing.
  */
 
 import { callGraphql, saidBy, type GhCall, type GhFailure } from "./gh.ts";

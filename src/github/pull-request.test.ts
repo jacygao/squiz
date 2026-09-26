@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { parseDiff } from "../findings/diff.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { fetchDiff, findPullRequestForBranch } from "./pull-request.ts";
 
 type FakeGh = {
@@ -153,7 +154,7 @@ function diffOfSize(count: number): string {
 
 test("a branch with an open pull request comes back with everything the round needs", async () => {
   await withFakeGh({ stdout: listing(row) }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.deepEqual(result, {
       outcome: "found",
@@ -173,7 +174,7 @@ test("the sha that comes back is the head's, never the base's", async () => {
   // carried the wrong one would be told its anchors were wrong.
   const both = { ...row, baseRefOid: "dd5609879f5cdef406c312f7398d387a85459139" };
   await withFakeGh({ stdout: listing(both) }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.equal(
       result.outcome === "found" ? result.headSha : null,
@@ -185,7 +186,7 @@ test("the sha that comes back is the head's, never the base's", async () => {
 
 test("a pull request with no description is found, with an empty one", async () => {
   await withFakeGh({ stdout: listing({ ...row, body: "" }) }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.equal(result.outcome, "found");
     assert.equal(result.outcome === "found" ? result.description : null, "");
@@ -194,9 +195,36 @@ test("a pull request with no description is found, with an empty one", async () 
 
 test("an empty list is an answer of none", async () => {
   await withFakeGh({ stdout: "[]\n" }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.deepEqual(result, { outcome: "none" });
+  });
+});
+
+/**
+ * The gate is what this protects. A round reads an answer of none as a branch
+ * nobody opened a pull request for, exits 0 and posts nothing, so a lookup the
+ * round's own deadline stopped must never arrive as one: every round would
+ * decide in silence that there was nothing to review.
+ */
+test("a lookup with nothing left on the deadline is a failure, never an answer of none", async () => {
+  await withFakeGh({ stdout: listing(row) }, (gh) => {
+    const result = findPullRequestForBranch("feature", {
+      directory: tmpdir(),
+      until: deadlineIn(0),
+    });
+
+    assert.equal(result.outcome, "failed");
+    assert.equal(gh.workingDirectory(), null, "a call with no time to answer in is not made");
+  });
+});
+
+test("the diff runs under the deadline it is given too", async () => {
+  await withFakeGh({ stdout: diffFromGitHub }, (gh) => {
+    const result = fetchDiff(142, { directory: tmpdir(), until: deadlineIn(0) });
+
+    assert.equal(result.outcome, "failed");
+    assert.equal(gh.workingDirectory(), null);
   });
 });
 
@@ -212,7 +240,7 @@ test("a gh that exits non-zero is a failure, never an answer of none", async () 
       stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)\n",
     },
     () => {
-      const result = findPullRequestForBranch("feature", tmpdir());
+      const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
       assert.deepEqual(result, {
         outcome: "failed",
@@ -224,7 +252,7 @@ test("a gh that exits non-zero is a failure, never an answer of none", async () 
 
 test("a gh that is not installed is a failure", async () => {
   await withNoGh(() => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.equal(result.outcome, "failed");
     assert.match(
@@ -239,7 +267,7 @@ test("a zero exit with no output at all is a failure", async () => {
   // `gh` said nothing and succeeded. There is no pull request in that, but
   // there is no "none" in it either.
   await withFakeGh({ stdout: "" }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.equal(result.outcome, "failed");
   });
@@ -247,7 +275,7 @@ test("a zero exit with no output at all is a failure", async () => {
 
 test("an answer that is not JSON is a failure", async () => {
   await withFakeGh({ stdout: "gh: something went sideways\n" }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.deepEqual(result, {
       outcome: "failed",
@@ -258,7 +286,7 @@ test("an answer that is not JSON is a failure", async () => {
 
 test("a row carrying no usable number is a failure", async () => {
   await withFakeGh({ stdout: '[{"number":"142"}]' }, () => {
-    const result = findPullRequestForBranch("feature", tmpdir());
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
     assert.equal(result.outcome, "failed");
   });
@@ -270,7 +298,7 @@ test("a row missing any field the round needs is a failure", async () => {
     delete missing[field];
 
     await withFakeGh({ stdout: listing(missing) }, () => {
-      const result = findPullRequestForBranch("feature", tmpdir());
+      const result = findPullRequestForBranch("feature", { directory: tmpdir() });
 
       assert.equal(
         result.outcome,
@@ -286,7 +314,7 @@ test("the branch reaches gh as one argument, whatever git let into it", async ()
   // is attacker-influenced. Passed as an array it is a value and nothing else.
   const branch = "evil/$(id);rm-rf&`x`";
   await withFakeGh({ stdout: "[]" }, (gh) => {
-    findPullRequestForBranch(branch, tmpdir());
+    findPullRequestForBranch(branch, { directory: tmpdir() });
 
     assert.deepEqual(gh.arguments(), [
       "pr",
@@ -308,7 +336,7 @@ test("gh is asked from the directory it was given", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "squiz-where-")));
   try {
     await withFakeGh({ stdout: "[]" }, (gh) => {
-      findPullRequestForBranch("feature", directory);
+      findPullRequestForBranch("feature", { directory: directory });
 
       assert.equal(gh.workingDirectory(), directory);
     });
@@ -319,7 +347,7 @@ test("gh is asked from the directory it was given", async () => {
 
 test("the diff comes back byte for byte as it arrived", async () => {
   await withFakeGh({ stdout: diffFromGitHub }, () => {
-    const result = fetchDiff(142, tmpdir());
+    const result = fetchDiff(142, { directory: tmpdir() });
 
     assert.deepEqual(result, { outcome: "fetched", diff: diffFromGitHub });
   });
@@ -330,7 +358,7 @@ test("the diff GitHub serves names the files a finding names", async () => {
   // keys every file under a name no finding matches, and each one routes to the
   // summary with nothing reporting why.
   await withFakeGh({ stdout: diffFromGitHub }, () => {
-    const result = fetchDiff(142, tmpdir());
+    const result = fetchDiff(142, { directory: tmpdir() });
     const changed = parseDiff(result.outcome === "fetched" ? result.diff : "");
 
     assert.deepEqual(
@@ -349,7 +377,7 @@ test("a diff larger than a mebibyte arrives whole", async () => {
   assert.ok(diff.length > 1024 * 1024, "the fixture has to be past the ceiling it is testing");
 
   await withFakeGh({ stdout: diff }, () => {
-    const result = fetchDiff(142, tmpdir());
+    const result = fetchDiff(142, { directory: tmpdir() });
 
     assert.equal(result.outcome, "fetched");
     assert.equal(
@@ -362,7 +390,7 @@ test("a diff larger than a mebibyte arrives whole", async () => {
 
 test("a diff GitHub refused is a failure carrying what gh said", async () => {
   await withFakeGh({ status: 1, stderr: "gh: Not Found (HTTP 404)\n" }, () => {
-    const result = fetchDiff(142, tmpdir());
+    const result = fetchDiff(142, { directory: tmpdir() });
 
     assert.deepEqual(result, {
       outcome: "failed",
@@ -373,7 +401,7 @@ test("a diff GitHub refused is a failure carrying what gh said", async () => {
 
 test("a gh that printed no diff at all is a failure", async () => {
   await withFakeGh({ stdout: "" }, () => {
-    const result = fetchDiff(142, tmpdir());
+    const result = fetchDiff(142, { directory: tmpdir() });
 
     assert.deepEqual(result, { outcome: "failed", reason: "gh answered with an empty diff" });
   });
@@ -381,7 +409,7 @@ test("a gh that printed no diff at all is a failure", async () => {
 
 test("a gh that is not installed fails the diff rather than throwing", async () => {
   await withNoGh(() => {
-    const result = fetchDiff(142, tmpdir());
+    const result = fetchDiff(142, { directory: tmpdir() });
 
     assert.equal(result.outcome, "failed");
   });
@@ -391,7 +419,7 @@ test("the diff is asked for as a diff, for the number given, where gh was pointe
   const directory = await realpath(await mkdtemp(join(tmpdir(), "squiz-diff-")));
   try {
     await withFakeGh({ stdout: diffFromGitHub }, (gh) => {
-      fetchDiff(80, directory);
+      fetchDiff(80, { directory: directory });
 
       assert.deepEqual(gh.arguments(), [
         "api",
