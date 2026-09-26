@@ -20,7 +20,7 @@ export type Span = {
  * A total of 0 is no spans at all.
  */
 export function spanCount(total: number, size: number): number {
-  return Math.ceil(total / size);
+  return Math.floor(total / size);
 }
 
 /**
