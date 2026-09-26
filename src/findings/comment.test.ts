@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readComment, renderComment } from "./comment.ts";
+import { readComment, renderComment, renderReply } from "./comment.ts";
 import {
   type ChangeFinding,
   type FileFinding,
@@ -339,4 +339,97 @@ test("a first line ending in a carriage return is read no differently", () => {
     severity: "high",
     headline: card.headline,
   });
+});
+
+/**
+ * The reply an ordinary answer goes on the thread as, taken from the live episode
+ * that posted one unmarked.
+ */
+const ordinaryReply = comment(
+  "**Squiz coding agent**",
+  "",
+  "Confirmed. Fixed: pageCount now returns Math.ceil(total / perPage) in befac71.",
+);
+
+/**
+ * The replies a shell can hand the command. Each one begins something markdown
+ * reads as a block of its own, is bold itself, carries newlines, or is a single
+ * character.
+ */
+const awkwardReplies: readonly string[] = [
+  "- pageCount: fixed\n- pageAt: fixed",
+  "# Fixed",
+  "> Card can be placed off-screen once the explanation expands",
+  "**Fixed.**",
+  "Fixed in befac71.\n\nThe clamp runs from the completion callback now.",
+  "x",
+];
+
+test("a reply is the marker on its own line, with the text beneath it (#194)", () => {
+  assert.equal(
+    renderReply("Confirmed. Fixed: pageCount now returns Math.ceil(total / perPage) in befac71."),
+    ordinaryReply,
+  );
+});
+
+/**
+ * The reviewer reads every comment on the thread and rules on what it reads, so
+ * the reply's own markdown has to survive being marked. A marker on the text's
+ * own line would make prose of a bullet and a sentence of a heading.
+ */
+test("the text is carried under the marker rather than beside it, whatever it begins", () => {
+  for (const text of awkwardReplies) {
+    assert.equal(renderReply(text), comment("**Squiz coding agent**", "", text));
+  }
+});
+
+test("every reply is read back as the coding agent's", () => {
+  const texts = [...awkwardReplies, "Fixed in befac71.", "", "   \n  "];
+  for (const text of texts) {
+    assert.equal(
+      readComment(renderReply(text)).by,
+      "coding agent",
+      `a reply read as a person's has a disagreement reported as a finding nobody answered: ${JSON.stringify(text)}`,
+    );
+  }
+});
+
+/**
+ * `squiz reply` reports its own usage rather than posting a reply with no text,
+ * so this is what the composer does with one rather than what reaches a thread.
+ */
+test("a reply with no text is the marker alone", () => {
+  assert.equal(renderReply(""), "**Squiz coding agent**");
+  assert.equal(renderReply("   \n  "), "**Squiz coding agent**");
+});
+
+// How many times `body` carries the coding agent's marker.
+function markerCount(body: string): number {
+  return body.split("**Squiz coding agent").length - 1;
+}
+
+/**
+ * A reply that already carries the marker is marked once. The reader answers off
+ * the first line and would call it the coding agent's either way, and a second
+ * marker further down is a shape nothing reading the thread has a rule for.
+ */
+test("a reply that already carries the marker is not marked again", () => {
+  const marked = "**Squiz coding agent:** fixed in befac71.";
+  const once = renderReply("Fixed in befac71.");
+
+  assert.equal(renderReply(marked), marked);
+  assert.equal(markerCount(renderReply(marked)), 1);
+  assert.equal(renderReply(once), once);
+  assert.equal(markerCount(renderReply(ordinaryReply)), 1);
+});
+
+/**
+ * The coding agent quoting the comment it answers is still the coding agent.
+ * Only the first line names an author, and the marker takes it.
+ */
+test("a reply that quotes the reviewer's comment is not read as the reviewer's", () => {
+  const quoting = renderReply(renderComment(duplicate));
+
+  assert.equal(readComment(quoting).by, "coding agent");
+  assert.ok(quoting.endsWith(duplicateComment), "the comment being answered is quoted as it stands");
 });
