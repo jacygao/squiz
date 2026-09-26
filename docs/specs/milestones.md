@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.8 (draft)
+**Version:** 0.9 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -164,8 +164,8 @@ separate channels and stay separate.
 
 ## M6 — The summary comment
 
-Classification of every thread into its terminal status at close, the re-opened
-counter, and the three-block comment, posted once and never edited.
+Classification of every thread into its terminal status at close, and the
+three-block comment, posted once and never edited.
 
 ### Acceptance criteria
 
