@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -440,6 +440,9 @@ const pullRequestRow = JSON.stringify([
   },
 ]);
 
+/** A run of the binary, and the request body the fake `gh` was sent last. */
+type FakeRun = Run & { readonly sent: string };
+
 /**
  * Run the binary's `args` where a branch is checked out, with a `gh` on PATH
  * that answers the pull request lookup with one pull request and the API call
@@ -448,23 +451,31 @@ const pullRequestRow = JSON.stringify([
  * A fake binary rather than an injected runner, as the rest of the repository
  * tests `gh` with. The two calls are told apart by the `graphql` argument: the
  * lookup is `gh pr list`, which is not an API call and carries no status line.
+ *
+ * What the fake was sent on stdin is kept, so that a test can assert the body a
+ * command composed rather than only what it printed about it.
  */
-async function withFakeGh(args: readonly string[], api: ApiAnswer): Promise<Run> {
+async function withFakeGh(args: readonly string[], api: ApiAnswer): Promise<FakeRun> {
   const directory = await mkdtemp(join(tmpdir(), "squiz-gh-"));
   try {
     await writeFile(join(directory, "list.out"), pullRequestRow, "utf8");
+    // Written empty first, so that a command that asked gh for nothing at all is
+    // read back as a command that sent nothing rather than as a missing fixture.
+    await writeFile(join(directory, "api.in"), "", "utf8");
     await writeFile(join(directory, "api.out"), api.stdout ?? "", "utf8");
     await writeFile(join(directory, "api.err"), api.stderr ?? "", "utf8");
     await writeFile(join(directory, "api.status"), String(api.status ?? 0), "utf8");
     await writeFile(join(directory, "gh"), fakeGh(directory), "utf8");
     await chmod(join(directory, "gh"), 0o755);
 
-    return await run(shim, args, {
+    const result = await run(shim, args, {
       cwd: onABranch,
       // node and git have to stay reachable: the shim execs node, and the
       // commands resolve the branch with git.
       path: `${directory}:${process.env["PATH"] ?? ""}`,
     });
+
+    return { ...result, sent: await readFile(join(directory, "api.in"), "utf8") };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -475,8 +486,10 @@ function fakeGh(directory: string): string {
   return [
     "#!/bin/sh",
     // The request body arrives on stdin, and a gh that never read it would have
-    // the caller fail on a broken pipe instead of on the answer below.
-    "cat > /dev/null",
+    // the caller fail on a broken pipe instead of on the answer below. It is
+    // kept rather than dropped: the last call of a command wrote it, which is
+    // the one whose body a test asserts.
+    `cat > ${at}/api.in`,
     'for arg in "$@"; do',
     '  if [ "$arg" = graphql ]; then',
     `    cat ${at}/api.out`,
@@ -548,4 +561,22 @@ test("a reply that landed names the thread that took it", async () => {
   assert.equal(result.stdout, "replied in PRRT_somewhere on #80\n");
   assert.equal(result.stderr, "");
   assert.equal(result.code, 0);
+});
+
+/** The comment body inside the reply mutation the fake `gh` was sent. */
+function replyBodySent(sent: string): unknown {
+  const request = JSON.parse(sent) as { readonly variables?: { readonly body?: unknown } };
+  return request.variables?.body;
+}
+
+test("a reply is posted under the coding agent's marker, not as the text alone (#194)", async () => {
+  const posted = answered({ data: { addPullRequestReviewThreadReply: { comment: {} } } });
+  const result = await withFakeGh(["reply", "PRRT_somewhere", "Fixed in befac71."], posted);
+
+  assert.equal(result.stdout, "replied in PRRT_somewhere on #80\n");
+  assert.equal(
+    replyBodySent(result.sent),
+    "**Squiz coding agent**\n\nFixed in befac71.",
+    "an unmarked reply reads as a person's, and the thread it answers is reported as a finding nobody answered",
+  );
 });

@@ -10,6 +10,7 @@
  * cannot be read as a pull request with nothing open on it.
  */
 
+import { renderReply } from "./findings/comment.ts";
 import { findPullRequestForBranch } from "./github/pull-request.ts";
 import { replyInThread } from "./github/thread-actions.ts";
 import { listReviewThreads, threadLocation, type ReviewThread } from "./github/threads.ts";
@@ -101,6 +102,11 @@ function listThreads(): HookExit {
  *
  * The pull request is looked up before the reply, so that a thread worked from
  * a branch whose pull request is gone is answered rather than replied to.
+ *
+ * What is posted carries the coding agent's marker rather than the text alone.
+ * The marker is the only thing that tells the reply from a comment a person left,
+ * and a thread read back at the close is a disagreement or a finding nobody
+ * answered depending on which it was.
  */
 function postReply(args: readonly string[]): HookExit {
   const id = args[0] ?? "";
@@ -121,7 +127,7 @@ function postReply(args: readonly string[]): HookExit {
     return 0;
   }
 
-  const action = replyInThread(id, body, { directory });
+  const action = replyInThread(id, renderReply(body), { directory });
   if (action.outcome !== "acted") {
     reportFailure(`nothing replied in ${id}: ${action.reason}`);
     return 0;
