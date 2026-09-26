@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.25 (draft)
+**Version:** 0.26 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -957,6 +957,7 @@ until something asks.
 | **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
+| **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 
 Nothing at P2 gets an interface built for it in advance.
 
