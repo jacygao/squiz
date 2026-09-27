@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.34 (draft)
+**Version:** 0.36 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -153,6 +153,25 @@ flowchart TD
    finishes again. A thread a person opened is counted by neither the arithmetic
    nor the reason, so it never blocks the coding agent and an episode ends with
    one still open.
+
+   Each open thread gets one line: its identifier, then where it is. The reason
+   does not say what the finding is. `squiz threads` says that, and the reason
+   names the command. The identifier comes first on the line in both, so the
+   agent copies it from either into `squiz reply`.
+
+   ```
+   Squiz reviewed the change on this branch and left 2 comments on PR #41.
+
+   2 threads are open on it:
+   PRRT_kwDOL7tYbc5abcd1 packages/sync/src/queue.ts:134
+   PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57
+
+   The commands that work them:
+     squiz threads
+     squiz reply <id> <text>
+
+   Address what applies, reply on anything you disagree with, then finish.
+   ```
 5. **Close the episode.** Otherwise the harness posts one summary comment on the
    pull request and exits 0. This happens whether or not threads are still open,
    and what remains open is what the summary reports and what a person then

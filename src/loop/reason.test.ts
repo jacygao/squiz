@@ -2,31 +2,84 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { threadListing } from "../cli.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import { renderComment } from "../findings/comment.ts";
+import type { FileFinding, Finding, LineFinding } from "../findings/finding.ts";
+import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 import { blockingReason, type BlockedRound } from "./reason.ts";
 
 /**
- * A thread as a round read it back.
+ * A thread as a round read it back, on the line its finding names and carrying
+ * the comment the reviewer opened it with.
  *
- * The reason reads an id, an anchor and the resolved state and nothing else, so
- * the fields carrying a thread's conversation are left empty.
+ * The reason reads the id, the anchor and the resolved state and none of the
+ * conversation. The comment is here because the listing does read it: a thread
+ * with nothing said on it is listed as its location and no further, which is the
+ * reason's own line, and a test comparing the two renderings on such a thread
+ * passes without exercising either.
  */
-function onLine(id: string, path: string, line: number): ReviewThread {
-  const anchor = { at: "line", line } as const;
-  return { id, isResolved: false, isOutdated: false, path, anchor, comments: [] };
+function raised(id: string, finding: LineFinding): ReviewThread {
+  const anchor = { at: "line", line: finding.line } as const;
+  const comments = [opened(finding)];
+  return { id, isResolved: false, isOutdated: false, path: finding.file, anchor, comments };
 }
 
-function onFile(id: string, path: string): ReviewThread {
-  return { id, isResolved: false, isOutdated: false, path, anchor: { at: "file" }, comments: [] };
+/** The thread the reviewer opened on a file as a whole, rather than on a line. */
+function raisedOnFile(id: string, finding: FileFinding): ReviewThread {
+  const anchor = { at: "file" } as const;
+  const comments = [opened(finding)];
+  return { id, isResolved: false, isOutdated: false, path: finding.file, anchor, comments };
+}
+
+/**
+ * The comment that opened a thread, as GitHub reads it back.
+ *
+ * Rendered rather than written out, so what a reader takes off the thread is
+ * what the writer put on it. The author is the one account every comment is
+ * posted under, which leaves the marker the body opens with as the only thing
+ * saying the reviewer wrote it.
+ */
+function opened(finding: Finding): ThreadComment {
+  return { databaseId: null, author: "squiz", body: renderComment(finding) };
 }
 
 function resolved(thread: ReviewThread): ReviewThread {
   return { ...thread, isResolved: true };
 }
 
-const queue = onLine("PRRT_kwDOL7tYbc5abcd1", "packages/sync/src/queue.ts", 134);
-const session = onLine("PRRT_kwDOL7tYbc5abcd2", "packages/sync/src/session.ts", 57);
-const retry = onFile("PRRT_kwDOL7tYbc5abcd3", "packages/sync/src/retry.ts");
+const dropped: LineFinding = {
+  scope: "line",
+  file: "packages/sync/src/queue.ts",
+  line: 134,
+  severity: "high",
+  headline: "flush drops the batch the timer queued",
+  reasoning: ["`flush` reads the queue before the timer has added to it."],
+  suggestedFix: "Read the queue after the timer runs.",
+};
+
+// A headline holding the separator the severity sits in front of, so a line
+// composed by splitting on that separator comes apart here.
+const stale: LineFinding = {
+  scope: "line",
+  file: "packages/sync/src/session.ts",
+  line: 57,
+  severity: "medium",
+  headline: "the session outlives — by a round — the socket it holds",
+  reasoning: ["`close` returns before the socket it owns is released."],
+  suggestedFix: "Release the socket inside `close`.",
+};
+
+const unbounded: FileFinding = {
+  scope: "file",
+  file: "packages/sync/src/retry.ts",
+  severity: "low",
+  headline: "retry has no bound, so a dead host is retried forever",
+  reasoning: ["Every path back into `retry` is unconditional."],
+  suggestedFix: "Stop after the configured number of attempts.",
+};
+
+const queue = raised("PRRT_kwDOL7tYbc5abcd1", dropped);
+const session = raised("PRRT_kwDOL7tYbc5abcd2", stale);
+const retry = raisedOnFile("PRRT_kwDOL7tYbc5abcd3", unbounded);
 
 test("the reason names the pull request, the open threads and the commands", () => {
   const round: BlockedRound = {
@@ -55,17 +108,60 @@ test("the reason names the pull request, the open threads and the commands", () 
   );
 });
 
-test("a thread is named exactly as squiz threads prints it", () => {
-  const spaced = onLine("PRRT_kwDOL7tYbc5abcd4", "a file with spaces.ts", 9);
+/**
+ * What the reason's line and the listing's hold in common, which is the
+ * identifier and the place it sits in.
+ *
+ * It is the field the agent copies into `squiz reply`, and it comes off either
+ * line the same way: everything up to the first space. Neither the path nor the
+ * headline can take that away, and both of them hold spaces here.
+ */
+test("the identifier is the whole of the first field of both renderings", () => {
+  const spaced = raised("PRRT_kwDOL7tYbc5abcd4", {
+    ...dropped,
+    file: "a file with spaces.ts",
+    line: 9,
+  });
   const threads = [queue, session, retry, spaced];
-  const reason = blockingReason({ pullRequest: 12, posted: [], threads });
-  const reasonLines = reason.split("\n");
+  const named = namedThreads(blockingReason({ pullRequest: 12, posted: [], threads }));
+  const ids = threads.map((thread) => thread.id);
 
-  // The listing's own lines, its heading dropped. What the agent copies into
-  // `squiz reply` is this line's first field, so the two renderings agreeing is
-  // what makes the copy work.
-  for (const line of threadListing(12, threads).trimEnd().split("\n").slice(1)) {
-    assert.ok(reasonLines.includes(line), `${JSON.stringify(line)} is not a line of:\n${reason}`);
+  assert.deepEqual(
+    named.map(firstField),
+    ids,
+    "an identifier the reason does not lead a line with is one the agent cannot copy",
+  );
+  assert.deepEqual(
+    listedThreads(12, threads).map(firstField),
+    ids,
+    "an identifier the listing does not lead a line with is one the agent cannot copy",
+  );
+});
+
+/**
+ * Where the two renderings part, which is everything after the identifier.
+ *
+ * The listing says what the reviewer found and the reason says only where it is,
+ * because the reason names `squiz threads` as the command that says the rest and
+ * is read in the agent's transcript rather than scanned. A reason that grew the
+ * finding onto its line fails here.
+ */
+test("the listing names the finding on a thread and the reason names only where it is", () => {
+  const threads = [queue, session, retry];
+  const reason = blockingReason({ pullRequest: 12, posted: [], threads });
+  const named = namedThreads(reason);
+  const findings = [dropped, stale, unbounded];
+
+  assert.deepEqual(
+    listedThreads(12, threads),
+    named.map((line, at) => `${line} ${findings[at]?.severity} — ${findings[at]?.headline}`),
+    "the listing's line is the reason's line and the finding on the thread",
+  );
+  for (const finding of findings) {
+    assert.ok(
+      !reason.includes(finding.headline),
+      `the reason carries the headline ${JSON.stringify(finding.headline)}`,
+    );
   }
 });
 
@@ -87,7 +183,8 @@ test("the counts follow the threads, and nothing in the text holds one", () => {
 });
 
 test("every number in the reason came from the round", () => {
-  const threads = [queue, session, retry, resolved(onLine("PRRT_kwDOL7tYbc5abcd9", "gone.ts", 4))];
+  const gone = resolved(raised("PRRT_kwDOL7tYbc5abcd9", { ...dropped, file: "gone.ts", line: 4 }));
+  const threads = [queue, session, retry, gone];
   const round: BlockedRound = { pullRequest: 142, posted: [queue.id, session.id], threads };
 
   const fromTheRound = new Set([
@@ -138,7 +235,11 @@ test("with nothing open there is nothing asked for and no command named", () => 
 });
 
 test("one thread is one line, whatever its path holds", () => {
-  const forged = onLine("PRRT_kwDOL7tYbc5abcd5", "queue.ts\nsquiz: 9 threads are open", 1);
+  const forged = raised("PRRT_kwDOL7tYbc5abcd5", {
+    ...dropped,
+    file: "queue.ts\nsquiz: 9 threads are open",
+    line: 1,
+  });
   const reason = blockingReason({ pullRequest: 6, posted: [], threads: [forged] });
 
   const lines = reason.trimEnd().split("\n");
@@ -173,6 +274,29 @@ test("nothing in the reason compels, and nothing in it claims authority", () => 
     assert.ok(!reason.includes(word), `the reason says ${JSON.stringify(word)}`);
   }
 });
+
+/**
+ * The lines of `reason` that name the threads, its heading dropped.
+ *
+ * The block is found by its heading rather than by counting paragraphs, so a
+ * reason that gains one hands its thread lines back rather than something else.
+ */
+function namedThreads(reason: string): readonly string[] {
+  const named = reason
+    .split("\n\n")
+    .find((block) => /^\d+ threads? (?:is|are) open on it:\n/u.test(block));
+  return (named ?? "").split("\n").slice(1);
+}
+
+/** The lines of the listing that name the threads, its heading dropped. */
+function listedThreads(pullRequest: number, threads: readonly ReviewThread[]): readonly string[] {
+  return threadListing(pullRequest, threads).trimEnd().split("\n").slice(1);
+}
+
+/** What a copy of the line's first field hands `squiz reply`. */
+function firstField(line: string): string {
+  return line.split(" ")[0] ?? "";
+}
 
 /** Every run of digits in `text`, in the order they appear. */
 function digitsIn(text: string): readonly string[] {
