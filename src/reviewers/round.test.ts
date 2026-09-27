@@ -23,6 +23,19 @@ const scratchDirectory = ".squiz/agent-1/scratch";
  */
 const BOUND = 0.4;
 
+/**
+ * How long after being asked to stop a reviewer starts one more tool, in
+ * milliseconds. Inside the grace it is given to exit.
+ */
+const IN_GRACE_MS = 200;
+
+/**
+ * A bound shorter than the interval at which a running round reads the process
+ * table, in seconds, so that a tool started under it is recorded by no reading
+ * except the one the round takes as it stops.
+ */
+const FLOOD_BOUND = (LOOK_MS - 50) / 1_000;
+
 test("the reviewer runs in the work tree holding the change", async () => {
   await inATree(async (tree) => {
     const round = await runRound(reviewer(reporting("process.cwd()")).adapter, at(tree), 10);
@@ -673,6 +686,57 @@ test("a round at read looks for nothing outside the reviewer's group", async () 
   });
 });
 
+/**
+ * A reviewer that ignores `SIGTERM` goes on running for the whole grace, and what
+ * it starts in there is as much outside the reviewer's group as what it started
+ * before. A round that stopped looking when it signalled has no reading left that
+ * the reviewer is still the parent in, and the escalation reparents the tool
+ * before anything could name it.
+ */
+test("a tool the reviewer detached inside the grace is stopped too (#143)", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(detachingOnSignal(tree)).adapter, deeply(tree), BOUND);
+    assert.equal(round.outcome, "timed-out");
+
+    const tool = toolIn(tree);
+    assert.ok(
+      await gone(tool),
+      `the tool ${tool} started inside the grace outlived the round that asked for it to stop`,
+    );
+  });
+});
+
+/**
+ * A reviewer that floods is stopped by the bound the reader reads, and closing its
+ * output is not how it is stopped. The pipe going is what kills it on that path:
+ * its next write fails and it exits without having been asked to, so its own
+ * cleanup of the tools it detached never runs, and neither does the reading that
+ * would have named them. Both need the reviewer to still be the parent of what it
+ * started.
+ */
+test("a tool the reviewer detached is stopped when the bound ends a flood (#143)", async () => {
+  await inATree(async (tree) => {
+    const asked = join(tree, "signal");
+    const round = await runRound(
+      reviewer(detachingThenFlooding(tree, obliging(asked))).adapter,
+      deeply(tree),
+      FLOOD_BOUND,
+    );
+    assert.equal(round.outcome, "timed-out");
+
+    const tool = toolIn(tree);
+    assert.ok(
+      await gone(tool),
+      `the detached tool ${tool} outlived the round whose bound ended the flood`,
+    );
+    assert.equal(
+      readFileSync(asked, "utf8"),
+      "SIGTERM",
+      "the tool was killed outright rather than asked, which leaves a write half made",
+    );
+  });
+});
+
 /** Stop what a test left running, which is not something for a test to fail over. */
 function stopGroup(pid: number): void {
   try {
@@ -825,6 +889,50 @@ function leavingEarly(tree: string): string {
 /** A reviewer that answers the signal, while the tool it started does not. */
 function obedient(tree: string): string {
   return withTool(tree, "setInterval(() => {}, 1000);");
+}
+
+/**
+ * The lines that start one detached tool and record what it was, for a reviewer
+ * that starts one at a moment of its own rather than before anything else.
+ *
+ * `spawn` and `fs` are the reviewer's, declared above wherever this is used.
+ */
+function startingTool(tree: string, tool: (readyFile: string) => string): string {
+  const pidFile = join(tree, "pids");
+  const readyFile = join(tree, "ready");
+  return [
+    `const started = spawn(process.execPath, ["-e", ${JSON.stringify(tool(readyFile))}], { stdio: "ignore", detached: true });`,
+    "started.unref();",
+    `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + started.pid);`,
+  ].join("\n");
+}
+
+/**
+ * A reviewer that answers no signal, and starts a detached tool a moment after
+ * being asked to stop.
+ *
+ * It records its own identifier before anything else, so a round that never
+ * reached it is told apart from one whose tool was never recorded.
+ */
+function detachingOnSignal(tree: string): string {
+  const pidFile = join(tree, "pids");
+  return [
+    'const { spawn } = require("node:child_process");',
+    'const fs = require("node:fs");',
+    `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+    `process.on('SIGTERM', () => { setTimeout(() => { ${startingTool(tree, deafly)} }, ${IN_GRACE_MS}); });`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+}
+
+/** A reviewer that detaches a tool and then floods its output until it is stopped. */
+function detachingThenFlooding(tree: string, tool: (readyFile: string) => string): string {
+  return [
+    'const { spawn } = require("node:child_process");',
+    'const fs = require("node:fs");',
+    startingTool(tree, tool),
+    flooding,
+  ].join("\n");
 }
 
 /** A reviewer that detaches a tool answering no signal, and answers none itself. */

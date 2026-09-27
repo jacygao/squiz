@@ -279,8 +279,17 @@ async function attempt(
   // Read as the chunks arrive, so that a reviewer flooding its output is
   // stopped by the bound even where the loop never reaches a timer.
   let overran = false;
+  // Leaving the stream open on the way out is what makes the reviewer outlive
+  // this. Destroying it closes the pipe, and the reviewer dies on its next write:
+  // before it has been asked to stop, so a CLI that reaps the tools it detached
+  // never gets to, and before the reading that would name those tools, which
+  // needs the reviewer to still be their parent. The stream is destroyed once the
+  // round has stopped everything instead.
+  const chunks: AsyncIterableIterator<Uint8Array> = child.stdout.iterator({
+    destroyOnReturn: false,
+  });
   const bounded = async function* (): AsyncGenerator<Uint8Array> {
-    for await (const chunk of child.stdout) {
+    for await (const chunk of chunks) {
       if (bound.passed()) {
         overran = true;
         return;
@@ -461,19 +470,32 @@ type Owned = {
  * is outside the grant as much as outside the bound.
  */
 async function stop(owned: Owned): Promise<void> {
-  // A detached tool is named by the chain of parents leading back to the
-  // reviewer, so the last look for one comes before the signal that ends it.
-  const outside = await owned.detached.groups();
-  owned.detached.stopLooking();
-  if (owned.gone() && !groupRuns(owned) && !owned.detached.left()) return;
-  signal(owned, "SIGTERM");
-  signalEach(outside, "SIGTERM");
-  if (await settled(owned, GRACE_MS)) return;
-  signal(owned, "SIGKILL");
-  // Asked again, because the grace is long enough for an identifier to be reused
-  // and nothing is sent to a group that cannot be shown to be this round's.
-  signalEach(await owned.detached.groups(), "SIGKILL");
-  await settled(owned, GRACE_MS);
+  try {
+    // A detached tool is named by the chain of parents leading back to the
+    // reviewer, so a reading comes before each signal that could end it.
+    const outside = await owned.detached.groups();
+    if (owned.gone() && !groupRuns(owned) && !owned.detached.left()) return;
+    signal(owned, "SIGTERM");
+    signalEach(outside, "SIGTERM");
+    // The reading goes on through the grace. A reviewer that ignores the signal
+    // runs for the whole of it and can start a tool inside it, and only a reading
+    // taken while the reviewer is still there can say whose that tool is.
+    if (await settled(owned, GRACE_MS)) return;
+    // Read again before the kill, and while the reviewer is still the parent of
+    // what it started. The grace is also long enough for an identifier to be
+    // reused, so nothing is sent to a group that cannot be shown to be this
+    // round's.
+    const late = await owned.detached.groups();
+    signal(owned, "SIGKILL");
+    // A tool that appeared after the reviewer was asked to stop is killed
+    // outright. The round has no grace left to offer it, and a tool still running
+    // when the round returns is worse than a write of its own left half made.
+    signalEach(late, "SIGKILL");
+    await settled(owned, GRACE_MS);
+  } finally {
+    // However this ended, nothing of the round goes on reading the process table.
+    owned.detached.stopLooking();
+  }
 }
 
 /**

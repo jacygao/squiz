@@ -375,8 +375,12 @@ group of its own, and no identifier of the reviewer's group names it. At `deep`,
 whose grant is the only one carrying a tool that starts a group of its own, the
 round reads the process table as the reviewer runs and records every group below
 the reviewer that is not the reviewer's. Each of those is signalled alongside the
-reviewer's group, on the same grace and the same escalation. A group is signalled
-only where the process holding its identifier is still the one that was recorded.
+reviewer's group, on the same grace and the same escalation. The reading goes on
+through the grace, and the last one is taken before the reviewer is killed, so a
+tool the reviewer starts after being asked to stop is recorded while the reviewer
+is still there to attribute it to. Such a tool is killed outright, because the
+round has no grace left to offer it. A group is signalled only where the process
+holding its identifier is still the one that was recorded.
 Identifiers are reused, and a stranger's process killed over a reused one is worse
 than a tool left running. A tool started in the last instant of a reviewer that
 exits on its own is recorded by nothing, because the parentage that names such a
