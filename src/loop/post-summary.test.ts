@@ -172,7 +172,6 @@ const closing: ClosingRound = {
   verdicts: {
     threads: [{ thread: "PRRT_one", ruled: "open", outcome: "left-open" }],
     unapplied: [],
-    reopened: 0,
   },
   findings,
   because: "round-cap",
@@ -274,23 +273,16 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
  * during, and the round would then end having said nothing at all.
  */
 /**
- * A close reached before the review composes nothing, and which answer that is
- * turns on the episode's state rather than on the pull request, which looks the
- * same either way.
+ * A close reached before the review composes nothing, and says what the episode
+ * loses by it. The rounds it ran are the whole of what decides that.
  */
-test("a close before the review is silent where the episode was reported and named where it was not", () => {
-  const rounds = [COST, COST];
-
-  assert.deepEqual(
-    summaryNotComposed({ pullRequest: PULL_REQUEST, rounds, spentOutsideRounds: unspent, closeReported: true }),
-    { outcome: "reported-before" },
-  );
-
+test("a close before the review names the rounds whose findings nothing reports", () => {
   const never = summaryNotComposed({
     pullRequest: PULL_REQUEST,
-    rounds,
+    rounds: [COST, COST],
     spentOutsideRounds: unspent,
   });
+
   assert.equal(never.outcome, "never-composed");
   assert.match(
     never.outcome === "never-composed" ? never.reason : "",

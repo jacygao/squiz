@@ -1,7 +1,7 @@
 /**
- * One round, composed: gate on the pull request, run the reviewer, post what it
- * found, apply what it ruled, post the episode's summary where the round closed
- * it, and return what the round concluded.
+ * One round, composed: gate on the episode and on the pull request, run the
+ * reviewer, post what it found, apply what it ruled, post the episode's summary
+ * where the round closed it, and return what the round concluded.
  *
  * **A round the reviewer failed is not a round that found nothing.** The
  * reviewer's own outcome is carried out to the caller, so a round killed at its
@@ -42,6 +42,7 @@ import {
   recordSpendOutsideRounds,
   writeState,
   type EpisodeState,
+  type StateWrite,
 } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
@@ -118,9 +119,15 @@ export type RoundAccount = {
 export type RoundConclusion =
   /** No open pull request has this branch as its head: nothing ran, nothing posted. */
   | { readonly outcome: "no-pull-request" }
+  /**
+   * The episode had already reported its close, so this firing ran nothing and
+   * posted nothing. Its comment is on the pull request, or the firing that could
+   * not post one said so.
+   */
+  | { readonly outcome: "episode-over" }
   /** Another round. The coding agent is handed the open threads, with this reason. */
   | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount)
-  /** The episode is over, for the reason the decision gave. */
+  /** This round ended the episode, for the reason the decision gave. */
   | ({
       readonly outcome: "close";
       readonly because: ClosingReason;
@@ -130,6 +137,13 @@ export type RoundConclusion =
        * comment, and it cannot read that off a field that is missing.
        */
       readonly summary: EpisodeSummary;
+      /**
+       * Whether the close was recorded in the episode's state.
+       *
+       * A close nothing recorded is one no later firing can read, so it reviews
+       * this pull request again. The caller reports the write that failed.
+       */
+      readonly recorded: StateWrite;
     } & RoundAccount)
   /**
    * The round failed. Never a clean pass: `failure` says whose failure it was,
@@ -190,23 +204,26 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     until: deadlineIn(Math.min(PRE_REVIEW_MARGIN_MS, beforePosting.remaining())),
   };
 
+  const stateRead = openState(episode);
+  if ("ended" in stateRead) return stateRead.ended;
+  const onFile = stateRead.step;
+
+  // An episode that reported its close is over, and nothing here is read before
+  // this. The bounds are the wrong question: a cap raised between firings would
+  // let a closed episode review again, and it would post a second comment for one
+  // episode. A firing of one asks GitHub nothing at all.
+  if (onFile?.closeReported === true) return { outcome: "episode-over" };
+
   const gated = gate(preReview);
   if ("ended" in gated) return gated.ended;
   const pullRequest = gated.step;
 
-  const stateRead = openState(episode, pullRequest.number);
-  if ("ended" in stateRead) return stateRead.ended;
-  const state = stateRead.step;
+  const state = onPullRequest(onFile, pullRequest.number);
 
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return {
-      outcome: "close",
-      because: over,
-      summary: summaryNotComposed(state),
-      ...nothingDone(pullRequest.number),
-    };
+    return closing(episode, over, summaryNotComposed(state), state, nothingDone(pullRequest.number));
   }
 
   const listing = handOver(pullRequest, preReview);
@@ -281,7 +298,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   );
 
   if (decision.next === "close") {
-    return closed(episode, decision.because, account, recorded, handedOver, posting);
+    return closeAfterReview(episode, decision.because, account, recorded, handedOver, posting);
   }
   return {
     outcome: "block",
@@ -328,25 +345,35 @@ function gate(call: GhCall): Step<PullRequest> {
 }
 
 /**
- * The episode's state as this round starts, or the conclusion it ended on.
+ * What the episode's state file holds as this round starts, `null` where the
+ * episode has none, or the conclusion the round ended on instead.
  *
- * A state file that will not read back ends the round before the reviewer runs.
- * The round count is the only bound on the loop, and a round that reviewed on a
- * count it could not read would start the count again on every firing.
+ * Read before anything else the round does, because this file is what says the
+ * episode is over.
  *
- * The pull request is the one the gate found rather than the one the file names.
- * The rounds recorded are the episode's however many pull requests they read,
- * and the cap and the token bound are the episode's too.
+ * A file that will not read back ends the round before the reviewer runs. The
+ * round count is the only bound on the loop, and a round that reviewed on a count
+ * it could not read would start the count again on every firing.
  */
-function openState(episode: Episode, pullRequest: number): Step<EpisodeState> {
+function openState(episode: Episode): Step<EpisodeState | null> {
   const read = readState(episode);
   if (read.outcome === "unreadable") {
     return { ended: failed("harness", `no review ran: ${read.reason}`) };
   }
-  if (read.outcome === "absent") {
-    return { step: { pullRequest, rounds: [], spentOutsideRounds: unspent } };
-  }
-  return { step: { ...read.state, pullRequest } };
+  if (read.outcome === "absent") return { step: null };
+  return { step: read.state };
+}
+
+/**
+ * The episode's state against the pull request this round reviews, which is the
+ * one the gate found rather than the one the file names.
+ *
+ * The rounds recorded are the episode's however many pull requests they read, and
+ * the cap and the token bound are the episode's too.
+ */
+function onPullRequest(state: EpisodeState | null, pullRequest: number): EpisodeState {
+  if (state === null) return { pullRequest, rounds: [], spentOutsideRounds: unspent };
+  return { ...state, pullRequest };
 }
 
 /**
@@ -570,12 +597,12 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
 }
 
 /**
- * The close, with the episode's summary comment on the pull request and the close
- * recorded in the episode's state.
+ * The close of a round that reviewed, with the episode's summary comment on the
+ * pull request.
  *
- * The summary goes up last, after the findings and the verdicts. A thread is what
- * the next reader works, and a comment that took the margin from the threads
- * would report an episode whose findings never landed.
+ * The comment goes up last, after the findings and the verdicts. A thread is what
+ * the next reader works, and a comment that took the margin from the threads would
+ * report an episode whose findings never landed.
  *
  * `handedOver` is the listing this round made, which is where the headline of
  * every finding raised before this round is. The account carries the threads this
@@ -586,7 +613,7 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
  * failure that ended the coding agent's turn would cost the work the round was
  * reviewing.
  */
-function closed(
+function closeAfterReview(
   episode: Episode,
   because: ClosingReason,
   account: RoundAccount,
@@ -605,14 +632,31 @@ function closed(
     },
     { directory: on.directory, until: on.margin },
   );
+  return closing(episode, because, summary, state, account);
+}
 
-  // Recorded so that a later firing of the episode knows the close was reported,
-  // whether the comment landed or the failure to post it was announced here. A
-  // write that failed is not reported: the comment is already on the pull request,
-  // and a state file that will not take this is one the next firing of the episode
-  // reports before it reviews anything.
-  writeState(episode, { ...state, closeReported: true });
-  return { outcome: "close", because, summary, ...account };
+/**
+ * The end of an episode: what closed it, what became of its comment, and the
+ * close written to the episode's state.
+ *
+ * Every path that ends an episode comes through here, and the one write is why.
+ * The mark is what stops a later firing reviewing the same pull request and
+ * posting a second comment for one episode, so a path that ended an episode
+ * without it is one the loop does not treat as ended at all.
+ *
+ * A write that failed is carried out rather than swallowed. It leaves the episode
+ * looking open to every later firing, which is worth a line of its own, and it
+ * takes nothing away from a comment that posted.
+ */
+function closing(
+  episode: Episode,
+  because: ClosingReason,
+  summary: EpisodeSummary,
+  state: EpisodeState,
+  account: RoundAccount,
+): RoundConclusion {
+  const recorded = writeState(episode, { ...state, closeReported: true });
+  return { outcome: "close", because, summary, recorded, ...account };
 }
 
 type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;

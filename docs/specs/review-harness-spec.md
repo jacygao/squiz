@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.42 (draft)
+**Version:** 0.43 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -113,15 +113,18 @@ is reached.
 An episode is keyed by the subagent's id from the hook payload, which is the
 same every time that subagent stops. Its state lives in `.squiz/<episode>/`
 inside the worktree, and holds the round count, the pull request number, the
-cost of each round, the reviewer's session directory, and its scratch space.
+cost of each round, whether the episode has reported its close, the reviewer's
+session directory, and its scratch space.
 
 ### End-to-end workflow
 
 ```mermaid
 flowchart TD
     A[Coding agent finishes its turn] --> B[SubagentStop hook fires]
-    B --> C{Pull request for this branch?}
-    C -->|no| D[Exit 0, nothing happens]
+    B --> K{Episode already closed?}
+    K -->|yes| D[Exit 0, nothing happens]
+    K -->|no| C{Pull request for this branch?}
+    C -->|no| D
     C -->|yes| E[Reviewer runs locally against<br/>the working tree]
     E --> F[Findings posted as threads<br/>on the pull request]
     F --> G{Threads open and rounds remaining?}
@@ -133,20 +136,25 @@ flowchart TD
 
 ### A round, step by step
 
-1. **Gate on the pull request.** The hook looks for a pull request whose head is
+1. **Gate on the episode.** The hook reads the episode's state file first. An
+   episode that has reported its close is over: the hook exits 0, no reviewer
+   runs, and nothing is asked of GitHub. The round cap and the token bound are not
+   consulted, because an episode that is over stays over whatever a bound would now
+   allow.
+2. **Gate on the pull request.** The hook looks for a pull request whose head is
    the current branch. If there is none it exits 0, and no review runs and
    nothing is posted.
-2. **Run the reviewer.** The harness spawns the reviewer as a separate local
+3. **Run the reviewer.** The harness spawns the reviewer as a separate local
    agent process, hands it the pull request for scope and intent together with
    the threads the reviewer itself opened on it, and lets it read the working
    tree directly: files the diff did not touch, callers, and git history. At
    depth `deep` it also runs the tests. The reviewer never edits the code it is
    reviewing.
-3. **Post the findings, and act on the verdicts.** Each new finding opens a new
+4. **Post the findings, and act on the verdicts.** Each new finding opens a new
    review comment thread, anchored to a file and a line or to a file as a whole.
    Each verdict the reviewer returned is applied to the thread it names: `fixed`
    and `withdrawn` close the thread, `open` re-opens it or leaves it open.
-4. **Block, or stop.** If threads of this review are still open and the round cap
+5. **Block, or stop.** If threads of this review are still open and the round cap
    has not been reached, the hook exits 2. The blocking reason names the open
    threads and the commands that work them, and goes back into the coding agent's
    still-open turn. The agent keeps working, and the next round starts when it
@@ -172,10 +180,10 @@ flowchart TD
 
    Address what applies, reply on anything you disagree with, then finish.
    ```
-5. **Close the episode.** Otherwise the harness posts one summary comment on the
-   pull request and exits 0. This happens whether or not threads are still open,
-   and what remains open is what the summary reports and what a person then
-   looks at.
+6. **Close the episode.** Otherwise the harness posts one summary comment on the
+   pull request, records the close in the episode's state, and exits 0. This
+   happens whether or not threads are still open, and what remains open is what
+   the summary reports and what a person then looks at.
 
 Where the pull request carries open threads, the coding agent works them before
 it finishes its turn. It replies on a thread to say what it changed, to disagree, or to ask
@@ -671,31 +679,36 @@ The comment is never edited or replaced. A second episode on the same pull
 request posts a second comment, and the comments accumulate as a history of the
 review passes.
 
-The round that closes the episode is the round that posts it, and it records in
-the episode's state that the close was reported. A round that blocks the coding
-agent posts nothing, because the comment is the close of the episode rather than
-the end of a round, and one comment for every firing would report a review that
-is still going on. A round the reviewer failed posts nothing either: it reached
-no decision about the episode, and counts taken from a review that did not finish
-would read as counts from one that did. The hook's stderr carries that failure
-instead.
+**An episode reports its close once.** The round that closes it posts the
+comment, and then writes the close to the episode's state. Every path that ends an
+episode writes it, the paths that end one with no comment included.
 
-A firing that finds the round cap or the token bound already spent closes the
-episode and composes no comment. It runs no reviewer and lists none of the
-episode's threads, so a comment written from what it holds would report an episode
-that raised nothing. What it says depends on whether the close was already
-reported. Where it was, the firing is silent: the comment went up when the episode
-closed, or the firing that could not post it said so then. Where it was not, this
-close is the end of an episode no comment will ever report, and the hook's stderr
-says so and why. A bound lowered between firings is that case: the episode's rounds
-ran, their findings are on the pull request, and the round that blocked reported
-nothing. An episode that ran no round at all is the same answer for the other
-reason, and the line names which of the two it is.
+That record is what ends the episode. A later firing of the same subagent reads
+it first and does nothing: no reviewer runs, nothing is asked of GitHub, and the
+hook exits 0. The bounds are not consulted there. A cap raised between firings
+would otherwise let a closed episode review again, and it would post a second
+comment for one episode.
+
+A round that blocks the coding agent posts nothing and records nothing, because
+the comment is the close of the episode rather than the end of a round. A round
+the reviewer failed posts nothing either: it reached no decision about the
+episode, and counts taken from a review that did not finish would read as counts
+from one that did. The hook's stderr carries that failure.
 
 The comment goes up after the round's findings and its verdicts, inside the
 window the round reserves for posting. Nothing is attempted past the end of that
 window. Where the window is gone before the comment can be sent, no comment is
 posted and the hook's stderr says the episode closed without its summary.
+
+A firing that finds the round cap or the token bound already spent closes the
+episode and composes no comment. It runs no reviewer and lists none of the
+episode's threads, so a comment written from what it holds would report an episode
+that raised nothing. This close ends an episode that no comment will ever report,
+and the hook's stderr says so. The line names the rounds the episode ran, because
+that is what tells a person whether findings are sitting on the pull request with
+nothing counting them. A bound lowered between firings reaches this: the episode
+reviewed, its last round blocked, and the next firing ends it. An episode that ran
+no round at all reaches it too, and the line says which of the two it was.
 
 ### What the comment carries
 
@@ -843,12 +856,9 @@ nothing retries one.
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
 | The window is gone before the findings are posted | Exit 0, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window: a call made there is one the runtime kills the hook during, and the round would end having said nothing at all. |
 | The summary comment cannot be posted | Exit 0, and the close is a close still rather than a round the harness failed. stderr says the episode closed without its summary, and names what GitHub or the window answered. Nothing is retried: posting is a create, so a second attempt is a second comment. |
-<<<<<<< HEAD
+| The episode closes with no summary composed at all | Exit 0, and stderr says the episode closed without one and how many rounds it ran. A bound lowered between firings closes an episode whose last round blocked, and that close runs no reviewer and lists no threads, so nothing composes the comment its rounds earned. |
+| The close cannot be written to the episode's state | Exit 0, the comment stands as posted, and stderr names the write that failed. The episode then reads as one still open: the next firing of that subagent reviews the pull request again and posts a second comment. Nothing else can be read from a state file that took no close, and a firing that guessed the episode was over would drop the only report of a review that did run. |
 | The local state file cannot be read or written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. A read that fails ends the firing before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
-=======
-| The episode closes with no summary composed at all | Exit 0, and stderr says the episode closed without one and whether it reviewed. A bound lowered between firings closes an episode whose last round blocked, and that close runs no reviewer and lists no threads, so nothing composes the comment its rounds earned. |
-| The local state file cannot be written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. |
->>>>>>> 786ef98 (Say so where an episode closes with no summary at all)
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |
 | The token bound is reached | Exit 0. The episode closes without starting another round, and the summary comment reports that the bound was reached rather than reporting the round as one the reviewer failed. |

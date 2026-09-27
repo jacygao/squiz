@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import type { Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { SummaryPosting } from "../github/summary.ts";
+import type { StateWrite } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
 import type { EpisodeSummary } from "../loop/post-summary.ts";
@@ -102,11 +103,13 @@ function closedRound(
   ruled: readonly AppliedVerdict[] = [],
   unreadableDiff?: Error,
   summary: SummaryPosting = { outcome: "posted" },
+  recorded: StateWrite = { outcome: "written" },
 ): RoundConclusion {
   return {
     outcome: "close",
     because,
     summary,
+    recorded,
     pullRequest: PULL_REQUEST,
     posted: [],
     findings: unreadableDiff === undefined ? { outcomes } : { outcomes, unreadableDiff },
@@ -119,18 +122,18 @@ function closedRound(
 
 /**
  * A close the round reached before the review: the bound was already spent, so no
- * reviewer ran and no comment was composed. `summary` says whether the episode's
- * close had been reported before this firing.
+ * reviewer ran and no comment was composed.
  */
 function closedBeforeTheReview(because: ClosingReason, summary: EpisodeSummary): RoundConclusion {
   return {
     outcome: "close",
     because,
     summary,
+    recorded: { outcome: "written" },
     pullRequest: PULL_REQUEST,
     posted: [],
     findings: { outcomes: [] },
-    verdicts: { threads: [], unapplied: [], reopened: 0 },
+    verdicts: { threads: [], unapplied: [] },
   };
 }
 
@@ -369,13 +372,27 @@ test("a summary the window left no time to send carries that as its reason", () 
   );
 });
 
-test("a close whose episode was already reported composes no pointer", () => {
+test("a firing of an episode that is over composes no pointer", () => {
   // The comment went up when the episode closed, or the firing that could not
   // post it said so then. A second line would report a failure twice.
-  const reported: EpisodeSummary = { outcome: "reported-before" };
+  assert.equal(failureIn({ outcome: "episode-over" }), null);
+});
 
-  assert.equal(failureIn(closedBeforeTheReview("round-cap", reported)), null);
-  assert.equal(failureIn(closedBeforeTheReview("token-bound", reported)), null);
+test("a close the harness could not record says so", () => {
+  // The record is what tells a later firing that the episode is over. Without it
+  // that firing reviews this pull request again and posts a second comment, and
+  // this line is the only warning of it.
+  const conclusion = closedRound("nothing-open", [], [], undefined, { outcome: "posted" }, {
+    outcome: "failed",
+    reason:
+      "/work/.squiz/a1e3196c5ad0f2410/state.json could not be written: EACCES: permission denied",
+  });
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to record the episode's close: " +
+      "/work/.squiz/a1e3196c5ad0f2410/state.json could not be written: EACCES: permission denied",
+  );
 });
 
 test("a close that ends an episode no comment ever reported says so", () => {
@@ -810,8 +827,14 @@ test("every way a round can fail exits 0", async () => {
     { returns: closedRound("nothing-open", [], [refused("PRRT_1")]) },
     { returns: closedRound("nothing-open", [noted("one")], [], new Error("no hunk header")) },
     { returns: closedRound("nothing-open", [], [], undefined, SUMMARY_REFUSED) },
-    { returns: closedBeforeTheReview("round-cap", { outcome: "reported-before" }) },
     { returns: closedBeforeTheReview("round-cap", NO_SUMMARY) },
+    { returns: { outcome: "episode-over" } },
+    {
+      returns: closedRound("nothing-open", [], [], undefined, { outcome: "posted" }, {
+        outcome: "failed",
+        reason: "state.json could not be written: ENOSPC: no space left on device",
+      }),
+    },
     { throws: "the round read a thread that was not there" },
   ];
 

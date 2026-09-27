@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,6 +104,12 @@ type Setup = {
   readonly outsideRounds?: RoundCost;
   /** Whether a firing of the episode has already reported its close. */
   readonly closeReported?: boolean;
+  /**
+   * A kind of call after which the episode's directory takes no more writes, for
+   * a state file the round can read and cannot write. It is the round's own later
+   * writes that fail, and the ones before that call have already landed.
+   */
+  readonly lockStateAfter?: Kind;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
   readonly marginMs?: number;
@@ -306,13 +312,17 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     git(worktree, ["commit", "--quiet", "--allow-empty", "--message", "the change under review"]);
     if (setup.detached === true) git(worktree, ["checkout", "--quiet", "--detach", "HEAD"]);
 
+    const episode = episodeAt(worktree, AGENT_ID);
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
-    await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {});
+    await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {}, {
+      ...(setup.lockStateAfter === undefined
+        ? {}
+        : { [setup.lockStateAfter]: episode.directory }),
+    });
     warm(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
-    const episode = episodeAt(worktree, AGENT_ID);
     if (setup.rounds !== undefined) {
       const written = writeState(episode, {
         pullRequest: PULL_REQUEST,
@@ -379,7 +389,19 @@ async function runInFixture(setup: Setup): Promise<Ran> {
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
+    // A directory a test locked takes no writes, and removing what is under it is
+    // one, so the permission goes back before the fixture is removed.
+    unlock(join(worktree, ".squiz"));
     await rm(root, { recursive: true, force: true });
+  }
+}
+
+/** Let `directory` and everything under it be written again, where it is there. */
+function unlock(directory: string): void {
+  if (!existsSync(directory)) return;
+  chmodSync(directory, 0o700);
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) unlock(join(directory, entry.name));
   }
 }
 
@@ -427,6 +449,7 @@ async function writeFake(
   answers: Answers,
   sequences: Partial<Record<Kind, readonly string[]>>,
   delays: Partial<Record<Kind, string>>,
+  locks: Partial<Record<Kind, string>>,
 ): Promise<void> {
   const script = [
     "#!/bin/sh",
@@ -471,6 +494,9 @@ async function writeFake(
     "  exit 1",
     "fi",
     'cat "$answer"',
+    // After the answer, so the call itself succeeded and only what the round
+    // writes afterwards fails.
+    'if [ -f "$dir/lock-$kind" ]; then chmod 500 "$(cat "$dir/lock-$kind")"; fi',
     "exit 0",
     "",
   ].join("\n");
@@ -487,6 +513,9 @@ async function writeFake(
   }
   for (const [kind, seconds] of Object.entries(delays)) {
     await writeFile(join(directory, `delay-${kind}`), seconds, "utf8");
+  }
+  for (const [kind, locked] of Object.entries(locks)) {
+    await writeFile(join(directory, `lock-${kind}`), locked, "utf8");
   }
 }
 
@@ -656,7 +685,6 @@ function summaryReason(summary: EpisodeSummary): string {
     case "never-composed":
       return summary.reason;
     case "posted":
-    case "reported-before":
       return "";
   }
 }
@@ -1779,14 +1807,15 @@ test("a cap lowered after a round blocked closes the episode with no summary, an
 });
 
 /**
- * A firing after the episode reported its close says nothing about a summary.
+ * An episode whose close was recorded is over, and a later firing of it reviews
+ * nothing and posts nothing.
  *
- * The two firings are chained: the flag the second one reads is the one the close
- * wrote, rather than a flag the fixture set by hand. A second line about one
- * episode's summary reports a failure that did not happen, and a comment posted
- * here would be a second comment for one episode.
+ * The firings are chained: what the second reads is what the close wrote, rather
+ * than a state the fixture arranged. A firing that reviewed here would spend a
+ * round of a closed episode, raise its findings again and put a second comment on
+ * one pull request.
  */
-test("a firing after the episode reported its close says nothing about a summary", async () => {
+test("a firing after the episode reported its close reviews nothing and posts nothing", async () => {
   const closed = await runInFixture({
     config: { rounds: 1 },
     answers: POSTING,
@@ -1804,9 +1833,137 @@ test("a firing after the episode reported its close says nothing about a summary
     reviewer: reviews({}),
   });
 
-  assert.ok(again.conclusion.outcome === "close");
-  assert.deepEqual(again.kinds, ["prlist"]);
-  assert.equal(again.conclusion.summary.outcome, "reported-before");
+  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
+  assert.deepEqual(again.kinds, [], "an episode that is over asks GitHub nothing at all");
+});
+
+/**
+ * An episode that closed below its cap is over too.
+ *
+ * The cap allows two more rounds here, so the bounds do not end this episode and
+ * the record of its close is the only thing that does. A round gated on the bounds
+ * alone reviews again, appends a round and posts a second comment for one episode.
+ */
+test("a firing after an episode closed below its cap reviews nothing, whatever the cap allows", async () => {
+  const closed = await runInFixture({
+    config: { rounds: 3 },
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close");
+  assert.equal(closed.conclusion.because, "nothing-open");
+  assert.equal(closed.state?.closeReported, true, "the close records itself, cap or no cap");
+
+  const again = await runInFixture({
+    config: { rounds: 3 },
+    rounds: closed.state?.rounds ?? [],
+    closeReported: closed.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
+  assert.equal(again.invocations.length, 0, "a closed episode must not be billed for another round");
+  assert.deepEqual(again.kinds, []);
+  assert.deepEqual(
+    again.state?.rounds,
+    closed.state?.rounds,
+    "and no round is appended to an episode that is over",
+  );
+});
+
+/**
+ * A close that reported a summary nothing composed records itself, so it is
+ * reported once.
+ *
+ * The first firing finds its cap already spent, composes nothing and says so. The
+ * second is an episode that is over: the line has been written, and writing it
+ * again on every firing is the second output format the pointer must not grow.
+ */
+test("a close that reported its missing summary records itself, and is not reported twice", async () => {
+  const first = await runInFixture({
+    config: { rounds: 1 },
+    rounds: [ANSWER_COST],
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(first.conclusion.outcome === "close");
+  assert.equal(first.conclusion.because, "round-cap");
+  assert.equal(first.conclusion.summary.outcome, "never-composed");
+  assert.equal(first.state?.closeReported, true, "a close that ends the episode records it");
+
+  const again = await runInFixture({
+    config: { rounds: 1 },
+    rounds: first.state?.rounds ?? [],
+    closeReported: first.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
+  assert.deepEqual(again.kinds, []);
+});
+
+/**
+ * A close whose record could not be written says so, and the comment it posted
+ * still counts as posted.
+ *
+ * The episode's directory stops taking writes once the comment has gone up, which
+ * is the shape a full disk and a directory turned read-only both leave: the state
+ * file is there and readable, the round's cost is in it, and the close cannot be
+ * added. Two failures would be worse than the one: a comment reported as lost when
+ * it is on the pull request, and a persistence failure nobody was told about.
+ */
+test("a close that could not record itself reports the write and keeps the comment it posted", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), summary: SUMMARY_POSTED },
+    lockStateAfter: "summary",
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(
+    ran.conclusion.summary,
+    { outcome: "posted" },
+    "the comment is on the pull request, and a write that failed afterwards does not take it off",
+  );
+  assert.equal(ran.conclusion.recorded.outcome, "failed");
+  assert.match(
+    ran.conclusion.recorded.outcome === "failed" ? ran.conclusion.recorded.reason : "",
+    /could not be written/u,
+    "the filesystem's own error is what a person has to act on",
+  );
+  assert.notEqual(
+    ran.state?.closeReported,
+    true,
+    "the file is readable and holds no close, which is exactly why the next firing cannot know",
+  );
+
+  // The next firing of that episode, its directory writable again. It has nothing
+  // that says the episode closed, so it reviews as an episode that never did.
+  const again = await runInFixture({
+    rounds: ran.state?.rounds ?? [],
+    closeReported: ran.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.equal(
+    again.invocations.length,
+    1,
+    "a close the harness could not record is one no later firing can read, and the round that lost it said so",
+  );
+  assert.deepEqual(again.kinds.filter((kind) => kind === "summary"), ["summary"]);
 });
 
 test("an exhausted cap whose last recorded round failed closes the episode too", async () => {

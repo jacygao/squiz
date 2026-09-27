@@ -30,20 +30,14 @@ import type { AppliedVerdicts } from "./verdicts.ts";
 /**
  * What became of the episode's summary comment, which every close says.
  *
- * Four answers and no fifth. A close that could say nothing about its summary is
+ * Three answers and no fourth. A close that could say nothing about its summary is
  * a close that reports no comment and no reason for there being none, and exit 0
  * then reads as a review that ended clean.
  */
 export type EpisodeSummary =
   | SummaryPosting
   /**
-   * Nothing was composed here because an earlier firing of this episode already
-   * reported the close. Its comment went up, or its failure to post one was
-   * announced then.
-   */
-  | { readonly outcome: "reported-before" }
-  /**
-   * Nothing was composed here and nothing ever was, so the episode ends with no
+   * Nothing was composed and nothing ever will be, so the episode ends with no
    * summary on the pull request at all. `reason` is the one line that says so.
    */
   | { readonly outcome: "never-composed"; readonly reason: string };
@@ -98,26 +92,19 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Summary
 }
 
 /**
- * What became of the summary of an episode closed before its review ran, read
- * from the state the episode left behind.
+ * What became of the summary of an episode closed before its review ran.
  *
- * No comment is composed on that close and none is attempted: the firing runs no
+ * No comment is composed on that close and none is attempted. The firing runs no
  * reviewer and lists none of the episode's threads, so a comment written from what
  * it holds would report an episode that raised nothing.
  *
- * Which of the two answers it is turns on whether the close was already reported,
- * because the pull request looks the same either way. An episode whose last round
- * closed it carries its comment already. An episode whose last round blocked
- * carries none, and a bound lowered between firings closes it here: its rounds
- * ran, its findings are on the pull request, and nothing will ever report them.
- *
- * An episode that ran no round at all is the same answer for a different reason,
- * and the line says which. Nothing reviewed it, so there is nothing for a comment
- * to carry, and a close that said nothing would still be a review that never
- * happened ending at exit 0.
+ * The episode ends here with nothing on the pull request reporting it, and the
+ * rounds it ran say what that costs. Rounds ran means findings are up there with
+ * no comment counting them, and a person is told so that they go and read the
+ * threads. No round at all means there was nothing to report in the first place.
+ * Both are closes at exit 0, where silence reads as a review that went fine.
  */
 export function summaryNotComposed(state: EpisodeState): EpisodeSummary {
-  if (state.closeReported === true) return { outcome: "reported-before" };
   const rounds = state.rounds.length;
   if (rounds === 0) {
     return { outcome: "never-composed", reason: "no round of the episode ever ran" };
