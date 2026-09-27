@@ -853,9 +853,11 @@ async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
         'for argument in "$@"; do',
         `  printf '%s\\n' "$argument" >> ${quote(argumentLog)}`,
         "done",
-        // A call told to read a body is read, or the writer is signalled instead
-        // of answered.
-        'case " $* " in *" --input "*) cat > /dev/null ;; esac',
+        // Every call reads its stdin, or a call carrying a body signals the
+        // writer instead of answering it. A call carrying none sees an empty
+        // stdin, so there is nothing to tell the two apart for. `read` does it
+        // because it is a builtin: `PATH` here holds git and gh alone.
+        "while read -r line; do :; done",
         "case $1 in",
         `  pr) printf '%s' ${quote(gh.pullRequests ?? "")} ;;`,
         `  api) if [ "$2" = graphql ]; then printf '%s' ${quote(gh.threads ?? NO_THREADS)}; else printf '%s' ${quote(gh.diff ?? "")}; fi ;;`,

@@ -76,8 +76,9 @@ export type GraphqlRequest = {
  * Why a call produced no answer. Every one carries `reason`: the one line the
  * caller reports.
  *
- * A call that reached the bound is `unreachable`, which is what GitHub being
- * unreachable is reported as. It is not a failure of its own.
+ * `unreachable` covers a call that reached its bound and a call whose request
+ * `gh` never read. GitHub being unreachable is what both are reported as, and
+ * neither is a failure of its own. `not-run` is narrower, and means no `gh` ran.
  */
 export type GhFailure =
   | { readonly outcome: "not-run"; readonly reason: string }
@@ -230,15 +231,29 @@ function classify(result: SpawnSyncReturns<string>, boundMs: number): Completed 
       reason: `gh did not answer within ${boundMs / 1000} seconds, so GitHub could not be reached`,
     };
   }
-  if (result.error !== undefined) {
-    return { outcome: "not-run", reason: `gh could not be run: ${result.error.message}` };
-  }
-  // A gh killed by anything else answered nothing either, and "gh exited null"
-  // names the mechanism rather than the failure.
+  // An exit status of its own is what tells a gh that ran from one that did not.
+  // The error is read after it rather than before, because an error beside a
+  // status is the write of the body failing rather than a gh that would not run.
   if (result.status === null) {
+    // Nothing was started: no signal ended it, and the error says why.
+    if (result.signal === null && result.error !== undefined) {
+      return { outcome: "not-run", reason: `gh could not be run: ${result.error.message}` };
+    }
+    // A gh killed answered nothing either, and "gh exited null" names the
+    // mechanism rather than the failure.
     return {
       outcome: "unreachable",
       reason: `gh was killed by ${result.signal ?? "a signal"}, so GitHub could not be reached`,
+    };
+  }
+  // gh streams the body, so it can answer before it has read all of it and leave
+  // the write of the rest failing. Whatever it answered there, it did not answer
+  // the request. A success carried out of that is a comment nothing posted, and
+  // nothing retries a comment the harness believes it created.
+  if (result.error !== undefined && result.status === 0) {
+    return {
+      outcome: "unreachable",
+      reason: "gh exited 0 without reading all of the request, so it never reached GitHub",
     };
   }
   return {
