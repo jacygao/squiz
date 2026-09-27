@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.46 (draft)
+**Version:** 0.47 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -264,6 +264,14 @@ Where a tree is shared, the harness detects it by resolving
 live episodes on one toplevel means a shared tree. The round still runs, the
 summary comment names the other episodes that were in flight, and the
 tracked-file comparison under Confinement is disabled for that round.
+
+An episode whose round died without recording a close is live by the definition
+above, so it counts. A worktree holding one therefore has the comparison disabled
+for every episode after it, until that episode's directory is gone. This is the
+direction to be wrong in: the comparison reports a tracked file that changed, and
+reading a live episode as over runs it against a tree another coding agent is
+editing, which names a file the reviewer never touched. Reading an abandoned
+episode as live only means nothing is detected that round.
 
 ## 4. The reviewer
 
@@ -763,12 +771,19 @@ Three blocks, in this order.
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
    finding carries; a tracked file that changed while the reviewer ran; other
-   episodes that shared the worktree; and a cap or bound that ended the episode
-   early.
+   episodes that shared the worktree; a round that could not tell whether the
+   worktree was shared or what changed in it; and a cap or bound that ended the
+   episode early.
 
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
 a comment that left it out would read as a review that found nothing there.
+
+A round that could not tell says so, rather than saying nothing. Both answers it
+gives have three values and not two: the worktree was shared, was not, or could
+not be established; and a tracked file changed, none did, or no comparison could
+be taken. A comment that renders "none" and "could not tell" alike reports a
+review nothing checked as a review that found nothing wrong.
 
 A round whose review did not run closes no episode, so no comment reports one.
 The round's failure is announced on the hook's stderr instead.
