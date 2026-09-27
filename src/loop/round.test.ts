@@ -325,7 +325,6 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     if (setup.rounds !== undefined) {
       const written = writeState(episode, {
-        pullRequest: PULL_REQUEST,
         rounds: setup.rounds,
         spentOutsideRounds: setup.outsideRounds ?? unspent,
         ...(setup.closeReported === undefined ? {} : { closeReported: setup.closeReported }),
@@ -946,7 +945,6 @@ test("the round's cost is recorded in the episode state with its token count", a
   });
 
   assert.deepEqual(ran.state, {
-    pullRequest: PULL_REQUEST,
     rounds: [ANSWER_COST],
     spentOutsideRounds: unspent,
   });
@@ -1273,7 +1271,7 @@ test("a reviewer killed at its bound is a failed round and not an empty review",
   );
   assert.deepEqual(
     ran.state,
-    { pullRequest: PULL_REQUEST, rounds: [floor], spentOutsideRounds: unspent },
+    { rounds: [floor], spentOutsideRounds: unspent },
     "a killed round's floor is what it reported before it was stopped, and it counts against the cap",
   );
 });

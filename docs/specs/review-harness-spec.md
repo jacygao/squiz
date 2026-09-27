@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.45 (draft)
+**Version:** 0.46 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -124,9 +124,20 @@ long ago anything happened.
 
 An episode is keyed by the subagent's id from the hook payload, which is the
 same every time that subagent stops. Its state lives in `.squiz/<episode>/`
-inside the worktree, and holds the round count, the pull request number, the
-cost of each round, whether the episode has reported its close, the reviewer's
-session directory, and its scratch space.
+inside the worktree, and holds the round count, the cost of each round, what the
+episode spent on attempts that were no round, whether the episode has reported
+its close, the reviewer's session directory, and its scratch space.
+
+While a round runs, the episode's directory also holds a marker naming that
+round's process and when that process started. A pid alone is reused, so the
+start time is what tells the round that holds it now from one that held it
+before. The marker is removed when the round ends, and it is gitignored, so the
+comparison of tracked files under Confinement never reads it as a change.
+
+**The marker is what makes an episode's first round visible.** The state file is
+written when a round records what it spent, which is after the review, so during
+a first round there is no state file to read a close from. Without the marker a
+second episode starting then would read the worktree as its own.
 
 ### End-to-end workflow
 
@@ -1090,7 +1101,7 @@ until something asks.
 | **P0** | The coding agent's commands | `squiz threads` and `squiz reply`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
-| **P0** | The episode state file | Round count, pull request number, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the subagent's id and living in the worktree |
+| **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the subagent's id and living in the worktree |
 | **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison or not at all |
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |

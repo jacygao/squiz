@@ -278,7 +278,6 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
  */
 test("a close before the review names the rounds whose findings nothing reports", () => {
   const never = summaryNotComposed({
-    pullRequest: PULL_REQUEST,
     rounds: [COST, COST],
     spentOutsideRounds: unspent,
   });
@@ -295,7 +294,6 @@ test("an episode that ran no round at all is named as one that never ran", () =>
   // Nothing reviewed it, so there is nothing for a comment to carry. It is still
   // a close at exit 0, and silence there reads as a review that went fine.
   const never = summaryNotComposed({
-    pullRequest: PULL_REQUEST,
     rounds: [],
     spentOutsideRounds: unspent,
   });

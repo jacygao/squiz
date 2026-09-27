@@ -38,7 +38,6 @@ function roundRunning(worktree: string, id: string): void {
 /** An episode of `worktree` that has run a round, and closed or not. */
 function episodeRecorded(worktree: string, id: string, closed: boolean): void {
   const written = writeState(episodeAt(worktree, id), {
-    pullRequest: 41,
     rounds: [unspent],
     spentOutsideRounds: unspent,
     ...(closed ? { closeReported: true } : {}),

@@ -23,8 +23,6 @@ import type { Episode } from "./episode.ts";
 
 /** What the rounds of one episode have established so far. */
 export type EpisodeState = {
-  /** The pull request every round of this episode reviews. */
-  readonly pullRequest: number;
   /**
    * What each round spent, in the order the rounds ran. Rounds are appended and
    * never edited, so the number of entries is the number of rounds that have
@@ -173,13 +171,6 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     return unreadable(`${path} holds ${render(parsed)} rather than a JSON object`);
   }
 
-  const pullRequest = parsed["pullRequest"];
-  if (!isCount(pullRequest)) {
-    return unreadable(
-      `${path}: "pullRequest" is ${render(pullRequest)} rather than a pull request number`,
-    );
-  }
-
   const recorded = parsed["rounds"];
   if (!Array.isArray(recorded)) {
     return unreadable(`${path}: "rounds" is ${render(recorded)} rather than an array`);
@@ -207,7 +198,6 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   return {
     outcome: "read",
     state: {
-      pullRequest,
       rounds,
       spentOutsideRounds: outside.cost,
       ...(reported === undefined ? {} : { closeReported: reported }),
