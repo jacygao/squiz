@@ -743,6 +743,37 @@ test("the first round of a first episode posts its finding, is handed no thread,
 });
 
 /**
+ * The configured command reaches the prompt, and only where the reviewer has a
+ * shell to run it with.
+ *
+ * The configuration is built here rather than loaded, so a round at `deep` runs
+ * before the loader accepts that depth.
+ */
+test("the configured test command reaches a reviewer at `deep` and not one at `read`", async () => {
+  const deep = await runInFixture({
+    answers: POSTING,
+    reviewer: reviews({}),
+    config: { depth: "deep", test: "pnpm vitest run" },
+  });
+  const read = await runInFixture({
+    answers: POSTING,
+    reviewer: reviews({}),
+    config: { depth: "read", test: "pnpm vitest run" },
+  });
+
+  assert.match(
+    deep.invocations[0]?.prompt ?? "",
+    /^pnpm vitest run$/mu,
+    "the project's own command did not reach the reviewer, so it runs whatever it infers",
+  );
+  assert.equal(
+    read.invocations[0]?.prompt.includes("pnpm vitest run"),
+    false,
+    "a reviewer with no shell was named a command to run the tests with",
+  );
+});
+
+/**
  * A second coding agent on the same branch is a second episode, and its state
  * file is new while the pull request is not.
  *
