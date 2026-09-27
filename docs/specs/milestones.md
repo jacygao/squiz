@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.10 (draft)
+**Version:** 0.11 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -8,6 +8,10 @@
 
 Ten milestones for building Squiz, in the order they are done. Each ends in
 something that can be run or seen, never in a module written.
+
+M9 is the last of them. The P1 and P2 entries of the specification's What ships
+that no milestone here delivers are a second version, and its milestones are
+planned once M9 closes.
 
 ## M0 — Prerequisites spike
 
