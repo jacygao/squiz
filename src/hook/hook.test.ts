@@ -85,7 +85,6 @@ function salvagedRound(
       verdicts: {
         threads: ruled,
         unapplied: [],
-        reopened: ruled.filter((thread) => thread.outcome === "reopened").length,
       },
     },
   };
@@ -106,7 +105,6 @@ function closedRound(
     verdicts: {
       threads: ruled,
       unapplied: [],
-      reopened: ruled.filter((thread) => thread.outcome === "reopened").length,
     },
   };
 }
@@ -118,7 +116,7 @@ function blockedRound(reason: string): RoundConclusion {
     pullRequest: PULL_REQUEST,
     posted: ["PRRT_kwDOA"],
     findings: { outcomes: [] },
-    verdicts: { threads: [], unapplied: [], reopened: 0 },
+    verdicts: { threads: [], unapplied: [] },
   };
 }
 

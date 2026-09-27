@@ -94,7 +94,6 @@ function rulings(ruled: Readonly<Record<string, Verdict | null>>): AppliedVerdic
       outcome: "left-open",
     })),
     unapplied: [],
-    reopened: 0,
   };
 }
 
@@ -384,7 +383,6 @@ test("the status a thread ends in is the reviewer's ruling, not what the mutatio
         },
       ],
       unapplied: [],
-      reopened: 0,
     },
   });
   assert.deepEqual(

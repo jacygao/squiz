@@ -362,7 +362,7 @@ function nothingDone(pullRequest: number): RoundAccount {
     pullRequest,
     posted: [],
     findings: { outcomes: [] },
-    verdicts: { threads: [], unapplied: [], reopened: 0 },
+    verdicts: { threads: [], unapplied: [] },
   };
 }
 

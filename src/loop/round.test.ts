@@ -795,7 +795,6 @@ test("a resolved thread of the reviewer's own is handed over, and a verdict re-o
 
   assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "unresolve"]);
   assert.ok(ran.conclusion.outcome === "block");
-  assert.equal(ran.conclusion.verdicts.reopened, 1);
   assert.match(ran.conclusion.reason, /1 thread is open on it:\nPRRT_closed/u);
 });
 
