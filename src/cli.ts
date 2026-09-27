@@ -165,11 +165,16 @@ export function threadListing(pullRequest: number, threads: readonly ReviewThrea
  *
  * A thread carrying no finding ends at its location. A person can open a thread
  * on the pull request, and there is no severity and no headline to print for one.
+ *
+ * One thread is one line. A path may hold a newline, which would otherwise put a
+ * line in the listing that no thread wrote and whose first field a reader would
+ * take for an identifier, so the whitespace of the line is collapsed after it is
+ * composed. An identifier holds none, and survives.
  */
 function listedThread(thread: ReviewThread): string {
   const located = `${thread.id} ${threadLocation(thread)}`;
   const said = namedFindingOn(thread);
-  return said === "" ? located : `${located} ${said}`;
+  return (said === "" ? located : `${located} ${said}`).replace(/\s+/gu, " ").trim();
 }
 
 // The dispatch runs only where this file is the process's entry point, so that
