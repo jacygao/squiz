@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -71,6 +72,44 @@ async function treeWithTrackedFiles(root: string): Promise<void> {
   commitEverything(root, "the change under review");
 }
 
+/**
+ * A superproject holding a submodule committed at `revisions.first`.
+ *
+ * The submodule is cloned over the file transport, which git refuses unless the
+ * command allows it.
+ */
+async function superprojectWithSubmodule(
+  base: string,
+): Promise<{ root: string; revisions: readonly string[] }> {
+  const inner = join(base, "inner");
+  const root = join(base, "super");
+  await mkdir(inner);
+  await mkdir(root);
+
+  git(inner, "init", "--quiet", "--initial-branch", "main");
+  const revisions: string[] = [];
+  for (const content of ["first\n", "second\n", "third\n"]) {
+    await writeFile(join(inner, "version.txt"), content);
+    commitEverything(inner, `the submodule at ${content.trim()}`);
+    revisions.push(revisionOf(inner));
+  }
+
+  git(root, "init", "--quiet", "--initial-branch", "review/the-round");
+  await writeFile(join(root, "top.ts"), "the superproject\n");
+  commitEverything(root, "the change under review");
+  git(root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", inner, "module");
+  git(join(root, "module"), "checkout", "--quiet", revisions[0] ?? "");
+  commitEverything(root, "the submodule at its first revision");
+
+  return { root, revisions };
+}
+
+function revisionOf(directory: string): string {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
+  assert.equal(result.status, 0, `git rev-parse: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
 type Read = Extract<TrackedFilesReading, { outcome: "read" }>;
 
 /** A reading that was taken, or a failed test carrying git's reason. */
@@ -129,11 +168,18 @@ test("a write to a gitignored path is not a change", async () => {
     await mkdir(join(scratch, "jiti"), { recursive: true });
     await writeFile(join(scratch, "jiti", "pi-extension.3ffe37ba.mjs"), "the extension\n");
 
-    assert.deepEqual(compareTrackedFiles(before, reading(root)), { outcome: "unchanged" });
+    const after = reading(root);
+
+    assert.deepEqual(compareTrackedFiles(before, after), { outcome: "unchanged" });
     assert.deepEqual(
-      [...reading(root).status.keys()],
+      [...after.status.keys()],
       [],
       "an ignored path is not git's to report, so it never reaches a reading",
+    );
+    assert.deepEqual(
+      [...after.content.keys()].filter((path) => path.startsWith(".squiz")),
+      [],
+      "and nothing ignored is fingerprinted, however the reading finds its paths",
     );
   });
 });
@@ -157,6 +203,127 @@ test("an edit, a new file, a staged file and a deletion are each named, and noth
       outcome: "changed",
       paths: ["plain.ts", "probe.sh", "probes/deeper.sh", "staged.ts", "sub/nested.ts"],
     });
+  });
+});
+
+test("an untracked file is read by its contents, not by its status alone", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    // A file the coding agent wrote and has not staged. git says `??` about it
+    // before and after the edit, so the contents are the only thing that names
+    // one, and it is a file the coding agent would commit.
+    await writeFile(join(root, "notes.ts"), "assert(true);\n");
+    const before = reading(root);
+
+    await writeFile(join(root, "notes.ts"), "assert(false);\n");
+    const after = reading(root);
+
+    assert.equal(before.status.get("notes.ts"), "??");
+    assert.equal(after.status.get("notes.ts"), "??");
+    assert.deepEqual(compareTrackedFiles(before, after), {
+      outcome: "changed",
+      paths: ["notes.ts"],
+    });
+  });
+});
+
+test("an untracked directory git will not look inside is read as a directory", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    // A repository of its own inside the tree. git names the directory and never
+    // what is in it, so a reading has one entry to hold and it is not a file.
+    const embedded = join(root, "embedded");
+    await mkdir(embedded);
+    git(embedded, "init", "--quiet", "--initial-branch", "main");
+    await writeFile(join(embedded, "cloned.ts"), "from somewhere else\n");
+
+    const taken = reading(root);
+
+    assert.equal(taken.status.get("embedded/"), "??");
+    assert.equal(taken.content.get("embedded/"), "kind:directory");
+  });
+});
+
+test("a submodule staged at another revision is named", async () => {
+  await withTemporaryDirectory(async (base) => {
+    const { root, revisions } = await superprojectWithSubmodule(base);
+    const module = join(root, "module");
+
+    git(module, "checkout", "--quiet", revisions[1] ?? "");
+    git(root, "add", "module");
+    const before = reading(root);
+
+    git(module, "checkout", "--quiet", revisions[2] ?? "");
+    git(root, "add", "module");
+    const after = reading(root);
+
+    assert.equal(before.status.get("module"), "M ", "the gitlink was already staged at the first");
+    assert.equal(after.status.get("module"), "M ", "and git says the same of it at the second");
+    assert.deepEqual(compareTrackedFiles(before, after), {
+      outcome: "changed",
+      paths: ["module"],
+    });
+  });
+});
+
+test("a tracked file replaced by a pipe is named, and the reading still returns", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    // Both readings are taken in a child, because an open of a pipe waits for a
+    // writer that never comes and no timer can interrupt a synchronous open. A
+    // reading that tried it would hang the round, and this test would hang the
+    // suite rather than fail it.
+    const script = [
+      `import { spawnSync } from "node:child_process";`,
+      `import { rmSync } from "node:fs";`,
+      `import { compareTrackedFiles, readTrackedFiles } from ${JSON.stringify(
+        new URL("./tracked-files.ts", import.meta.url).href,
+      )};`,
+      `const root = process.argv[1];`,
+      `const before = readTrackedFiles(root);`,
+      `rmSync(root + "/plain.ts");`,
+      `spawnSync("mkfifo", [root + "/plain.ts"]);`,
+      `const after = readTrackedFiles(root);`,
+      `process.stdout.write(JSON.stringify({`,
+      `  comparison: compareTrackedFiles(before, after),`,
+      `  stands: after.outcome === "read" ? after.content.get("plain.ts") : after.reason,`,
+      `}));`,
+    ].join("\n");
+
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", script, root], {
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+
+    assert.equal(run.error, undefined, "the reading never returned");
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), {
+      comparison: { outcome: "changed", paths: ["plain.ts"] },
+      stands: "kind:pipe",
+    });
+  });
+});
+
+test("a tracked file replaced by a socket is named rather than failing the reading", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    const before = reading(root);
+
+    const path = join(root, "plain.ts");
+    await unlink(path);
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+    try {
+      const after = reading(root);
+
+      assert.equal(after.content.get("plain.ts"), "kind:socket");
+      assert.deepEqual(compareTrackedFiles(before, after), {
+        outcome: "changed",
+        paths: ["plain.ts"],
+      });
+    } finally {
+      server.close();
+    }
   });
 });
 
@@ -233,11 +400,28 @@ test("taking a reading writes nothing, git's index included", async () => {
     await utimes(join(root, "plain.ts"), long, long);
     const index = readFileSync(join(root, ".git", "index"));
 
-    reading(root);
+    // An environment that permits the refresh write, so what holds the index is
+    // the reading's own flag rather than whatever the caller set.
+    const permitted = { ...process.env, GIT_OPTIONAL_LOCKS: "1" };
+    const previous = process.env["GIT_OPTIONAL_LOCKS"];
+    process.env["GIT_OPTIONAL_LOCKS"] = "1";
+    try {
+      reading(root);
+    } finally {
+      if (previous === undefined) delete process.env["GIT_OPTIONAL_LOCKS"];
+      else process.env["GIT_OPTIONAL_LOCKS"] = previous;
+    }
 
     assert.ok(readFileSync(join(root, ".git", "index")).equals(index), "the index was rewritten");
 
-    const plain = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
+    // The control. git has no positive form of the flag, so the refresh write is
+    // permitted through the environment, which the caller of the tests may have
+    // turned off.
+    const plain = spawnSync("git", ["status", "--porcelain"], {
+      cwd: root,
+      encoding: "utf8",
+      env: permitted,
+    });
     assert.equal(plain.stdout, "", "the tree is still clean");
     assert.ok(
       !readFileSync(join(root, ".git", "index")).equals(index),

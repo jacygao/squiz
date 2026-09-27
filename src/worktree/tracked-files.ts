@@ -1,5 +1,6 @@
 /**
- * A reading of a worktree's tracked files, and what two readings disagree about.
+ * A reading of a worktree's files, tracked and untracked, and what two readings
+ * disagree about.
  *
  * Two readings, one taken before the reviewer runs and one when it exits, are
  * what catches a write the reviewer made through the shell. A shell is itself a
@@ -11,12 +12,12 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, lstatSync, openSync, readSync, readlinkSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readSync, readlinkSync, type Stats } from "node:fs";
 import { join } from "node:path";
 
 import { worktreeToplevel } from "./toplevel.ts";
 
-/** A worktree's tracked files at one moment, or why git could not say. */
+/** A worktree's files at one moment, or why git could not say. */
 export type TrackedFilesReading =
   | {
       readonly outcome: "read";
@@ -25,8 +26,10 @@ export type TrackedFilesReading =
       /** Every path git gave a status for, against its two letters. */
       readonly status: ReadonlyMap<string, string>;
       /**
-       * Every tracked path, against what stands in the worktree at it: the
-       * content hashed, where a link points, or that nothing stands there.
+       * Every path a commit could carry, tracked or untracked, against what
+       * stands at it. That is the content hashed, where a link points, the
+       * revision a submodule is staged at, the kind of a path that is none of
+       * those, or that nothing stands there at all.
        */
       readonly content: ReadonlyMap<string, string>;
     }
@@ -53,8 +56,8 @@ const STATUS_ARGUMENTS = [
   // Paths arrive as git holds them, so one holding a space or a newline needs no
   // unquoting.
   "-z",
-  // An untracked file is a file the coding agent would commit. Without this git
-  // collapses a new directory to its name and never says what is inside it.
+  // Without this git collapses a new directory to its name and never says which
+  // files are inside it.
   "--untracked-files=all",
   // One path per record. A rename record carries two, and a rename is a
   // deletion and an addition as far as a comparison is concerned.
@@ -62,17 +65,19 @@ const STATUS_ARGUMENTS = [
 ] as const;
 
 /**
- * Read what stands in every tracked file of the worktree holding `directory`.
+ * Read what stands at every path of the worktree holding `directory` that a
+ * commit could carry.
  *
- * Gitignored paths are absent from a reading, because git leaves them out of
- * both answers it gives here: nothing ignored is tracked, and a status without
- * `--ignored` names none of them. Writes there are permitted, and the
- * reviewer's own CLI compiles into the scratch space inside the tree on every
- * round.
+ * Tracked paths and untracked ones both count, because a file the coding agent
+ * has not staged is still one it would commit. Gitignored paths are absent,
+ * because git leaves them out of both answers it gives here: nothing ignored is
+ * tracked, and a status without `--ignored` names none of them. Writes there are
+ * permitted, and the reviewer's own CLI compiles into the scratch space inside
+ * the tree on every round.
  *
  * Never throws. A git that is missing, a directory that is no repository, and a
- * tracked file that cannot be read all come back as `failed`, carrying the
- * reason as a single line.
+ * path that cannot be read all come back as `failed`, carrying the reason as a
+ * single line.
  */
 export function readTrackedFiles(directory: string): TrackedFilesReading {
   const toplevel = worktreeToplevel(directory);
@@ -83,19 +88,18 @@ export function readTrackedFiles(directory: string): TrackedFilesReading {
   if (!reported.ran) return { outcome: "failed", reason: reported.reason };
   // `ls-files` answers about the directory it runs in and names paths relative
   // to it, so it runs at the root, where it covers the whole worktree and names
-  // a path the way a status does.
-  const listed = git(root, ["ls-files", "-z"]);
+  // a path the way a status does. `--stage` carries each entry's mode and
+  // object, and the object is the only place a submodule's revision is written.
+  const listed = git(root, ["ls-files", "-z", "--stage"]);
   if (!listed.ran) return { outcome: "failed", reason: listed.reason };
+  const staged = stagedEntries(listed.stdout);
+  if (!staged.listed) return { outcome: "failed", reason: staged.reason };
 
-  const content = contentOf(root, records(listed.stdout));
+  const status = statusOf(records(reported.stdout));
+  const content = contentOf(root, staged.entries, untrackedIn(status));
   if (!content.read) return { outcome: "failed", reason: content.reason };
 
-  return {
-    outcome: "read",
-    root,
-    status: statusOf(records(reported.stdout)),
-    content: content.paths,
-  };
+  return { outcome: "read", root, status, content: content.paths };
 }
 
 /**
@@ -151,20 +155,75 @@ function statusOf(records: readonly string[]): ReadonlyMap<string, string> {
   return status;
 }
 
+function untrackedIn(status: ReadonlyMap<string, string>): readonly string[] {
+  return [...status].filter(([, code]) => code === "??").map(([path]) => path);
+}
+
+type StagedEntry = {
+  readonly mode: string;
+  /** The object the index holds at the path, which for a submodule is a commit. */
+  readonly object: string;
+  readonly path: string;
+};
+
+type Staged =
+  | { readonly listed: true; readonly entries: readonly StagedEntry[] }
+  | { readonly listed: false; readonly reason: string };
+
+function stagedEntries(stdout: string): Staged {
+  const entries: StagedEntry[] = [];
+  for (const record of records(stdout)) {
+    // The mode, the object and the stage, then a tab, because a path may hold a
+    // space. A record in any other shape would drop a tracked file out of the
+    // reading, and a hole in a reading reads as a file nobody touched.
+    const tab = record.indexOf("\t");
+    const fields = tab === -1 ? [] : record.slice(0, tab).split(" ");
+    const [mode, object] = fields;
+    if (mode === undefined || object === undefined) {
+      return { listed: false, reason: `git listed a file as ${JSON.stringify(record)}` };
+    }
+    entries.push({ mode, object, path: record.slice(tab + 1) });
+  }
+  return { listed: true, entries };
+}
+
+const SUBMODULE = "160000";
+
 type Content =
   | { readonly read: true; readonly paths: ReadonlyMap<string, string> }
   | { readonly read: false; readonly reason: string };
 
-function contentOf(root: string, paths: readonly string[]): Content {
+function contentOf(
+  root: string,
+  entries: readonly StagedEntry[],
+  untracked: readonly string[],
+): Content {
+  const wanted: readonly { readonly path: string; readonly marker?: string }[] = [
+    ...entries.map((entry) =>
+      // A submodule's own files belong to another repository, and the revision
+      // the index holds is what a commit here would carry. That revision moves
+      // under a status entry that does not, so a reading holds it rather than
+      // anything about the directory in the worktree.
+      entry.mode === SUBMODULE
+        ? { path: entry.path, marker: `gitlink:${entry.object}` }
+        : { path: entry.path },
+    ),
+    ...untracked.map((path) => ({ path })),
+  ];
+
   const content = new Map<string, string>();
-  for (const path of paths) {
-    // A path in a conflict is listed once per stage.
+  for (const { path, marker } of wanted) {
+    // A path in a conflict is listed once per stage, and the first stands for it.
     if (content.has(path)) continue;
+    if (marker !== undefined) {
+      content.set(path, marker);
+      continue;
+    }
     try {
       content.set(path, standsAt(join(root, path)));
     } catch (cause) {
-      // A tracked path the worktree does not hold is a deletion, which is a
-      // change to name rather than a reading that failed.
+      // A path the worktree does not hold is a deletion, which is a change to
+      // name rather than a reading that failed.
       if (isMissing(cause)) {
         content.set(path, "absent");
         continue;
@@ -179,20 +238,31 @@ function contentOf(root: string, paths: readonly string[]): Content {
  * What stands at one path, as a value two readings can be compared by.
  *
  * The kind is part of it, so a file replaced by a link to a file of the same
- * content is a change.
+ * content is a change, and so is one replaced by a pipe.
  */
 function standsAt(path: string): string {
   const entry = lstatSync(path);
   // A link is read rather than followed. What it points at may be outside the
   // worktree, or not there at all, and neither is this worktree's content.
   if (entry.isSymbolicLink()) return `link:${digestOf(readlinkSync(path, "buffer"))}`;
-  // A submodule is a directory here and a commit in the index. Its own files
-  // belong to another repository, and a status names a submodule that moved.
-  if (entry.isDirectory()) return "submodule";
-  return `file:${hashOfFile(path)}`;
+  // Only a regular file is opened. An open of a pipe waits for a writer that may
+  // never arrive, and no timer interrupts a synchronous open, so a reading that
+  // tried it would hang the round and the round would be killed with nothing
+  // posted.
+  if (entry.isFile()) return `file:${hashOfFile(path)}`;
+  return `kind:${kindOf(entry)}`;
 }
 
-/** Hashed in chunks, so that a large tracked file is never held in memory. */
+function kindOf(entry: Stats): string {
+  if (entry.isDirectory()) return "directory";
+  if (entry.isFIFO()) return "pipe";
+  if (entry.isSocket()) return "socket";
+  if (entry.isBlockDevice()) return "block-device";
+  if (entry.isCharacterDevice()) return "character-device";
+  return "unknown";
+}
+
+/** Hashed in chunks, so that a large file is never held in memory. */
 function hashOfFile(path: string): string {
   const digest = createHash("sha256");
   const chunk = Buffer.allocUnsafe(64 * 1024);
