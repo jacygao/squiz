@@ -277,11 +277,12 @@ test("an episode closed by no bound at all notes none", () => {
 });
 
 /**
- * Nothing on the pull request carries a finding no comment could be posted for,
- * and no line of the comment accounts for it, so a count that included it would
- * reconcile with nothing a reader can see.
+ * Nothing on the pull request carries a finding whose comment could not be
+ * posted. The reviewer confirmed it and the harness lost it, so a comment that
+ * left it out would read as a review that found nothing there. The summary
+ * carries the failure because GitHub was reachable: it posted this comment.
  */
-test("a finding nothing could be posted for is not counted as raised", () => {
+test("a finding whose comment could not be posted is counted and named in Notes", () => {
   const comment = renderSummary({
     ...quiet,
     findings: posted({
@@ -290,7 +291,45 @@ test("a finding nothing could be posted for is not counted as raised", () => {
       reason: "gh answered HTTP 422",
     }),
   });
-  assert.equal(comment, renderSummary(quiet));
+  assert.equal(
+    comment,
+    [
+      "**Squiz review — 1 round, 1 finding**",
+      "",
+      "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
+      "20,100 tokens over 1 round: 20,100 · $0.0061",
+      "",
+      "**Needs a person**",
+      "",
+      "Nothing needs a person.",
+      "",
+      "**Notes**",
+      "",
+      "- `src/queue.ts:134` — Retry backoff resets (raised, and its comment could not be posted)",
+    ].join("\n"),
+  );
+});
+
+/**
+ * What GitHub said is the round's to report. It is unbounded text, and a newline
+ * in it would put a line in a comment that nothing wrote.
+ */
+test("the reason the comment could not be posted stays out of the summary", () => {
+  const comment = renderSummary({
+    ...quiet,
+    findings: posted({
+      outcome: "failed",
+      finding: onFile("src/retry.ts", "Nothing in this file is reached"),
+      reason: "gh answered HTTP 422\nValidation Failed",
+    }),
+  });
+  assert.ok(
+    comment.endsWith(
+      "- `src/retry.ts` — Nothing in this file is reached (raised, and its comment could not be posted)",
+    ),
+    `the file-scoped finding was not named: ${comment}`,
+  );
+  assert.ok(!comment.includes("422"), `GitHub's own words reached the summary: ${comment}`);
 });
 
 /**

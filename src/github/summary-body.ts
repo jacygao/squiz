@@ -14,9 +14,10 @@
  * this does not write.
  */
 
+import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
-import type { Noted, PostedFindings } from "../loop/post-findings.ts";
+import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSpendLine } from "./spend-line.ts";
@@ -90,19 +91,16 @@ function tally(episode: ClosedEpisode): string {
  * How many findings the review raised: every thread of the episode, and the
  * closing round's findings that no thread holds.
  *
- * Larger than the four status counts add to, because a finding about the change
- * as a whole is raised and carries no status.
+ * Larger than the four status counts add to, because a finding no thread holds
+ * is raised and carries no status. Every one of them is a line in Notes, so
+ * nothing in the count is a finding the reader cannot see.
  *
- * Two findings are outside it. A finding no comment could be posted for at all
- * is left out: no line of this comment accounts for it, and a count that
- * reconciles with nothing a reader can see reads as an error in the comment. And
- * a finding about the change as a whole that an earlier round raised is left out
- * because nothing carries one between rounds, so the count covers the closing
- * round's. Threads are unaffected: every thread of the episode is on the pull
- * request when it closes.
+ * A finding an earlier round raised and no thread holds is not counted, because
+ * nothing carries one between rounds. Threads are unaffected: every thread of the
+ * episode is on the pull request when it closes.
  */
 function countRaised(episode: ClosedEpisode): number {
-  return episode.threads.length + noted(episode.findings).length;
+  return episode.threads.length + unthreaded(episode.findings).length;
 }
 
 function howMany(threads: readonly ClassifiedThread[], status: string): number {
@@ -154,28 +152,59 @@ function named(headline: string | null): string {
  * episode rather than about any one finding.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
-  const lines = [...noted(episode.findings).map(noteLine), ...closedEarly(episode.because)];
+  const lines = [...unthreaded(episode.findings).map(noteLine), ...closedEarly(episode.because)];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
 }
 
 /** The findings of the closing round that no thread on the pull request holds. */
-function noted(findings: PostedFindings): readonly Noted[] {
-  return findings.outcomes.filter((outcome) => outcome.outcome === "noted");
+function unthreaded(findings: PostedFindings): readonly (Noted | Failed)[] {
+  return findings.outcomes.filter((outcome) => outcome.outcome !== "threaded");
 }
 
 /**
- * One noted finding.
+ * One finding that no thread holds.
  *
  * A finding about the change as a whole has nowhere to point at and is named by
  * its subject. One that named a location is given that location, because the
  * location is the whole of what a person has to go on: no thread was opened, so
  * there is nothing on the pull request to follow.
+ *
+ * A finding whose comment could not be posted at all says so. The reviewer
+ * confirmed it and the harness lost it, and a line that read like the others
+ * would send a person looking for a thread that is not there.
  */
-function noteLine(note: Noted): string {
-  const { headline } = note.finding;
-  if (note.location === undefined) return `- About the change as a whole: ${headline}`;
-  return `- \`${note.location}\` — ${headline} (no thread could be opened for it)`;
+function noteLine(note: Noted | Failed): string {
+  if (note.outcome === "failed") {
+    // Not the reason GitHub gave, which the round reports: it is unbounded text,
+    // and a newline in it would put a line in this comment that nothing wrote.
+    const lost = "raised, and its comment could not be posted";
+    return line(where(note.finding), note.finding.headline, lost);
+  }
+  // A finding about the change as a whole is in Notes because that is where one
+  // belongs, and nothing failed to place it.
+  if (note.location === undefined) return line(undefined, note.finding.headline);
+  return line(note.location, note.finding.headline, "no thread could be opened for it");
+}
+
+/** One Notes line: where the defect is, what it is, and what became of the finding. */
+function line(location: string | undefined, headline: string, what?: string): string {
+  const said = what === undefined ? "" : ` (${what})`;
+  if (location === undefined) return `- About the change as a whole: ${headline}${said}`;
+  return `- \`${location}\` — ${headline}${said}`;
+}
+
+/**
+ * Where the finding said the defect is, as the summary writes it, or `undefined`
+ * for one about the change as a whole.
+ *
+ * Read off the finding itself, which is all there is for a finding no comment
+ * was posted for: nothing placed it anywhere.
+ */
+function where(finding: Finding): string | undefined {
+  if (finding.file === undefined) return undefined;
+  if (finding.line === undefined) return finding.file;
+  return `${finding.file}:${finding.line}`;
 }
 
 /**
