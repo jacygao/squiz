@@ -88,7 +88,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   A proxy that refuses the connection is safe, because every client fails fast.
 
 - **Budget seven times the reviewer's spend for the sessions that drive it.**
-  Ten rounds came to $0.23 and the sessions driving them came to $1.61. That is
+  Nine rounds came to $0.23 and the sessions driving them came to $1.61. That is
   about the ratio the earlier episode measured, and it holds for the short
   failing firings as well as for the long reviewing ones: a session that
   dispatches one subagent and fails its round in a second still costs tens of
