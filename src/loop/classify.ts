@@ -15,7 +15,7 @@
  * back, and the finding it was written from is in hand instead.
  *
  * Nothing is carried between rounds and nothing here reads GitHub. Every thread
- * on the pull request is handed over each round, resolved ones included, so the
+ * the reviewer opened is handed over each round, resolved ones included, so the
  * closing round's own account covers the whole episode.
  *
  * The comment itself is composed elsewhere, and nothing here throws.
@@ -30,8 +30,8 @@ import type { AppliedVerdicts } from "./verdicts.ts";
 /** What the closing round holds of the episode, which is the whole of it. */
 export type EpisodeAtClose = {
   /**
-   * Every thread on the pull request, as the round listed it before the review:
-   * its comments, its anchor and its resolved state.
+   * Every thread the round handed the reviewer, as it was listed before the
+   * review: its comments, its anchor and its resolved state.
    */
   readonly handedOver: readonly ReviewThread[];
   /** What the reviewer ruled on each of those threads. */
@@ -81,8 +81,8 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
   const counted = new Set<string>();
 
   for (const thread of closing.handedOver) {
-    // Every thread handed over is counted, a person's among them, so that
-    // nothing below can reach one of them a second time.
+    // Noted whether or not it carries a finding, so that nothing below can reach
+    // one of them a second time.
     counted.add(thread.id);
     const reading = readThread(thread);
     if (reading.raised !== "finding") continue;

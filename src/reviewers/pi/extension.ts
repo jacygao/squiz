@@ -150,7 +150,7 @@ export default function reportAsYouGo(pi: Registrar): void {
       "Rule on one thread you were handed. Call it once per thread, naming the thread by the identifier it was handed to you under.",
     promptSnippet: "Rule on one thread you were handed",
     promptGuidelines: [
-      `Use ${REPORT_VERDICT} once for every thread handed over, from round 2 on.`,
+      `Use ${REPORT_VERDICT} once for every thread handed over.`,
     ],
     parameters: verdictParameters,
     execute: async (_toolCallId, params) => {
