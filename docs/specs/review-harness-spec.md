@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.44 (draft)
+**Version:** 0.45 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -109,6 +109,18 @@ is reached.
 |---|---|
 | **Round** | One pass: gate, review, post, decide. A round either blocks the coding agent and starts another round, or ends the episode. |
 | **Episode** | Every round belonging to one pull request. The round cap, the local state file and the summary comment are all per-episode; the review itself is per-round. |
+
+An episode is **live** from its first round until it closes, and its reviewer is
+reviewing or its coding agent is working on what the review said. It closes for
+one of three reasons: nothing is left open for another round to work, the round
+cap is spent, or a round reached the token bound. A round that failed closes
+nothing — the episode stays live, and the next time that subagent stops another
+round runs.
+
+A live episode is one whose close has not been recorded. Nothing else makes an
+episode live or over: not whether a round is running at this instant, because
+between two rounds the coding agent is working and no round exists, and not how
+long ago anything happened.
 
 An episode is keyed by the subagent's id from the hook payload, which is the
 same every time that subagent stops. Its state lives in `.squiz/<episode>/`
