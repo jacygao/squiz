@@ -43,6 +43,12 @@ const HEAD_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
 /** The subagent id the episode keys on, which is hexadecimal as every real one is. */
 const AGENT_ID = "ab12cd34";
 
+/** A second episode's id, for the worktree a round does not have to itself. */
+const OTHER_AGENT_ID = "ef56ab78";
+
+/** The file under review, tracked and committed, which is what a reviewer's write shows up in. */
+const TRACKED = "src/ui/card.ts";
+
 /**
  * `git diff` of one changed line, which is the one line a comment can be
  * anchored to. A finding on line 88 of it threads inline; one anywhere else does
@@ -112,6 +118,13 @@ type Setup = {
   readonly lockStateAfter?: Kind;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
+  /** An episode of the same worktree that has run a round and not closed. */
+  readonly sharedWith?: string;
+  /**
+   * A directory where the round's marker goes, so that marking the round fails
+   * and every other write the round makes lands.
+   */
+  readonly blockMarker?: boolean;
   readonly marginMs?: number;
   readonly windowMs?: number;
   readonly detached?: boolean;
@@ -137,6 +150,10 @@ type Ran = {
   readonly invocations: readonly Invocation[];
   /** Whether both directories the reviewer writes into existed when it started. */
   readonly directoriesReady: readonly boolean[];
+  /** Whether the round was marked as running when each reviewer process started. */
+  readonly markedWhenStarted: readonly boolean[];
+  /** Whether the marker naming this round was still there once the round ended. */
+  readonly markerLeft: boolean;
   readonly state: EpisodeState | null;
   /** The state file exactly as it stands, `null` where there is no file at all. */
   readonly stateSource: string | null;
@@ -277,6 +294,38 @@ function attempts(...runs: readonly ParsedRun[]): Reviewer {
   };
 }
 
+/** A reviewer that wrote to the file under review through its shell, and reviewed. */
+function writesThenReviews(findings: readonly Finding[] = []): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}`],
+    parse: reviews({ findings }).parse,
+  };
+}
+
+/**
+ * A reviewer that wrote to the file under review and then never finished, so the
+ * bound kills it.
+ *
+ * The write a killed reviewer left behind is the one the comparison exists for.
+ */
+function writesThenHangs(cost: RoundCost): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; sleep 30`],
+    parse: hangs(cost).parse,
+  };
+}
+
+/** A reviewer that corrupted git's index, so the reading after it cannot be taken. */
+function breaksGit(): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", "printf 'not an index' > .git/index"],
+    parse: reviews({}).parse,
+  };
+}
+
 /** A reviewer that is not installed, which is the setup problem a round cannot fix. */
 const notInstalled: Reviewer = {
   command: "/nonexistent/squiz-reviewer",
@@ -309,7 +358,13 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     git(worktree, ["init", "--quiet", "--initial-branch", BRANCH]);
     git(worktree, ["config", "user.email", "squiz@example.invalid"]);
     git(worktree, ["config", "user.name", "Squiz"]);
-    git(worktree, ["commit", "--quiet", "--allow-empty", "--message", "the change under review"]);
+    // `.squiz/` is gitignored, as it is in a project the harness is installed in,
+    // so the episode's own directory is not read as something the reviewer wrote.
+    await writeFile(join(worktree, ".gitignore"), ".squiz/\n", "utf8");
+    await mkdir(join(worktree, "src", "ui"), { recursive: true });
+    await writeFile(join(worktree, TRACKED), "// line 1\n", "utf8");
+    git(worktree, ["add", "."]);
+    git(worktree, ["commit", "--quiet", "--message", "the change under review"]);
     if (setup.detached === true) git(worktree, ["checkout", "--quiet", "--detach", "HEAD"]);
 
     const episode = episodeAt(worktree, AGENT_ID);
@@ -335,9 +390,19 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       mkdirSync(episode.directory, { recursive: true });
       writeFileSync(episode.stateFile, setup.stateSource, "utf8");
     }
+    if (setup.sharedWith !== undefined) {
+      const written = writeState(episodeAt(worktree, setup.sharedWith), {
+        rounds: [ANSWER_COST],
+        spentOutsideRounds: unspent,
+      });
+      assert.equal(written.outcome, "written", "the other episode's own state must be written");
+    }
+    const marker = join(episode.directory, "running.json");
+    if (setup.blockMarker === true) mkdirSync(join(marker, "occupied"), { recursive: true });
 
     const invocations: Invocation[] = [];
     const directoriesReady: boolean[] = [];
+    const markedWhenStarted: boolean[] = [];
     const adapter: Adapter = {
       argv: (invocation) => {
         invocations.push(invocation);
@@ -346,6 +411,9 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         directoriesReady.push(
           existsSync(invocation.sessionDirectory) && existsSync(invocation.scratchDirectory),
         );
+        // The round is marked before the reading it takes here, so a reviewer that
+        // starts unmarked is a round no other episode in this worktree can find.
+        markedWhenStarted.push(existsSync(marker));
         return {
           command: setup.reviewer.command ?? "/bin/sh",
           args: [...(setup.reviewer.args ?? ["-c", "exit 0"])],
@@ -381,6 +449,8 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       })),
       invocations,
       directoriesReady,
+      markedWhenStarted,
+      markerLeft: existsSync(marker),
       state: stateIn(stateSource),
       stateSource,
       elapsedMs,
@@ -2120,5 +2190,147 @@ test("a paid attempt that ended as a setup problem is what stops the next round"
     next.invocations.length,
     0,
     "410,000 tokens against a 400,000-token bound buys no further reviewer, and forgetting them is what buys a reviewer that burned the bound and reported nothing another try at it",
+  );
+});
+
+/**
+ * A reviewer at `deep` can write to the tree through its shell, and two readings
+ * taken around it are the only thing that names the file it changed. A round
+ * reports what they say and does nothing else with it.
+ */
+test("a tracked file the reviewer wrote to is named, and the round posts what it found", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: writesThenReviews([finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, {
+    outcome: "changed",
+    paths: [TRACKED],
+  });
+  assert.deepEqual(ran.conclusion.confinement?.otherEpisodes, { outcome: "alone" });
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff", "create", "lookup"],
+    "a mutated tree is reported rather than blocked on, so the round posts what it always would",
+  );
+  assert.deepEqual(
+    ran.markedWhenStarted,
+    [true],
+    "a round another episode cannot find is one whose reviewer's writes that episode reads as its own",
+  );
+  assert.equal(ran.markerLeft, false, "the marker goes when the round ends");
+});
+
+/**
+ * The reading after the reviewer is taken on every path the reviewer can end on.
+ *
+ * A reviewer killed at its time bound is the one most likely to have left a write
+ * behind, and it is the path where the round is already handling a failure. A
+ * comparison taken only where the review finished would be missing from the case
+ * it exists for, and every other test here would still pass.
+ */
+test("a round killed at its bound takes the reading after the reviewer all the same", async () => {
+  const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: POSTING,
+    reviewer: writesThenHangs(floor),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  assert.deepEqual(
+    ran.conclusion.confinement?.trackedFiles,
+    { outcome: "changed", paths: [TRACKED] },
+    "the write the kill left behind is what the comparison exists to name",
+  );
+  assert.deepEqual(ran.markedWhenStarted, [true]);
+  assert.equal(ran.markerLeft, false, "a round that failed clears its marker too");
+});
+
+test("a worktree shared with another live episode takes no comparison, and the round still runs", async () => {
+  const ran = await runInFixture({
+    sharedWith: OTHER_AGENT_ID,
+    answers: POSTING,
+    reviewer: writesThenReviews([finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  const confinement = ran.conclusion.confinement;
+  assert.equal(confinement?.otherEpisodes.outcome, "shared");
+  assert.deepEqual(
+    confinement?.otherEpisodes.outcome === "shared"
+      ? confinement.otherEpisodes.episodes.map((other) => other.id)
+      : [],
+    [OTHER_AGENT_ID],
+    "the episodes that shared the worktree are what the summary names in place of a comparison",
+  );
+  assert.equal(
+    confinement?.trackedFiles.outcome,
+    "not-taken",
+    "a reading taken here would name the other episode's writing as this reviewer's",
+  );
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff", "create", "lookup"],
+    "what is disabled in a shared worktree is the comparison and nothing else",
+  );
+});
+
+test("a reading that could not be taken is not a tree that did not change", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: breaksGit(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const trackedFiles = ran.conclusion.confinement?.trackedFiles;
+  assert.equal(
+    trackedFiles?.outcome,
+    "unknown",
+    "a git that failed, read as a clean tree, would report a reviewer that touched nothing",
+  );
+  assert.match(
+    trackedFiles?.outcome === "unknown" ? trackedFiles.reason : "",
+    /the reading after could not be taken/u,
+  );
+  assert.ok(ran.kinds.includes("summary"), "the episode closed on its own terms all the same");
+});
+
+test("a round with too little of its window left takes no reading", async () => {
+  const ran = await runInFixture({
+    // Less left than a reading is given, and nothing interrupts one that has
+    // started: the round takes none rather than one the posting pays for.
+    windowMs: 4_000,
+    marginMs: 1_000,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const trackedFiles = ran.conclusion.confinement?.trackedFiles;
+  assert.equal(trackedFiles?.outcome, "not-taken");
+  assert.match(trackedFiles?.outcome === "not-taken" ? trackedFiles.reason : "", /window/u);
+});
+
+test("a marker that could not be written is reported, and the round reviews and posts", async () => {
+  const ran = await runInFixture({
+    blockMarker: true,
+    answers: POSTING,
+    reviewer: writesThenReviews([finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.equal(
+    ran.conclusion.confinement?.marked.outcome,
+    "failed",
+    "a round no other episode can find says so rather than passing for one they can",
+  );
+  assert.deepEqual(
+    ran.conclusion.confinement?.trackedFiles,
+    { outcome: "changed", paths: [TRACKED] },
+    "the marker is for the other episodes, and this round reads its own worktree either way",
   );
 });
