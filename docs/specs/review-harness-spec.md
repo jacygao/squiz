@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.45 (draft)
+**Version:** 0.47 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -253,6 +253,14 @@ Where a tree is shared, the harness detects it by resolving
 live episodes on one toplevel means a shared tree. The round still runs, the
 summary comment names the other episodes that were in flight, and the
 tracked-file comparison under Confinement is disabled for that round.
+
+An episode whose round died without recording a close is live by the definition
+above, so it counts. A worktree holding one therefore has the comparison disabled
+for every episode after it, until that episode's directory is gone. This is the
+direction to be wrong in: the comparison reports a tracked file that changed, and
+reading a live episode as over runs it against a tree another coding agent is
+editing, which names a file the reviewer never touched. Reading an abandoned
+episode as live only means nothing is detected that round.
 
 ## 4. The reviewer
 
