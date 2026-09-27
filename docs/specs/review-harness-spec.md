@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.33 (draft)
+**Version:** 0.34 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -659,8 +659,12 @@ Three blocks, in this order.
 1. **The counts and what the review spent.** Rounds run, findings raised, how
    many ended `fixed`, `withdrawn`, `open` and `disputed`, and the tokens each
    round spent with the episode's total, followed by the dollars where the
-   reviewer's CLI priced the model. Findings raised counts the general findings
-   too, which carry no status.
+   reviewer's CLI priced the model. Findings raised counts every thread of the
+   episode, and every finding of the closing round that no thread holds. The
+   findings that no thread holds carry no status. Every thread of the episode is
+   counted because the threads persist on the pull request. Only the closing
+   round's findings that no thread holds are counted, because nothing carries one
+   of those from one round to the next.
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its headline and where it sits: `file:line` for a
    thread anchored to a line, and the file alone for one anchored to the file.
@@ -668,9 +672,14 @@ Three blocks, in this order.
 3. **Notes.** Anything else a person reviewing the pull request should know:
    findings about the change as a whole, each with its headline; a finding the
    harness could anchor to neither a line nor a file, with its `file:line`; a
-   tracked file that changed while the reviewer ran; a round whose review did not
-   run; other episodes that shared the worktree; and a cap or bound that ended
-   the episode early.
+   finding whose comment could not be posted at all, with the location the
+   finding carries; a tracked file that changed while the reviewer ran; the
+   closing round, where its review did not run; other episodes that shared the
+   worktree; and a cap or bound that ended the episode early.
+
+A finding whose comment could not be posted is in Notes because nothing else on
+the pull request holds it. The reviewer confirmed it and the harness lost it, so
+a comment that left it out would read as a review that found nothing there.
 
 ### The format
 
