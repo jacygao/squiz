@@ -487,6 +487,22 @@ test("a finding naming one of the two fields reads as a line rather than one wit
 });
 
 /**
+ * A path is git's rather than the harness's, and a newline is legal in one. One
+ * thread per line is the shape `squiz reply` users read off the listing, and the
+ * stray line's first field is what a reader would take for an identifier.
+ */
+test("a path that is not one line still prints as one thread on one line (#213)", () => {
+  const printed = threadListing(185, [
+    thread({ id: "PRRT_split", path: "src/a\nb.ts", anchor: { at: "line", line: 3 } }),
+    thread({ id: "PRRT_plain", path: "src/c.ts", anchor: { at: "line", line: 4 } }),
+  ]);
+
+  const listed = printed.trimEnd().split("\n").slice(1);
+  assert.equal(listed.length, 2, `two threads printed as ${listed.length} lines: ${printed}`);
+  assert.equal(listed[0], "PRRT_split src/a b.ts:3");
+});
+
+/**
  * The renderer collapses a headline to one line, and a comment a person edited on
  * GitHub is not bound by that. One thread per line is the shape `squiz reply`
  * users read off the listing.
