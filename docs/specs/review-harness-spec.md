@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.37 (draft)
+**Version:** 0.38 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -786,6 +786,19 @@ the runtime killing the hook, which the review budget exists to stay below.
 The summary comment carries it whenever GitHub can be reached; the hook's stderr
 carries what could not be posted.
 
+**What ran and answered is reported by its answer.** Where `gh` ran and said what
+was wrong, that is what the round reports: the status it exited with, and the
+first line of what it wrote. A `gh` that could not be run at all is a different
+failure with a row of its own, and the two are never collapsed into one.
+
+**A call whose request never arrived did nothing that was asked of it.** A call's
+body reaches `gh` on its standard input, and `gh` can answer before it has read
+all of it. A call that ends that way is a failure and never a call that did what
+was asked. Where `gh` exited non-zero, the failure reported is what `gh` said.
+Where it exited 0, the failure reported is GitHub not having been reached. A
+comment the harness only believes it created is a finding lost for good, because
+nothing retries one.
+
 | Failure | Behaviour |
 |---|---|
 | The reviewer is not installed, or has no API key | Exit 0, nothing posted, and stderr names the check that failed. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
@@ -795,6 +808,7 @@ carries what could not be posted.
 | The reviewer exceeds the review budget | The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. |
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
+| `gh` cannot be run at all | Exit 0, nothing posted, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
 | The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |
 | The threads on the pull request cannot all be listed | Exit 0, nothing posted, and no review runs. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |

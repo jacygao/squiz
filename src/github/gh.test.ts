@@ -16,6 +16,15 @@ type FakeGh = {
   readonly hangSeconds?: number;
   /** Kills itself, which is the null exit status with a signal. */
   readonly selfKill?: boolean;
+  /**
+   * Answers without reading stdin, which is what real `gh` does whenever it
+   * decides before it has read the body: an unknown flag, a path whose
+   * `{owner}` will not expand, or a GitHub that refuses mid-upload.
+   *
+   * The writer is then signalled rather than answered, and the call carries an
+   * error beside the exit status and the two streams.
+   */
+  readonly answersUnread?: boolean;
 };
 
 type Fake = {
@@ -70,7 +79,7 @@ function script(fake: FakeGh, argumentLog: string, stdinLog: string, cwdLog: str
     // child holding the pipes open after its parent is gone.
     lines.push(`exec sleep ${fake.hangSeconds}`);
   } else {
-    lines.push(`cat > ${quote(stdinLog)}`);
+    if (fake.answersUnread !== true) lines.push(`cat > ${quote(stdinLog)}`);
     if (fake.selfKill === true) lines.push("kill -9 $$");
     lines.push(`printf '%s' ${quote(fake.stdout ?? "")}`);
     lines.push(`printf '%s' ${quote(fake.stderr ?? "")} >&2`);
@@ -124,6 +133,15 @@ const anywhere = { directory: tmpdir() };
 
 /** A path, a body and an id all admit these, and none of them may reach a shell. */
 const hostile = "evil/$(id); rm -rf & `x` 'q'";
+
+/**
+ * A body larger than a pipe buffer, so that a `gh` which answers without reading
+ * it cannot be written to before it is gone.
+ *
+ * The write then fails every time rather than most times, which is what makes a
+ * test of it a test rather than a coin toss.
+ */
+const LARGER_THAN_A_PIPE = "x".repeat(2_000_000);
 
 test("a REST answer carries the body and the HTTP status", async () => {
   await withFakeGh({ stdout: included("200 OK", '{"number":142,"head":{"sha":"abc"}}') }, () => {
@@ -297,7 +315,83 @@ test("a gh that is not installed is a failure and not a throw", async () => {
   await withNoGh(() => {
     const result = callRest({ path: "repos/o/r/pulls/1" }, anywhere);
 
-    assert.equal(result.outcome, "not-run");
+    assert.equal(
+      result.outcome,
+      "not-run",
+      "a gh that never started is the one failure where nothing at all was learned",
+    );
+  });
+});
+
+test("a gh that answered before it read the body is reported by what it answered", async () => {
+  await withFakeGh(
+    {
+      answersUnread: true,
+      status: 1,
+      stdout: included("401 Unauthorized", '{"message":"Bad credentials"}'),
+      stderr: "gh: Bad credentials (HTTP 401)\n",
+    },
+    () => {
+      const result = callRest(
+        {
+          path: "repos/o/r/pulls/142/comments",
+          method: "POST",
+          body: { body: LARGER_THAN_A_PIPE },
+        },
+        anywhere,
+      );
+
+      assert.equal(
+        result.outcome,
+        "exited",
+        "a gh that ran and said what was wrong must not be reported as a gh that could not run",
+      );
+      assert.equal(result.outcome === "exited" ? result.httpStatus : null, 401);
+      assert.equal(
+        result.outcome === "exited" ? result.reason : "",
+        "gh exited 1 on HTTP 401: gh: Bad credentials (HTTP 401)",
+      );
+    },
+  );
+});
+
+/**
+ * The one failure here that costs a finding for good. Nothing retries a comment
+ * the harness believes it created, so a `gh` that answered a request it never
+ * read has to fail the call however cleanly it exited.
+ */
+test("a gh that exits 0 before it read the body is never an answer", async () => {
+  await withFakeGh(
+    { answersUnread: true, status: 0, stdout: included("201 Created", '{"id":1,"body":"ok"}') },
+    () => {
+      const result = callRest(
+        {
+          path: "repos/o/r/pulls/142/comments",
+          method: "POST",
+          body: { body: LARGER_THAN_A_PIPE },
+        },
+        anywhere,
+      );
+
+      assert.notEqual(
+        result.outcome,
+        "answered",
+        "a request that never arrived must never read as a comment that was posted",
+      );
+      assert.equal(result.outcome, "unreachable");
+    },
+  );
+});
+
+test("a gh killed while its body is being written is unreachable, not a gh that would not run", async () => {
+  await withFakeGh({ answersUnread: true, selfKill: true }, () => {
+    const result = callRest(
+      { path: "repos/o/r/pulls/142/comments", method: "POST", body: { body: LARGER_THAN_A_PIPE } },
+      anywhere,
+    );
+
+    assert.equal(result.outcome, "unreachable");
+    assert.match(result.outcome === "unreachable" ? result.reason : "", /killed by SIGKILL/u);
   });
 });
 
