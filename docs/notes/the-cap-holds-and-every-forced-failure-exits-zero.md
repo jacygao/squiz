@@ -161,13 +161,17 @@ pull request #204 read back through GraphQL, and the `stderr` that event carried
 | The reviewer runs, exits cleanly, and completes no message | `HTTPS_PROXY` at a refused port, `NO_PROXY` keeping GitHub reachable | 0 | `squiz: the reviewer could not run: Connection error.` | nothing |
 | GitHub is unreachable | `HTTPS_PROXY` at a refused port, GitHub not in `NO_PROXY` | 0 | `squiz: no review ran: the pull request for "scratch/m5-failure-rows" could not be looked up: gh exited 1: Post "https://api.github.com/graphql": proxyconnect tcp: dial tcp 127.0.0.1:1: connect: connection refused` | nothing |
 | The reviewer exceeds the review budget | `"timeout": 50`, and again `"timeout": 65` with `"thinking": "max"` | 0 | `squiz: the reviewer was killed at its 50-second bound, and the round recorded no findings` | nothing |
-| The local state file cannot be written | `.squiz` replaced by an empty regular file, so the episode's directory cannot exist | 0 | `squiz: no review ran: <worktree>/.squiz/<episode>/state.json could not be read: ENOTDIR: not a directory, open '<worktree>/.squiz/<episode>/state.json'` | nothing |
+| The local state file cannot be read | `.squiz` replaced by an empty regular file, so the episode's directory cannot exist | 0 | `squiz: no review ran: <worktree>/.squiz/<episode>/state.json could not be read: ENOTDIR: not a directory, open '<worktree>/.squiz/<episode>/state.json'` | nothing |
 | The round cap is reached | `"rounds": 1`, and `"rounds": 2` | 0 | empty | 2 threads under the cap of 1, none new by the cap of 2's round 2 |
 | The token bound is reached | `"tokens": 100000` with `"rounds": 3` and `"thinking": "max"` | 0 | empty | 3 threads |
 | A `.squiz.json` that cannot be read or parsed (§ 9) | `"timeout": 700`, then a key named `reviewEverything` | 0 | `squiz: no review ran: <worktree>/.squiz.json: "timeout" is 700, but it must be a whole number of seconds from 1 to 480` | nothing |
 
 The subagent finished normally after every one of those firings: each one's
 `task_updated` carried `"status": "completed"`.
+
+§ 7 names the state file only at the write. The forcing above stops the episode
+at the read, before a reviewer starts, so the write is in the table of rows a run
+did not reach.
 
 ### The cap, read from the exit codes
 
@@ -248,7 +252,7 @@ bound at all.
 
 | | Sessions | Rounds | Tokens |
 |---|---|---|---|
-| Whole run | $1.6082 | $0.2262 over 10 rounds | 436,248 |
+| Whole run | $1.6082 | $0.2262 over 9 rounds | 436,248 |
 
 Eleven sessions were started and ten of them reported a cost. The total of the
 two figures is $1.8344.
@@ -282,6 +286,7 @@ reported no cost.
 
 | § 7 row | Why not | What covers it |
 |---|---|---|
+| The local state file cannot be written | The write happens after the review, where the round records what it spent and reports that nothing was posted. Replacing `.squiz` with a file stops the episode at the read instead, before a reviewer starts | `src/loop/episode-state.test.ts`, "a write that cannot happen carries the error the filesystem gave" |
 | The reviewer has no API key | `pi` reads its credential from `~/.pi/agent/auth.json` and ignores `DEEPSEEK_API_KEY`, so forcing this means editing a real credential file or moving `HOME`, and the session driving the run needs its own `HOME` as much as `pi` does. Its twin, a reviewer that is not installed, was forced instead | `src/reviewers/round.test.ts` on a command that cannot be started, and `docs/notes/a-startup-failure-never-reaches-the-stream.md` on where the reason is |
 | The reviewer stops without finishing its review, retried once, then treated as an unavailable API | It needs a run whose message stops for an answer and whose output still cannot be read — a reviewer that writes prose instead of calling `finish_review`. No configuration produces that, and it is the only path to the pointer that says the review did not run | `src/reviewers/round.test.ts` on the retry and the second failure |
 | The reviewer exceeds the ceiling | Deliberately not run. It is measured, and exercising it records the subagent as failed and tells the coding agent nothing ran | `docs/notes/the-runtime-kills-the-reviewer-too-but-only-sigterm-is-certain.md` |
