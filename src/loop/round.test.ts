@@ -317,6 +317,19 @@ function writesThenHangs(cost: RoundCost): Reviewer {
   };
 }
 
+/**
+ * A reviewer that wrote to the file under review and then took the write
+ * permission off the episode's directory, so the round cannot record what it
+ * spent.
+ */
+function writesThenLocksTheState(): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; chmod 500 .squiz/${AGENT_ID}`],
+    parse: reviews({}).parse,
+  };
+}
+
 /** A reviewer that corrupted git's index, so the reading after it cannot be taken. */
 function breaksGit(): Reviewer {
   return {
@@ -2332,5 +2345,35 @@ test("a marker that could not be written is reported, and the round reviews and 
     ran.conclusion.confinement?.trackedFiles,
     { outcome: "changed", paths: [TRACKED] },
     "the marker is for the other episodes, and this round reads its own worktree either way",
+  );
+});
+
+/**
+ * A round that could not record what it spent posts nothing and reports the write,
+ * and what the readings established is not lost with it.
+ *
+ * The reviewer ran and both readings were taken, so a conclusion carrying no
+ * confinement here would say no reviewer ran. The mutation is the one thing about
+ * this round nothing else can be asked for afterwards: the tree has moved on by
+ * the time anybody reads it.
+ */
+test("a cost that could not be recorded keeps what the readings established", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: writesThenLocksTheState(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /nothing was posted/u);
+  assert.deepEqual(
+    ran.conclusion.confinement?.trackedFiles,
+    { outcome: "changed", paths: [TRACKED] },
+    "the reviewer ran, and the file it wrote to is named whatever the state file did",
+  );
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff"],
+    "nothing is posted on a state file that would not take the round",
   );
 });

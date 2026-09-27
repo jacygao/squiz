@@ -17,6 +17,7 @@ import { test } from "node:test";
 
 import { unspent } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { markRoundRunning } from "../worktree/shared-tree.ts";
 import { readAfterReviewer, readBeforeReviewer, type RoundConfinement } from "./confinement.ts";
 import { writeState } from "./episode-state.ts";
 import { episodeAt, type Episode } from "./episode.ts";
@@ -74,6 +75,22 @@ async function around(
 /** A reviewer that wrote to the file under review, through its shell. */
 async function wroteToTheTree(episode: Episode): Promise<void> {
   await appendFile(join(episode.worktree, TRACKED), "// line 2\n", "utf8");
+}
+
+/** A round of another episode, started in this worktree after ours. */
+function otherRoundStarts(worktree: string, id: string): void {
+  const marked = markRoundRunning(episodeAt(worktree, id));
+  assert.equal(marked.outcome, "written", marked.outcome === "failed" ? marked.reason : "");
+}
+
+/** An episode of the worktree that ran a round and reported its close. */
+function episodeCameAndWent(worktree: string, id: string): void {
+  const written = writeState(episodeAt(worktree, id), {
+    rounds: [unspent],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+  });
+  assert.equal(written.outcome, "written", written.outcome === "failed" ? written.reason : "");
 }
 
 /** An episode of the worktree that has run a round and not closed. */
@@ -232,19 +249,141 @@ test("a marker that could not be written is carried out, and the comparison is t
   });
 });
 
+
+/**
+ * The tree is asked about again after the reviewer, because an episode that
+ * became live during the review is the one a single asking cannot see.
+ *
+ * Marking this round first only makes the round that starts later see this one.
+ * It does nothing for this one, which asked before that round existed, so a
+ * comparison built on the first answer alone names the other reviewer's writing
+ * as this one's.
+ */
+test("an episode that became live after the first reading is not compared against", async () => {
+  await withWorktree(async (episode) => {
+    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
+
+    otherRoundStarts(episode.worktree, OTHER_AGENT_ID);
+    await wroteToTheTree(episode);
+
+    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
+
+    assert.equal(confinement.otherEpisodes.outcome, "shared");
+    assert.equal(
+      confinement.trackedFiles.outcome,
+      "not-taken",
+      "the write is the other episode's, and naming it here accuses this reviewer of it",
+    );
+  });
+});
+
+/**
+ * An episode that started and closed inside one review is live at neither asking,
+ * and the tree was shared for the whole of the interval the comparison covers.
+ */
+test("an episode that came and went inside the review is not compared against", async () => {
+  await withWorktree(async (episode) => {
+    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
+
+    episodeCameAndWent(episode.worktree, OTHER_AGENT_ID);
+    await wroteToTheTree(episode);
+
+    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
+
+    assert.equal(confinement.trackedFiles.outcome, "not-taken");
+    assert.match(
+      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
+      new RegExp(OTHER_AGENT_ID, "u"),
+      "the episode that appeared while the reviewer ran is what the answer names",
+    );
+  });
+});
+
+/**
+ * The reading is bounded rather than merely admitted.
+ *
+ * Nothing about a round's remaining window reaches a `git status` that has
+ * already started, so a reading let in on what was left and then given no bound
+ * of its own runs as long as git does. What the round would lose there is the
+ * cost of a review that finished and the posting after it.
+ */
+test("a reading that runs past its bound is cut short and answered as one that failed", async () => {
+  await withWorktree(async (episode) => {
+    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    assert.equal(before.reading.outcome, "read");
+
+    const started = Date.now();
+    const confinement = await withGitThatDelays("status", 20, () =>
+      readAfterReviewer(before, deadlineIn(WINDOW_MS)),
+    );
+    const elapsedMs = Date.now() - started;
+
+    assert.equal(confinement.trackedFiles.outcome, "unknown");
+    assert.match(
+      confinement.trackedFiles.outcome === "unknown" ? confinement.trackedFiles.reason : "",
+      /ran out of/u,
+      "a reading that ran out of time is its own answer and never a tree nobody touched",
+    );
+    assert.ok(
+      elapsedMs < 15_000,
+      `the reading is cut short rather than waited out: it took ${elapsedMs}ms`,
+    );
+  });
+});
+
 /**
  * Run `body` with a `git` of the test's own in front of the real one, recording
  * for each call whether the marker was already there.
- *
- * The fake runs the real git, so everything asked of it is answered as it would
- * be. The path comes from the environment's own git rather than a guess at where
- * it is installed.
  */
 async function withGitThatRecords(
   marker: string,
   witness: string,
   body: () => Promise<void>,
 ): Promise<void> {
+  await withGitThat(
+    `if [ -f ${quote(marker)} ]; then echo marked; else echo unmarked; fi >> ${quote(witness)}`,
+    body,
+  );
+}
+
+/**
+ * Run `body` with a `git` that waits before answering one subcommand.
+ *
+ * Only that subcommand waits, so resolving the worktree still answers at once and
+ * the one call that hangs is what the reading has to be cut short during. The wait
+ * is short and repeated, because a shell blocked in one long sleep outlives the
+ * signal that stops it and holds the pipe its caller is reading.
+ */
+async function withGitThatDelays<T>(
+  subcommand: string,
+  seconds: number,
+  body: () => T | Promise<T>,
+): Promise<T> {
+  return await withGitThat(
+    [
+      `for arg in "$@"; do`,
+      `  [ "$arg" = ${quote(subcommand)} ] || continue`,
+      `  waited=0`,
+      `  while [ "$waited" -lt ${Math.round(seconds * 5)} ]; do`,
+      `    sleep 0.2`,
+      `    waited=$((waited + 1))`,
+      `  done`,
+      "done",
+    ].join("\n"),
+    body,
+  );
+}
+
+/**
+ * Run `body` with a `git` that runs `preamble` and then the real git.
+ *
+ * Everything asked of it is answered as it would be, because the real git stands
+ * behind it. Its path comes from the environment rather than from a guess at
+ * where git is installed.
+ */
+async function withGitThat<T>(preamble: string, body: () => T | Promise<T>): Promise<T> {
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   assert.equal(real.status, 0, "the test needs the real git to stand behind the fake");
   const realGit = real.stdout.trim();
@@ -253,19 +392,10 @@ async function withGitThatRecords(
   const previous = process.env["PATH"];
   try {
     const fake = join(directory, "git");
-    await writeFile(
-      fake,
-      [
-        "#!/bin/sh",
-        `if [ -f ${quote(marker)} ]; then echo marked; else echo unmarked; fi >> ${quote(witness)}`,
-        `exec ${quote(realGit)} "$@"`,
-        "",
-      ].join("\n"),
-      "utf8",
-    );
+    await writeFile(fake, ["#!/bin/sh", preamble, `exec ${quote(realGit)} "$@"`, ""].join("\n"), "utf8");
     await chmod(fake, 0o755);
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
-    await body();
+    return await body();
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;

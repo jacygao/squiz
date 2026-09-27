@@ -295,7 +295,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   // bound is the one most likely to have left a write behind.
   const confinement = readAfterReviewer(around, window);
 
-  const recording = keepCost(episode, state, review);
+  const recording = keepCost(episode, state, review, confinement);
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
 
@@ -521,7 +521,12 @@ function makeDirectories(episode: Episode): string | null {
  *
  * A setup problem records what it spent without recording a round.
  */
-function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<EpisodeState> {
+function keepCost(
+  episode: Episode,
+  state: EpisodeState,
+  review: Review,
+  confinement: RoundConfinement,
+): Step<EpisodeState> {
   const recorded = withSpend(state, review);
   // Nothing was spent and no round ran, so there is nothing to keep. Writing
   // anyway would put a write that could fail in front of the reason the reviewer
@@ -533,7 +538,16 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
     // Nothing is posted on a state file that would not take the round. A round
     // that posted its findings and recorded nothing is one the next round
     // repeats comment for comment.
-    return { ended: failed("harness", `nothing was posted: ${written.reason}`) };
+    return {
+      ended: {
+        outcome: "failed",
+        failure: "harness",
+        reason: `nothing was posted: ${written.reason}`,
+        // The reviewer ran and both readings were taken, and the tree has moved on
+        // by the time anything could ask again.
+        confinement,
+      },
+    };
   }
   return { step: recorded };
 }
