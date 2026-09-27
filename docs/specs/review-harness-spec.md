@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.43 (draft)
+**Version:** 0.44 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -266,6 +266,14 @@ Five things are handed to it:
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
+
+**A configured test command reaches the reviewer in the prompt, and only at depth
+`deep`.** The prompt is the only channel a project's own text arrives through:
+the charter ships with the harness, and the command line is flags and tool names.
+It is named there as the only test command the reviewer may run, because a
+command offered as one option among several leaves the reviewer inferring one,
+which is what naming it prevents. At `read` it is absent, because there is no
+shell to run it with.
 
 **There is no file-selection or budgeting stage.** The reviewer decides what to
 open, one read at a time.

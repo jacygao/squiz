@@ -1,10 +1,15 @@
 /**
  * The task prompt the reviewer is handed each round: the pull request under
- * review, and the threads already on it.
+ * review, the threads already on it, and the one command its tests are run
+ * with.
  *
  * It sits above the adapters rather than inside one. Every adapter hands its
  * CLI the same prompt, so a second reviewer is a second command line and not a
  * second prompt.
+ *
+ * The test command is carried here because the prompt is the only channel a
+ * project's own text reaches the reviewer through. The command line the adapter
+ * builds is flags and tool names.
  *
  * Three things are deliberately absent. The charter reaches the reviewer
  * separately and is the same every round, so nothing here restates it.
@@ -14,6 +19,7 @@
  * and the threads are the whole of what it knows about the rounds before it.
  */
 
+import type { Depth } from "../config/config.ts";
 import type { PullRequest } from "../github/pull-request.ts";
 import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 
@@ -33,6 +39,19 @@ export type UnderReview = {
 };
 
 /**
+ * How the reviewer is to run the project's tests.
+ *
+ * The depth comes with the command because the two together decide whether it is
+ * written into the prompt at all. Only `deep` grants a shell, and a command named
+ * to a reviewer with no way to run it invites a finding that the tests fail.
+ */
+export type TestCommand = {
+  readonly depth: Depth;
+  /** What the project configured, or `null` where it configured nothing. */
+  readonly command: string | null;
+};
+
+/**
  * The prompt for one round.
  *
  * Each thread is written under its own identifier, which is what a verdict
@@ -44,17 +63,48 @@ export type UnderReview = {
  * Never throws, and refuses nothing. A field that arrived empty is carried as
  * it is, because a round with a thin description is still a round to review.
  */
-export function composePrompt(underReview: UnderReview): string {
+export function composePrompt(underReview: UnderReview, tests: TestCommand): string {
   const { pullRequest, diff, threads } = underReview;
   return [
     `# Review pull request #${pullRequest.number}`,
     `Head \`${pullRequest.headRef}\`, base \`${pullRequest.baseRef}\`.`,
     "## Description",
     described(pullRequest.description),
+    ...testSection(tests),
     "## Diff",
     block(diff, "diff"),
     ...threadSections(threads),
   ].join("\n\n");
+}
+
+/**
+ * The one command the reviewer may run the tests with, or nothing at all.
+ *
+ * It is handed over as the only command and not as a preference, because that is
+ * the whole of what it is for: a runner invoked another way can rewrite what it
+ * checks, and turn a failing test green by editing the code under review. A
+ * reviewer that reads it as one option among several is back to inferring a
+ * command, which is what naming one prevents.
+ *
+ * Nothing is carried where the project named no command, and the reviewer works
+ * out how to run the tests as it does when nothing is configured. Nothing is
+ * carried at `read` either, where there is no shell to run a command with.
+ *
+ * The command is text the project wrote, so it is fenced like the diff: what it
+ * carries cannot close the block and read as a section of the prompt's own.
+ */
+function testSection(tests: TestCommand): readonly string[] {
+  if (tests.depth !== "deep") return [];
+  const command = tests.command?.trim() ?? "";
+  // A command of nothing but space names no command, and a block holding it
+  // would tell the reviewer to run a blank line.
+  if (command === "") return [];
+  return [
+    "## The test command",
+    "Run the tests with this command, and with no other:",
+    block(command, "sh"),
+    "It is the only test command to run. A runner invoked any other way may rewrite what it checks, which turns a failing test green by editing the code you are reviewing. So do not run a variant of this command, a single test out of it, or a command of your own.",
+  ];
 }
 
 /**

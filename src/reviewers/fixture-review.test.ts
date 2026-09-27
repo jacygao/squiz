@@ -281,7 +281,11 @@ function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, diff: diffOf(tree), threads: [thread] }),
+    prompt: composePrompt(
+      { pullRequest, diff: diffOf(tree), threads: [thread] },
+      // The fixture runs at `read`, which no test command reaches.
+      { depth: "read", command: null },
+    ),
     sessionDirectory,
     scratchDirectory,
     depth: "read",

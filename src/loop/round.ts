@@ -254,7 +254,10 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     {
       directory,
       charterFile: setup.charterFile,
-      prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }),
+      prompt: composePrompt(
+        { pullRequest, diff: fetched.diff, threads: handedOver },
+        { depth: config.depth, command: config.test },
+      ),
       sessionDirectory: episode.sessionDirectory,
       scratchDirectory: episode.scratchDirectory,
       thinking: config.thinking,
