@@ -111,6 +111,11 @@ const unreadableContents: readonly string[] = [
   `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": 0.04}`,
   `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": 0.04}}`,
   `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": "0.04", "tokens": 1, "messages": 1}}`,
+  // A close that is there and cannot be read is neither yes nor no. Read as no,
+  // the next firing announces a missing summary for an episode carrying one; read
+  // as yes, it closes the episode in silence.
+  `{"pullRequest": 142, "rounds": [], "closeReported": "true"}`,
+  `{"pullRequest": 142, "rounds": [], "closeReported": 1}`,
 ];
 
 for (const contents of unreadableContents) {
@@ -202,4 +207,23 @@ test("a state file naming no spend outside its rounds has spent none", (t) => {
     outcome: "read",
     state: { pullRequest: 142, rounds: [], spentOutsideRounds: unspent },
   });
+});
+
+test("a reported close is written and comes back, and one never written is absent", (t) => {
+  const episode = episodeIn(t);
+  const closed: EpisodeState = {
+    pullRequest: 142,
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+  };
+
+  assert.deepEqual(writeState(episode, closed), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state: closed });
+
+  // A file written before the field existed says the close was never reported,
+  // which is the answer that has the next firing announce the missing summary.
+  writeFileSync(episode.stateFile, `{"pullRequest": 142, "rounds": []}`);
+  const read = readState(episode);
+  assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
 });

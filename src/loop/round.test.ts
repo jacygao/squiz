@@ -22,7 +22,6 @@ import { test } from "node:test";
 import { defaultConfig, type Config } from "../config/config.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
-import type { SummaryPosting } from "../github/summary.ts";
 import {
   unspent,
   type Adapter,
@@ -34,6 +33,7 @@ import {
 } from "../reviewers/adapter.ts";
 import { writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
+import type { EpisodeSummary } from "./post-summary.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
 
 const BRANCH = "review-me";
@@ -102,6 +102,8 @@ type Setup = {
   readonly rounds?: readonly RoundCost[];
   /** What the episode already spent on attempts that were no round. */
   readonly outsideRounds?: RoundCost;
+  /** Whether a firing of the episode has already reported its close. */
+  readonly closeReported?: boolean;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
   readonly marginMs?: number;
@@ -316,6 +318,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         pullRequest: PULL_REQUEST,
         rounds: setup.rounds,
         spentOutsideRounds: setup.outsideRounds ?? unspent,
+        ...(setup.closeReported === undefined ? {} : { closeReported: setup.closeReported }),
       });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
     }
@@ -646,9 +649,16 @@ function sent(stdin: string): string {
   return String(body);
 }
 
-/** Why the summary did not post, or the empty string where it did. */
-function summaryReason(summary: SummaryPosting | undefined): string {
-  return summary?.outcome === "failed" ? summary.reason : "";
+/** Why the episode has no summary comment, or the empty string where it has one. */
+function summaryReason(summary: EpisodeSummary): string {
+  switch (summary.outcome) {
+    case "failed":
+    case "never-composed":
+      return summary.reason;
+    case "posted":
+    case "reported-before":
+      return "";
+  }
 }
 
 /** A finding on the one line the diff carries, which threads inline. */
@@ -981,6 +991,11 @@ test("a closing round posts one comment carrying the summary it composed", async
   assert.equal(ran.conclusion.because, "round-cap");
   assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
   assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "summary"]);
+  assert.equal(
+    ran.state?.closeReported,
+    true,
+    "a later firing of this episode reads this to know the close was reported, and announces a missing summary where it is not there",
+  );
 
   const posted = ran.calls.filter((call) => call.kind === "summary");
   assert.equal(posted.length, 1, "the comment is posted once, and nothing ever edits it");
@@ -1014,6 +1029,11 @@ test("a round that blocks posts no summary", async () => {
     ran.kinds.filter((kind) => kind === "summary"),
     [],
     "the summary is the episode's close, and one for every firing reports a review that is still going on",
+  );
+  assert.notEqual(
+    ran.state?.closeReported,
+    true,
+    "a round that blocked reported no close, and a later firing that read this as one would close the episode in silence",
   );
 });
 
@@ -1699,10 +1719,94 @@ test("a cap already spent closes the episode before a reviewer is started", asyn
   assert.deepEqual(
     ran.kinds,
     ["prlist"],
-    "the episode's summary went up when it closed, and a second one here would report an episode with no threads in hand as an episode that raised nothing",
+    "a comment composed here would report an episode with none of its threads in hand as an episode that raised nothing",
   );
-  assert.equal(ran.conclusion.summary, undefined, "so no summary was attempted at all");
+  // The state file this fixture wrote records no close, which is what an
+  // interruption between the cost and the close leaves. The comment is missing
+  // and the round says so.
+  assert.equal(ran.conclusion.summary.outcome, "never-composed");
   assert.equal(ran.state?.rounds.length, 3, "and no fourth round is appended to the count");
+});
+
+/**
+ * A cap lowered between firings closes an episode whose summary was never posted.
+ *
+ * The first firing reviews under a cap of 3, posts its finding and blocks, so
+ * nothing has closed the episode and nothing has reported it. The cap is 1 by the
+ * next firing, which finds the bound already spent: it starts no review, lists
+ * none of the episode's threads and composes no comment. A close that said nothing
+ * here would end the episode with findings on the pull request, no comment
+ * reporting them, and exit 0 reading as a clean review.
+ */
+test("a cap lowered after a round blocked closes the episode with no summary, and says so", async () => {
+  const blocked = await runInFixture({
+    config: { rounds: 3 },
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(blocked.conclusion.outcome === "block");
+  assert.notEqual(
+    blocked.state?.closeReported,
+    true,
+    "a round that blocked closed no episode, so it has reported no close",
+  );
+
+  const closed = await runInFixture({
+    config: { rounds: 1 },
+    rounds: blocked.state?.rounds ?? [],
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close");
+  assert.equal(closed.conclusion.because, "round-cap");
+  assert.deepEqual(
+    closed.kinds,
+    ["prlist"],
+    "no review ran here, so nothing was listed to compose a comment from and nothing was posted",
+  );
+  assert.equal(
+    closed.conclusion.summary.outcome,
+    "never-composed",
+    "the episode closed with no summary anywhere, and a close that reports nothing reads as a clean review",
+  );
+  assert.match(
+    summaryReason(closed.conclusion.summary),
+    /1 round/u,
+    "the line has to say the episode reviewed, or a person has no reason to go and read its threads",
+  );
+});
+
+/**
+ * A firing after the episode reported its close says nothing about a summary.
+ *
+ * The two firings are chained: the flag the second one reads is the one the close
+ * wrote, rather than a flag the fixture set by hand. A second line about one
+ * episode's summary reports a failure that did not happen, and a comment posted
+ * here would be a second comment for one episode.
+ */
+test("a firing after the episode reported its close says nothing about a summary", async () => {
+  const closed = await runInFixture({
+    config: { rounds: 1 },
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close");
+  assert.deepEqual(closed.conclusion.summary, { outcome: "posted" });
+
+  const again = await runInFixture({
+    config: { rounds: 1 },
+    rounds: closed.state?.rounds ?? [],
+    closeReported: closed.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(again.conclusion.outcome === "close");
+  assert.deepEqual(again.kinds, ["prlist"]);
+  assert.equal(again.conclusion.summary.outcome, "reported-before");
 });
 
 test("an exhausted cap whose last recorded round failed closes the episode too", async () => {

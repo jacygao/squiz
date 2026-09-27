@@ -24,7 +24,6 @@ import type { Config } from "../config/config.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
-import type { SummaryPosting } from "../github/summary.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
 import {
@@ -46,7 +45,7 @@ import {
 } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
-import { postEpisodeSummary } from "./post-summary.ts";
+import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
 import { blockingReason } from "./reason.ts";
 import {
   decideAfterRound,
@@ -126,14 +125,11 @@ export type RoundConclusion =
       readonly outcome: "close";
       readonly because: ClosingReason;
       /**
-       * What became of the episode's summary comment.
-       *
-       * Absent where none was attempted, which is a close reached before the
-       * review: the episode's comment went up when the episode closed, and a
-       * firing that finds a bound already spent holds none of the episode's
-       * threads to write a second one from.
+       * What became of the episode's summary comment. Said by every close, and
+       * never left to be inferred: the caller reports a close that ended with no
+       * comment, and it cannot read that off a field that is missing.
        */
-      readonly summary?: SummaryPosting;
+      readonly summary: EpisodeSummary;
     } & RoundAccount)
   /**
    * The round failed. Never a clean pass: `failure` says whose failure it was,
@@ -205,7 +201,12 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return { outcome: "close", because: over, ...nothingDone(pullRequest.number) };
+    return {
+      outcome: "close",
+      because: over,
+      summary: summaryNotComposed(state),
+      ...nothingDone(pullRequest.number),
+    };
   }
 
   const listing = handOver(pullRequest, preReview);
@@ -280,7 +281,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   );
 
   if (decision.next === "close") {
-    return closed(decision.because, account, recorded.rounds, handedOver, posting);
+    return closed(episode, decision.because, account, recorded, handedOver, posting);
   }
   return {
     outcome: "block",
@@ -569,7 +570,8 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
 }
 
 /**
- * The close, with the episode's summary comment on the pull request.
+ * The close, with the episode's summary comment on the pull request and the close
+ * recorded in the episode's state.
  *
  * The summary goes up last, after the findings and the verdicts. A thread is what
  * the next reader works, and a comment that took the margin from the threads
@@ -585,16 +587,17 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
  * reviewing.
  */
 function closed(
+  episode: Episode,
   because: ClosingReason,
   account: RoundAccount,
-  rounds: readonly RoundCost[],
+  state: EpisodeState,
   handedOver: readonly ReviewThread[],
   on: Posting,
 ): RoundConclusion {
   const summary = postEpisodeSummary(
     {
       pullRequest: account.pullRequest,
-      rounds,
+      rounds: state.rounds,
       handedOver,
       verdicts: account.verdicts,
       findings: account.findings,
@@ -602,6 +605,13 @@ function closed(
     },
     { directory: on.directory, until: on.margin },
   );
+
+  // Recorded so that a later firing of the episode knows the close was reported,
+  // whether the comment landed or the failure to post it was announced here. A
+  // write that failed is not reported: the comment is already on the pull request,
+  // and a state file that will not take this is one the next firing of the episode
+  // reports before it reviews anything.
+  writeState(episode, { ...state, closeReported: true });
   return { outcome: "close", because, summary, ...account };
 }
 

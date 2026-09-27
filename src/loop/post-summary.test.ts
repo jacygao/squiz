@@ -22,10 +22,10 @@ import type { Finding } from "../findings/finding.ts";
 import type { GhCall } from "../github/gh.ts";
 import { renderSummary } from "../github/summary-body.ts";
 import type { ReviewThread } from "../github/threads.ts";
-import type { RoundCost } from "../reviewers/adapter.ts";
+import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import type { PostedFindings } from "./post-findings.ts";
-import { postEpisodeSummary, type ClosingRound } from "./post-summary.ts";
+import { postEpisodeSummary, summaryNotComposed, type ClosingRound } from "./post-summary.ts";
 
 const PULL_REQUEST = 142;
 
@@ -273,6 +273,47 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
  * A call made past the end of the window is one the runtime kills the hook
  * during, and the round would then end having said nothing at all.
  */
+/**
+ * A close reached before the review composes nothing, and which answer that is
+ * turns on the episode's state rather than on the pull request, which looks the
+ * same either way.
+ */
+test("a close before the review is silent where the episode was reported and named where it was not", () => {
+  const rounds = [COST, COST];
+
+  assert.deepEqual(
+    summaryNotComposed({ pullRequest: PULL_REQUEST, rounds, spentOutsideRounds: unspent, closeReported: true }),
+    { outcome: "reported-before" },
+  );
+
+  const never = summaryNotComposed({
+    pullRequest: PULL_REQUEST,
+    rounds,
+    spentOutsideRounds: unspent,
+  });
+  assert.equal(never.outcome, "never-composed");
+  assert.match(
+    never.outcome === "never-composed" ? never.reason : "",
+    /nothing reports the 2 rounds it ran/u,
+    "a person told only that a bound was spent has no reason to go and read the threads",
+  );
+});
+
+test("an episode that ran no round at all is named as one that never ran", () => {
+  // Nothing reviewed it, so there is nothing for a comment to carry. It is still
+  // a close at exit 0, and silence there reads as a review that went fine.
+  const never = summaryNotComposed({
+    pullRequest: PULL_REQUEST,
+    rounds: [],
+    spentOutsideRounds: unspent,
+  });
+
+  assert.deepEqual(never, {
+    outcome: "never-composed",
+    reason: "no round of the episode ever ran",
+  });
+});
+
 test("a margin with nothing left on it posts nothing and says so", async () => {
   await withFakeGh({ stdout: CREATED }, (gh) => {
     const posting = postEpisodeSummary(closing, { directory: tmpdir(), until: deadlineIn(0) });

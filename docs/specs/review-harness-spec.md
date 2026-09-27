@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.41 (draft)
+**Version:** 0.42 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -671,16 +671,26 @@ The comment is never edited or replaced. A second episode on the same pull
 request posts a second comment, and the comments accumulate as a history of the
 review passes.
 
-The round that closes the episode is the round that posts it. A round that blocks
-the coding agent posts nothing, because the comment is the close of the episode
-rather than the end of a round, and one comment for every firing would report a
-review that is still going on. A round the reviewer failed posts nothing either:
-it reached no decision about the episode, and counts taken from a review that did
-not finish would read as counts from one that did. The hook's stderr carries that
-failure instead. A firing that finds the round cap or the token bound already
-spent closes without posting a comment. The episode's own comment went up when it
-closed, and a firing that starts no review lists none of the episode's threads, so
-a comment written there would report an episode that raised nothing.
+The round that closes the episode is the round that posts it, and it records in
+the episode's state that the close was reported. A round that blocks the coding
+agent posts nothing, because the comment is the close of the episode rather than
+the end of a round, and one comment for every firing would report a review that
+is still going on. A round the reviewer failed posts nothing either: it reached
+no decision about the episode, and counts taken from a review that did not finish
+would read as counts from one that did. The hook's stderr carries that failure
+instead.
+
+A firing that finds the round cap or the token bound already spent closes the
+episode and composes no comment. It runs no reviewer and lists none of the
+episode's threads, so a comment written from what it holds would report an episode
+that raised nothing. What it says depends on whether the close was already
+reported. Where it was, the firing is silent: the comment went up when the episode
+closed, or the firing that could not post it said so then. Where it was not, this
+close is the end of an episode no comment will ever report, and the hook's stderr
+says so and why. A bound lowered between firings is that case: the episode's rounds
+ran, their findings are on the pull request, and the round that blocked reported
+nothing. An episode that ran no round at all is the same answer for the other
+reason, and the line names which of the two it is.
 
 The comment goes up after the round's findings and its verdicts, inside the
 window the round reserves for posting. Nothing is attempted past the end of that
@@ -833,7 +843,12 @@ nothing retries one.
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
 | The window is gone before the findings are posted | Exit 0, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window: a call made there is one the runtime kills the hook during, and the round would end having said nothing at all. |
 | The summary comment cannot be posted | Exit 0, and the close is a close still rather than a round the harness failed. stderr says the episode closed without its summary, and names what GitHub or the window answered. Nothing is retried: posting is a create, so a second attempt is a second comment. |
+<<<<<<< HEAD
 | The local state file cannot be read or written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. A read that fails ends the firing before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
+=======
+| The episode closes with no summary composed at all | Exit 0, and stderr says the episode closed without one and whether it reviewed. A bound lowered between firings closes an episode whose last round blocked, and that close runs no reviewer and lists no threads, so nothing composes the comment its rounds earned. |
+| The local state file cannot be written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. |
+>>>>>>> 786ef98 (Say so where an episode closes with no summary at all)
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |
 | The token bound is reached | Exit 0. The episode closes without starting another round, and the summary comment reports that the bound was reached rather than reporting the round as one the reviewer failed. |
@@ -1045,7 +1060,7 @@ until something asks.
 | **P0** | The coding agent's commands | `squiz threads` and `squiz reply`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
-| **P0** | The episode state file | Round count, pull request number, per-round cost, what the episode spent on attempts that were no round, keyed by the subagent's id and living in the worktree |
+| **P0** | The episode state file | Round count, pull request number, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the subagent's id and living in the worktree |
 | **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison or not at all |
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |

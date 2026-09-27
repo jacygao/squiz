@@ -131,17 +131,29 @@ function closingFailure(round: ClosedRound): string | null {
 }
 
 /**
- * The summary comment the episode closed without, or `null` where it went up.
+ * The summary comment the episode closed without, or `null` where the close was
+ * reported.
  *
- * Last on the line, and carrying the reason GitHub or the window gave. The
- * summary is the whole of the episode's record on the pull request, so where it
- * is missing this line is the only thing that will ever say what the review
- * counted, and which failure it was decides whether anything can be done about
- * it.
+ * Last on the line, and carrying the reason the round gave. The summary is the
+ * whole of the episode's record on the pull request, so where it is missing this
+ * line is the only thing that will ever say what the review counted, and which
+ * failure it was decides whether anything can be done about it.
+ *
+ * A comment nothing composed is reported exactly as a comment GitHub refused. The
+ * pull request carries neither, and a close that named only the second would let
+ * the first end an episode in silence.
  */
 function summaryLostBy(round: ClosedRound): string | null {
-  if (round.summary === undefined || round.summary.outcome !== "failed") return null;
-  return `post the episode's summary: ${round.summary.reason}`;
+  switch (round.summary.outcome) {
+    case "failed":
+    case "never-composed":
+      return `post the episode's summary: ${round.summary.reason}`;
+    // Posted here, or posted by the firing that closed the episode, whose own
+    // line said so where it could not. A second line would report a failure twice.
+    case "posted":
+    case "reported-before":
+      return null;
+  }
 }
 
 /**

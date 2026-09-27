@@ -44,6 +44,17 @@ export type EpisodeState = {
    * run past a bound it had reached.
    */
   readonly spentOutsideRounds: RoundCost;
+  /**
+   * Whether a firing of this episode has reported its close: the summary comment
+   * posted, or the failure to post it announced.
+   *
+   * Absent is no, which is what a file written before this field existed says.
+   * The rounds alone cannot stand in for it. A firing that finds the bound spent
+   * cannot tell an episode whose last round closed it from one whose last round
+   * blocked under a cap that has since been lowered, and those two want opposite
+   * answers: silence, and a line saying the episode closed with no summary.
+   */
+  readonly closeReported?: boolean;
 };
 
 /**
@@ -186,7 +197,22 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   const outside = spentOutsideRoundsIn(parsed, path);
   if ("problem" in outside) return unreadable(`${path}: ${outside.problem}`);
 
-  return { outcome: "read", state: { pullRequest, rounds, spentOutsideRounds: outside.cost } };
+  const reported = parsed["closeReported"];
+  // Read as no, it would say an episode carrying its comment closed without one.
+  // Read as yes, it would leave the next close silent. Neither is a reading.
+  if (reported !== undefined && typeof reported !== "boolean") {
+    return unreadable(`${path}: "closeReported" is ${render(reported)} rather than true or false`);
+  }
+
+  return {
+    outcome: "read",
+    state: {
+      pullRequest,
+      rounds,
+      spentOutsideRounds: outside.cost,
+      ...(reported === undefined ? {} : { closeReported: reported }),
+    },
+  };
 }
 
 /**
