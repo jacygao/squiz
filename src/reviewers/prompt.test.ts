@@ -90,11 +90,11 @@ const preamble = [
   "```",
 ];
 
-test("round 1 carries the pull request and asks for no verdict", () => {
+test("a prompt carrying no thread carries the pull request and asks for no verdict", () => {
   assert.equal(round([]), prompt(...preamble));
 });
 
-test("from round 2 on every thread is carried with its comments and its resolved state", () => {
+test("every thread handed over is carried with its comments and its resolved state", () => {
   assert.equal(
     round([finding, settled]),
     prompt(

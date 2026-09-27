@@ -804,9 +804,26 @@ test("a .squiz.json that cannot be read runs no round", async () => {
 type Answers = {
   readonly pullRequests?: string;
   readonly diff?: string;
+  /** The threads listing every round makes. One naming none by default. */
+  readonly threads?: string;
   readonly status?: number;
   readonly stderr?: string;
 };
+
+/**
+ * A threads listing that names no thread, as `gh api graphql --include` answers
+ * one: the status line, the headers, a blank line, then the body.
+ */
+const NO_THREADS = [
+  "HTTP/2.0 200 OK",
+  "Content-Type: application/json; charset=utf-8\r",
+  "",
+  JSON.stringify({
+    data: {
+      node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+    },
+  }),
+].join("\n");
 
 type Tools = {
   /** A `PATH` holding git, and the fake `gh` where there is one. */
@@ -836,9 +853,12 @@ async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
         'for argument in "$@"; do',
         `  printf '%s\\n' "$argument" >> ${quote(argumentLog)}`,
         "done",
+        // A call told to read a body is read, or the writer is signalled instead
+        // of answered.
+        'case " $* " in *" --input "*) cat > /dev/null ;; esac',
         "case $1 in",
         `  pr) printf '%s' ${quote(gh.pullRequests ?? "")} ;;`,
-        `  api) printf '%s' ${quote(gh.diff ?? "")} ;;`,
+        `  api) if [ "$2" = graphql ]; then printf '%s' ${quote(gh.threads ?? NO_THREADS)}; else printf '%s' ${quote(gh.diff ?? "")}; fi ;;`,
         "esac",
         `printf '%s' ${quote(gh.stderr ?? "")} >&2`,
         `exit ${gh.status ?? 0}`,

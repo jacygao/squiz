@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.31 (draft)
+**Version:** 0.32 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -137,19 +137,22 @@ flowchart TD
    the current branch. If there is none it exits 0, and no review runs and
    nothing is posted.
 2. **Run the reviewer.** The harness spawns the reviewer as a separate local
-   agent process, hands it the pull request for scope and intent, and lets it
-   read the working tree directly: files the diff did not touch, callers, and
-   git history. At depth `deep` it also runs the tests. The reviewer never edits
-   the code it is reviewing.
+   agent process, hands it the pull request for scope and intent together with
+   the threads the reviewer itself opened on it, and lets it read the working
+   tree directly: files the diff did not touch, callers, and git history. At
+   depth `deep` it also runs the tests. The reviewer never edits the code it is
+   reviewing.
 3. **Post the findings, and act on the verdicts.** Each new finding opens a new
    review comment thread, anchored to a file and a line or to a file as a whole.
    Each verdict the reviewer returned is applied to the thread it names: `fixed`
    and `withdrawn` close the thread, `open` re-opens it or leaves it open.
-4. **Block, or stop.** If threads are still open and the round cap has not been
-   reached, the hook exits 2. The blocking reason names the open threads and the
-   commands that work them, and goes back into the coding agent's still-open
-   turn. The agent keeps working, and the next round starts when it finishes
-   again.
+4. **Block, or stop.** If threads of this review are still open and the round cap
+   has not been reached, the hook exits 2. The blocking reason names the open
+   threads and the commands that work them, and goes back into the coding agent's
+   still-open turn. The agent keeps working, and the next round starts when it
+   finishes again. A thread a person opened is counted by neither the arithmetic
+   nor the reason, so it never blocks the coding agent and an episode ends with
+   one still open.
 5. **Close the episode.** Otherwise the harness posts one summary comment on the
    pull request and exits 0. This happens whether or not threads are still open,
    and what remains open is what the summary reports and what a person then
@@ -531,8 +534,23 @@ findings; it does not decide whether they count. The order runs `high` to
 `low`, and findings of one severity keep the order the reviewer reported them
 in.
 
-From round 2 on the reviewer is handed the threads already on the pull request,
-and reports one verdict for each. It rules by reading the code as it now stands.
+Every round hands the reviewer the threads the reviewer itself opened, and it
+reports one verdict for each. It rules by reading the code as it now stands.
+
+A thread is the reviewer's own when the comment that opened it carries the
+reviewer's marker from § 2. A thread a person replied to is still the reviewer's
+own, because the comment that opened it is the finding. The reviewer's resolved
+threads go over beside its open ones, because re-opening a thread is a verdict
+and a verdict only reaches a thread that was handed over.
+
+The threads are the whole of what the reviewer knows about the rounds before it,
+so they go over in every round rather than from the second round on. A pull
+request carries the threads of every episode that has run on it, and the first
+round of a second episode is handed them. The first round of a first episode is
+handed none, because there are none yet.
+
+A thread a person opened is left alone. It is not handed over, no verdict is
+applied to it, and nothing in the loop reads or answers it.
 
 | Verdict | What it means | The harness |
 |---|---|---|
@@ -980,7 +998,7 @@ until something asks.
 | **P2** | The main session as a trigger | Today the loop runs for subagents only |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
-| **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone. Today a round hands the reviewer only the threads the reviewer opened |
+| **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
 
 Nothing at P2 gets an interface built for it in advance.
 

@@ -26,12 +26,12 @@ export type BlockedRound = {
    */
   readonly posted: readonly string[];
   /**
-   * Every thread on the pull request as the round last read it, resolved ones
+   * Every thread of this review as the round last read it, resolved ones
    * included.
    *
    * The unresolved ones are what the reason names, filtered here rather than by
-   * the caller: `squiz threads` filters the same way, so what the agent is told
-   * is open is what the command it checks with prints.
+   * the caller: `squiz threads` filters resolved threads out the same way, so a
+   * thread the agent is told is open is one the command it checks with prints.
    */
   readonly threads: readonly ReviewThread[];
 };

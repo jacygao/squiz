@@ -23,10 +23,11 @@ export type UnderReview = {
   /** The diff GitHub served for it. */
   readonly diff: string;
   /**
-   * Every review thread already on the pull request.
+   * Every thread of this review already on the pull request.
    *
-   * Empty is round 1. It is the only thing deciding whether a verdict is asked
-   * for, so a round number beside it is a second answer that can disagree.
+   * Empty where the reviewer has opened none yet. It is the only thing deciding
+   * whether a verdict is asked for, so a round number beside it is a second
+   * answer that can disagree.
    */
   readonly threads: readonly ReviewThread[];
 };
@@ -59,8 +60,8 @@ export function composePrompt(underReview: UnderReview): string {
 /**
  * The threads and the one instruction that goes with them, or nothing at all.
  *
- * A prompt that carried the heading with no threads under it would ask a
- * round-1 reviewer to rule on an empty list.
+ * A prompt that carried the heading with no threads under it would ask the
+ * reviewer to rule on an empty list.
  */
 function threadSections(threads: readonly ReviewThread[]): readonly string[] {
   if (threads.length === 0) return [];

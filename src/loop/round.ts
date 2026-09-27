@@ -20,6 +20,7 @@
 import { mkdirSync } from "node:fs";
 
 import type { Config } from "../config/config.ts";
+import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
@@ -192,12 +193,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     return { outcome: "close", because: over, ...nothingDone(pullRequest.number) };
   }
 
-  // Round 1 hands the reviewer nothing to rule on. From round 2 on every thread
-  // on the pull request goes over with its comments and resolved state, which is
-  // the whole of what a reviewer holding no state knows about the rounds before
-  // it.
-  const firstRound = state.rounds.length === 0;
-  const listing = firstRound ? noThreads : handOver(pullRequest, preReview);
+  const listing = handOver(pullRequest, preReview);
   if ("ended" in listing) return listing.ended;
   const handedOver = listing.step;
 
@@ -370,15 +366,23 @@ function nothingDone(pullRequest: number): RoundAccount {
   };
 }
 
-/** What round 1 hands over: nothing, because no round has opened a thread yet. */
-const noThreads: Step<readonly ReviewThread[]> = { step: [] };
-
 /**
- * Every thread on the pull request, which is what the reviewer rules on.
+ * The threads the reviewer opened, which are the ones it rules on, each with its
+ * comments and resolved state.
  *
- * A listing that failed ends the round with nothing posted. Handing over none
- * instead would ask for a fresh review of code the reviewer has already
- * commented on, and every finding of the round before would go up a second time.
+ * Listed every round, the first of an episode included. The pull request carries
+ * the threads of every episode before this one, and handing over none would ask
+ * for a fresh review of code the reviewer has already commented on: every
+ * finding of the round before would go up a second time. A listing that failed
+ * ends the round with nothing posted.
+ *
+ * A thread a person opened is left out, and nothing downstream reaches it: no
+ * verdict is sent to it, it is not counted among the open threads, and the
+ * blocking reason does not name it. It is a conversation on the pull request
+ * rather than part of this review, so an episode may close with one still open.
+ *
+ * The reviewer's own resolved threads go over with the rest, because re-opening
+ * one is a verdict and a verdict only reaches a thread that was handed over.
  */
 function handOver(pullRequest: PullRequest, call: GhCall): Step<readonly ReviewThread[]> {
   const listed = listReviewThreads(pullRequest.nodeId, call);
@@ -390,7 +394,19 @@ function handOver(pullRequest: PullRequest, call: GhCall): Step<readonly ReviewT
       ),
     };
   }
-  return { step: listed.threads };
+  return { step: listed.threads.filter(openedByReviewer) };
+}
+
+/**
+ * Whether the reviewer opened `thread`, which is what its first comment's marker
+ * says.
+ *
+ * A reply a person left on the reviewer's own thread does not take it away from
+ * the reviewer: the comment that opened it is the finding, and the rest of the
+ * thread is the conversation about it.
+ */
+function openedByReviewer(thread: ReviewThread): boolean {
+  return readThread(thread).raised === "finding";
 }
 
 /**

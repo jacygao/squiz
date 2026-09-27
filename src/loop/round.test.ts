@@ -6,9 +6,9 @@
  * as a round that found nothing, so every reviewer outcome is exercised beside
  * an honest empty review and the two are asserted to be different conclusions.
  *
- * Which calls a round makes is part of what it does: round 1 hands over no
- * threads and must not list them, and a round that ended before the review must
- * post nothing. The fake `gh` records the kind of every call for that reason.
+ * Which calls a round makes is part of what it does: every round lists the
+ * threads once, and a round that ended before the review must post nothing. The
+ * fake `gh` records the kind of every call for that reason.
  */
 
 import assert from "node:assert/strict";
@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { defaultConfig, type Config } from "../config/config.ts";
+import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import {
   unspent,
@@ -511,8 +512,27 @@ const REOPENED = included(
   JSON.stringify({ data: { unresolveReviewThread: { thread: { isResolved: false } } } }),
 );
 
+/** One thread of the pull request as the listing reads it back. */
+type Listed = {
+  readonly id: string;
+  readonly isResolved: boolean;
+  /**
+   * The comment that opened it, which is what says whose thread it is. The
+   * reviewer's own finding by default.
+   */
+  readonly opening?: string;
+};
+
+/**
+ * The comment a person left, carrying none of the markers.
+ *
+ * A thread opened by one of these is nobody's finding, so no round hands it to
+ * the reviewer.
+ */
+const PERSON_WROTE = "Why does this need a card at all?";
+
 /** One thread already on the pull request, as the listing reads it back. */
-function listed(threads: readonly { readonly id: string; readonly isResolved: boolean }[]): string {
+function listed(threads: readonly Listed[]): string {
   return included(
     "200 OK",
     JSON.stringify({
@@ -531,7 +551,11 @@ function listed(threads: readonly { readonly id: string; readonly isResolved: bo
               comments: {
                 pageInfo: { hasNextPage: false, endCursor: null },
                 nodes: [
-                  { databaseId: 51, author: { login: "squiz" }, body: "The name says nothing." },
+                  {
+                    databaseId: 51,
+                    author: { login: "squiz" },
+                    body: thread.opening ?? renderComment(finding("The name says nothing.")),
+                  },
                 ],
               },
             })),
@@ -572,10 +596,21 @@ function finding(headline: string): Finding {
   };
 }
 
-/** Everything a round that posts one finding needs answering. */
-const POSTING: Answers = { prlist: PR_LIST, diff: DIFF, create: CREATED, lookup: LOOKUP };
+/**
+ * Everything a round that posts one finding needs answering.
+ *
+ * The threads listing is among them because every round makes it, the first
+ * round of an episode included.
+ */
+const POSTING: Answers = {
+  prlist: PR_LIST,
+  diff: DIFF,
+  threads: listed([]),
+  create: CREATED,
+  lookup: LOOKUP,
+};
 
-test("round 1 posts its finding, hands over no threads, and blocks", async () => {
+test("the first round of a first episode posts its finding, is handed no thread, and blocks", async () => {
   const ran = await runInFixture({
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
@@ -583,8 +618,8 @@ test("round 1 posts its finding, hands over no threads, and blocks", async () =>
 
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "diff", "create", "lookup"],
-    "round 1 must not list threads: there are none to rule on, and asking for them would have the reviewer rule on an empty list",
+    ["prlist", "threads", "diff", "create", "lookup"],
+    "the listing is one call and the round makes it once: a pull request with no thread of the reviewer's is answered by asking, not by assuming",
   );
   assert.equal(ran.conclusion.outcome, "block");
   assert.ok(ran.conclusion.outcome === "block");
@@ -595,8 +630,173 @@ test("round 1 posts its finding, hands over no threads, and blocks", async () =>
   assert.equal(
     ran.invocations[0]?.prompt.includes("## Threads already on this pull request"),
     false,
-    "a round-1 prompt that carried a threads section would ask for a verdict on nothing",
+    "a prompt that carried a threads section with nothing handed over would ask for a verdict on nothing",
   );
+});
+
+/**
+ * A second coding agent on the same branch is a second episode, and its state
+ * file is new while the pull request is not.
+ *
+ * No round is recorded here, so this is that episode's first round. The threads
+ * the earlier episode left are still on the pull request, and a round handed none
+ * of them raises every one of those findings again beside the old ones.
+ */
+test("a second episode's first round is handed the threads already on the pull request", async () => {
+  const ran = await runInFixture({
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([
+        { id: "PRRT_one", isResolved: false },
+        { id: "PRRT_two", isResolved: true },
+      ]),
+      resolve: RESOLVED,
+      unresolve: REOPENED,
+    },
+    reviewer: reviews({
+      verdicts: [
+        { thread: "PRRT_one", verdict: "fixed" },
+        { thread: "PRRT_two", verdict: "open" },
+      ],
+    }),
+  });
+
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve"]);
+  const prompt = ran.invocations[0]?.prompt ?? "";
+  assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
+  assert.match(prompt, /### PRRT_two\n\nResolved\./u);
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.deepEqual(
+    ran.conclusion.verdicts.threads.map((applied) => applied.thread),
+    ["PRRT_one", "PRRT_two"],
+    "every verdict still reached its thread, so no finding of the earlier episode is raised a second time",
+  );
+});
+
+/**
+ * A thread whose first comment carries no marker was written by a person, and the
+ * loop leaves it alone.
+ *
+ * Nothing else is open here, so the episode closes over a thread that is. That is
+ * the point: the thread is a conversation on the pull request rather than work of
+ * this review, and a round that counted it would block the coding agent over a
+ * comment nobody asked it to work.
+ */
+test("a person's thread is not handed over, and an episode closes with one still open", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_person", isResolved: false, opening: PERSON_WROTE }]),
+    },
+    reviewer: reviews({}),
+  });
+
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff"],
+    "a person's thread was resolved or re-opened, so the reviewer's judgement was applied to a comment it was never shown",
+  );
+  assert.equal(
+    ran.invocations[0]?.prompt.includes("PRRT_person"),
+    false,
+    "the reviewer was shown a person's thread and asked to rule on it",
+  );
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(
+    ran.conclusion.because,
+    "nothing-open",
+    "the person's thread was counted among the open threads, so the episode blocked over work this review does not have",
+  );
+  assert.deepEqual(ran.conclusion.verdicts.threads, []);
+});
+
+/**
+ * A round that blocks over its own thread does not name a person's in the reason
+ * it hands the coding agent.
+ */
+test("the blocking reason names no thread a person opened", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([
+        { id: "PRRT_person", isResolved: false, opening: PERSON_WROTE },
+        { id: "PRRT_ours", isResolved: false },
+      ]),
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_ours", verdict: "open" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.match(ran.conclusion.reason, /1 thread is open on it:\nPRRT_ours/u);
+  assert.equal(
+    ran.conclusion.reason.includes("PRRT_person"),
+    false,
+    "the reason told the coding agent to work a person's comment as a finding of this review",
+  );
+});
+
+/**
+ * A verdict naming a thread the round did not hand over is reported rather than
+ * dropped, and nothing is sent for it.
+ *
+ * The reviewer cannot name a person's thread from the prompt, which never carried
+ * it. One that names it anyway is a reviewer inventing an identifier, and the
+ * round says so instead of acting on it.
+ */
+test("a verdict naming a person's thread is reported unapplied and reaches nothing", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_person", isResolved: false, opening: PERSON_WROTE }]),
+      resolve: RESOLVED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_person", verdict: "fixed" }] }),
+  });
+
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff"],
+    "the verdict closed a person's thread, which is the reviewer's judgement applied to a comment it was never handed",
+  );
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(ran.conclusion.verdicts.unapplied, [
+    {
+      thread: "PRRT_person",
+      verdict: "fixed",
+      reason: "no thread with that id was handed to the reviewer",
+    },
+  ]);
+});
+
+/**
+ * The reviewer's own resolved threads are handed over, so a verdict can re-open
+ * one.
+ *
+ * No round is recorded here, so a filter that kept only open threads and a round
+ * that handed over nothing at all would both pass on a listing of open ones.
+ */
+test("a resolved thread of the reviewer's own is handed over, and a verdict re-opens it", async () => {
+  const ran = await runInFixture({
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_closed", isResolved: true }]),
+      unresolve: REOPENED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_closed", verdict: "open" }] }),
+  });
+
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "unresolve"]);
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.equal(ran.conclusion.verdicts.reopened, 1);
+  assert.match(ran.conclusion.reason, /1 thread is open on it:\nPRRT_closed/u);
 });
 
 test("the round's cost is recorded in the episode state with its token count", async () => {
@@ -626,7 +826,7 @@ test("the reviewer's session directory and scratch space exist before it starts"
   );
 });
 
-test("round 2 hands over every thread with its state and applies the verdicts", async () => {
+test("a later round hands over the reviewer's threads with their state and applies the verdicts", async () => {
   const ran = await runInFixture({
     rounds: [ANSWER_COST],
     answers: {
@@ -681,7 +881,7 @@ test("a round that leaves nothing open closes the episode", async () => {
 
 test("an honest empty review is a clean round and not a failure", async () => {
   const ran = await runInFixture({
-    answers: { prlist: PR_LIST, diff: DIFF },
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
     reviewer: reviews({}),
   });
 
@@ -747,7 +947,11 @@ test("a reviewer killed at its bound is a failed round and not an empty review",
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.match(ran.conclusion.reason, /killed at its 1-second bound/u);
-  assert.deepEqual(ran.kinds, ["prlist", "diff"], "a round with no review posts nothing");
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff"],
+    "a round with no review posts nothing",
+  );
   assert.deepEqual(
     ran.state,
     { pullRequest: PULL_REQUEST, rounds: [floor], spentOutsideRounds: unspent },
@@ -764,7 +968,7 @@ test("a reviewer nothing can be read from is reported unavailable", async () => 
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "unavailable");
-  assert.deepEqual(ran.kinds, ["prlist", "diff"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff"]);
   assert.deepEqual(
     ran.state?.rounds,
     [{ dollars: 0.02, tokens: 600, messages: 2 }],
@@ -860,7 +1064,7 @@ test("a round posts the findings the reviewer reported before it failed, whateve
       ["PRRT_new"],
       `${failure} discarded the finding the reviewer had already confirmed`,
     );
-    assert.deepEqual(ran.kinds, ["prlist", "diff", "create", "lookup"]);
+    assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "create", "lookup"]);
     assert.match(ran.conclusion.reason, /kept the 1 finding the reviewer had reported/u);
     assert.deepEqual(
       ran.state?.rounds ?? [],
@@ -1031,7 +1235,6 @@ test("a state file that will not read back stops the round before the reviewer r
 
 test("threads that could not be listed end the round with nothing posted", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
     answers: { prlist: PR_LIST, diff: DIFF, create: CREATED, lookup: LOOKUP },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
@@ -1045,7 +1248,7 @@ test("threads that could not be listed end the round with nothing posted", async
 
 test("a diff that could not be fetched ends the round before the reviewer runs", async () => {
   const ran = await runInFixture({
-    answers: { prlist: PR_LIST },
+    answers: { prlist: PR_LIST, threads: listed([]) },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
@@ -1057,7 +1260,7 @@ test("a diff that could not be fetched ends the round before the reviewer runs",
 
 test("a finding that could not be posted is reported and does not read as clean", async () => {
   const ran = await runInFixture({
-    answers: { prlist: PR_LIST, diff: DIFF },
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
