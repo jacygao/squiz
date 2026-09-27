@@ -178,7 +178,6 @@ test("fixed and withdrawn close the thread each names", async () => {
       { thread: "PRRT_one", mutation: "close" },
       { thread: "PRRT_two", mutation: "close" },
     ]);
-    assert.equal(applied.reopened, 0);
   });
 });
 
@@ -201,7 +200,6 @@ test("open re-opens a thread that was closed and counts it as re-opened", async 
       { thread: "PRRT_reopen", mutation: "reopen" },
       { thread: "PRRT_close", mutation: "close" },
     ]);
-    assert.equal(applied.reopened, 1, "only the thread that was closed and is open again counts");
   });
 });
 
@@ -217,7 +215,6 @@ test("open leaves a thread that is already open alone", async () => {
       { thread: "PRRT_still", ruled: "open", outcome: "left-open" },
     ]);
     assert.deepEqual(sent(gh), [], "a thread in the state the verdict asks for takes no mutation");
-    assert.equal(applied.reopened, 0, "a thread that was never closed was not re-opened");
   });
 });
 
@@ -375,7 +372,6 @@ test("a re-open GitHub refused is not counted as a thread re-opened", async () =
     );
 
     assert.equal(applied.threads[0]?.outcome, "failed");
-    assert.equal(applied.reopened, 0);
   });
 });
 
@@ -413,7 +409,6 @@ test("a gh that is not installed fails every thread and throws nothing", async (
       // The third asked for nothing, so there was no call for gh to fail.
       ["failed", "failed", "left-open"],
     );
-    assert.equal(applied.reopened, 0);
   });
 });
 
@@ -421,7 +416,7 @@ test("no thread handed over is no work and no failure", async () => {
   await withFakeGh(healthy, (gh) => {
     const applied = applyVerdicts([], [], anywhere);
 
-    assert.deepEqual(applied, { threads: [], unapplied: [], reopened: 0 });
+    assert.deepEqual(applied, { threads: [], unapplied: [] });
     assert.deepEqual(sent(gh), []);
   });
 });

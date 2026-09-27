@@ -64,14 +64,6 @@ export type AppliedVerdicts = {
   /** One entry per thread handed over, in that order, ruled on or not. */
   readonly threads: readonly AppliedVerdict[];
   readonly unapplied: readonly UnappliedVerdict[];
-  /**
-   * How many threads this round re-opened.
-   *
-   * A count beside the outcomes rather than a state a thread can be in: a
-   * thread that was closed and is open again still ends its episode in one of
-   * the statuses every thread ends in.
-   */
-  readonly reopened: number;
 };
 
 /**
@@ -99,11 +91,7 @@ export function applyVerdicts(
   const threads = handedOver.map((thread) =>
     apply(thread, rulings.byThread.get(thread.id) ?? null, call),
   );
-  return {
-    threads,
-    unapplied: rulings.unapplied,
-    reopened: threads.filter((thread) => thread.outcome === "reopened").length,
-  };
+  return { threads, unapplied: rulings.unapplied };
 }
 
 /** The verdicts to apply, keyed by thread, and the ones that go unapplied. */

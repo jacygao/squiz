@@ -94,22 +94,19 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   dispatches one subagent and fails its round in a second still costs tens of
   cents.
 
+- **Keep § 7's two rows, and name the second for what reaches it rather than for
+  a cause.** Every unreachable provider lands on the row for a reviewer that runs,
+  exits cleanly and completes no message, so naming the other one after the model
+  API described a case `pi` cannot produce. It is now named for output that cannot
+  be read and that no retry recovers, which is the only thing that reaches it.
+
+- **Drop the round's re-opened count.** Nothing read it: not the state file, not
+  the failure pointer, and not the summary comment, which carries terminal
+  statuses and no re-opened count. A thread re-opened in one round and fixed in
+  the next still ends its episode `fixed`. The re-open above was confirmed from
+  GitHub's own resolved state, which is the better evidence in any case.
+
 ## Needs your input
-
-- **Whether § 7's unavailable-API row and its completes-no-message row should
-  stay as two.** With `pi` every unreachable provider lands on the second, so
-  the first describes a case this reviewer cannot produce and its wording is
-  never written. Recommended: keep both rows and say on the unavailable-API row
-  that a reviewer whose provider answers nothing is the row above it, because
-  the distinction is real for a CLI that reports a failed request differently.
-  A spec edit is a separate decision and this note makes none.
-
-- **Whether the round's `reopened` count should be recorded anywhere.** Nothing
-  outside the process can read it today: the state file holds cost alone, the
-  pointer does not mention it, and the summary comment that would report it is
-  M6. The re-open above was confirmed from GitHub instead. Recommended: leave it
-  to the summary comment rather than adding it to the state file, and expect a
-  live run before M6 to confirm a re-open the same way.
 
 - **Whether the salvage half of the review-budget row is worth buying.** It
   needs a scratch change big enough that the reviewer's reports spread over tens
@@ -288,10 +285,10 @@ reported no cost.
 |---|---|---|
 | The local state file cannot be written | The write happens after the review, where the round records what it spent and reports that nothing was posted. Replacing `.squiz` with a file stops the episode at the read instead, before a reviewer starts | `src/loop/episode-state.test.ts`, "a write that cannot happen carries the error the filesystem gave" |
 | The reviewer has no API key | `pi` reads its credential from `~/.pi/agent/auth.json` and ignores `DEEPSEEK_API_KEY`, so forcing this means editing a real credential file or moving `HOME`, and the session driving the run needs its own `HOME` as much as `pi` does. Its twin, a reviewer that is not installed, was forced instead | `src/reviewers/round.test.ts` on a command that cannot be started, and `docs/notes/a-startup-failure-never-reaches-the-stream.md` on where the reason is |
-| The reviewer stops without finishing its review, retried once, then treated as an unavailable API | It needs a run whose message stops for an answer and whose output still cannot be read — a reviewer that writes prose instead of calling `finish_review`. No configuration produces that, and it is the only path to the pointer that says the review did not run | `src/reviewers/round.test.ts` on the retry and the second failure |
+| The reviewer stops without finishing its review, and no retry recovers it | It needs a run whose message stops for an answer and whose output still cannot be read — a reviewer that writes prose instead of calling `finish_review`. No configuration produces that, and it is the only path to the pointer that says the review did not run, whether a retry failed too or the round had no time for one | `src/reviewers/round.test.ts` on the retry and the second failure |
 | The reviewer exceeds the ceiling | Deliberately not run. It is measured, and exercising it records the subagent as failed and tells the coding agent nothing ran | `docs/notes/the-runtime-kills-the-reviewer-too-but-only-sigterm-is-certain.md` |
 | The calls before the review run out of time | The 60-second share is not configurable, and reaching it needs a GitHub slower than that. A proxy that hangs rather than refuses reaches it, and hangs the driving session with it | `src/github/gh.test.ts`, which holds a `gh` for 30 seconds against the call ceiling, and `src/loop/round.test.ts` on the share |
-| The threads on the pull request cannot all be listed | The listing runs from round 2 on, so forcing it means a GitHub that answers round 1 and refuses one firing later. Nothing in the environment changes between two firings of one session | `src/loop/round.test.ts` and `src/github/threads.test.ts` |
+| The threads on the pull request cannot all be listed | Not reached by these runs, which refused GitHub before the lookup rather than between its calls. A round lists the threads before it reviews, so a GitHub that answers the lookup and refuses the listing would reach it on the first firing | `src/loop/round.test.ts` and `src/github/threads.test.ts` |
 | Some comments post and others fail | It needs one create to fail while another lands, which no environment produces on demand | `src/loop/post-findings.test.ts`, on the threads that landed staying where another fails |
 | The window is gone before the findings are posted | The window and the posting margin are lowered only through `RoundSetup`'s `windowMs` and `marginMs`, which exist for tests and have no path from `.squiz.json` | `src/loop/round.test.ts` |
 | The harness itself throws | A throw is a defect, and forcing one means editing production code | `src/hook/trap.test.ts` |
