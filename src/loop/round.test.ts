@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +33,7 @@ import {
 } from "../reviewers/adapter.ts";
 import { writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
+import type { EpisodeSummary } from "./post-summary.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
 
 const BRANCH = "review-me";
@@ -64,7 +65,15 @@ index d3d0cb2..6db135b 100644
 `.slice(1);
 
 /** Which call to `gh` the fake was asked for. */
-type Kind = "prlist" | "diff" | "threads" | "create" | "lookup" | "resolve" | "unresolve";
+type Kind =
+  | "prlist"
+  | "diff"
+  | "threads"
+  | "create"
+  | "lookup"
+  | "resolve"
+  | "unresolve"
+  | "summary";
 
 /** What the fake answers each kind of call with. A kind with no answer exits 1. */
 type Answers = Partial<Record<Kind, string>>;
@@ -93,6 +102,14 @@ type Setup = {
   readonly rounds?: readonly RoundCost[];
   /** What the episode already spent on attempts that were no round. */
   readonly outsideRounds?: RoundCost;
+  /** Whether a firing of the episode has already reported its close. */
+  readonly closeReported?: boolean;
+  /**
+   * A kind of call after which the episode's directory takes no more writes, for
+   * a state file the round can read and cannot write. It is the round's own later
+   * writes that fail, and the ones before that call have already landed.
+   */
+  readonly lockStateAfter?: Kind;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
   readonly marginMs?: number;
@@ -100,11 +117,22 @@ type Setup = {
   readonly detached?: boolean;
 };
 
+/** One call to `gh`, as the fake took it. */
+type Call = {
+  readonly kind: Kind;
+  /** The arguments as one line, which is where the method and the path are. */
+  readonly argv: string;
+  /** What the round wrote to `gh`'s stdin, empty where it sent no body. */
+  readonly body: string;
+};
+
 /** Everything the round left behind, read before the fixture is removed. */
 type Ran = {
   readonly conclusion: RoundConclusion;
   /** The kind of each `gh` call, in the order the round made them. */
   readonly kinds: readonly Kind[];
+  /** Every call in the order the round made them, with what it sent. */
+  readonly calls: readonly Call[];
   /** What the reviewer was handed, one entry per process the round started. */
   readonly invocations: readonly Invocation[];
   /** Whether both directories the reviewer writes into existed when it started. */
@@ -284,18 +312,23 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     git(worktree, ["commit", "--quiet", "--allow-empty", "--message", "the change under review"]);
     if (setup.detached === true) git(worktree, ["checkout", "--quiet", "--detach", "HEAD"]);
 
+    const episode = episodeAt(worktree, AGENT_ID);
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
-    await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {});
+    await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {}, {
+      ...(setup.lockStateAfter === undefined
+        ? {}
+        : { [setup.lockStateAfter]: episode.directory }),
+    });
     warm(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
-    const episode = episodeAt(worktree, AGENT_ID);
     if (setup.rounds !== undefined) {
       const written = writeState(episode, {
         pullRequest: PULL_REQUEST,
         rounds: setup.rounds,
         spentOutsideRounds: setup.outsideRounds ?? unspent,
+        ...(setup.closeReported === undefined ? {} : { closeReported: setup.closeReported }),
       });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
     }
@@ -338,9 +371,15 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const stateSource = existsSync(episode.stateFile)
       ? readFileSync(episode.stateFile, "utf8")
       : null;
+    const kinds = lines(join(binaries, "kinds")) as readonly Kind[];
     return {
       conclusion,
-      kinds: lines(join(binaries, "kinds")) as readonly Kind[],
+      kinds,
+      calls: kinds.map((kind, at) => ({
+        kind,
+        argv: (lines(join(binaries, `argv-${at + 1}`))[0] ?? "").trim(),
+        body: contents(join(binaries, `stdin-${at + 1}`)),
+      })),
       invocations,
       directoriesReady,
       state: stateIn(stateSource),
@@ -350,7 +389,19 @@ async function runInFixture(setup: Setup): Promise<Ran> {
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
+    // A directory a test locked takes no writes, and removing what is under it is
+    // one, so the permission goes back before the fixture is removed.
+    unlock(join(worktree, ".squiz"));
     await rm(root, { recursive: true, force: true });
+  }
+}
+
+/** Let `directory` and everything under it be written again, where it is there. */
+function unlock(directory: string): void {
+  if (!existsSync(directory)) return;
+  chmodSync(directory, 0o700);
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) unlock(join(directory, entry.name));
   }
 }
 
@@ -367,7 +418,7 @@ function warm(directory: string): void {
   } catch {
     // The fake has no answer for this, so it exits 1. Running it is the point.
   }
-  for (const name of ["count", "kinds", "count-unknown", "stdin-1"]) {
+  for (const name of ["count", "kinds", "count-unknown", "stdin-1", "argv-1"]) {
     rmSync(join(directory, name), { force: true });
   }
 }
@@ -398,6 +449,7 @@ async function writeFake(
   answers: Answers,
   sequences: Partial<Record<Kind, readonly string[]>>,
   delays: Partial<Record<Kind, string>>,
+  locks: Partial<Record<Kind, string>>,
 ): Promise<void> {
   const script = [
     "#!/bin/sh",
@@ -416,11 +468,19 @@ async function writeFake(
     // The read-back that follows a create reaches the threads from the comment.
     "  *'PullRequestReviewComment'*) kind=lookup ;;",
     "  *'reviewThreads(first:100'*) kind=threads ;;",
+    // Before the create, which is the other POST. The summary goes to the issues
+    // path and a finding's thread to the pulls path, and those two paths are the
+    // whole of the difference between a comment on the pull request and a comment
+    // on a line of its diff.
+    "  *'/issues/'*'/comments'*) kind=summary ;;",
     "  *'--method POST'*) kind=create ;;",
     "  *'pr list'*) kind=prlist ;;",
     "  *'v3.diff'*) kind=diff ;;",
     "esac",
     'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
+    // The arguments of this one call, so a test can read the method and the path
+    // a comment was sent to and not only that a call was made.
+    'printf \'%s\\n\' "$*" > "$dir/argv-$n"',
     // Which call of this kind it is, so that a paging read-back can answer
     // differently each time.
     'k=$(cat "$dir/count-$kind" 2>/dev/null || echo 0)',
@@ -434,6 +494,9 @@ async function writeFake(
     "  exit 1",
     "fi",
     'cat "$answer"',
+    // After the answer, so the call itself succeeded and only what the round
+    // writes afterwards fails.
+    'if [ -f "$dir/lock-$kind" ]; then chmod 500 "$(cat "$dir/lock-$kind")"; fi',
     "exit 0",
     "",
   ].join("\n");
@@ -451,6 +514,9 @@ async function writeFake(
   for (const [kind, seconds] of Object.entries(delays)) {
     await writeFile(join(directory, `delay-${kind}`), seconds, "utf8");
   }
+  for (const [kind, locked] of Object.entries(locks)) {
+    await writeFile(join(directory, `lock-${kind}`), locked, "utf8");
+  }
 }
 
 /** `text` as one shell word, so a fixture can hold whatever it needs to. */
@@ -463,6 +529,11 @@ function lines(path: string): readonly string[] {
   return readFileSync(path, "utf8")
     .split("\n")
     .filter((line) => line !== "");
+}
+
+/** A file as it stands, or the empty string where there is none. */
+function contents(path: string): string {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
 /** The pull request row `gh pr list --json` prints for the branch. */
@@ -511,6 +582,13 @@ const REOPENED = included(
   "200 OK",
   JSON.stringify({ data: { unresolveReviewThread: { thread: { isResolved: false } } } }),
 );
+
+/** The summary comment GitHub created: an issue comment, on no line of the diff. */
+const SUMMARY_POSTED = included("201 Created", JSON.stringify({
+  id: 2140876531,
+  node_id: "IC_kwDOUEd2qM7q-4A7",
+  html_url: `https://github.com/o/r/pull/${PULL_REQUEST}#issuecomment-2140876531`,
+}));
 
 /** One thread of the pull request as the listing reads it back. */
 type Listed = {
@@ -583,6 +661,34 @@ function listedPage(cursor: string): string {
   );
 }
 
+/** The comment body `gh` was handed, or a failure naming what arrived instead. */
+function sent(stdin: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdin);
+  } catch {
+    return assert.fail(`gh was handed what is not JSON: ${stdin}`);
+  }
+  assert.ok(
+    typeof parsed === "object" && parsed !== null && "body" in parsed,
+    `gh was handed no body: ${stdin}`,
+  );
+  const body: unknown = parsed.body;
+  assert.equal(typeof body, "string", `the body gh was handed is not text: ${stdin}`);
+  return String(body);
+}
+
+/** Why the episode has no summary comment, or the empty string where it has one. */
+function summaryReason(summary: EpisodeSummary): string {
+  switch (summary.outcome) {
+    case "failed":
+    case "never-composed":
+      return summary.reason;
+    case "posted":
+      return "";
+  }
+}
+
 /** A finding on the one line the diff carries, which threads inline. */
 function finding(headline: string): Finding {
   return {
@@ -600,7 +706,8 @@ function finding(headline: string): Finding {
  * Everything a round that posts one finding needs answering.
  *
  * The threads listing is among them because every round makes it, the first
- * round of an episode included.
+ * round of an episode included, and the summary because a round that closes the
+ * episode posts one.
  */
 const POSTING: Answers = {
   prlist: PR_LIST,
@@ -608,6 +715,7 @@ const POSTING: Answers = {
   threads: listed([]),
   create: CREATED,
   lookup: LOOKUP,
+  summary: SUMMARY_POSTED,
 };
 
 test("the first round of a first episode posts its finding, is handed no thread, and blocks", async () => {
@@ -690,13 +798,14 @@ test("a person's thread is not handed over, and an episode closes with one still
       prlist: PR_LIST,
       diff: DIFF,
       threads: listed([{ id: "PRRT_person", isResolved: false, opening: PERSON_WROTE }]),
+      summary: SUMMARY_POSTED,
     },
     reviewer: reviews({}),
   });
 
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "diff"],
+    ["prlist", "threads", "diff", "summary"],
     "a person's thread was resolved or re-opened, so the reviewer's judgement was applied to a comment it was never shown",
   );
   assert.equal(
@@ -756,13 +865,14 @@ test("a verdict naming a person's thread is reported unapplied and reaches nothi
       diff: DIFF,
       threads: listed([{ id: "PRRT_person", isResolved: false, opening: PERSON_WROTE }]),
       resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
     },
     reviewer: reviews({ verdicts: [{ thread: "PRRT_person", verdict: "fixed" }] }),
   });
 
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "diff"],
+    ["prlist", "threads", "diff", "summary"],
     "the verdict closed a person's thread, which is the reviewer's judgement applied to a comment it was never handed",
   );
   assert.ok(ran.conclusion.outcome === "close");
@@ -870,6 +980,7 @@ test("a round that leaves nothing open closes the episode", async () => {
       diff: DIFF,
       threads: listed([{ id: "PRRT_one", isResolved: false }]),
       resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
     },
     reviewer: reviews({ verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
   });
@@ -878,9 +989,186 @@ test("a round that leaves nothing open closes the episode", async () => {
   assert.equal(ran.conclusion.because, "nothing-open");
 });
 
+/**
+ * The one comment an episode posts, asserted as the whole body `gh` was handed.
+ *
+ * A test that asserted a call had been made would pass on an empty body, and the
+ * comment is posted once and never edited, so whatever is wrong in it is
+ * permanent for that episode.
+ *
+ * Every part of it comes from somewhere else: the round count and the spend from
+ * the episode's state file, the location and the headline from the thread that was
+ * listed before the review, the status from the verdict the reviewer returned, and
+ * the note from the bound that closed the episode.
+ */
+test("a closing round posts one comment carrying the summary it composed", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    // One round recorded, so this round is the second and the last the cap allows.
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_open", isResolved: false }]),
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_open", verdict: "open" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "round-cap");
+  assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "summary"]);
+  assert.equal(
+    ran.state?.closeReported,
+    true,
+    "a later firing of this episode reads this to know the close was reported, and announces a missing summary where it is not there",
+  );
+
+  const posted = ran.calls.filter((call) => call.kind === "summary");
+  assert.equal(posted.length, 1, "the comment is posted once, and nothing ever edits it");
+  assert.equal(
+    sent(posted[0]?.body ?? ""),
+    [
+      "**Squiz review — 2 rounds, 1 finding**",
+      "",
+      "Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0",
+      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
+      "",
+      "**Needs a person**",
+      "",
+      "- `src/ui/card.ts:88` — The name says nothing. (open)",
+      "",
+      "**Notes**",
+      "",
+      "- The episode ended at its round cap rather than with nothing left open",
+    ].join("\n"),
+  );
+});
+
+test("a round that blocks posts no summary", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "summary"),
+    [],
+    "the summary is the episode's close, and one for every firing reports a review that is still going on",
+  );
+  assert.notEqual(
+    ran.state?.closeReported,
+    true,
+    "a round that blocked reported no close, and a later firing that read this as one would close the episode in silence",
+  );
+});
+
+/**
+ * A summary that did not post leaves the close a close.
+ *
+ * A failed round would be the wrong answer twice over: the review finished and
+ * the episode is over, and a round that failed over a comment it could not post
+ * would be reported as a review that did not happen.
+ */
+test("a summary gh refused does not turn the close into a failed round", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    // No summary answer, so the fake exits 1 exactly as a gh that could not post.
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      resolve: RESOLVED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
+  });
+
+  assert.equal(ran.conclusion.outcome, "close", "the episode closed, and the review finished");
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "nothing-open");
+  assert.equal(ran.conclusion.summary?.outcome, "failed");
+  assert.match(
+    summaryReason(ran.conclusion.summary),
+    /gh exited 1/u,
+    "the reason GitHub gave is what the failure pointer has to carry",
+  );
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "summary"]);
+  assert.deepEqual(
+    ran.conclusion.verdicts.threads.map((applied) => applied.outcome),
+    ["closed"],
+    "what the round put on the pull request stands, whatever became of the summary",
+  );
+});
+
+/**
+ * A round the reviewer failed posts no summary.
+ *
+ * The cap is 1 here, so a clean round of this shape would close the episode. The
+ * round reached no decision about the episode, and counts taken from a review that
+ * did not finish would read as counts from one that did.
+ */
+test("a round the reviewer failed posts no summary", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 1 },
+    answers: POSTING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "summary"),
+    [],
+    "a failed round is reported on the hook's stderr, not as a summary of a review that did not finish",
+  );
+});
+
+/**
+ * Two episodes on one pull request each post their own comment, and neither
+ * touches what is already there.
+ *
+ * A second coding agent on the same branch is a second episode: its state file is
+ * new and the pull request is not. Posting is a create addressed to the pull
+ * request's comment collection rather than to any comment of its own, so the
+ * comments accumulate as the history of the review passes.
+ */
+test("a second episode on the same pull request posts a second comment and edits nothing", async () => {
+  const answers: Answers = {
+    prlist: PR_LIST,
+    diff: DIFF,
+    threads: listed([{ id: "PRRT_one", isResolved: false }]),
+    resolve: RESOLVED,
+    summary: SUMMARY_POSTED,
+  };
+  const reviewer = reviews({ verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] });
+
+  const first = await runInFixture({ rounds: [ANSWER_COST], answers, reviewer });
+  const second = await runInFixture({ rounds: [ANSWER_COST], answers, reviewer });
+
+  for (const [at, ran] of [first, second].entries()) {
+    const episode = `episode ${at + 1}`;
+    assert.ok(ran.conclusion.outcome === "close", `${episode} did not close`);
+    assert.deepEqual(ran.conclusion.summary, { outcome: "posted" }, `${episode} posted no summary`);
+    const posted = ran.calls.filter((call) => call.kind === "summary");
+    assert.equal(posted.length, 1, `${episode} posted ${posted.length} comments`);
+    assert.equal(
+      posted[0]?.argv,
+      `api --include --method POST repos/{owner}/{repo}/issues/${PULL_REQUEST}/comments --input -`,
+      `${episode} posted somewhere other than the pull request's comment collection`,
+    );
+    assert.deepEqual(
+      ran.calls.filter((call) => /--method (?:PATCH|PUT|DELETE)/u.test(call.argv)),
+      [],
+      `${episode} edited or removed a comment, and the first episode's own is permanent`,
+    );
+  }
+});
+
 test("an honest empty review is a clean round and not a failure", async () => {
   const ran = await runInFixture({
-    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), summary: SUMMARY_POSTED },
     reviewer: reviews({}),
   });
 
@@ -918,6 +1206,7 @@ test("a round that reached the token bound closes the episode", async () => {
       diff: DIFF,
       threads: listed([{ id: "PRRT_one", isResolved: false }]),
       unresolve: REOPENED,
+      summary: SUMMARY_POSTED,
     },
     reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open" }] }),
   });
@@ -1259,7 +1548,7 @@ test("a diff that could not be fetched ends the round before the reviewer runs",
 
 test("a finding that could not be posted is reported and does not read as clean", async () => {
   const ran = await runInFixture({
-    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), summary: SUMMARY_POSTED },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
@@ -1295,6 +1584,9 @@ test("the posting margin bounds every call the round makes after the review", as
  * A posting margin that began afresh there would spend those two minutes on the
  * far side of the window, and what lies on the far side of the window is the
  * runtime killing the hook with nothing posted and the subagent recorded failed.
+ *
+ * The summary is on the same terms as the findings. It is the last thing the round
+ * would send, so it is the first thing a spent window costs.
  */
 test("a review that returned late leaves the posting what is left of the window, not a fresh margin", async () => {
   const ran = await runInFixture({
@@ -1315,9 +1607,14 @@ test("a review that returned late leaves the posting what is left of the window,
     "the window was gone before the posting started, and the round says so rather than reporting a comment it never wrote",
   );
   assert.deepEqual(
-    ran.kinds.filter((kind) => kind === "create"),
-    [],
+    ran.kinds,
+    ["prlist", "threads", "diff"],
     "a call made past the end of the window is one the runtime kills the hook during",
+  );
+  assert.match(
+    summaryReason(ran.conclusion.summary),
+    /ran out before this call was made/u,
+    "the episode closed without its summary, and the round has to say so for the pointer to name it",
   );
 });
 
@@ -1447,8 +1744,226 @@ test("a cap already spent closes the episode before a reviewer is started", asyn
     0,
     "a cap read only after the reviewer has run is not a bound: it bills for the round it was there to stop",
   );
-  assert.deepEqual(ran.kinds, ["prlist"]);
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist"],
+    "a comment composed here would report an episode with none of its threads in hand as an episode that raised nothing",
+  );
+  // The state file this fixture wrote records no close, which is what an
+  // interruption between the cost and the close leaves. The comment is missing
+  // and the round says so.
+  assert.equal(ran.conclusion.summary.outcome, "never-composed");
   assert.equal(ran.state?.rounds.length, 3, "and no fourth round is appended to the count");
+});
+
+/**
+ * A cap lowered between firings closes an episode whose summary was never posted.
+ *
+ * The first firing reviews under a cap of 3, posts its finding and blocks, so
+ * nothing has closed the episode and nothing has reported it. The cap is 1 by the
+ * next firing, which finds the bound already spent: it starts no review, lists
+ * none of the episode's threads and composes no comment. A close that said nothing
+ * here would end the episode with findings on the pull request, no comment
+ * reporting them, and exit 0 reading as a clean review.
+ */
+test("a cap lowered after a round blocked closes the episode with no summary, and says so", async () => {
+  const blocked = await runInFixture({
+    config: { rounds: 3 },
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(blocked.conclusion.outcome === "block");
+  assert.notEqual(
+    blocked.state?.closeReported,
+    true,
+    "a round that blocked closed no episode, so it has reported no close",
+  );
+
+  const closed = await runInFixture({
+    config: { rounds: 1 },
+    rounds: blocked.state?.rounds ?? [],
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close");
+  assert.equal(closed.conclusion.because, "round-cap");
+  assert.deepEqual(
+    closed.kinds,
+    ["prlist"],
+    "no review ran here, so nothing was listed to compose a comment from and nothing was posted",
+  );
+  assert.equal(
+    closed.conclusion.summary.outcome,
+    "never-composed",
+    "the episode closed with no summary anywhere, and a close that reports nothing reads as a clean review",
+  );
+  assert.match(
+    summaryReason(closed.conclusion.summary),
+    /1 round/u,
+    "the line has to say the episode reviewed, or a person has no reason to go and read its threads",
+  );
+});
+
+/**
+ * An episode whose close was recorded is over, and a later firing of it reviews
+ * nothing and posts nothing.
+ *
+ * The firings are chained: what the second reads is what the close wrote, rather
+ * than a state the fixture arranged. A firing that reviewed here would spend a
+ * round of a closed episode, raise its findings again and put a second comment on
+ * one pull request.
+ */
+test("a firing after the episode reported its close reviews nothing and posts nothing", async () => {
+  const closed = await runInFixture({
+    config: { rounds: 1 },
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close");
+  assert.deepEqual(closed.conclusion.summary, { outcome: "posted" });
+
+  const again = await runInFixture({
+    config: { rounds: 1 },
+    rounds: closed.state?.rounds ?? [],
+    closeReported: closed.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
+  assert.deepEqual(again.kinds, [], "an episode that is over asks GitHub nothing at all");
+});
+
+/**
+ * An episode that closed below its cap is over too.
+ *
+ * The cap allows two more rounds here, so the bounds do not end this episode and
+ * the record of its close is the only thing that does. A round gated on the bounds
+ * alone reviews again, appends a round and posts a second comment for one episode.
+ */
+test("a firing after an episode closed below its cap reviews nothing, whatever the cap allows", async () => {
+  const closed = await runInFixture({
+    config: { rounds: 3 },
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close");
+  assert.equal(closed.conclusion.because, "nothing-open");
+  assert.equal(closed.state?.closeReported, true, "the close records itself, cap or no cap");
+
+  const again = await runInFixture({
+    config: { rounds: 3 },
+    rounds: closed.state?.rounds ?? [],
+    closeReported: closed.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
+  assert.equal(again.invocations.length, 0, "a closed episode must not be billed for another round");
+  assert.deepEqual(again.kinds, []);
+  assert.deepEqual(
+    again.state?.rounds,
+    closed.state?.rounds,
+    "and no round is appended to an episode that is over",
+  );
+});
+
+/**
+ * A close that reported a summary nothing composed records itself, so it is
+ * reported once.
+ *
+ * The first firing finds its cap already spent, composes nothing and says so. The
+ * second is an episode that is over: the line has been written, and writing it
+ * again on every firing is the second output format the pointer must not grow.
+ */
+test("a close that reported its missing summary records itself, and is not reported twice", async () => {
+  const first = await runInFixture({
+    config: { rounds: 1 },
+    rounds: [ANSWER_COST],
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(first.conclusion.outcome === "close");
+  assert.equal(first.conclusion.because, "round-cap");
+  assert.equal(first.conclusion.summary.outcome, "never-composed");
+  assert.equal(first.state?.closeReported, true, "a close that ends the episode records it");
+
+  const again = await runInFixture({
+    config: { rounds: 1 },
+    rounds: first.state?.rounds ?? [],
+    closeReported: first.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
+  assert.deepEqual(again.kinds, []);
+});
+
+/**
+ * A close whose record could not be written says so, and the comment it posted
+ * still counts as posted.
+ *
+ * The episode's directory stops taking writes once the comment has gone up, which
+ * is the shape a full disk and a directory turned read-only both leave: the state
+ * file is there and readable, the round's cost is in it, and the close cannot be
+ * added. Two failures would be worse than the one: a comment reported as lost when
+ * it is on the pull request, and a persistence failure nobody was told about.
+ */
+test("a close that could not record itself reports the write and keeps the comment it posted", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), summary: SUMMARY_POSTED },
+    lockStateAfter: "summary",
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(
+    ran.conclusion.summary,
+    { outcome: "posted" },
+    "the comment is on the pull request, and a write that failed afterwards does not take it off",
+  );
+  assert.equal(ran.conclusion.recorded.outcome, "failed");
+  assert.match(
+    ran.conclusion.recorded.outcome === "failed" ? ran.conclusion.recorded.reason : "",
+    /could not be written/u,
+    "the filesystem's own error is what a person has to act on",
+  );
+  assert.notEqual(
+    ran.state?.closeReported,
+    true,
+    "the file is readable and holds no close, which is exactly why the next firing cannot know",
+  );
+
+  // The next firing of that episode, its directory writable again. It has nothing
+  // that says the episode closed, so it reviews as an episode that never did.
+  const again = await runInFixture({
+    rounds: ran.state?.rounds ?? [],
+    closeReported: ran.state?.closeReported,
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.equal(
+    again.invocations.length,
+    1,
+    "a close the harness could not record is one no later firing can read, and the round that lost it said so",
+  );
+  assert.deepEqual(again.kinds.filter((kind) => kind === "summary"), ["summary"]);
 });
 
 test("an exhausted cap whose last recorded round failed closes the episode too", async () => {

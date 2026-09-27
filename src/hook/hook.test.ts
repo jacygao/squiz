@@ -25,8 +25,11 @@ import { fileURLToPath } from "node:url";
 
 import type { Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
+import type { SummaryPosting } from "../github/summary.ts";
+import type { StateWrite } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
+import type { EpisodeSummary } from "../loop/post-summary.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import type { RoundConclusion, RoundFailure } from "../loop/round.ts";
 import type { AppliedVerdict } from "../loop/verdicts.ts";
@@ -90,15 +93,23 @@ function salvagedRound(
   };
 }
 
+/**
+ * A round that closed the episode. Its summary went up unless a test says
+ * otherwise, which is the shape a healthy episode ends in.
+ */
 function closedRound(
   because: ClosingReason,
   outcomes: readonly FindingOutcome[] = [],
   ruled: readonly AppliedVerdict[] = [],
   unreadableDiff?: Error,
+  summary: SummaryPosting = { outcome: "posted" },
+  recorded: StateWrite = { outcome: "written" },
 ): RoundConclusion {
   return {
     outcome: "close",
     because,
+    summary,
+    recorded,
     pullRequest: PULL_REQUEST,
     posted: [],
     findings: unreadableDiff === undefined ? { outcomes } : { outcomes, unreadableDiff },
@@ -108,6 +119,35 @@ function closedRound(
     },
   };
 }
+
+/**
+ * A close the round reached before the review: the bound was already spent, so no
+ * reviewer ran and no comment was composed.
+ */
+function closedBeforeTheReview(because: ClosingReason, summary: EpisodeSummary): RoundConclusion {
+  return {
+    outcome: "close",
+    because,
+    summary,
+    recorded: { outcome: "written" },
+    pullRequest: PULL_REQUEST,
+    posted: [],
+    findings: { outcomes: [] },
+    verdicts: { threads: [], unapplied: [] },
+  };
+}
+
+/** The summary of an episode no firing of which ever composed one. */
+const NO_SUMMARY: EpisodeSummary = {
+  outcome: "never-composed",
+  reason: "the bound was spent before this firing listed the episode's threads, and nothing reports the 2 rounds it ran",
+};
+
+/** A summary GitHub refused, which leaves the episode no record of itself. */
+const SUMMARY_REFUSED: SummaryPosting = {
+  outcome: "failed",
+  reason: "gh answered HTTP 502 without posting the summary",
+};
 
 function blockedRound(reason: string): RoundConclusion {
   return {
@@ -304,6 +344,82 @@ test("a verdict that did not reach its thread is said, where the close reads cle
   );
 });
 
+test("an episode that closed without its summary says so", () => {
+  // The summary is the episode's whole record on the pull request: the counts,
+  // the cost and what needs a person are in it and nowhere else. Nothing posts it
+  // a second time, so this line is all a person gets.
+  const conclusion = closedRound("nothing-open", [], [], undefined, SUMMARY_REFUSED);
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to post the episode's summary: " +
+      "gh answered HTTP 502 without posting the summary",
+  );
+});
+
+test("a summary the window left no time to send carries that as its reason", () => {
+  // Which failure it was decides whether anything can be done about it, so the
+  // pointer carries the reason and not the fact alone.
+  const conclusion = closedRound("round-cap", [], [], undefined, {
+    outcome: "failed",
+    reason: "the time left for GitHub ran out before this call was made",
+  });
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to post the episode's summary: " +
+      "the time left for GitHub ran out before this call was made",
+  );
+});
+
+test("a firing of an episode that is over composes no pointer", () => {
+  // The comment went up when the episode closed, or the firing that could not
+  // post it said so then. A second line would report a failure twice.
+  assert.equal(failureIn({ outcome: "episode-over" }), null);
+});
+
+test("a close the harness could not record says so", () => {
+  // The record is what tells a later firing that the episode is over. Without it
+  // that firing reviews this pull request again and posts a second comment, and
+  // this line is the only warning of it.
+  const conclusion = closedRound("nothing-open", [], [], undefined, { outcome: "posted" }, {
+    outcome: "failed",
+    reason:
+      "/work/.squiz/a1e3196c5ad0f2410/state.json could not be written: EACCES: permission denied",
+  });
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to record the episode's close: " +
+      "/work/.squiz/a1e3196c5ad0f2410/state.json could not be written: EACCES: permission denied",
+  );
+});
+
+test("a close that ends an episode no comment ever reported says so", () => {
+  // A bound lowered between firings closes an episode whose rounds ran and whose
+  // findings are on the pull request with nothing reporting them. Exit 0 and
+  // silence here is a review that reads as clean.
+  assert.equal(
+    pointerFor(closedBeforeTheReview("round-cap", NO_SUMMARY)),
+    "the round closed the episode on PR #142 having failed to post the episode's summary: " +
+      "the bound was spent before this firing listed the episode's threads, and nothing " +
+      "reports the 2 rounds it ran",
+  );
+});
+
+test("a close that ends an episode which never reviewed says that instead", () => {
+  const conclusion = closedBeforeTheReview("token-bound", {
+    outcome: "never-composed",
+    reason: "no round of the episode ever ran",
+  });
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to post the episode's summary: " +
+      "no round of the episode ever ran",
+  );
+});
+
 test("both kinds of failure share the one line", () => {
   const conclusion = closedRound(
     "round-cap",
@@ -315,6 +431,23 @@ test("both kinds of failure share the one line", () => {
     pointerFor(conclusion),
     "the round closed the episode on PR #142 having failed to post 1 of 2 findings " +
       "and to apply 1 of 2 verdicts",
+  );
+});
+
+test("everything a close failed at shares the one line, the summary last", () => {
+  const conclusion = closedRound(
+    "round-cap",
+    [unpostable("the anchor is off")],
+    [refused("PRRT_1")],
+    undefined,
+    SUMMARY_REFUSED,
+  );
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to post 1 of 1 findings " +
+      "and to apply 1 of 1 verdicts and to post the episode's summary: " +
+      "gh answered HTTP 502 without posting the summary",
   );
 });
 
@@ -373,6 +506,11 @@ test("every pointer the hook composes is one line", () => {
     closedRound("nothing-open", [unpostable("one"), unpostable("two")]),
     closedRound("round-cap", [threaded("one"), unpostable("two")], [refused("PRRT_1")]),
     closedRound("nothing-open", [noted("one")], [], new Error("the diff carries no hunk header")),
+    closedRound("nothing-open", [], [], undefined, {
+      outcome: "failed",
+      reason: "gh exited 1 on HTTP 502:\ngh: Bad gateway\n",
+    }),
+    closedBeforeTheReview("round-cap", NO_SUMMARY),
   ];
 
   for (const conclusion of conclusions) {
@@ -617,6 +755,12 @@ test("a closing round that carried a failure exits 0 and is not silent", async (
       pointer:
         "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings\n",
     },
+    {
+      conclusion: closedRound("nothing-open", [threaded("one")], [], undefined, SUMMARY_REFUSED),
+      pointer:
+        "squiz: the round closed the episode on PR #142 having failed to post the episode's " +
+        "summary: gh answered HTTP 502 without posting the summary\n",
+    },
   ];
 
   await withRepository(async (worktree) => {
@@ -682,6 +826,15 @@ test("every way a round can fail exits 0", async () => {
     { returns: closedRound("nothing-open", [threaded("one"), unpostable("two")]) },
     { returns: closedRound("nothing-open", [], [refused("PRRT_1")]) },
     { returns: closedRound("nothing-open", [noted("one")], [], new Error("no hunk header")) },
+    { returns: closedRound("nothing-open", [], [], undefined, SUMMARY_REFUSED) },
+    { returns: closedBeforeTheReview("round-cap", NO_SUMMARY) },
+    { returns: { outcome: "episode-over" } },
+    {
+      returns: closedRound("nothing-open", [], [], undefined, { outcome: "posted" }, {
+        outcome: "failed",
+        reason: "state.json could not be written: ENOSPC: no space left on device",
+      }),
+    },
     { throws: "the round read a thread that was not there" },
   ];
 

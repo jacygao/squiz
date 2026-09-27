@@ -84,10 +84,12 @@ export function failureIn(conclusion: RoundConclusion): string | null {
       // An episode that closed at its cap or its budget has not failed. What it
       // could not put on the pull request is the only thing left to say.
       return closingFailure(conclusion);
-    // A blocked round's stderr is its reason alone, and a branch nobody opened a
-    // pull request for had nothing to run.
+    // A blocked round's stderr is its reason alone. A branch nobody opened a pull
+    // request for had nothing to run, and an episode that had already reported its
+    // close ran nothing either: what it came to was said when it closed.
     case "block":
     case "no-pull-request":
+    case "episode-over":
       return null;
   }
 }
@@ -124,10 +126,51 @@ function failedFailure(round: FailedRound): string {
  * review.
  */
 function closingFailure(round: ClosedRound): string | null {
-  const unreported = unreportedBy(round);
-  if (unreported === null) return null;
+  const failures = [unreportedBy(round), summaryLostBy(round), closeUnrecordedBy(round)].filter(
+    (what) => what !== null,
+  );
+  if (failures.length === 0) return null;
   const at = `PR #${round.pullRequest}`;
-  return `the round closed the episode on ${at} having failed to ${unreported}`;
+  return `the round closed the episode on ${at} having failed to ${failures.join(" and to ")}`;
+}
+
+/**
+ * The summary comment the episode closed without, or `null` where it went up.
+ *
+ * Carries the reason the round gave. The summary is the whole of the episode's
+ * record on the pull request, so where it is missing this line is the only thing
+ * that will ever say what the review counted, and which failure it was decides
+ * whether anything can be done about it.
+ *
+ * A comment nothing composed is reported exactly as a comment GitHub refused. The
+ * pull request carries neither, and a close that named only the second would let
+ * the first end an episode in silence.
+ */
+function summaryLostBy(round: ClosedRound): string | null {
+  switch (round.summary.outcome) {
+    case "failed":
+    case "never-composed":
+      return `post the episode's summary: ${round.summary.reason}`;
+    case "posted":
+      return null;
+  }
+}
+
+/**
+ * The close the episode could not record, or `null` where it recorded it.
+ *
+ * Last on the line, because it is the only part of a close that is about the
+ * harness rather than about the pull request.
+ *
+ * A close nothing recorded is a close no later firing can read. That firing finds
+ * the rounds in the state file and no close, which is what an interruption leaves
+ * too, so it takes the episode for one still open and reviews the pull request
+ * again. This line is the only warning of that, and it carries the filesystem's
+ * own error because that is what someone has to fix.
+ */
+function closeUnrecordedBy(round: ClosedRound): string | null {
+  if (round.recorded.outcome !== "failed") return null;
+  return `record the episode's close: ${round.recorded.reason}`;
 }
 
 /**
