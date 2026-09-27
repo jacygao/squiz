@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.32 (draft)
+**Version:** 0.33 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -158,8 +158,8 @@ flowchart TD
    and what remains open is what the summary reports and what a person then
    looks at.
 
-From round 2 on, the coding agent works the existing threads before it finishes
-its turn. It replies on a thread to say what it changed, to disagree, or to ask
+Where the pull request carries open threads, the coding agent works them before
+it finishes its turn. It replies on a thread to say what it changed, to disagree, or to ask
 a question. It does not close threads. A thread closes when the reviewer's
 verdict closes it, so a closed thread means the reviewer read the code as it now
 stands and accepted it.
@@ -463,8 +463,7 @@ The standing rules:
   is cut short.
 - Finish the review with the call for that, once, after the last finding and the
   last verdict, and finish it even where there was nothing to report.
-- **From round 2 on:** return a verdict on every thread you were handed, one
-  call each. The coding agent's replies say where to look; they never settle
+- **On every thread you were handed:** return a verdict, one call each. The coding agent's replies say where to look; they never settle
   anything. Re-read the code as it now stands and rule from that.
 - The suggested fix is one way to address a finding. Rule on whether the defect
   is gone, not on whether the suggestion was taken.
@@ -999,6 +998,7 @@ until something asks.
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
+| **P2** | A check that says a review is in progress | A status on the pull request that is not green while an episode is running, so the change does not read as ready to merge mid-review |
 
 Nothing at P2 gets an interface built for it in advance.
 

@@ -83,9 +83,9 @@ than where the construct begins or ends.
 
 ## Ruling on what you found before
 
-From round 2 on you are handed the threads your earlier findings opened, each
-with what has been said on it since. Report a verdict on every one of them, one
-call each.
+You are handed the threads your earlier findings opened, each with what has been
+said on it since. Report a verdict on every one of them, one call each. A review
+of a pull request nothing has reviewed before is handed none.
 
 The coding agent's replies say where to look. They never settle anything. Read
 the code as it now stands and rule from that.
@@ -109,7 +109,7 @@ says and wherever it says it.
 | Call | When |
 |---|---|
 | `report_finding` | Once per finding, as soon as you have confirmed it. |
-| `report_verdict` | Once per thread you were handed, from round 2 on. |
+| `report_verdict` | Once per thread you were handed. |
 | `finish_review` | Once, after the last finding and the last verdict. |
 
 **Finish the review even where you found nothing.** A review that found nothing
