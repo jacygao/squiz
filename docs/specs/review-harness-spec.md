@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.36 (draft)
+**Version:** 0.37 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -254,7 +254,7 @@ Five things are handed to it:
 | | |
 |---|---|
 | **A working directory** | The git work tree holding the change under review. The reviewer process runs with this as its current directory. |
-| **The pull request** | Its number, its base and head refs, its description, and every review thread already on it with the replies and resolved state of each. The harness fetches all of this and passes it in. |
+| **The pull request** | Its number, its base and head refs, its description, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness fetches all of this and passes it in. |
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
