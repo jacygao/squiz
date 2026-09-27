@@ -154,12 +154,24 @@ flowchart TD
    nor the reason, so it never blocks the coding agent and an episode ends with
    one still open.
 
-   The reason names each open thread by its identifier and by where the thread
-   is, one thread per line. It does not say what the finding on the thread is.
-   `squiz threads` carries the severity and the headline of each one, and the
-   reason names that command. The identifier leads the line in both, and it is
-   the whole of the first field of the line, so it copies out of either of them
-   into `squiz reply`.
+   Each open thread gets one line: its identifier, then where it is. The reason
+   does not say what the finding is. `squiz threads` says that, and the reason
+   names the command. The identifier comes first on the line in both, so the
+   agent copies it from either into `squiz reply`.
+
+   ```
+   Squiz reviewed the change on this branch and left 2 comments on PR #41.
+
+   2 threads are open on it:
+   PRRT_kwDOL7tYbc5abcd1 packages/sync/src/queue.ts:134
+   PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57
+
+   The commands that work them:
+     squiz threads
+     squiz reply <id> <text>
+
+   Address what applies, reply on anything you disagree with, then finish.
+   ```
 5. **Close the episode.** Otherwise the harness posts one summary comment on the
    pull request and exits 0. This happens whether or not threads are still open,
    and what remains open is what the summary reports and what a person then
