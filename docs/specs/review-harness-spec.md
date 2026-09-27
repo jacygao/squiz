@@ -671,6 +671,22 @@ The comment is never edited or replaced. A second episode on the same pull
 request posts a second comment, and the comments accumulate as a history of the
 review passes.
 
+The round that closes the episode is the round that posts it. A round that blocks
+the coding agent posts nothing, because the comment is the close of the episode
+rather than the end of a round, and one comment for every firing would report a
+review that is still going on. A round the reviewer failed posts nothing either:
+it reached no decision about the episode, and counts taken from a review that did
+not finish would read as counts from one that did. The hook's stderr carries that
+failure instead. A firing that finds the round cap or the token bound already
+spent closes without posting a comment. The episode's own comment went up when it
+closed, and a firing that starts no review lists none of the episode's threads, so
+a comment written there would report an episode that raised nothing.
+
+The comment goes up after the round's findings and its verdicts, inside the
+window the round reserves for posting. Nothing is attempted past the end of that
+window. Where the window is gone before the comment can be sent, no comment is
+posted and the hook's stderr says the episode closed without its summary.
+
 ### What the comment carries
 
 Three blocks, in this order.
@@ -813,6 +829,7 @@ nothing retries one.
 | The threads on the pull request cannot all be listed | Exit 0, nothing posted, and no review runs. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
 | The window is gone before the findings are posted | Exit 0, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window: a call made there is one the runtime kills the hook during, and the round would end having said nothing at all. |
+| The summary comment cannot be posted | Exit 0, and the close is a close still rather than a round the harness failed. stderr says the episode closed without its summary, and names what GitHub or the window answered. Nothing is retried: posting is a create, so a second attempt is a second comment. |
 | The local state file cannot be read or written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. A read that fails ends the firing before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |

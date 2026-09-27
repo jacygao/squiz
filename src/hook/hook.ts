@@ -124,10 +124,24 @@ function failedFailure(round: FailedRound): string {
  * review.
  */
 function closingFailure(round: ClosedRound): string | null {
-  const unreported = unreportedBy(round);
-  if (unreported === null) return null;
+  const failures = [unreportedBy(round), summaryLostBy(round)].filter((what) => what !== null);
+  if (failures.length === 0) return null;
   const at = `PR #${round.pullRequest}`;
-  return `the round closed the episode on ${at} having failed to ${unreported}`;
+  return `the round closed the episode on ${at} having failed to ${failures.join(" and to ")}`;
+}
+
+/**
+ * The summary comment the episode closed without, or `null` where it went up.
+ *
+ * Last on the line, and carrying the reason GitHub or the window gave. The
+ * summary is the whole of the episode's record on the pull request, so where it
+ * is missing this line is the only thing that will ever say what the review
+ * counted, and which failure it was decides whether anything can be done about
+ * it.
+ */
+function summaryLostBy(round: ClosedRound): string | null {
+  if (round.summary === undefined || round.summary.outcome !== "failed") return null;
+  return `post the episode's summary: ${round.summary.reason}`;
 }
 
 /**

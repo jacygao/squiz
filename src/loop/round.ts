@@ -1,6 +1,7 @@
 /**
  * One round, composed: gate on the pull request, run the reviewer, post what it
- * found, apply what it ruled, and return what the round concluded.
+ * found, apply what it ruled, post the episode's summary where the round closed
+ * it, and return what the round concluded.
  *
  * **A round the reviewer failed is not a round that found nothing.** The
  * reviewer's own outcome is carried out to the caller, so a round killed at its
@@ -23,6 +24,7 @@ import type { Config } from "../config/config.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
+import type { SummaryPosting } from "../github/summary.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
 import {
@@ -44,6 +46,7 @@ import {
 } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
+import { postEpisodeSummary } from "./post-summary.ts";
 import { blockingReason } from "./reason.ts";
 import {
   decideAfterRound,
@@ -119,7 +122,19 @@ export type RoundConclusion =
   /** Another round. The coding agent is handed the open threads, with this reason. */
   | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount)
   /** The episode is over, for the reason the decision gave. */
-  | ({ readonly outcome: "close"; readonly because: ClosingReason } & RoundAccount)
+  | ({
+      readonly outcome: "close";
+      readonly because: ClosingReason;
+      /**
+       * What became of the episode's summary comment.
+       *
+       * Absent where none was attempted, which is a close reached before the
+       * review: the episode's comment went up when the episode closed, and a
+       * firing that finds a bound already spent holds none of the episode's
+       * threads to write a second one from.
+       */
+      readonly summary?: SummaryPosting;
+    } & RoundAccount)
   /**
    * The round failed. Never a clean pass: `failure` says whose failure it was,
    * and an honest empty review is not one of them.
@@ -265,7 +280,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   );
 
   if (decision.next === "close") {
-    return { outcome: "close", because: decision.because, ...account };
+    return closed(decision.because, account, recorded.rounds, handedOver, posting);
   }
   return {
     outcome: "block",
@@ -553,6 +568,43 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
   };
 }
 
+/**
+ * The close, with the episode's summary comment on the pull request.
+ *
+ * The summary goes up last, after the findings and the verdicts. A thread is what
+ * the next reader works, and a comment that took the margin from the threads
+ * would report an episode whose findings never landed.
+ *
+ * `handedOver` is the listing this round made, which is where the headline of
+ * every finding raised before this round is. The account carries the threads this
+ * round opened, and the two together are the whole episode.
+ *
+ * A comment that could not be posted leaves the close a close. The episode is
+ * over, so nothing is retried and no later round reads the same code again, and a
+ * failure that ended the coding agent's turn would cost the work the round was
+ * reviewing.
+ */
+function closed(
+  because: ClosingReason,
+  account: RoundAccount,
+  rounds: readonly RoundCost[],
+  handedOver: readonly ReviewThread[],
+  on: Posting,
+): RoundConclusion {
+  const summary = postEpisodeSummary(
+    {
+      pullRequest: account.pullRequest,
+      rounds,
+      handedOver,
+      verdicts: account.verdicts,
+      findings: account.findings,
+      because,
+    },
+    { directory: on.directory, until: on.margin },
+  );
+  return { outcome: "close", because, summary, ...account };
+}
+
 type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
 
 /**
@@ -562,6 +614,10 @@ type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
  * **Still a failed round, whatever it posted.** The outcome is the reviewer's
  * own, the cost recorded before this stands as a floor, and no block-or-close
  * decision is asked for.
+ *
+ * No summary comment either. Nothing here closed the episode, and counts taken
+ * from a review that did not finish would read as one that did. The hook's stderr
+ * carries the failure.
  *
  * The posting runs on the round's own margin, which is what is left of the one
  * window. A round that reached its time bound has spent most of that window, and
