@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { type Adapter, type Invocation, unspent } from "./adapter.ts";
+import { LOOK_MS } from "./detached.ts";
 import { grants } from "./pi/argv.ts";
 import { parse } from "./pi/parse.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
@@ -509,10 +510,10 @@ test("a reviewer that complains at length is drained as it goes, and only the en
 });
 
 /**
- * A reviewer that ignores the signal is killed, and the tools it started go
- * with it. At depth `read` the grant is the only confinement there is, and a
- * subprocess outliving the round can still write to the tree the coding agent
- * is about to commit.
+ * A reviewer that ignores the signal is killed, and the tools it left in its own
+ * group go with it. At depth `read` the grant is the only confinement there is,
+ * and a subprocess outliving the round can still write to the tree the coding
+ * agent is about to commit.
  */
 test("a killed reviewer takes the processes it started with it", async () => {
   await inATree(async (tree) => {
@@ -605,6 +606,82 @@ test("a tool that outlives a reviewer which took the signal is stopped too", asy
   });
 });
 
+/**
+ * `pi` starts every shell command detached, which makes the tool the leader of a
+ * process group of its own. The signal sent to the reviewer's group does not reach
+ * it, and `pi` reaps the tools it detached from a handler of its own, which a
+ * reviewer killed outright never runs.
+ */
+test("a tool the reviewer detached is stopped when the reviewer is killed (#143)", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(deafDetached(tree)).adapter, deeply(tree), BOUND);
+    assert.equal(round.outcome, "timed-out");
+
+    const tool = toolIn(tree);
+    assert.ok(
+      await gone(tool),
+      `the detached tool ${tool} outlived the round that started it, in a group of its own`,
+    );
+  });
+});
+
+/**
+ * The comparison that detects a write made through the shell is taken when the
+ * reviewer exits, so a detached tool still running then writes to the tree after
+ * the comparison has been taken.
+ */
+test("a tool the reviewer detached is stopped when the reviewer exits on its own (#143)", async () => {
+  await inATree(async (tree) => {
+    const asked = join(tree, "signal");
+    const round = await runRound(
+      reviewer(leavingDetached(tree, obliging(asked))).adapter,
+      deeply(tree),
+      10,
+    );
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+
+    const tool = toolIn(tree);
+    assert.ok(
+      await gone(tool),
+      `the detached tool ${tool} outlived the reviewer that started it`,
+    );
+    assert.equal(
+      readFileSync(asked, "utf8"),
+      "SIGTERM",
+      "the tool was killed outright rather than asked, which leaves a write half made",
+    );
+  });
+});
+
+/**
+ * At `read` the grant carries nothing that starts a process group of its own, so a
+ * round of that depth reads no process table. Work that runs anyway is work that
+ * can fail anyway.
+ */
+test("a round at read looks for nothing outside the reviewer's group", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(leavingDetached(tree, deafly)).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+
+    const tool = toolIn(tree);
+    const stillThere = !(await gone(tool, 250));
+    stopGroup(tool);
+    assert.ok(
+      stillThere,
+      "a round at read stopped something outside its group, which its grant cannot start",
+    );
+  });
+});
+
+/** Stop what a test left running, which is not something for a test to fail over. */
+function stopGroup(pid: number): void {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
+
 /** The identifier of the reviewer itself, as the reviewer recorded it. */
 function reviewerIn(tree: string): number {
   const reviewer = Number(readFileSync(join(tree, "pids"), "utf8").split(" ")[0]);
@@ -660,25 +737,78 @@ function deafly(readyFile: string): string {
 }
 
 /**
- * A reviewer that starts a tool answering no signal, waits for it to be up,
- * records both process identifiers, and then does what it is told.
+ * A tool that answers `SIGTERM` by recording that it was asked, and exits.
  *
- * The tool is what `pi` leaves behind: its `grep` and its `find` both start
- * ripgrep without detaching it, so a tool of a round sits in the round's own
- * process group.
+ * A round that kills a tool outright rather than asking it first leaves whatever
+ * it was writing half written, inside the tree under review.
  */
-function withTool(tree: string, andThen: string): string {
+function obliging(signalFile: string): (readyFile: string) => string {
+  return (readyFile) =>
+    [
+      `process.on('SIGTERM', () => { require("node:fs").writeFileSync(${JSON.stringify(signalFile)}, "SIGTERM"); process.exit(0); });`,
+      `require("node:fs").writeFileSync(${JSON.stringify(readyFile)}, "up");`,
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+}
+
+/**
+ * A reviewer that starts one tool, waits for it to be up, records both process
+ * identifiers, and then does what it is told.
+ *
+ * `detaching` is the difference between what `pi` does for a shell command and
+ * what it does for `grep` and `find`. Detached, the tool leads a process group of
+ * its own and nothing of the reviewer's group names it; otherwise it sits in the
+ * round's own group, which is where ripgrep sits.
+ */
+function withAnyTool(
+  tree: string,
+  tool: (readyFile: string) => string,
+  detaching: boolean,
+  andThen: string,
+): string {
   const pidFile = join(tree, "pids");
   const readyFile = join(tree, "ready");
   return [
     'const { spawn } = require("node:child_process");',
     'const fs = require("node:fs");',
-    `const tool = spawn(process.execPath, ["-e", ${JSON.stringify(deafly(readyFile))}], { stdio: "ignore" });`,
+    `const tool = spawn(process.execPath, ["-e", ${JSON.stringify(tool(readyFile))}], { stdio: "ignore", detached: ${detaching} });`,
+    "tool.unref();",
     `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + tool.pid);`,
     `const until = Date.now() + 10000;`,
     `while (!fs.existsSync(${JSON.stringify(readyFile)}) && Date.now() < until) {}`,
     andThen,
   ].join("\n");
+}
+
+/** A reviewer whose tool answers no signal and sits in the round's own group. */
+function withTool(tree: string, andThen: string): string {
+  return withAnyTool(tree, deafly, false, andThen);
+}
+
+/** A reviewer whose tool is detached, and which then does what it is told. */
+function withDetachedTool(
+  tree: string,
+  tool: (readyFile: string) => string,
+  andThen: string,
+): string {
+  return withAnyTool(tree, tool, true, andThen);
+}
+
+/**
+ * A reviewer that detaches a tool, stays up long enough for the round to have read
+ * the process table, and then reviews and leaves.
+ *
+ * A detached tool is named by the chain of parents leading back to the reviewer,
+ * so one started in the last instant of a reviewer's life is one nothing can
+ * attribute to it.
+ */
+function leavingDetached(tree: string, tool: (readyFile: string) => string): string {
+  const answer = JSON.stringify(reportingMessage + reported);
+  return withDetachedTool(
+    tree,
+    tool,
+    `setTimeout(() => process.stdout.write(${answer}, () => process.exit(0)), ${LOOK_MS * 3});`,
+  );
 }
 
 /** A reviewer that answers no signal either, so that both need the escalation. */
@@ -695,6 +825,15 @@ function leavingEarly(tree: string): string {
 /** A reviewer that answers the signal, while the tool it started does not. */
 function obedient(tree: string): string {
   return withTool(tree, "setInterval(() => {}, 1000);");
+}
+
+/** A reviewer that detaches a tool answering no signal, and answers none itself. */
+function deafDetached(tree: string): string {
+  return withDetachedTool(
+    tree,
+    deafly,
+    "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);",
+  );
 }
 
 /** A reviewer that never reached the model, which says so on stderr and exits. */
@@ -771,6 +910,11 @@ function at(tree: string): Invocation {
     depth: "read",
     thinking: "medium",
   };
+}
+
+/** The same round at the depth whose grant carries a shell. */
+function deeply(tree: string): Invocation {
+  return { ...at(tree), depth: "deep" };
 }
 
 /** A fresh work tree, removed however the test ends. */

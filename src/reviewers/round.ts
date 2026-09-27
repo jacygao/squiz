@@ -38,6 +38,7 @@ import {
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
+import { type Detached, nothingDetached, watchDetached } from "./detached.ts";
 
 /**
  * How long a killed reviewer is given to exit before it is killed outright, and
@@ -208,10 +209,10 @@ async function attempt(
   const options: SpawnOptionsWithStdioTuple<StdioNull, StdioPipe, StdioPipe> = {
     cwd: line.directory,
     env: { ...process.env, TMPDIR: scratch },
-    // The reviewer leads its own process group, so that stopping it stops the
-    // tools it started. At depth `read` the grant is the only thing keeping the
-    // reviewer off the code under review, and a tool outliving the round that
-    // launched it is outside the grant as much as outside the bound.
+    // The reviewer leads its own process group, so that stopping it stops every
+    // tool it left in that group. At depth `read` the grant is the only thing
+    // keeping the reviewer off the code under review, and a tool outliving the
+    // round that launched it is outside the grant as much as outside the bound.
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   };
@@ -256,11 +257,22 @@ async function attempt(
     if (!over) startFailure = startFailed(line.command, cause);
   });
 
+  // A CLI that spawns a tool detached makes it the leader of a group of its own,
+  // which no identifier of the reviewer's group names. Looking for one costs a
+  // reading of the process table while the reviewer runs, and only the grant that
+  // carries a shell can start one.
+  const detached =
+    invocation.depth === "deep" && child.pid !== undefined
+      ? watchDetached(child.pid)
+      : nothingDetached;
+
   // The reviewer leads the group, so its identifier names the group. What the
-  // round owns is the group rather than the one process in it that it started.
+  // round owns is the group rather than the one process in it that it started,
+  // and whatever the reviewer put outside that group.
   const owned: Owned = {
     child,
     group: child.pid,
+    detached,
     gone: () => hasStopped(child) || unstarted,
   };
 
@@ -413,10 +425,13 @@ function endedAs(command: string, child: ChildProcess): string {
   return `${command} did not run`;
 }
 
-/** How often the reviewer's group is asked whether anything of it is left. */
+/** How often a group of this round is asked whether anything of it is left. */
 const POLL_MS = 25;
 
-/** What one round owns: the reviewer, and the process group it leads. */
+/**
+ * What one round owns: the reviewer, the process group it leads, and the tools
+ * it put outside that group.
+ */
 type Owned = {
   readonly child: ChildProcess;
   /**
@@ -424,6 +439,7 @@ type Owned = {
    * reviewer never got as far as having one.
    */
   readonly group: number | undefined;
+  readonly detached: Detached;
   /** Whether the reviewer itself is gone, including where it never started. */
   readonly gone: () => boolean;
 };
@@ -432,23 +448,31 @@ type Owned = {
  * Stop the reviewer and everything it started, and do not return while any of
  * it might still be running.
  *
- * `SIGTERM` to the process group first, which makes the reviewer kill its own
- * children and exit. Anything of the group still there after the grace is
- * killed outright, and each wait is bounded, so a reviewer that answers neither
- * signal cannot hold the round open.
+ * `SIGTERM` first, and to two things: the reviewer's process group, which makes
+ * the reviewer kill its own children and exit, and each group the reviewer put a
+ * tool of its own in, which the group signal does not reach. Anything still there
+ * after the grace is killed outright, and each wait is bounded, so a reviewer or
+ * a tool that answers neither signal cannot hold the round open.
  *
- * **The reviewer's own exit does not end this.** A tool it started sits in the
- * same group and can outlive it, whether because the reviewer finished first or
- * because the reviewer took the signal and the tool did not. At depth `read`
- * the grant is the only thing keeping the round off the code under review, and
- * a tool that outlives the round is outside the grant as much as outside the
- * bound.
+ * **The reviewer's own exit does not end this.** A tool it started can outlive
+ * it, whether because the reviewer finished first or because the reviewer took
+ * the signal and the tool did not. At depth `read` the grant is the only thing
+ * keeping the round off the code under review, and a tool that outlives the round
+ * is outside the grant as much as outside the bound.
  */
 async function stop(owned: Owned): Promise<void> {
-  if (owned.gone() && !groupRuns(owned)) return;
+  // A detached tool is named by the chain of parents leading back to the
+  // reviewer, so the last look for one comes before the signal that ends it.
+  const outside = await owned.detached.groups();
+  owned.detached.stopLooking();
+  if (owned.gone() && !groupRuns(owned) && !owned.detached.left()) return;
   signal(owned, "SIGTERM");
+  signalEach(outside, "SIGTERM");
   if (await settled(owned, GRACE_MS)) return;
   signal(owned, "SIGKILL");
+  // Asked again, because the grace is long enough for an identifier to be reused
+  // and nothing is sent to a group that cannot be shown to be this round's.
+  signalEach(await owned.detached.groups(), "SIGKILL");
   await settled(owned, GRACE_MS);
 }
 
@@ -476,16 +500,17 @@ function groupRuns(owned: Owned): boolean {
 }
 
 /**
- * Wait for the reviewer and its group both to be gone, for as long as the wait
- * allows. Resolves false where either is still there.
+ * Wait for the reviewer, its group, and whatever it put outside its group all to
+ * be gone, for as long as the wait allows. Resolves false where any of them is
+ * still there.
  *
- * The reviewer's exit arrives as an event; a tool of its group outliving it
- * does not, so the group is asked at intervals rather than waited on.
+ * The reviewer's exit arrives as an event; a tool outliving it does not, so a
+ * group is asked at intervals rather than waited on.
  */
 async function settled(owned: Owned, milliseconds: number): Promise<boolean> {
   const bound = deadlineIn(milliseconds);
   for (;;) {
-    if (owned.gone() && !groupRuns(owned)) return true;
+    if (owned.gone() && !groupRuns(owned) && !owned.detached.left()) return true;
     if (bound.passed()) return false;
     await pause(POLL_MS);
   }
@@ -503,7 +528,8 @@ function signal(owned: Owned, sent: NodeJS.Signals): void {
   if (group !== undefined) {
     try {
       // A negative identifier is the group rather than the one process, so a
-      // tool the reviewer started is stopped whether or not the reviewer is.
+      // tool the reviewer left in its group is stopped whether or not the
+      // reviewer is.
       process.kill(-group, sent);
       return;
     } catch {
@@ -514,6 +540,23 @@ function signal(owned: Owned, sent: NodeJS.Signals): void {
     owned.child.kill(sent);
   } catch {
     // Nothing to do with it: the wait below is what bounds this either way.
+  }
+}
+
+/**
+ * Signal each group the reviewer put a tool of its own in.
+ *
+ * Every identifier here was confirmed to name the group this round recorded
+ * immediately before the call. A refusal is a process that cannot be stopped from
+ * here, which the grace then covers.
+ */
+function signalEach(groups: readonly number[], sent: NodeJS.Signals): void {
+  for (const group of groups) {
+    try {
+      process.kill(-group, sent);
+    } catch {
+      // Gone between the confirmation and here, or not ours to signal.
+    }
   }
 }
 

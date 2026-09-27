@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.45 (draft)
+**Version:** 0.47 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -368,6 +368,19 @@ group and waits a grace before escalating, and the runtime's own kill escalates
 only while the session outlives the grace. A CLI that ignores `SIGTERM` runs on
 after the round that started it, spending against the model API with no episode
 left to record it. An adapter for such a CLI is not one this harness can hold.
+
+**The group signal reaches the tools the CLI leaves in the reviewer's group, and
+no others.** A CLI that starts a tool detached makes that tool the leader of a
+group of its own, and no identifier of the reviewer's group names it. At `deep`,
+whose grant is the only one carrying a tool that starts a group of its own, the
+round reads the process table as the reviewer runs and records every group below
+the reviewer that is not the reviewer's. Each of those is signalled alongside the
+reviewer's group, on the same grace and the same escalation. A group is signalled
+only where the process holding its identifier is still the one that was recorded.
+Identifiers are reused, and a stranger's process killed over a reused one is worse
+than a tool left running. A tool started in the last instant of a reviewer that
+exits on its own is recorded by nothing, because the parentage that names such a
+tool ends at a reviewer that is still there.
 
 ### The `pi` adapter
 
@@ -1038,7 +1051,8 @@ the `.ts` files as they are, so there is no build step and no compiled output.
   execs the real one.
 
 There are no runtime dependencies. Everything outside the process is a
-subprocess: `git`, `gh`, and the reviewer's own CLI.
+subprocess: `git`, `gh`, the reviewer's own CLI, and `ps`, which is the only
+reading of the process table Node has.
 
 ### Structure
 
