@@ -218,7 +218,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   if ("ended" in gated) return gated.ended;
   const pullRequest = gated.step;
 
-  const state = onPullRequest(onFile, pullRequest.number);
+  const state = orEmpty(onFile);
 
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
@@ -374,9 +374,8 @@ function openState(episode: Episode): Step<EpisodeState | null> {
  * The rounds recorded are the episode's however many pull requests they read, and
  * the cap and the token bound are the episode's too.
  */
-function onPullRequest(state: EpisodeState | null, pullRequest: number): EpisodeState {
-  if (state === null) return { pullRequest, rounds: [], spentOutsideRounds: unspent };
-  return { ...state, pullRequest };
+function orEmpty(state: EpisodeState | null): EpisodeState {
+  return state ?? { rounds: [], spentOutsideRounds: unspent };
 }
 
 /**

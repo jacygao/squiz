@@ -44,7 +44,6 @@ function refusalOf(t: TestContext, contents: string): string {
 test("state written comes back as it was written", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
-    pullRequest: 142,
     rounds: [firstRound, secondRound],
     spentOutsideRounds: unspent,
   };
@@ -55,15 +54,14 @@ test("state written comes back as it was written", (t) => {
 
 test("the episode's directory is made by the write that needs it", (t) => {
   const episode = episodeIn(t);
-  assert.deepEqual(writeState(episode, { pullRequest: 7, rounds: [], spentOutsideRounds: unspent }), { outcome: "written" });
+  assert.deepEqual(writeState(episode, { rounds: [], spentOutsideRounds: unspent }), { outcome: "written" });
   assert.deepEqual(readdirSync(episode.directory), ["state.json"]);
 });
 
 test("a later round's state replaces the one before it", (t) => {
   const episode = episodeIn(t);
-  writeState(episode, { pullRequest: 142, rounds: [firstRound], spentOutsideRounds: unspent });
+  writeState(episode, { rounds: [firstRound], spentOutsideRounds: unspent });
   const second: EpisodeState = {
-    pullRequest: 142,
     rounds: [firstRound, secondRound],
     spentOutsideRounds: unspent,
   };
@@ -96,26 +94,22 @@ const unreadableContents: readonly string[] = [
   "null",
   "[]",
   `"142"`,
-  `{"rounds": []}`,
-  `{"pullRequest": "142", "rounds": []}`,
-  `{"pullRequest": 0, "rounds": []}`,
-  `{"pullRequest": 1.5, "rounds": []}`,
-  `{"pullRequest": 142}`,
-  `{"pullRequest": 142, "rounds": {}}`,
-  `{"pullRequest": 142, "rounds": [3]}`,
-  `{"pullRequest": 142, "rounds": [{"dollars": 0.01, "tokens": 100}]}`,
-  `{"pullRequest": 142, "rounds": [{"dollars": "0.01", "tokens": 100, "messages": 1}]}`,
-  `{"pullRequest": 142, "rounds": [{"dollars": 0.01, "tokens": -1, "messages": 1}]}`,
+  `{}`,
+  `{"rounds": {}}`,
+  `{"rounds": [3]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100}]}`,
+  `{"rounds": [{"dollars": "0.01", "tokens": 100, "messages": 1}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": -1, "messages": 1}]}`,
   // A spend that is there and cannot be read must not stand in for zero: the
   // token bound would then let the episode spend past a bound it had reached.
-  `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": 0.04}`,
-  `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": 0.04}}`,
-  `{"pullRequest": 142, "rounds": [], "spentOutsideRounds": {"dollars": "0.04", "tokens": 1, "messages": 1}}`,
+  `{"rounds": [], "spentOutsideRounds": 0.04}`,
+  `{"rounds": [], "spentOutsideRounds": {"dollars": 0.04}}`,
+  `{"rounds": [], "spentOutsideRounds": {"dollars": "0.04", "tokens": 1, "messages": 1}}`,
   // A close that is there and cannot be read is neither yes nor no. Read as no,
   // the next firing announces a missing summary for an episode carrying one; read
   // as yes, it closes the episode in silence.
-  `{"pullRequest": 142, "rounds": [], "closeReported": "true"}`,
-  `{"pullRequest": 142, "rounds": [], "closeReported": 1}`,
+  `{"rounds": [], "closeReported": "true"}`,
+  `{"rounds": [], "closeReported": 1}`,
 ];
 
 for (const contents of unreadableContents) {
@@ -145,7 +139,6 @@ test("a write that cannot happen carries the error the filesystem gave", (t) => 
   writeFileSync(join(episode.worktree, ".squiz"), "");
 
   const written = writeState(episode, {
-    pullRequest: 142,
     rounds: [firstRound],
     spentOutsideRounds: unspent,
   });
@@ -161,22 +154,21 @@ test("a write that cannot happen carries the error the filesystem gave", (t) => 
 });
 
 test("a round's spend is appended, and the number of entries is the number of rounds", () => {
-  const start: EpisodeState = { pullRequest: 142, rounds: [], spentOutsideRounds: unspent };
+  const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
   const afterTwo = recordRound(recordRound(start, firstRound), secondRound);
 
   assert.equal(start.rounds.length, 0, "the state a round was given must not change");
-  assert.equal(afterTwo.pullRequest, 142);
   assert.deepEqual(afterTwo.rounds, [firstRound, secondRound]);
 });
 
 test("a round that spent nothing is still a round", (t) => {
   const episode = episodeIn(t);
-  const start: EpisodeState = { pullRequest: 142, rounds: [], spentOutsideRounds: unspent };
+  const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
   writeState(episode, recordRound(start, unspent));
 
   assert.deepEqual(readState(episode), {
     outcome: "read",
-    state: { pullRequest: 142, rounds: [unspent], spentOutsideRounds: unspent },
+    state: { rounds: [unspent], spentOutsideRounds: unspent },
   });
 });
 
@@ -186,7 +178,7 @@ test("a round that spent nothing is still a round", (t) => {
  * round, and the money it spent has to survive that.
  */
 test("spend recorded outside the rounds does not move the round count", () => {
-  const start: EpisodeState = { pullRequest: 142, rounds: [firstRound], spentOutsideRounds: unspent };
+  const start: EpisodeState = { rounds: [firstRound], spentOutsideRounds: unspent };
   const after = recordSpendOutsideRounds(recordSpendOutsideRounds(start, firstRound), secondRound);
 
   assert.equal(after.rounds.length, 1, "no round was run, so the cap has nothing more to spend");
@@ -201,18 +193,17 @@ test("spend recorded outside the rounds does not move the round count", () => {
 test("a state file naming no spend outside its rounds has spent none", (t) => {
   const episode = episodeIn(t);
   mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(episode.stateFile, `{"pullRequest": 142, "rounds": []}`);
+  writeFileSync(episode.stateFile, `{"rounds": []}`);
 
   assert.deepEqual(readState(episode), {
     outcome: "read",
-    state: { pullRequest: 142, rounds: [], spentOutsideRounds: unspent },
+    state: { rounds: [], spentOutsideRounds: unspent },
   });
 });
 
 test("a reported close is written and comes back, and one never written is absent", (t) => {
   const episode = episodeIn(t);
   const closed: EpisodeState = {
-    pullRequest: 142,
     rounds: [firstRound],
     spentOutsideRounds: unspent,
     closeReported: true,
@@ -223,7 +214,7 @@ test("a reported close is written and comes back, and one never written is absen
 
   // A file written before the field existed says the close was never reported,
   // which is the answer that has the next firing announce the missing summary.
-  writeFileSync(episode.stateFile, `{"pullRequest": 142, "rounds": []}`);
+  writeFileSync(episode.stateFile, `{"rounds": []}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
 });
