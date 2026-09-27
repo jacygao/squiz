@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.40 (draft)
+**Version:** 0.41 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -708,13 +708,16 @@ Three blocks, in this order.
    findings about the change as a whole, each with its headline; a finding the
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
-   finding carries; a tracked file that changed while the reviewer ran; the
-   closing round, where its review did not run; other episodes that shared the
-   worktree; and a cap or bound that ended the episode early.
+   finding carries; a tracked file that changed while the reviewer ran; other
+   episodes that shared the worktree; and a cap or bound that ended the episode
+   early.
 
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
 a comment that left it out would read as a review that found nothing there.
+
+A round whose review did not run closes no episode, so no comment reports one.
+The round's failure is announced on the hook's stderr instead.
 
 ### The format
 
