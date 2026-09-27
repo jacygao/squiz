@@ -224,6 +224,47 @@ test("a finding whose headline the reviewer left blank still reads as a sentence
 
 // The threads keep the order they were classified in, which is the pull
 // request's own order and not a grouping by status.
+/**
+ * A headline is the reviewer's own text and reaches the summary unchanged.
+ * `readFinding` accepts a newline in one, and only the comment renderer collapsed
+ * it, so a thread this round opened carries the newline into the summary while a
+ * thread handed over does not. One finding then renders as two bullets under a
+ * count that says one.
+ */
+test("a headline carrying newlines is one line of the summary, not two", () => {
+  const broken = "Cache key misses the tenant\n\n- Reproduction detail";
+  const summary = renderSummary({
+    ...quiet,
+    rounds: [round(0.0061, 20_100)],
+    threads: [thread("open", "src/cache.ts:12", broken)],
+    findings: posted(noted(onTheChange(broken)), noted(onLine("src/a.ts", 4, broken), "src/a.ts:4")),
+  });
+
+  assert.match(
+    summary,
+    /^- `src\/cache\.ts:12` — Cache key misses the tenant - Reproduction detail \(open\)$/mu,
+    summary,
+  );
+  assert.equal(
+    summary.split("\n").filter((each) => each.startsWith("- ")).length,
+    3,
+    `three findings rendered as more than three bullets:\n${summary}`,
+  );
+  assert.ok(!summary.includes("\n\n- Reproduction"), `a headline opened a block:\n${summary}`);
+});
+
+// Whitespace is all a headline has to be for the collapse to leave nothing, and a
+// line naming neither a headline nor its absence reads as a rendering that broke.
+test("a headline that is nothing but whitespace is named as missing", () => {
+  const summary = renderSummary({
+    ...quiet,
+    rounds: [round(0.0061, 20_100)],
+    threads: [thread("open", "src/cache.ts:12", "  \n ")],
+  });
+
+  assert.match(summary, /— The reviewer left this finding's headline blank \(open\)$/mu, summary);
+});
+
 test("the unsettled findings keep the order they were classified in", () => {
   const comment = renderSummary({
     ...quiet,

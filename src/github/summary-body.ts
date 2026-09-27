@@ -134,14 +134,21 @@ function unsettledLine(thread: ClassifiedThread): string {
 }
 
 /**
- * What to call the finding, where the reviewer left its headline blank.
+ * What to call the finding, as one line.
  *
- * A line that stopped after the location would read as a rendering that broke.
- * The reader is told the headline is missing instead, and the location names the
- * thread the finding itself is on.
+ * The reviewer's own text reaches this unchanged, so any run of whitespace in it
+ * is collapsed here. A newline left in a headline makes a second bullet out of
+ * one finding, or a heading out of the line after it, while the count above still
+ * says one.
+ *
+ * A headline the reviewer left blank, or one that is nothing but whitespace, is
+ * named as missing. A line that stopped after the location would read as a
+ * rendering that broke; the reader is told the headline is missing instead, and
+ * the location names the thread the finding itself is on.
  */
 function named(headline: string | null): string {
-  return headline ?? "The reviewer left this finding's headline blank";
+  const said = (headline ?? "").replace(/\s+/gu, " ").trim();
+  return said === "" ? "The reviewer left this finding's headline blank" : said;
 }
 
 /**
@@ -189,9 +196,10 @@ function noteLine(note: Noted | Failed): string {
 
 /** One Notes line: where the defect is, what it is, and what became of the finding. */
 function line(location: string | undefined, headline: string, what?: string): string {
-  const said = what === undefined ? "" : ` (${what})`;
-  if (location === undefined) return `- About the change as a whole: ${headline}${said}`;
-  return `- \`${location}\` — ${headline}${said}`;
+  const disposition = what === undefined ? "" : ` (${what})`;
+  const said = named(headline);
+  if (location === undefined) return `- About the change as a whole: ${said}${disposition}`;
+  return `- \`${location}\` — ${said}${disposition}`;
 }
 
 /**
