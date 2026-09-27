@@ -1,0 +1,346 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { writeState } from "../loop/episode-state.ts";
+import { episodeAt } from "../loop/episode.ts";
+import { unspent } from "../reviewers/adapter.ts";
+import { clearRoundRunning, markRoundRunning, otherLiveEpisodes } from "./shared-tree.ts";
+
+/** Run git in `directory`, and fail the test rather than the fixture. */
+function git(directory: string, ...args: readonly string[]): void {
+  const result = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+  assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+}
+
+/** A temporary directory with every symlink resolved, so git's answer is known. */
+async function withWorktree<T>(body: (root: string) => Promise<T> | T): Promise<T> {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-shared-"));
+  try {
+    const root = realpathSync(directory);
+    git(root, "init", "--quiet", "--initial-branch", "review/the-round");
+    return await body(root);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Mark a round of `id` running in `worktree`, as a round of it would. */
+function roundRunning(worktree: string, id: string): void {
+  const marked = markRoundRunning(episodeAt(worktree, id));
+  assert.equal(marked.outcome, "written", marked.outcome === "failed" ? marked.reason : "");
+}
+
+/** An episode of `worktree` that has run a round, and closed or not. */
+function episodeRecorded(worktree: string, id: string, closed: boolean): void {
+  const written = writeState(episodeAt(worktree, id), {
+    pullRequest: 41,
+    rounds: [unspent],
+    spentOutsideRounds: unspent,
+    ...(closed ? { closeReported: true } : {}),
+  });
+  assert.equal(written.outcome, "written", written.outcome === "failed" ? written.reason : "");
+}
+
+function markerFile(worktree: string, id: string): string {
+  return join(episodeAt(worktree, id).directory, "running.json");
+}
+
+/** The pid of a process that has exited, which is what a killed round's marker names. */
+function pidOfAProcessThatHasGone(): number {
+  const result = spawnSync("node", ["-e", "process.stdout.write(String(process.pid))"], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const pid = Number(result.stdout.trim());
+  assert.ok(Number.isInteger(pid) && pid > 1, `no pid came back: ${result.stdout}`);
+  return pid;
+}
+
+async function writeMarker(worktree: string, id: string, marker: unknown): Promise<void> {
+  const episode = episodeAt(worktree, id);
+  await mkdir(episode.directory, { recursive: true });
+  await writeFile(markerFile(worktree, id), JSON.stringify(marker), "utf8");
+}
+
+async function readMarker(worktree: string, id: string): Promise<Record<string, unknown>> {
+  const parsed: unknown = JSON.parse(await readFile(markerFile(worktree, id), "utf8"));
+  assert.ok(typeof parsed === "object" && parsed !== null, "the marker holds a JSON object");
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * Run `body` with a `ps` of the test's own on the front of `PATH`.
+ *
+ * Only `ps` is replaced, so git still resolves to the real one.
+ */
+async function withPsThat<T>(script: string, body: () => Promise<T> | T): Promise<T> {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-ps-"));
+  const previous = process.env["PATH"];
+  try {
+    const fake = join(directory, "ps");
+    await writeFile(fake, `#!/bin/sh\n${script}\n`, "utf8");
+    await chmod(fake, 0o755);
+    process.env["PATH"] = `${directory}:${previous ?? ""}`;
+    return await body();
+  } finally {
+    if (previous === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("an episode running a round makes the tree shared, and its round is named", async () => {
+  await withWorktree((root) => {
+    roundRunning(root, "aaa");
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: process.pid }],
+    });
+  });
+});
+
+test("an episode between two of its rounds is live, and has no round in flight", async () => {
+  // Its hook exited and its coding agent is editing this tree to address the
+  // findings. Read as gone, a reviewer running now would have those edits read
+  // back as its own.
+  await withWorktree((root) => {
+    episodeRecorded(root, "aaa", false);
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: null }],
+    });
+  });
+});
+
+test("an episode that reported its close is not live", async () => {
+  await withWorktree((root) => {
+    episodeRecorded(root, "aaa", true);
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+  });
+});
+
+test("the episode asking is never one of the episodes it finds", async () => {
+  // The round asking is running in the tree it asks about, so its own marker and
+  // its own state are both there. Counting itself would call every tree shared
+  // and disable the comparison always.
+  await withWorktree((root) => {
+    roundRunning(root, "aaa");
+    episodeRecorded(root, "aaa", false);
+
+    assert.deepEqual(otherLiveEpisodes(root, "aaa"), { outcome: "alone" });
+  });
+});
+
+test("a round that ended leaves the episode live, and names no round", async () => {
+  await withWorktree((root) => {
+    const episode = episodeAt(root, "aaa");
+    roundRunning(root, "aaa");
+    episodeRecorded(root, "aaa", false);
+    clearRoundRunning(episode);
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: null }],
+    });
+  });
+});
+
+test("the marker a killed round left behind cannot read a live episode as gone", async () => {
+  // The runtime kills a hook at its ceiling and none of the round's cleanup
+  // runs, so the marker stays and names a process that has gone. The episode is
+  // still live, because nothing reported its close.
+  await withWorktree(async (root) => {
+    await writeMarker(root, "aaa", {
+      pid: pidOfAProcessThatHasGone(),
+      startedAt: "Thu Jan  1 00:00:00 1970",
+      toplevel: root,
+    });
+    episodeRecorded(root, "aaa", false);
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: null }],
+    });
+  });
+});
+
+test("a round in flight is named in an episode whose state records a close", async () => {
+  // The two disagree, and the marker only ever adds. Reading the close first
+  // would answer that a tree with a reviewer running in it is a tree nobody else
+  // is in.
+  await withWorktree((root) => {
+    roundRunning(root, "aaa");
+    episodeRecorded(root, "aaa", true);
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: process.pid }],
+    });
+  });
+});
+
+test("an episode that recorded nothing and is running no round is not live", async () => {
+  // Nothing on disk says it ever got as far as a round, and the directory
+  // outlives the episode, which is why the directories alone answer nothing.
+  await withWorktree(async (root) => {
+    await mkdir(episodeAt(root, "aaa").directory, { recursive: true });
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+  });
+});
+
+test("a directory no episode key could have produced holds nobody's episode", async () => {
+  await withWorktree(async (root) => {
+    await mkdir(join(root, ".squiz", "not-an-episode"), { recursive: true });
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+  });
+});
+
+test("a worktree no episode has written in is one this round has to itself", async () => {
+  await withWorktree((root) => {
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+  });
+});
+
+test("two spellings of one worktree are one worktree", async () => {
+  // The marker records the toplevel through a symlink and git resolves the
+  // physical path, so the two strings differ and the directory is one. Compared
+  // as text this reads as a tree nobody else is in, which is the reading that
+  // would let the comparison run in a shared tree.
+  await withWorktree(async (root) => {
+    const inside = join(root, "tree");
+    await mkdir(inside);
+    git(inside, "init", "--quiet", "--initial-branch", "review/the-round");
+    const spelling = join(root, "link");
+    await symlink(inside, spelling);
+
+    roundRunning(spelling, "aaa");
+
+    const marker = await readMarker(spelling, "aaa");
+    assert.equal(marker["toplevel"], spelling, "the marker records the spelling it resolved");
+    assert.deepEqual(otherLiveEpisodes(inside, "bbb"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: process.pid }],
+    });
+  });
+});
+
+test("a round in another worktree is no round of this one", async () => {
+  await withWorktree(async (root) => {
+    const elsewhere = join(root, "elsewhere");
+    await mkdir(elsewhere);
+    roundRunning(root, "aaa");
+    // Everything about the live process is kept, so the worktree is all that
+    // decides this.
+    await writeMarker(root, "aaa", { ...(await readMarker(root, "aaa")), toplevel: elsewhere });
+
+    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+  });
+});
+
+test("a marker that will not read is not a tree nobody else is in", async () => {
+  await withWorktree(async (root) => {
+    await writeMarker(root, "aaa", { pid: 0, startedAt: "", toplevel: root });
+
+    const answer = otherLiveEpisodes(root, "bbb");
+
+    assert.equal(answer.outcome, "unknown");
+    assert.match(answer.outcome === "unknown" ? answer.reason : "", /"pid" is no process id/u);
+  });
+});
+
+test("a state file that will not read is not a tree nobody else is in", async () => {
+  await withWorktree(async (root) => {
+    const episode = episodeAt(root, "aaa");
+    await mkdir(episode.directory, { recursive: true });
+    await writeFile(episode.stateFile, "{ not json", "utf8");
+
+    const answer = otherLiveEpisodes(root, "bbb");
+
+    assert.equal(answer.outcome, "unknown");
+    assert.match(answer.outcome === "unknown" ? answer.reason : "", /is not valid JSON/u);
+  });
+});
+
+test("a live episode is named even where another episode could not be read", async () => {
+  await withWorktree(async (root) => {
+    roundRunning(root, "aaa");
+    await writeMarker(root, "bbb", { nothing: "a marker holds" });
+
+    assert.deepEqual(otherLiveEpisodes(root, "ccc"), {
+      outcome: "shared",
+      episodes: [{ id: "aaa", pid: process.pid }],
+    });
+  });
+});
+
+test("a ps killed before it answered establishes nothing about a round", async () => {
+  // A killed inspection returns no status, an empty stdout and an empty stderr,
+  // which is what ps's own answer for a process that is not there looks like on
+  // everything but the status. Read as that answer, it would report a round that
+  // is running as one that has gone.
+  await withWorktree(async (root) => {
+    roundRunning(root, "aaa");
+
+    assert.deepEqual(
+      otherLiveEpisodes(root, "bbb"),
+      { outcome: "shared", episodes: [{ id: "aaa", pid: process.pid }] },
+      "the real ps answers that the round is running",
+    );
+
+    const answer = await withPsThat("kill -TERM $$", () => otherLiveEpisodes(root, "bbb"));
+
+    assert.equal(answer.outcome, "unknown");
+    assert.match(
+      answer.outcome === "unknown" ? answer.reason : "",
+      /ps was killed by SIGTERM before it answered/u,
+    );
+  });
+});
+
+test("a ps that exits of its own accord saying nothing is a process that has gone", async () => {
+  await withWorktree(async (root) => {
+    roundRunning(root, "aaa");
+
+    const answer = await withPsThat("exit 1", () => otherLiveEpisodes(root, "bbb"));
+
+    assert.deepEqual(answer, { outcome: "alone" });
+  });
+});
+
+test("a git that could not resolve the worktree is not a tree nobody else is in", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-shared-"));
+  try {
+    const answer = otherLiveEpisodes(directory, "aaa");
+
+    assert.equal(answer.outcome, "unknown");
+    assert.match(
+      answer.outcome === "unknown" ? answer.reason : "",
+      /the worktree could not be resolved: git exited 128: fatal: not a git repository/u,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("an id no directory name can be made of is not a tree nobody else is in", async () => {
+  // Without our own directory name there is no leaving ourselves out.
+  await withWorktree((root) => {
+    const answer = otherLiveEpisodes(root, "!!!");
+
+    assert.equal(answer.outcome, "unknown");
+    assert.match(
+      answer.outcome === "unknown" ? answer.reason : "",
+      /holds no character a directory name may be made of/u,
+    );
+  });
+});
