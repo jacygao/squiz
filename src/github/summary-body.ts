@@ -17,9 +17,11 @@
 import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
+import type { RoundConfinement, TrackedFilesAnswer } from "../loop/confinement.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
+import type { OtherEpisodes } from "../worktree/shared-tree.ts";
 import { renderSpendLine } from "./spend-line.ts";
 
 /** What the episode came to, which is everything the comment is written from. */
@@ -38,6 +40,14 @@ export type ClosedEpisode = {
    * close Notes says nothing about.
    */
   readonly because: ClosingReason | null;
+  /**
+   * What the closing round established about the worktree its reviewer ran in.
+   *
+   * The marker it carries is not a note. A marker that was not written costs a
+   * later round its comparison rather than this one, and nobody reading this pull
+   * request can do anything about that.
+   */
+  readonly confinement: RoundConfinement;
 };
 
 /**
@@ -147,21 +157,96 @@ function unsettledLine(thread: ClassifiedThread): string {
  * the location names the thread the finding itself is on.
  */
 function named(headline: string | null): string {
-  const said = (headline ?? "").replace(/\s+/gu, " ").trim();
+  const said = oneLine(headline ?? "");
   return said === "" ? "The reviewer left this finding's headline blank" : said;
+}
+
+/**
+ * `text` as one line of the comment.
+ *
+ * Every run of whitespace collapses. A newline reaching the comment makes a
+ * second bullet out of one note, or a heading out of the line after it.
+ */
+function oneLine(text: string): string {
+  return text.replace(/\s+/gu, " ").trim();
 }
 
 /**
  * Notes, or nothing at all.
  *
  * The findings come in the order they were posted, which runs `high` severity
- * first, and the bound that closed the episode follows them: it is about the
- * episode rather than about any one finding.
+ * first. What the round established about the worktree follows them, and the
+ * bound that closed the episode comes last: the findings are each about one
+ * defect, the worktree is about the round, and the bound is about the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
-  const lines = [...unthreaded(episode.findings).map(noteLine), ...closedEarly(episode.because)];
+  const lines = [
+    ...unthreaded(episode.findings).map(noteLine),
+    ...whatChanged(episode.confinement.trackedFiles),
+    ...whoElseWasHere(episode.confinement.otherEpisodes),
+    ...closedEarly(episode.because),
+  ];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
+}
+
+/**
+ * What the reviewer did to the files a commit could carry, where there is
+ * anything to say.
+ *
+ * A tree nobody touched is no note. Every other answer is one, the two that
+ * establish nothing included: a round that found nothing and a round that could
+ * not look compose the same comment otherwise, and the one a person would act on
+ * is the one that then reads as reassurance.
+ *
+ * A comparison that was taken and could not be had, and one the round never
+ * took, are written alike. What a person does about either is the same — read the
+ * diff, because nothing else here says the reviewer left it alone — and the
+ * reason, which is the whole of the difference, is on the line.
+ */
+function whatChanged(answer: TrackedFilesAnswer): readonly string[] {
+  switch (answer.outcome) {
+    case "unchanged":
+      return [];
+    case "changed": {
+      const many = answer.paths.length === 1 ? "A file" : "Files";
+      // A path git gives can hold a newline, which left in would make a second
+      // bullet out of one note.
+      const which = answer.paths.map((path) => `\`${oneLine(path)}\``).join(", ");
+      return [`- ${many} changed in the worktree while the reviewer ran: ${which}`];
+    }
+    case "unknown":
+    case "not-taken":
+      return [
+        "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+          ` ${oneLine(answer.reason)}`,
+      ];
+  }
+}
+
+/**
+ * Which other episodes were in the worktree while the reviewer ran, where there
+ * is anything to say.
+ *
+ * A tree the round had to itself is no note. A tree nothing could be established
+ * about is one, because the comparison above it is only worth what the answer
+ * here is.
+ */
+function whoElseWasHere(episodes: OtherEpisodes): readonly string[] {
+  switch (episodes.outcome) {
+    case "alone":
+      return [];
+    case "shared": {
+      const many = episodes.episodes.length === 1 ? "Another episode was" : "Other episodes were";
+      const which = episodes.episodes.map((episode) => episode.id).join(", ");
+      return [`- ${many} in the worktree while the reviewer ran: ${which}`];
+    }
+    case "unknown":
+      return [
+        "- Nothing says whether another episode was in the worktree while the reviewer ran:" +
+          ` ${oneLine(episodes.reason)}`,
+      ];
+  }
 }
 
 /** The findings of the closing round that no thread on the pull request holds. */

@@ -684,6 +684,7 @@ function closeAfterReview(
       verdicts: account.verdicts,
       findings: account.findings,
       because,
+      confinement,
     },
     { directory: on.directory, until: on.margin },
   );

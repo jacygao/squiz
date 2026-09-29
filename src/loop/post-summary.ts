@@ -22,6 +22,7 @@ import { postSummary, type SummaryPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { classifyAtClose } from "./classify.ts";
+import type { RoundConfinement } from "./confinement.ts";
 import type { EpisodeState } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
@@ -71,6 +72,14 @@ export type ClosingRound = {
    * no summary at all, so nothing here is composed without a closing reason.
    */
   readonly because: ClosingReason;
+  /**
+   * What this round established about the worktree its reviewer ran in.
+   *
+   * Taken on every path the reviewer can end on, so a round that closes the
+   * episode always has one. A close that composed a comment without it would
+   * report a worktree nothing looked at as one nothing touched.
+   */
+  readonly confinement: RoundConfinement;
 };
 
 /**
@@ -87,6 +96,7 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Summary
     threads: classifyAtClose(closing),
     findings: closing.findings,
     because: closing.because,
+    confinement: closing.confinement,
   });
   return postSummary(closing.pullRequest, body, call);
 }
