@@ -16,16 +16,18 @@ const invocation: Invocation = {
   scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
   thinking: "medium",
+  roundSpace: undefined,
 };
 
 /**
- * The three parts are one value, so that a second reviewer CLI is a second
+ * The four parts are one value, so that a second reviewer CLI is a second
  * value of this shape and no other change anywhere.
  */
-test("the adapter carries a command line, a way to read output, and the grants", () => {
+test("the adapter carries a command line, what it confines with, a reader and the grants", () => {
   assert.equal(pi.argv(invocation).command, "pi");
   assert.deepEqual(Object.keys(pi.grants).toSorted(), ["deep", "read"]);
   assert.equal(typeof pi.parse, "function");
+  assert.deepEqual(pi.confine(invocation), { outcome: "prepared", environment: {} });
 });
 
 test("the grant on the command line is the one the adapter names", () => {

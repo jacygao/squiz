@@ -359,7 +359,7 @@ reach for touches the tree, the reporting calls included: what a report reaches
 is the round that is reading the reviewer's output, and nothing on disk.
 
 **At `deep` the grant includes `bash`, which is itself a write primitive.** A
-reviewer at `deep` can write to a tracked file, and four mechanisms bound what
+reviewer at `deep` can write to a tracked file, and five mechanisms bound what
 follows. None is configurable, and each applies where the third column says.
 
 | Mechanism | Guards against | Applies |
@@ -368,9 +368,11 @@ follows. None is configurable, and each applies where the third column says.
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
 | **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref`, `git push` — which the comparison cannot see, because every file is left exactly as it was. | At `deep`, where a shell is granted |
 | **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell. | Except in a shared worktree, where nothing detects such a write |
+| **The process group each shell records for itself**, signalled when the round ends. | A tool the reviewer started outliving the round, where the signal to the reviewer's own group does not reach it. | Where the reviewer CLI starts a shell in a group of its own |
 
-The first three prevent, and the fourth detects. A tracked file that changed
-during any round of the episode is named in the summary comment.
+The first three prevent, the fourth detects, and the fifth reaches what the
+round's own signal does not. A tracked file that changed during any round of the
+episode is named in the summary comment.
 
 **A refused call never reaches a shell**, and the reviewer reads the refusal as
 that call's own error while it is still there to choose something else.
@@ -384,15 +386,29 @@ around them.
 detected.** The comparison reads the worktree, not where `HEAD` points, and a
 commit leaves every tracked file identical. `git "com"mit` is such a command.
 
+Every shell the reviewer starts writes the group it leads into a file the round
+names, before it runs the command it was given, so a tool started in the last
+instant before the reviewer exits is recorded like any other. The file lives in
+`.squiz/<episode>/`, under a name that round alone uses, and it goes when the
+round ends. Nothing is recorded at `read`, where no shell is granted.
+
+**A recorded group is signalled only where the system says it is still the
+round's own.** The identifier is the shell's own, and it is free the moment that
+shell is reaped, so the round reads what is running in each recorded group and
+signals only a group whose every process began after the round did. A group
+nothing could be established about is left alone: a stranger's process killed
+over a reused identifier is worse than a tool left running.
+
 ### Adapters
 
 An adapter is the code that knows how to drive one reviewer CLI. `pi` has the
 first one. A second reviewer means writing a second adapter and changing nothing
-else. A new adapter implements three things:
+else. A new adapter implements four things:
 
 | | |
 |---|---|
 | `argv(opts)` | Build the command line from a working directory, a charter file, a prompt, a session directory, and the depth. |
+| `confine(opts)` | Put in place whatever the CLI is handed outside its command line, and return what to add to its environment. A CLI handed nothing returns an empty environment and writes no file. |
 | `parse(stdout)` | Report each finding and each verdict as the run makes it, and return the run's cost where the CLI reports one. A run the CLI reports as failed is told apart from one that reported no findings. |
 | `grants` | Which tools the CLI is given at each depth, the calls the reviewer reports through among them. |
 
@@ -416,6 +432,13 @@ group and waits a grace before escalating, and the runtime's own kill escalates
 only while the session outlives the grace. A CLI that ignores `SIGTERM` runs on
 after the round that started it, spending against the model API with no episode
 left to record it. An adapter for such a CLI is not one this harness can hold.
+
+**A CLI that starts a shell tool in a group of its own puts that tool outside
+that signal.** The round signals the reviewer's group, and a shell the CLI
+detached leads a group that is not it. `confine` is where such an adapter
+delivers the line its CLI runs inside every shell, which is what has each shell
+record the group it leads. What the round then does with those groups is under
+Confinement.
 
 ### The `pi` adapter
 
@@ -530,10 +553,10 @@ grant short of a reporting call leaves the reviewer no way to report and says
 nothing about it.
 
 `--thinking` sets the reasoning effort, and is on every command line at both
-depths. Without it `pi` takes the level from `~/.pi/agent/settings.json`, and the
+depths. Without it `pi` takes the level from the user's own settings, and the
 review a change gets depends on the machine it ran on. A level `pi` does not
 recognise is not taken silently: it warns on stderr and is otherwise ignored,
-which leaves the round thinking at the level that file holds.
+which leaves the round thinking at the level those settings hold.
 
 ### Charter
 
@@ -1100,7 +1123,9 @@ the `.ts` files as they are, so there is no build step and no compiled output.
   execs the real one.
 
 There are no runtime dependencies. Everything outside the process is a
-subprocess: `git`, `gh`, and the reviewer's own CLI.
+subprocess: `git`, `gh`, `ps`, and the reviewer's own CLI. `ps` answers two
+questions the runtime has no call for: when a process started, and what is
+running in a process group.
 
 ### Structure
 
@@ -1153,7 +1178,7 @@ until something asks.
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
 | **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the subagent's id and living in the worktree |
-| **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison or not at all |
+| **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison, and with the record each shell writes of the group it leads, or not at all |
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |

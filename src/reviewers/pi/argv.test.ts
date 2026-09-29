@@ -20,6 +20,7 @@ const invocation: Invocation = {
   scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
   thinking: "medium",
+  roundSpace: undefined,
 };
 
 const depths: readonly Depth[] = ["read", "deep"];

@@ -13,6 +13,7 @@
 import type { Depth, Thinking } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { Verdict } from "../findings/status.ts";
+import type { RoundSpace } from "./groups.ts";
 
 /** What the harness hands the reviewer for one round. */
 export type Invocation = {
@@ -42,6 +43,17 @@ export type Invocation = {
    * it on every command line rather than leaving the CLI to its own setting.
    */
   readonly thinking: Thinking;
+  /**
+   * The round's own space: where every shell the reviewer starts records the
+   * group it leads, and where the adapter writes whatever its CLI reads from a
+   * file.
+   *
+   * `undefined` at a depth that grants no shell, where there is nothing to
+   * record and nothing to reach. It is the one thing that says so, and both the
+   * adapter and the round read it: an adapter that delivered the prefix anyway
+   * would have the reviewer writing to a record nothing reads.
+   */
+  readonly roundSpace: RoundSpace | undefined;
 };
 
 /** A process to start: what to run, what to pass it, and where it runs. */
@@ -151,10 +163,36 @@ export type ParsedRun = {
   readonly result: RunResult;
 };
 
-/** The three parts of driving one reviewer CLI. */
+/**
+ * What one round has to put in place before its CLI starts, or why it could not.
+ *
+ * `prepared` carries what to add to the reviewer's environment. Everything the
+ * CLI reads from a file the adapter owns is already written by then.
+ */
+export type Confinement =
+  | { readonly outcome: "prepared"; readonly environment: Readonly<Record<string, string>> }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/** The four parts of driving one reviewer CLI. */
 export type Adapter = {
   /** Build the command line for one round, from what the harness set for it. */
   readonly argv: (invocation: Invocation) => CommandLine;
+  /**
+   * Put in place whatever the CLI is handed outside its command line, and say
+   * what to add to its environment.
+   *
+   * It is where a CLI that takes a setting rather than a flag is given one. The
+   * round calls it once, before the first process starts, and reports a failure
+   * as a setup problem: a confinement that is not in place is not a round to run
+   * anyway.
+   *
+   * **A CLI that starts each shell tool detached is told here to record the group
+   * that shell leads**, in `invocation.roundSpace`. Without that the round's
+   * signal to the reviewer's own group reaches none of those tools. An adapter
+   * whose CLI leaves its shells in the reviewer's group has nothing to deliver
+   * and adds nothing to the environment.
+   */
+  readonly confine: (invocation: Invocation) => Confinement;
   /**
    * Read the run's whole output: what it cost, and the review it returned.
    *

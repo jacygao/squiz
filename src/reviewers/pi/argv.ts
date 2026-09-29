@@ -14,8 +14,8 @@
  * nothing about it.
  *
  * `--thinking` is on every command line, at both depths. Without it `pi` takes
- * the level from `~/.pi/agent/settings.json`, a file the harness does not own,
- * and the same change gets a different review on two machines. A level `pi` does
+ * the level from the user's own settings, which the harness does not choose, and
+ * the same change gets a different review on two machines. A level `pi` does
  * not recognise is warned about on stderr and otherwise ignored, so an
  * unchecked name leaves the level where it was and the round succeeds anyway.
  *
