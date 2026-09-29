@@ -93,6 +93,22 @@ export function episodeAt(worktree: string, agentId: string): Episode {
   };
 }
 
+/**
+ * The episode whose state the directory named `name` holds, or nothing where no
+ * episode key could have produced that name.
+ *
+ * A name that is not what a key would have been stripped to is nobody's episode,
+ * and reading under it would read at paths no episode owns.
+ */
+export function episodeNamed(worktree: string, name: string): Episode | undefined {
+  try {
+    const episode = episodeAt(worktree, name);
+    return episode.id === name ? episode : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function safeName(agentId: string): string {
   const stripped = agentId.replace(unsafeCharacters, "").slice(0, nameLimit);
   if (stripped === "") {

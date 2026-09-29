@@ -9,7 +9,21 @@ import { test } from "node:test";
 import { writeState } from "../loop/episode-state.ts";
 import { episodeAt } from "../loop/episode.ts";
 import { unspent } from "../reviewers/adapter.ts";
-import { clearRoundRunning, markRoundRunning, otherLiveEpisodes } from "./shared-tree.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
+import {
+  clearRoundRunning,
+  markRoundRunning,
+  otherLiveEpisodes,
+  type OtherEpisodes,
+} from "./shared-tree.ts";
+
+/** Longer than any of these spends, so nothing but the fixture decides the answer. */
+const BOUND_MS = 30_000;
+
+/** Who else is in the worktree holding `directory`, under a bound no test reaches. */
+function whoElseIsHere(directory: string, agentId: string): OtherEpisodes {
+  return otherLiveEpisodes(directory, agentId, deadlineIn(BOUND_MS));
+}
 
 /** Run git in `directory`, and fail the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): void {
@@ -97,7 +111,7 @@ test("an episode running a round makes the tree shared, and its round is named",
   await withWorktree((root) => {
     roundRunning(root, "aaa");
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+    assert.deepEqual(whoElseIsHere(root, "bbb"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: process.pid }],
     });
@@ -111,7 +125,7 @@ test("an episode between two of its rounds is live, and has no round in flight",
   await withWorktree((root) => {
     episodeRecorded(root, "aaa", false);
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+    assert.deepEqual(whoElseIsHere(root, "bbb"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: null }],
     });
@@ -122,7 +136,7 @@ test("an episode that reported its close is not live", async () => {
   await withWorktree((root) => {
     episodeRecorded(root, "aaa", true);
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+    assert.deepEqual(whoElseIsHere(root, "bbb"), { outcome: "alone" });
   });
 });
 
@@ -134,7 +148,7 @@ test("the episode asking is never one of the episodes it finds", async () => {
     roundRunning(root, "aaa");
     episodeRecorded(root, "aaa", false);
 
-    assert.deepEqual(otherLiveEpisodes(root, "aaa"), { outcome: "alone" });
+    assert.deepEqual(whoElseIsHere(root, "aaa"), { outcome: "alone" });
   });
 });
 
@@ -145,7 +159,7 @@ test("a round that ended leaves the episode live, and names no round", async () 
     episodeRecorded(root, "aaa", false);
     clearRoundRunning(episode);
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+    assert.deepEqual(whoElseIsHere(root, "bbb"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: null }],
     });
@@ -164,7 +178,7 @@ test("the marker a killed round left behind cannot read a live episode as gone",
     });
     episodeRecorded(root, "aaa", false);
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+    assert.deepEqual(whoElseIsHere(root, "bbb"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: null }],
     });
@@ -179,7 +193,7 @@ test("a round in flight is named in an episode whose state records a close", asy
     roundRunning(root, "aaa");
     episodeRecorded(root, "aaa", true);
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), {
+    assert.deepEqual(whoElseIsHere(root, "bbb"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: process.pid }],
     });
@@ -192,7 +206,7 @@ test("an episode that recorded nothing and is running no round is not live", asy
   await withWorktree(async (root) => {
     await mkdir(episodeAt(root, "aaa").directory, { recursive: true });
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+    assert.deepEqual(whoElseIsHere(root, "bbb"), { outcome: "alone" });
   });
 });
 
@@ -200,13 +214,13 @@ test("a directory no episode key could have produced holds nobody's episode", as
   await withWorktree(async (root) => {
     await mkdir(join(root, ".squiz", "not-an-episode"), { recursive: true });
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+    assert.deepEqual(whoElseIsHere(root, "bbb"), { outcome: "alone" });
   });
 });
 
 test("a worktree no episode has written in is one this round has to itself", async () => {
   await withWorktree((root) => {
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+    assert.deepEqual(whoElseIsHere(root, "bbb"), { outcome: "alone" });
   });
 });
 
@@ -226,7 +240,7 @@ test("two spellings of one worktree are one worktree", async () => {
 
     const marker = await readMarker(spelling, "aaa");
     assert.equal(marker["toplevel"], spelling, "the marker records the spelling it resolved");
-    assert.deepEqual(otherLiveEpisodes(inside, "bbb"), {
+    assert.deepEqual(whoElseIsHere(inside, "bbb"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: process.pid }],
     });
@@ -242,7 +256,7 @@ test("a round in another worktree is no round of this one", async () => {
     // decides this.
     await writeMarker(root, "aaa", { ...(await readMarker(root, "aaa")), toplevel: elsewhere });
 
-    assert.deepEqual(otherLiveEpisodes(root, "bbb"), { outcome: "alone" });
+    assert.deepEqual(whoElseIsHere(root, "bbb"), { outcome: "alone" });
   });
 });
 
@@ -250,7 +264,7 @@ test("a marker that will not read is not a tree nobody else is in", async () => 
   await withWorktree(async (root) => {
     await writeMarker(root, "aaa", { pid: 0, startedAt: "", toplevel: root });
 
-    const answer = otherLiveEpisodes(root, "bbb");
+    const answer = whoElseIsHere(root, "bbb");
 
     assert.equal(answer.outcome, "unknown");
     assert.match(answer.outcome === "unknown" ? answer.reason : "", /"pid" is no process id/u);
@@ -263,7 +277,7 @@ test("a state file that will not read is not a tree nobody else is in", async ()
     await mkdir(episode.directory, { recursive: true });
     await writeFile(episode.stateFile, "{ not json", "utf8");
 
-    const answer = otherLiveEpisodes(root, "bbb");
+    const answer = whoElseIsHere(root, "bbb");
 
     assert.equal(answer.outcome, "unknown");
     assert.match(answer.outcome === "unknown" ? answer.reason : "", /is not valid JSON/u);
@@ -275,7 +289,7 @@ test("a live episode is named even where another episode could not be read", asy
     roundRunning(root, "aaa");
     await writeMarker(root, "bbb", { nothing: "a marker holds" });
 
-    assert.deepEqual(otherLiveEpisodes(root, "ccc"), {
+    assert.deepEqual(whoElseIsHere(root, "ccc"), {
       outcome: "shared",
       episodes: [{ id: "aaa", pid: process.pid }],
     });
@@ -291,12 +305,12 @@ test("a ps killed before it answered establishes nothing about a round", async (
     roundRunning(root, "aaa");
 
     assert.deepEqual(
-      otherLiveEpisodes(root, "bbb"),
+      whoElseIsHere(root, "bbb"),
       { outcome: "shared", episodes: [{ id: "aaa", pid: process.pid }] },
       "the real ps answers that the round is running",
     );
 
-    const answer = await withPsThat("kill -TERM $$", () => otherLiveEpisodes(root, "bbb"));
+    const answer = await withPsThat("kill -TERM $$", () => whoElseIsHere(root, "bbb"));
 
     assert.equal(answer.outcome, "unknown");
     assert.match(
@@ -310,7 +324,7 @@ test("a ps that exits of its own accord saying nothing is a process that has gon
   await withWorktree(async (root) => {
     roundRunning(root, "aaa");
 
-    const answer = await withPsThat("exit 1", () => otherLiveEpisodes(root, "bbb"));
+    const answer = await withPsThat("exit 1", () => whoElseIsHere(root, "bbb"));
 
     assert.deepEqual(answer, { outcome: "alone" });
   });
@@ -319,7 +333,7 @@ test("a ps that exits of its own accord saying nothing is a process that has gon
 test("a git that could not resolve the worktree is not a tree nobody else is in", async () => {
   const directory = await mkdtemp(join(tmpdir(), "squiz-shared-"));
   try {
-    const answer = otherLiveEpisodes(directory, "aaa");
+    const answer = whoElseIsHere(directory, "aaa");
 
     assert.equal(answer.outcome, "unknown");
     assert.match(
@@ -334,7 +348,7 @@ test("a git that could not resolve the worktree is not a tree nobody else is in"
 test("an id no directory name can be made of is not a tree nobody else is in", async () => {
   // Without our own directory name there is no leaving ourselves out.
   await withWorktree((root) => {
-    const answer = otherLiveEpisodes(root, "!!!");
+    const answer = whoElseIsHere(root, "!!!");
 
     assert.equal(answer.outcome, "unknown");
     assert.match(
@@ -343,3 +357,48 @@ test("an id no directory name can be made of is not a tree nobody else is in", a
     );
   });
 });
+
+/**
+ * A ps that will not answer is the deepest call the lookup makes, and no clock
+ * outside a subprocess reaches one already running.
+ *
+ * Read as a process that has gone, a ps cut short would answer that a round in
+ * flight had ended. Waited out, it spends the window the round had to review and
+ * post in.
+ */
+test("a ps that will not answer does not outlive the bound the lookup was given", async () => {
+  await withWorktree(async (root) => {
+    roundRunning(root, "aaa");
+
+    const started = Date.now();
+    const answer = await withPsThat(WAITS_AND_WAITS, () =>
+      otherLiveEpisodes(root, "bbb", deadlineIn(300)),
+    );
+    const elapsedMs = Date.now() - started;
+
+    assert.equal(answer.outcome, "unknown");
+    assert.match(
+      answer.outcome === "unknown" ? answer.reason : "",
+      /ps ran out of the time it was given/u,
+      "a lookup that ran out of time is its own answer and never a tree nobody else is in",
+    );
+    assert.ok(
+      elapsedMs < 10_000,
+      `the lookup is cut short rather than waited out: it took ${elapsedMs}ms`,
+    );
+  });
+});
+
+/**
+ * A wait far longer than any bound a test gives it, in short steps.
+ *
+ * A shell blocked in one long sleep outlives the signal that stops it and holds
+ * the pipe its caller is reading, so the wait is short and repeated instead.
+ */
+const WAITS_AND_WAITS = [
+  "waited=0",
+  'while [ "$waited" -lt 300 ]; do',
+  "  sleep 0.2",
+  "  waited=$((waited + 1))",
+  "done",
+].join("\n");

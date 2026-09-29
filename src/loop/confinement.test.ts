@@ -83,10 +83,10 @@ function otherRoundStarts(worktree: string, id: string): void {
   assert.equal(marked.outcome, "written", marked.outcome === "failed" ? marked.reason : "");
 }
 
-/** An episode of the worktree that ran a round and reported its close. */
-function episodeCameAndWent(worktree: string, id: string): void {
+/** An episode of the worktree that has run `rounds` rounds and reported its close. */
+function episodeRanRounds(worktree: string, id: string, rounds: number): void {
   const written = writeState(episodeAt(worktree, id), {
-    rounds: [unspent],
+    rounds: Array.from({ length: rounds }, () => unspent),
     spentOutsideRounds: unspent,
     closeReported: true,
   });
@@ -287,7 +287,7 @@ test("an episode that came and went inside the review is not compared against", 
     const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
 
-    episodeCameAndWent(episode.worktree, OTHER_AGENT_ID);
+    episodeRanRounds(episode.worktree, OTHER_AGENT_ID, 1);
     await wroteToTheTree(episode);
 
     const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
@@ -295,7 +295,7 @@ test("an episode that came and went inside the review is not compared against", 
     assert.equal(confinement.trackedFiles.outcome, "not-taken");
     assert.match(
       confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(OTHER_AGENT_ID, "u"),
+      new RegExp(`${OTHER_AGENT_ID} worked in the worktree`, "u"),
       "the episode that appeared while the reviewer ran is what the answer names",
     );
   });
@@ -329,6 +329,95 @@ test("a reading that runs past its bound is cut short and answered as one that f
     assert.ok(
       elapsedMs < 15_000,
       `the reading is cut short rather than waited out: it took ${elapsedMs}ms`,
+    );
+  });
+});
+
+
+/**
+ * The case a comparison of directory names cannot see.
+ *
+ * The other episode has run before, so its directory and its state file are both
+ * there at the first asking, and it is closed at both. It runs again and closes
+ * again while this reviewer is running: neither asking finds it live, the
+ * directory names are identical, and what it recorded is the only thing that
+ * moved.
+ */
+test("an episode that ran and closed inside the review is not compared against", async () => {
+  await withWorktree(async (episode) => {
+    episodeRanRounds(episode.worktree, OTHER_AGENT_ID, 1);
+
+    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    assert.deepEqual(before.otherEpisodes, { outcome: "alone" }, "the other episode has closed");
+
+    episodeRanRounds(episode.worktree, OTHER_AGENT_ID, 2);
+    await wroteToTheTree(episode);
+
+    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
+
+    assert.deepEqual(confinement.otherEpisodes, { outcome: "alone" });
+    assert.equal(confinement.trackedFiles.outcome, "not-taken");
+    assert.match(
+      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
+      new RegExp(`${OTHER_AGENT_ID} worked in the worktree`, "u"),
+      "the write may be the other episode's, and naming it here accuses this reviewer of it",
+    );
+  });
+});
+
+/**
+ * A directory with nothing recorded under it is an episode that may be in its
+ * first round, which is the round nothing on disk says anything about.
+ */
+test("an episode with nothing recorded is not a tree this round had to itself", async () => {
+  await withWorktree(async (episode) => {
+    await mkdir(episodeAt(episode.worktree, OTHER_AGENT_ID).directory, { recursive: true });
+
+    const confinement = await around(episode, () => wroteToTheTree(episode));
+
+    assert.deepEqual(confinement.otherEpisodes, { outcome: "alone" });
+    assert.equal(confinement.trackedFiles.outcome, "not-taken");
+    assert.match(
+      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
+      new RegExp(`${OTHER_AGENT_ID}: nothing is recorded`, "u"),
+      "an episode that recorded nothing cannot be shown to have done nothing",
+    );
+  });
+});
+
+/**
+ * The lookup is bounded rather than merely gated.
+ *
+ * What the round has left of its window decides that the lookup starts, and
+ * nothing about it reaches a git already spawned. A lookup let in on what was left
+ * and then given no bound of its own waits as long as git does, and it runs before
+ * the comparison, so an overrun here leaves that with none of the window either.
+ */
+test("a lookup that runs past its bound is cut short and establishes nothing", async () => {
+  await withWorktree(async (episode) => {
+    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    assert.equal(before.reading.outcome, "read");
+
+    const started = Date.now();
+    const confinement = await withGitThatDelays("rev-parse", 30, () =>
+      readAfterReviewer(before, deadlineIn(WINDOW_MS)),
+    );
+    const elapsedMs = Date.now() - started;
+
+    assert.equal(confinement.otherEpisodes.outcome, "unknown");
+    assert.match(
+      confinement.otherEpisodes.outcome === "unknown" ? confinement.otherEpisodes.reason : "",
+      /the worktree could not be resolved: git ran out of the time it was given/u,
+      "a lookup that ran out of time is its own answer and never a tree this round had to itself",
+    );
+    assert.equal(confinement.trackedFiles.outcome, "not-taken");
+    assert.match(
+      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
+      /the live episodes of the worktree could not be established/u,
+    );
+    assert.ok(
+      elapsedMs < 20_000,
+      `the lookup is cut short rather than waited out: it took ${elapsedMs}ms`,
     );
   });
 });

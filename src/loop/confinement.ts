@@ -17,14 +17,33 @@
  * **Who else is here is asked twice, and an episode that appeared between the two
  * readings counts.** Marking this round before reading makes a round that starts
  * later find this one, and does nothing for this one, which asked before that
- * round existed. So the tree is asked about again before the comparison is used,
- * and an episode whose directory appeared meanwhile is counted even where it is
- * live at neither asking.
+ * round existed. So the tree is asked about again before the comparison is used.
  *
- * **Every reading is bounded.** Nothing about the round's window reaches a git
- * that has already started, so the reading is given a deadline of its own and
- * carries a failure where it reaches it. What a round would lose to an unbounded
- * one is the recorded cost of a review that finished and the posting after it.
+ * **An episode that ran wholly between the two askings is found by what it
+ * recorded.** Neither asking sees such an episode live, so what it left on disk is
+ * the whole of the evidence, and the state file's content is what two askings are
+ * compared by. Every write an episode makes goes through the one writer, so
+ * content that did not move is a file nothing wrote. What the alternatives do
+ * instead:
+ *
+ * - A directory name is the same however many rounds ran inside it, which is the
+ *   case this answers.
+ * - The running marker is written when a round starts and removed when it ends, so
+ *   a round that began and ended in between leaves nothing at either asking.
+ * - The file's mtime says when a write landed rather than what it recorded, and
+ *   nothing here owns the clock it was stamped from.
+ * - The round count inside the file moves for a round that recorded a spend and
+ *   stands still for one that recorded only its close.
+ *
+ * An episode with nothing recorded, and one whose state will not read, are each
+ * their own answer and never a tree this round had to itself. Neither shows that
+ * the episode did nothing.
+ *
+ * **What the round has left decides that this starts, and never how long it
+ * runs.** Nothing about the round's window reaches a git or a ps already running,
+ * so one deadline covers the whole phase, the lookup and the reading together.
+ * What a round would lose to an unbounded phase is the recorded cost of a review
+ * that finished and the posting after it.
  *
  * Nothing here reports. What the readings establish is carried to the round's
  * close, and the summary comment is what names it.
@@ -33,7 +52,8 @@
  * tree is reported rather than blocked on.
  */
 
-import { readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
@@ -50,17 +70,16 @@ import {
   type TrackedFilesComparison,
   type TrackedFilesReading,
 } from "../worktree/tracked-files.ts";
-import type { Episode } from "./episode.ts";
+import { episodeNamed, type Episode } from "./episode.ts";
 
 /**
- * The longest a reading may run, and the least of the round's window that must be
- * left for one to be started.
+ * The longest the round spends on one side of the reviewer, and the least of its
+ * window that must be left for it to spend any.
  *
- * One number for both, so that a reading is never cut short by the window: it is
- * started only where the whole of its own bound is left, and it is bounded, so it
- * cannot spend more of the round than this.
+ * One number for both, so that nothing here is cut short by the window: the phase
+ * starts only where the whole of its own bound is left.
  */
-const READING_BOUND_MS = 5_000;
+const PHASE_BOUND_MS = 5_000;
 
 /** A reading, or a comparison, the round decided not to take. */
 type NotTaken = { readonly outcome: "not-taken"; readonly reason: string };
@@ -97,10 +116,21 @@ export type RoundConfinement = {
   readonly marked: MarkWrite;
 };
 
-/** The episodes of a worktree, as the directories holding their state name them. */
-type EpisodesPresent =
-  | { readonly listed: true; readonly ids: readonly string[] }
-  | { readonly listed: false; readonly reason: string };
+/**
+ * What one episode of the worktree has recorded, as a value two askings compare
+ * by.
+ *
+ * `untold` covers an episode with nothing recorded and one whose state will not
+ * read. Neither of those shows that the episode did nothing.
+ */
+type EpisodeRecord =
+  | { readonly outcome: "recorded"; readonly digest: string }
+  | { readonly outcome: "untold"; readonly reason: string };
+
+/** What every episode of the worktree but this one has recorded. */
+type EpisodesRecorded =
+  | { readonly read: true; readonly byId: ReadonlyMap<string, EpisodeRecord> }
+  | { readonly read: false; readonly reason: string };
 
 /** What the round holds between the two readings. */
 export type BeforeTheReviewer = {
@@ -108,18 +138,18 @@ export type BeforeTheReviewer = {
   readonly marked: MarkWrite;
   /** The live episodes at the first asking, which is one half of the answer. */
   readonly otherEpisodes: OtherEpisodes;
-  /** Every episode of the worktree at the first asking, live or over. */
-  readonly present: EpisodesPresent;
+  /** What every other episode of the worktree had recorded at the first asking. */
+  readonly recorded: EpisodesRecorded;
   /** The first reading, or why the round took none. */
   readonly reading: TrackedFilesReading | NotTaken;
 };
 
 /**
- * Mark this round as running, ask which other episodes are live in the worktree,
- * and take the reading the reviewer will be compared against.
+ * Mark this round as running, ask which other episodes are in the worktree, and
+ * take the reading the reviewer will be compared against.
  *
- * `until` is the moment the reading has to be inside. What it spends comes off
- * the reviewer's own bound, so a slow reading shortens the review rather than
+ * `until` is the moment all of that has to be inside. What it spends comes off
+ * the reviewer's own bound, so a slow phase shortens the review rather than
  * pushing the round past its window.
  *
  * Never throws. A marker that was not written, a tree that is shared and a
@@ -129,26 +159,27 @@ export type BeforeTheReviewer = {
 export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeTheReviewer {
   const marked = markRoundRunning(episode);
 
-  if (!roomForAReading(until)) {
+  const phase = phaseInside(until);
+  if (phase === null) {
     const reason = "the round had too little of its window left to read the worktree";
     return {
       episode,
       marked,
       otherEpisodes: { outcome: "unknown", reason },
-      present: { listed: false, reason },
+      recorded: { read: false, reason },
       reading: { outcome: "not-taken", reason },
     };
   }
 
-  const otherEpisodes = otherLiveEpisodes(episode.worktree, episode.id);
-  const present = episodesIn(episode);
+  const otherEpisodes = otherLiveEpisodes(episode.worktree, episode.id, phase);
+  const recorded = whatEachEpisodeRecorded(episode, phase);
   const shared = whyNotCompared(otherEpisodes);
   if (shared !== null) {
     return {
       episode,
       marked,
       otherEpisodes,
-      present,
+      recorded,
       reading: { outcome: "not-taken", reason: shared },
     };
   }
@@ -156,8 +187,8 @@ export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeThe
     episode,
     marked,
     otherEpisodes,
-    present,
-    reading: readTrackedFiles(episode.worktree, boundFor(until)),
+    recorded,
+    reading: readTrackedFiles(episode.worktree, phase),
   };
 }
 
@@ -166,56 +197,58 @@ export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeThe
  * the two readings establish.
  *
  * Reached on every path the reviewer can end on, the time bound included.
- * `until` is the round's own window: a second reading is not started where too
- * little of it is left, because what a reading spends here comes off the posting
- * that follows.
+ * `until` is the round's own window: nothing is started here where too little of
+ * it is left, because what this phase spends comes off the posting that follows.
  *
  * Never throws.
  */
 export function readAfterReviewer(before: BeforeTheReviewer, until: Deadline): RoundConfinement {
   const { episode, marked } = before;
-  const asked = roomForAReading(until)
-    ? otherLiveEpisodes(episode.worktree, episode.id)
-    : untold("the round had too little of its window left to ask who else was here");
+  const phase = phaseInside(until);
+  const asked =
+    phase === null
+      ? untold("the round had too little of its window left to ask who else was here")
+      : otherLiveEpisodes(episode.worktree, episode.id, phase);
   const otherEpisodes = eitherAsking(before.otherEpisodes, asked);
-  return { marked, otherEpisodes, trackedFiles: compared(before, otherEpisodes, until) };
+  return { marked, otherEpisodes, trackedFiles: compared(before, otherEpisodes, phase) };
 }
 
 function compared(
   before: BeforeTheReviewer,
   otherEpisodes: OtherEpisodes,
-  until: Deadline,
+  phase: Deadline | null,
 ): TrackedFilesAnswer {
   const { episode, reading } = before;
   if (reading.outcome === "not-taken") return reading;
 
   // The tree turned out to have been shared after the first reading was taken, so
   // what the two readings disagree about is not this reviewer's alone.
-  const shared = whyNotCompared(otherEpisodes) ?? whoAppeared(episode, before.present);
+  const shared = whyNotCompared(otherEpisodes);
   if (shared !== null) return { outcome: "not-taken", reason: shared };
 
-  if (!roomForAReading(until)) {
+  if (phase === null) {
     return {
       outcome: "not-taken",
       reason: "the round had too little of its window left to read the worktree a second time",
     };
   }
+
+  const elsewhere = whoElseWorked(episode, before.recorded, phase);
+  if (elsewhere !== null) return { outcome: "not-taken", reason: elsewhere };
+
   // A first reading that failed leaves nothing for a second one to be compared
   // against, and the comparison says which of the two could not be taken.
   const after =
-    reading.outcome === "failed"
-      ? reading
-      : readTrackedFiles(episode.worktree, boundFor(until));
+    reading.outcome === "failed" ? reading : readTrackedFiles(episode.worktree, phase);
   return compareTrackedFiles(reading, after);
 }
 
-/** Whether the round can start a reading and see the end of it inside `until`. */
-function roomForAReading(until: Deadline): boolean {
-  return until.remaining() >= READING_BOUND_MS;
-}
-
-function boundFor(until: Deadline): Deadline {
-  return deadlineIn(Math.min(READING_BOUND_MS, until.remaining()));
+/**
+ * One deadline over everything the round does on one side of the reviewer, or
+ * `null` where too little of the window is left to start.
+ */
+function phaseInside(until: Deadline): Deadline | null {
+  return until.remaining() >= PHASE_BOUND_MS ? deadlineIn(PHASE_BOUND_MS) : null;
 }
 
 /**
@@ -237,50 +270,106 @@ function whyNotCompared(episodes: OtherEpisodes): string | null {
 }
 
 /**
- * Why no comparison is taken over an episode that appeared while the reviewer
- * ran, or `null` where none did.
+ * Why no comparison is taken over another episode of the worktree, or `null`
+ * where every one of them is as it was before the reviewer ran.
  *
- * An episode that started and closed inside one review is live at neither asking,
- * and the tree was shared for part of the interval the comparison covers all the
- * same. The directory holding its state is what is left of it.
+ * An episode that ran and closed inside one review is live at neither asking, and
+ * the tree was shared for part of the interval the comparison covers. What it
+ * recorded is what is left of it, and an episode that recorded nothing either
+ * side of the review cannot be shown to have done nothing.
  */
-function whoAppeared(episode: Episode, before: EpisodesPresent): string | null {
-  if (!before.listed) return unlisted(before.reason);
-  const now = episodesIn(episode);
-  if (!now.listed) return unlisted(now.reason);
+function whoElseWorked(
+  episode: Episode,
+  before: EpisodesRecorded,
+  phase: Deadline,
+): string | null {
+  if (!before.read) return unestablished(before.reason);
+  const now = whatEachEpisodeRecorded(episode, phase);
+  if (!now.read) return unestablished(now.reason);
 
-  const had = new Set(before.ids);
-  const appeared = now.ids.filter((id) => !had.has(id)).sort();
-  if (appeared.length === 0) return null;
-  const which = appeared.join(", ");
-  const plural = appeared.length === 1 ? "episode" : "episodes";
-  return `the ${plural} ${which} appeared in the worktree while the reviewer ran`;
+  const worked: string[] = [];
+  const cannotTell: string[] = [];
+  for (const id of [...new Set([...before.byId.keys(), ...now.byId.keys()])].sort()) {
+    const was = before.byId.get(id);
+    const is = now.byId.get(id);
+    // An episode's directory arriving or going is the episode itself at work.
+    if (was === undefined || is === undefined) worked.push(id);
+    else if (was.outcome === "untold") cannotTell.push(`${id}: ${was.reason}`);
+    else if (is.outcome === "untold") cannotTell.push(`${id}: ${is.reason}`);
+    else if (was.digest !== is.digest) worked.push(id);
+  }
+
+  if (worked.length > 0) {
+    const plural = worked.length === 1 ? "episode" : "episodes";
+    return `the ${plural} ${worked.join(", ")} worked in the worktree while the reviewer ran`;
+  }
+  if (cannotTell.length > 0) {
+    const which = cannotTell.join("; ");
+    return `what another episode of the worktree recorded could not be established: ${which}`;
+  }
+  return null;
 }
 
-function unlisted(reason: string): string {
+function unestablished(reason: string): string {
   return `the episodes of the worktree could not be listed: ${reason}`;
 }
 
 /**
- * Every episode of the worktree other than this one, live or over.
+ * What each episode of the worktree other than this one has recorded.
  *
- * The episode owns where its own directory sits, so the directory holding all of
- * them is taken from it rather than spelled again here.
+ * The episode owns where the episodes sit and where its own state file goes, so
+ * both are taken from it rather than spelled again here.
  */
-function episodesIn(episode: Episode): EpisodesPresent {
+function whatEachEpisodeRecorded(episode: Episode, phase: Deadline): EpisodesRecorded {
   const directory = dirname(episode.directory);
+
+  let names: readonly string[];
   try {
-    const ids = readdirSync(directory, { withFileTypes: true })
+    names = readdirSync(directory, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name !== episode.id)
       .map((entry) => entry.name);
-    return { listed: true, ids };
   } catch (cause) {
     // Nothing has ever been written here, so no other episode has been here
     // either.
-    if (isMissing(cause)) return { listed: true, ids: [] };
-    return { listed: false, reason: `${directory} could not be read: ${reasonFor(cause)}` };
+    if (isMissing(cause)) return { read: true, byId: new Map() };
+    return { read: false, reason: `${directory} could not be read: ${reasonFor(cause)}` };
+  }
+
+  const byId = new Map<string, EpisodeRecord>();
+  for (const name of names) {
+    // A directory no episode key could have produced holds nobody's episode.
+    const other = episodeNamed(episode.worktree, name);
+    if (other === undefined) continue;
+    if (phase.passed()) return { read: false, reason: RAN_OUT };
+    byId.set(other.id, recordOf(other));
+  }
+  return { read: true, byId };
+}
+
+/**
+ * What one episode's state file holds, as one value.
+ *
+ * The bytes rather than what they parse to. A field the reader does not know
+ * about is still a write the episode made, and a reading that normalised it away
+ * would answer that the episode did nothing.
+ */
+function recordOf(episode: Episode): EpisodeRecord {
+  try {
+    const digest = createHash("sha256").update(readFileSync(episode.stateFile)).digest("hex");
+    return { outcome: "recorded", digest };
+  } catch (cause) {
+    if (isMissing(cause)) {
+      return { outcome: "untold", reason: `nothing is recorded at ${episode.stateFile}` };
+    }
+    return {
+      outcome: "untold",
+      reason: `${episode.stateFile} could not be read: ${reasonFor(cause)}`,
+    };
   }
 }
+
+/** What a phase cut short at its bound says, which is never that nothing happened. */
+const RAN_OUT = "the round ran out of the time it had to read the worktree";
 
 /**
  * What the two askings together say about the worktree.
