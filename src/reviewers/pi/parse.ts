@@ -49,6 +49,7 @@ type Tally = {
 const nothingReported: Reported = {
   findings: [],
   verdicts: [],
+  refusals: 0,
   finished: false,
   broken: undefined,
 };

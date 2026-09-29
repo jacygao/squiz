@@ -86,6 +86,14 @@ export type RoundOutput = {
 /** What the reviewer has reported, and whether it has said the review is done. */
 export type Reported = RoundOutput & {
   /**
+   * How many of the reviewer's calls the run refused before they ran.
+   *
+   * A review that spent its window being refused reports the same findings as
+   * one that had nothing to say, and this is the whole of the difference
+   * between them. Zero on a CLI whose adapter refuses nothing.
+   */
+  readonly refusals: number;
+  /**
    * Whether the reviewer has reported its review complete.
    *
    * It is the only thing that says a review is finished, and it is why a caller

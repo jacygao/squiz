@@ -12,6 +12,10 @@
  * report disagreeing — and it fails the output rather than quietly shortening
  * it.
  *
+ * A call stopped before it ran carries an error here as well, and that one is
+ * counted. A reviewer that spent its window being refused reports the findings
+ * of one that had nothing to say, and the count is the whole of the difference.
+ *
  * The reviewer says when its review is complete, because nothing else can.
  * Silence is a reviewer that found nothing and a reviewer that never reached
  * the end of its review, and an empty round that stood for both would read as a
@@ -25,6 +29,7 @@ import type { Finding } from "../../findings/finding.ts";
 import { readFinding, readVerdict } from "../../findings/reported.ts";
 import type { Verdict } from "../../findings/status.ts";
 import type { Reported, RoundOutput, ThreadVerdict } from "../adapter.ts";
+import { wasRefused } from "./refusals.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import type { PiEvent } from "./stream.ts";
 
@@ -62,10 +67,17 @@ export async function readOutput(
   const ruled = new Set<string>();
   let finished = false;
   let dropped = 0;
+  let refusals = 0;
   // The first report that was answered and could not be read back.
   let broken: string | undefined;
   const tell = (): void =>
-    reportedSoFar?.({ findings: [...findings], verdicts: [...verdicts], finished, broken });
+    reportedSoFar?.({
+      findings: [...findings],
+      verdicts: [...verdicts],
+      refusals,
+      finished,
+      broken,
+    });
 
   for await (const event of events) {
     if (event.type === "unreadable") {
@@ -75,7 +87,16 @@ export async function readOutput(
     if (event.type !== "tool_execution_end") continue;
     // A call the reviewer got wrong was answered with its refusal, so nothing
     // was reported and the reviewer knows it.
-    if (event.isError) continue;
+    if (event.isError) {
+      // A call stopped before it ran, which is the one error the round counts.
+      // The reviewer read the refusal here and could still choose something
+      // else, so it is not a failure of anything.
+      if (wasRefused(event.result)) {
+        refusals += 1;
+        tell();
+      }
+      continue;
+    }
 
     if (event.toolName === FINISH_REVIEW) {
       finished = true;

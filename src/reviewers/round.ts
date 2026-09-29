@@ -48,8 +48,16 @@ import { type Deadline, deadlineIn } from "./deadline.ts";
  */
 const GRACE_MS = 2_000;
 
-/** What one round of review came to. */
-export type Round =
+/**
+ * What one round of review came to, and how many of the reviewer's calls it
+ * refused.
+ *
+ * The refusals are the round's rather than an attempt's, so a round that ran the
+ * reviewer twice reports what both were stopped from doing. A reviewer that
+ * spent its window being refused returns the findings of one that had nothing to
+ * say, and this is what tells the two apart.
+ */
+export type Round = { readonly refusals: number } & (
   /** The reviewer ran and returned a review. Empty findings is a review that found nothing. */
   | ({ readonly outcome: "reviewed"; readonly cost: RoundCost } & RoundOutput)
   /**
@@ -88,7 +96,7 @@ export type Round =
       readonly outcome: "setup";
       readonly cost: RoundCost;
       readonly reason: string;
-    } & RoundOutput);
+    } & RoundOutput));
 
 /**
  * Run one round, at most `seconds` of wall clock for the whole of it.
@@ -108,10 +116,13 @@ export async function runRound(
   const scratch = resolve(invocation.directory, invocation.scratchDirectory);
   const unmade = makeScratch(scratch);
   if (unmade !== null) {
-    return { outcome: "setup", cost: unspent, reason: unmade, ...nothingReported };
+    return { outcome: "setup", cost: unspent, reason: unmade, refusals: 0, ...nothingReported };
   }
 
   let spent = unspent;
+  // Added up rather than replaced, unlike the reports below: each refusal is a
+  // call that was stopped, and a second attempt does not undo one.
+  let refused = 0;
   let held: RoundOutput = nothingReported;
   for (let attempts = 1; ; attempts += 1) {
     let ran: Attempt;
@@ -123,10 +134,12 @@ export async function runRound(
         outcome: "setup",
         cost: spent,
         reason: `the round could not be run: ${reasonFor(cause)}`,
+        refusals: refused,
         ...held,
       };
     }
     spent = plus(spent, ran.cost);
+    refused += ran.refusals;
     // Two attempts are two readings of the same change, so what the second
     // reported is what the first would have reported again. The first attempt's
     // reports stand only where the second got to none of its own.
@@ -135,20 +148,29 @@ export async function runRound(
     }
 
     if (ran.kind === "reviewed") {
-      return { outcome: "reviewed", cost: spent, findings: ran.findings, verdicts: ran.verdicts };
+      return {
+        outcome: "reviewed",
+        cost: spent,
+        refusals: refused,
+        findings: ran.findings,
+        verdicts: ran.verdicts,
+      };
     }
-    if (ran.kind === "killed") return { outcome: "timed-out", cost: spent, seconds, ...held };
+    if (ran.kind === "killed") {
+      return { outcome: "timed-out", cost: spent, seconds, refusals: refused, ...held };
+    }
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
-      return { outcome: "setup", cost: spent, reason: ran.reason, ...held };
+      return { outcome: "setup", cost: spent, reason: ran.reason, refusals: refused, ...held };
     }
     if (attempts > 1) {
-      return { outcome: "unavailable", cost: spent, reason: ran.reason, ...held };
+      return { outcome: "unavailable", cost: spent, reason: ran.reason, refusals: refused, ...held };
     }
     if (bound.passed()) {
       return {
         outcome: "unavailable",
         cost: spent,
         reason: `${ran.reason}; no time was left in the round to run the reviewer again`,
+        refusals: refused,
         ...held,
       };
     }
@@ -161,6 +183,8 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
 /** How one attempt ended, what it spent getting there, and what it got through. */
 type Attempt = {
   readonly cost: RoundCost;
+  /** How many of the reviewer's calls this attempt refused before they ran. */
+  readonly refusals: number;
   /**
    * What the reviewer reported before the attempt ended, whether or not it
    * finished the review. On an attempt that reviewed it is that review; on
@@ -222,6 +246,7 @@ async function attempt(
   } catch (cause) {
     return {
       cost: unspent,
+      refusals: 0,
       reported: nothingReported,
       kind: "unstartable",
       reason: startFailed(line.command, cause),
@@ -240,6 +265,7 @@ async function attempt(
   // parse's return, which a killed attempt never reaches.
   let progress: RoundProgress = {
     cost: unspent,
+    refusals: 0,
     finished: false,
     broken: undefined,
     ...nothingReported,
@@ -280,9 +306,15 @@ async function attempt(
   const parsing = read(adapter, bounded(), (reached) => {
     progress = reached;
   }).then(
-    (run): Attempt => ({ cost: run.cost, reported: reportedIn(progress), ...run.result }),
+    (run): Attempt => ({
+      cost: run.cost,
+      refusals: progress.refusals,
+      reported: reportedIn(progress),
+      ...run.result,
+    }),
     (cause): Attempt => ({
       cost: progress.cost,
+      refusals: progress.refusals,
       reported: reportedIn(progress),
       kind: "unparsed",
       reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
@@ -319,7 +351,13 @@ async function attempt(
   const failure = startFailure;
   over = true;
   if (failure !== undefined) {
-    return { cost: ended.cost, reported: ended.reported, kind: "unstartable", reason: failure };
+    return {
+      cost: ended.cost,
+      refusals: ended.refusals,
+      reported: ended.reported,
+      kind: "unstartable",
+      reason: failure,
+    };
   }
   if (ended.kind !== "unparsed" && ended.kind !== "incomplete") return ended;
 
@@ -371,11 +409,12 @@ function reportedIn(progress: RoundProgress): RoundOutput {
  */
 function atTheBound(progress: RoundProgress): Attempt {
   const cost = progress.cost;
+  const refusals = progress.refusals;
   const reported = reportedIn(progress);
-  if (!progress.finished) return { cost, reported, kind: "killed" };
+  if (!progress.finished) return { cost, refusals, reported, kind: "killed" };
   const { broken } = progress;
-  if (broken !== undefined) return { cost, reported, kind: "unparsed", reason: broken };
-  return { cost, reported, kind: "reviewed", ...reported };
+  if (broken !== undefined) return { cost, refusals, reported, kind: "unparsed", reason: broken };
+  return { cost, refusals, reported, kind: "reviewed", ...reported };
 }
 
 /**

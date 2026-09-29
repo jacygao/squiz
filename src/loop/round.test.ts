@@ -204,6 +204,7 @@ function hangs(cost: RoundCost, reported: Partial<RoundOutput> = {}): Reviewer {
         cost,
         ...nothingReported,
         ...reported,
+        refusals: 0,
         finished: false,
         broken: undefined,
       });
@@ -256,7 +257,14 @@ function reportsThenHolds(cost: RoundCost, findings: readonly Finding[]): Review
 function unreadable(cost: RoundCost, findings: readonly Finding[] = []): Reviewer {
   return {
     parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
-      progressSoFar?.({ cost, findings, verdicts: [], finished: false, broken: undefined });
+      progressSoFar?.({
+        cost,
+        findings,
+        verdicts: [],
+        refusals: 0,
+        finished: false,
+        broken: undefined,
+      });
       await drain(stdout);
       return { cost, result: { kind: "unparsed", reason: "the last message was not a review" } };
     },
@@ -267,7 +275,14 @@ function unreadable(cost: RoundCost, findings: readonly Finding[] = []): Reviewe
 function completesNothing(cost: RoundCost, findings: readonly Finding[] = []): Reviewer {
   return {
     parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
-      progressSoFar?.({ cost, findings, verdicts: [], finished: false, broken: undefined });
+      progressSoFar?.({
+        cost,
+        findings,
+        verdicts: [],
+        refusals: 0,
+        finished: false,
+        broken: undefined,
+      });
       await drain(stdout);
       return { cost, result: { kind: "incomplete", reason: "the model refused the request" } };
     },

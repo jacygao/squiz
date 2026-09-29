@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type { Reported, RoundOutput } from "../adapter.ts";
 import { type OutputRead, readOutput, verdictFor } from "./output.ts";
+import { refuse } from "./refusals.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import { type PiEvent, readEvents } from "./stream.ts";
 
@@ -49,6 +50,26 @@ function refused(toolName: string, said: string): PiEvent {
     toolName,
     isError: true,
     result: { content: [{ type: "text", text: said }], details: {} },
+  };
+}
+
+/**
+ * One call stopped before it ran, as `pi` answers a blocked call.
+ *
+ * The reason comes from the handler rather than a copy of it, because the text
+ * is the only thing separating a refused call from a tool that failed on its
+ * own.
+ */
+function blocked(command: string): PiEvent {
+  const refusal = refuse({ toolName: "bash", input: { command } });
+  assert.ok(refusal !== undefined, `${command} was not refused`);
+  nextCall += 1;
+  return {
+    type: "tool_execution_end",
+    toolCallId: `call_${nextCall}`,
+    toolName: "bash",
+    isError: true,
+    result: { content: [{ type: "text", text: refusal.reason }], details: {} },
   };
 }
 
@@ -239,6 +260,55 @@ test("what the caller was told is not changed by what arrives after it", async (
     (output) => told.push(output),
   );
   assert.deepEqual(told[0]?.findings, [lineFinding]);
+});
+
+/**
+ * A reviewer that spent its window being refused reports what one with nothing
+ * to say reports, so the count is the whole of the difference between them.
+ */
+test("a call stopped before it ran is counted, and reports nothing", async () => {
+  const told: Reported[] = [];
+  const result = await readOutput(
+    streamed([
+      blocked("git commit -m 'fix the finding'"),
+      reported(REPORT_FINDING, lineFinding),
+      blocked("git push --force origin HEAD"),
+      finished,
+    ]),
+    (output) => told.push(output),
+  );
+
+  const output = readingOf(result);
+  assert.deepEqual(output.findings, [lineFinding]);
+  assert.deepEqual(
+    told.map((reached) => [reached.refusals, reached.findings.length]),
+    [
+      [1, 0],
+      [1, 1],
+      [2, 1],
+      [2, 1],
+    ],
+    "a caller stopped mid-stream keeps the refusals it was last told",
+  );
+});
+
+test("a round the reviewer reached for nothing in counts no refusals", async () => {
+  const told: Reported[] = [];
+  await readOutput(
+    streamed([reported(REPORT_FINDING, lineFinding), finished]),
+    (output) => told.push(output),
+  );
+  assert.equal(told.at(-1)?.refusals, 0);
+});
+
+/** A call the reporting tool refused ran and answered. Only a blocked call counts. */
+test("a reporting call the extension refused is not counted as a refusal", async () => {
+  const told: Reported[] = [];
+  await readOutput(
+    streamed([refused(REPORT_FINDING, "the finding names no severity"), finished]),
+    (output) => told.push(output),
+  );
+  assert.equal(told.at(-1)?.refusals, 0);
 });
 
 test("a line the reader dropped does not fail a review it could read", async () => {
