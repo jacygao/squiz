@@ -12,6 +12,13 @@
  * them is observable from inside this one. The fixtures run the hook without
  * the trap around it, so a throw that escapes the hook fails the test instead
  * of being turned into the exit code the test was expecting.
+ *
+ * Some of the failures need an environment rather than a value: a GitHub that
+ * answers one call and refuses the next, a state file that will not take a write
+ * after the review, a posting margin that runs out mid-flight, a reviewer that
+ * stops without finishing. A scripted `gh` and a scripted reviewer, earlier on
+ * `PATH` than the real ones, produce each of those on demand, and the whole hook
+ * runs around them: the gate, the round, the posting, the exit code and stderr.
  */
 
 import assert from "node:assert/strict";
@@ -962,19 +969,27 @@ type Answers = {
 };
 
 /**
- * A threads listing that names no thread, as `gh api graphql --include` answers
- * one: the status line, the headers, a blank line, then the body.
+ * One answer from `gh api --include`: the status line, the headers, a blank
+ * line, then the body.
+ *
+ * The line endings are the fixture. The status line ends in a bare newline and
+ * the headers in CRLF, which is what the reader has to split on either way.
  */
-const NO_THREADS = [
-  "HTTP/2.0 200 OK",
-  "Content-Type: application/json; charset=utf-8\r",
-  "",
-  JSON.stringify({
-    data: {
-      node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
-    },
-  }),
-].join("\n");
+function response(status: string, body: unknown): string {
+  return [
+    `HTTP/2.0 ${status}`,
+    "Content-Type: application/json; charset=utf-8\r",
+    "",
+    JSON.stringify(body),
+  ].join("\n");
+}
+
+/** A threads listing that names no thread. */
+const NO_THREADS = response("200 OK", {
+  data: {
+    node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+  },
+});
 
 type Tools = {
   /** A `PATH` holding git, and the fake `gh` where there is one. */
@@ -1080,14 +1095,25 @@ const LISTING = JSON.stringify([
   },
 ]);
 
+/** The file the change under review touches, as the host project spells it. */
+const REVIEWED_FILE = "src/ui/card.ts";
+
+/**
+ * The change under review.
+ *
+ * Lines 86 and 87 are the two it added, so they are the only two a finding can
+ * be anchored to and the only two the router places inline.
+ */
 const DIFF = [
-  "diff --git a/src/ui/card.ts b/src/ui/card.ts",
+  `diff --git a/${REVIEWED_FILE} b/${REVIEWED_FILE}`,
   "index d3d0cb2..6db135b 100644",
-  "--- a/src/ui/card.ts",
-  "+++ b/src/ui/card.ts",
-  "@@ -85,7 +85,7 @@",
-  "-// line 88",
-  "+// line 88 CHANGED",
+  `--- a/${REVIEWED_FILE}`,
+  `+++ b/${REVIEWED_FILE}`,
+  "@@ -85,2 +85,4 @@",
+  " // the card's header",
+  "+// the reason is dropped here",
+  "+// and the outcome returned alone",
+  " // the card's footer",
   "",
 ].join("\n");
 
@@ -1221,4 +1247,623 @@ test("nothing in a branch name reaches a shell", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+/**
+ * A call to the fake `gh`, named for what the harness was doing when it made it.
+ *
+ * The arguments do not tell these apart on their own: the threads listing, the
+ * read-back a create makes, one thread's later comments and a verdict's mutation
+ * are all `gh api graphql --include --input -`, and they differ only in the query
+ * on stdin. Naming the call is what lets a plan land one create and refuse the
+ * next.
+ */
+type GhCallKind =
+  | "pull-request"
+  | "threads"
+  | "diff"
+  | "create"
+  | "read-back"
+  | "thread-comments"
+  | "verdict"
+  | "summary";
+
+/** What the fake `gh` does for one call. */
+type Answer = {
+  /**
+   * How long it takes to answer.
+   *
+   * Slept after the request has been read and before anything is written, so the
+   * call spends the share it was made in having done what was asked of it.
+   */
+  readonly sleepMs?: number;
+  readonly status?: number;
+  readonly stdout?: string;
+  readonly stderr?: string;
+};
+
+/**
+ * What the fake `gh` answers, per kind of call.
+ *
+ * A kind's answers are taken in order and the last one repeats, so two entries
+ * are one create that lands and every create after it refused. A kind with no
+ * entry at all is a call the test did not plan for, and the fake fails loudly
+ * rather than answering it.
+ */
+type GhPlan = Readonly<Partial<Record<GhCallKind, readonly Answer[]>>>;
+
+/** What the fake reviewer reports, and whether it says the review is done. */
+type ReviewerPlan = {
+  /** The prose of its one assistant message. */
+  readonly said: string;
+  /** What that message stopped for. `stop` is a reviewer that answered and stopped. */
+  readonly stopReason: string;
+  readonly findings: readonly Finding[];
+  /** Whether it calls the reporting tool that declares the review complete. */
+  readonly finish: boolean;
+};
+
+/** One call the fake `gh` made, as it recorded it. */
+type GhCallRecord = {
+  readonly kind: GhCallKind | "other";
+  readonly argv: readonly string[];
+  /** The request body, which arrived on stdin and was read whole before answering. */
+  readonly body: string;
+};
+
+/** The `PATH` the hook is given, and what the two fakes recorded on it. */
+type Harness = {
+  readonly path: string;
+  /** Every call to `gh`, in the order they were made. */
+  readonly ghCalls: () => readonly GhCallRecord[];
+  /** How many times the reviewer was started, which a retry moves to 2. */
+  readonly reviewerRuns: () => number;
+};
+
+/** A worktree on `BRANCH`, and a directory beside it that the round never reads. */
+type Fixture = {
+  readonly worktree: string;
+  readonly beside: string;
+};
+
+/**
+ * A repository with one commit on `BRANCH`, and a sibling directory for the
+ * fakes and their logs.
+ *
+ * Beside the worktree rather than inside it: what a fake writes must not land in
+ * the tree under review, and one of these tests seals the episode's own
+ * directory against writing.
+ */
+async function withWorktree<T>(body: (fixture: Fixture) => Promise<T>): Promise<T> {
+  const under = await mkdtemp(join(tmpdir(), "squiz-forced-"));
+  try {
+    const worktree = join(under, "tree");
+    mkdirSync(worktree);
+    commitOn(worktree, BRANCH);
+    return await body({ worktree: realpathSync(worktree), beside: under });
+  } finally {
+    await rm(under, { recursive: true, force: true });
+  }
+}
+
+/**
+ * A `PATH` carrying git, a fake `gh` and a fake reviewer, and the logs the two
+ * fakes write.
+ *
+ * The system's own `PATH` is left out so that a `gh` or a reviewer installed on
+ * the machine running the tests cannot be reached by one of them.
+ */
+async function harnessIn(
+  beside: string,
+  plan: { readonly gh: GhPlan; readonly reviewer: ReviewerPlan },
+): Promise<Harness> {
+  const path = join(beside, "tools");
+  const ghLog = join(beside, "gh-calls");
+  const reviewerLog = join(beside, "reviewer-runs");
+  mkdirSync(path);
+  symlinkSync(whichGit(), join(path, "git"));
+  await writeFile(ghLog, "", "utf8");
+  await writeFile(reviewerLog, "", "utf8");
+  await standIn(path, "gh", ghScript(plan.gh, ghLog));
+  await standIn(path, "pi", reviewerScript(plan.reviewer, reviewerLog));
+
+  return {
+    path,
+    ghCalls: () => recorded(ghLog).map((line) => JSON.parse(line) as GhCallRecord),
+    reviewerRuns: () => recorded(reviewerLog).length,
+  };
+}
+
+/**
+ * A script written as an executable `name` on the `PATH` the hook is given.
+ *
+ * A shell shim rather than the script itself, because an extensionless file's
+ * module system is whatever the directory it happens to sit in says it is.
+ */
+async function standIn(path: string, name: string, script: string): Promise<void> {
+  const file = join(path, `${name}.cjs`);
+  await writeFile(file, script, "utf8");
+  const shim = join(path, name);
+  await writeFile(shim, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(file)} "$@"\n`, "utf8");
+  await chmod(shim, 0o755);
+}
+
+function recorded(file: string): readonly string[] {
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+}
+
+/**
+ * The fake `gh`: it names the call it was asked for, records it, and answers what
+ * the plan says.
+ *
+ * **It reads the whole of its stdin before it answers anything.** A `gh` that
+ * exits 0 on a request it had not finished reading is reported as never having
+ * reached GitHub, whatever it printed, so a fake that raced the write would
+ * sometimes answer with that instead of what the plan says. Draining first is
+ * what makes every answer here the plan's.
+ *
+ * Plain CommonJS, because it is written to a file and run by a fresh process
+ * rather than type-stripped and imported.
+ */
+function ghScript(plan: GhPlan, log: string): string {
+  return `#!/usr/bin/env node
+"use strict";
+const fs = require("node:fs");
+
+const plan = ${JSON.stringify(plan)};
+const log = ${JSON.stringify(log)};
+const argv = process.argv.slice(2);
+
+function kindOf(body) {
+  if (argv[0] === "pr") return "pull-request";
+  if (argv[0] !== "api") return "other";
+  if (argv[1] === "graphql") {
+    if (body.indexOf("mutation(") !== -1) return "verdict";
+    if (body.indexOf("$pullRequest") !== -1) return "threads";
+    if (body.indexOf("$comment") !== -1) return "read-back";
+    if (body.indexOf("$thread") !== -1) return "thread-comments";
+    return "other";
+  }
+  let path = "";
+  for (const argument of argv) {
+    if (argument.indexOf("repos/") === 0) path = argument;
+  }
+  if (path.indexOf("/issues/") !== -1) return "summary";
+  if (path.indexOf("/pulls/") === -1) return "other";
+  return path.slice(-9) === "/comments" ? "create" : "diff";
+}
+
+function answer(body) {
+  const kind = kindOf(body);
+  const before = fs.readFileSync(log, "utf8").split("\\n").filter((line) => line !== "");
+  const made = before.filter((line) => JSON.parse(line).kind === kind).length;
+  fs.appendFileSync(log, JSON.stringify({ kind: kind, argv: argv, body: body }) + "\\n");
+
+  const answers = plan[kind];
+  if (answers === undefined || answers.length === 0) {
+    fs.writeSync(2, "fake gh: nothing was planned for a " + kind + " call\\n");
+    process.exit(97);
+  }
+  const given = answers[Math.min(made, answers.length - 1)];
+  setTimeout(() => {
+    if (given.stdout !== undefined) fs.writeSync(1, given.stdout);
+    if (given.stderr !== undefined) fs.writeSync(2, given.stderr);
+    process.exit(given.status === undefined ? 0 : given.status);
+  }, given.sleepMs === undefined ? 0 : given.sleepMs);
+}
+
+const chunks = [];
+process.stdin.on("data", (chunk) => chunks.push(chunk));
+process.stdin.on("error", () => answer(Buffer.concat(chunks).toString("utf8")));
+process.stdin.on("end", () => answer(Buffer.concat(chunks).toString("utf8")));
+`;
+}
+
+/**
+ * The fake reviewer: one assistant message, then the reporting calls the plan
+ * gives it.
+ *
+ * It records that it ran, which is how a retry is read back. Nothing about the
+ * command line it was handed is checked here; what reaches the reviewer is
+ * established where the reviewer is.
+ */
+function reviewerScript(plan: ReviewerPlan, log: string): string {
+  return `#!/usr/bin/env node
+"use strict";
+const fs = require("node:fs");
+
+const plan = ${JSON.stringify(plan)};
+fs.appendFileSync(${JSON.stringify(log)}, "ran\\n");
+
+const say = (event) => fs.writeSync(1, JSON.stringify(event) + "\\n");
+const answered = (id, toolName, details) =>
+  say({
+    type: "tool_execution_end",
+    toolCallId: String(id),
+    toolName: toolName,
+    isError: false,
+    result: { content: [{ type: "text", text: "Reported" }], details: details },
+  });
+
+say({
+  type: "message_end",
+  message: {
+    role: "assistant",
+    model: "stand-in",
+    stopReason: plan.stopReason,
+    content: [{ type: "text", text: plan.said }],
+    usage: {
+      input: 1000,
+      output: 200,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 1200,
+      cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
+    },
+  },
+});
+
+let call = 1;
+for (const finding of plan.findings) answered(call++, "report_finding", finding);
+if (plan.finish) answered(call++, "finish_review", {});
+process.exit(0);
+`;
+}
+
+/** A finding the fake reviewer confirms, anchored to a line the change added. */
+function confirmed(line: number, severity: Finding["severity"], headline: string): Finding {
+  return {
+    scope: "line",
+    file: REVIEWED_FILE,
+    line,
+    severity,
+    headline,
+    reasoning: ["the caller has no way to tell the two apart"],
+    suggestedFix: "return the reason beside the outcome",
+  };
+}
+
+/** A reviewer that reports `findings` and declares its review complete. */
+function reviews(findings: readonly Finding[]): ReviewerPlan {
+  return {
+    said: "Read the change and reported what it found.",
+    stopReason: "toolUse",
+    findings,
+    finish: true,
+  };
+}
+
+/** The comment GitHub creates, and the thread the read-back then matches to it. */
+const COMMENT_ID = 9001;
+const THREAD_ID = "PRRT_kwDOA1";
+
+const CREATED = response("201 Created", {
+  id: COMMENT_ID,
+  node_id: "PRRC_kwDOA1",
+  html_url: `https://github.com/squiz/squiz/pull/${PULL_REQUEST}#discussion_r${COMMENT_ID}`,
+});
+
+/** The read-back finding the thread the created comment opened. */
+const THREAD_READ_BACK = response("200 OK", {
+  data: {
+    node: {
+      pullRequest: {
+        reviewThreads: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [{ id: THREAD_ID, comments: { nodes: [{ databaseId: COMMENT_ID }] } }],
+        },
+      },
+    },
+  },
+});
+
+const SUMMARY_UP = response("201 Created", { id: 7001 });
+
+/** A call GitHub refused, which `gh` reports by its exit status and its stderr. */
+const GATEWAY_REFUSED: Answer = {
+  status: 1,
+  stdout: response("502 Bad Gateway", { message: "Bad gateway" }),
+  stderr: "gh: HTTP 502: Bad gateway\n",
+};
+
+/** The one line the harness reports a call GitHub refused as. */
+const GATEWAY_REASON = "gh exited 1 on HTTP 502: gh: HTTP 502: Bad gateway";
+
+/**
+ * A page of the read-back that names no thread and claims another page follows.
+ *
+ * It is what makes a create's read-back page: one create is a create and up to
+ * twenty pages of read-back, so the posting margin is split for two calls and
+ * spent by however many the walk takes.
+ */
+function readBackPageBefore(cursor: string): string {
+  return response("200 OK", {
+    data: {
+      node: {
+        pullRequest: {
+          reviewThreads: { pageInfo: { hasNextPage: true, endCursor: cursor }, nodes: [] },
+        },
+      },
+    },
+  });
+}
+
+/** A page of the threads listing carrying one thread, with another page to come. */
+function threadsPageBefore(cursor: string): string {
+  return response("200 OK", {
+    data: {
+      node: {
+        reviewThreads: {
+          pageInfo: { hasNextPage: true, endCursor: cursor },
+          nodes: [
+            {
+              id: "PRRT_kwDOEarlier",
+              isResolved: false,
+              isOutdated: false,
+              path: REVIEWED_FILE,
+              line: 86,
+              originalLine: 86,
+              subjectType: "LINE",
+              comments: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [{ databaseId: 11, author: { login: "squiz" }, body: "an earlier finding" }],
+              },
+            },
+          ],
+        },
+      },
+    },
+  });
+}
+
+/** The pre-review calls of a round that gets as far as reviewing. */
+const REACHES_THE_REVIEW: GhPlan = {
+  "pull-request": [{ stdout: LISTING }],
+  threads: [{ stdout: NO_THREADS }],
+  diff: [{ stdout: DIFF }],
+};
+
+/** What each call to `gh` was, in order, which is the whole of what reached GitHub. */
+function callKinds(harness: Harness): readonly string[] {
+  return harness.ghCalls().map((call) => call.kind);
+}
+
+/** The request body of `call`, parsed as the JSON it was sent as. */
+function sentBy(call: GhCallRecord): Readonly<Record<string, unknown>> {
+  return JSON.parse(call.body) as Readonly<Record<string, unknown>>;
+}
+
+const LANDED = "the reason is dropped and the outcome returned alone";
+const LOST = "the retry runs on a bound that is already spent";
+
+test("a create GitHub refuses leaves the comment that landed where it is", async () => {
+  // The round closes rather than blocks, so what it could not post is on its
+  // stderr and in its summary comment. A blocked round says neither, and a later
+  // round makes the missing comment again.
+  await withWorktree(async ({ worktree, beside }) => {
+    await writeFile(join(worktree, ".squiz.json"), JSON.stringify({ rounds: 1 }), "utf8");
+    const harness = await harnessIn(beside, {
+      gh: {
+        ...REACHES_THE_REVIEW,
+        create: [{ stdout: CREATED }, GATEWAY_REFUSED],
+        "read-back": [{ stdout: THREAD_READ_BACK }],
+        summary: [{ stdout: SUMMARY_UP }],
+      },
+      reviewer: reviews([confirmed(86, "high", LANDED), confirmed(87, "medium", LOST)]),
+    });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0, "a round that lost a comment must not stop the turn");
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings\n",
+    );
+
+    assert.deepEqual(
+      callKinds(harness),
+      ["pull-request", "threads", "diff", "create", "read-back", "create", "summary"],
+      "the comment that landed was re-read, re-posted or taken down",
+    );
+
+    const creates = harness.ghCalls().filter((call) => call.kind === "create");
+    assert.equal(sentBy(creates[0] as GhCallRecord)["line"], 86);
+    assert.equal(sentBy(creates[1] as GhCallRecord)["line"], 87);
+
+    const summary = harness.ghCalls().find((call) => call.kind === "summary");
+    const body = String(sentBy(summary as GhCallRecord)["body"]);
+    assert.ok(
+      body.includes(`\`${REVIEWED_FILE}:86\` — ${LANDED} (open)`),
+      `the summary does not report the comment that landed as a thread: ${body}`,
+    );
+    assert.ok(
+      body.includes(`\`${REVIEWED_FILE}:87\` — ${LOST} (raised, and its comment could not be posted)`),
+      `the summary does not report the finding nothing on the pull request holds: ${body}`,
+    );
+  });
+});
+
+test("a state file that will not take the round after the review posts nothing", async () => {
+  // The write happens after the review, and it stops what the round found from
+  // being posted. The reviewer's own directories are made before the episode's
+  // directory is sealed, so the round reaches the review and fails on the write
+  // that follows it rather than on the read that precedes it.
+  await withWorktree(async ({ worktree, beside }) => {
+    const episode = join(worktree, ".squiz", AGENT_ID);
+    await mkdir(join(episode, "session"), { recursive: true });
+    await mkdir(join(episode, "scratch"), { recursive: true });
+    const harness = await harnessIn(beside, {
+      gh: REACHES_THE_REVIEW,
+      reviewer: reviews([confirmed(86, "high", LANDED)]),
+    });
+    await chmod(episode, 0o555);
+
+    try {
+      const result = squizHook(worktree, harness.path, payload());
+
+      assert.equal(result.code, 0, "a state file nothing can write must not stop the turn");
+      assert.equal(result.stdout, "");
+      assert.match(
+        result.stderr,
+        /^squiz: nothing was posted: .*state\.json could not be written: [A-Z]+: /u,
+        "the pointer must carry the filesystem's own error rather than the word failed",
+      );
+      assertOneLine(result.stderr);
+
+      assert.equal(harness.reviewerRuns(), 1, "the review has to have run for this to be the write");
+      assert.deepEqual(
+        callKinds(harness),
+        ["pull-request", "threads", "diff"],
+        "a finding reached the pull request on a round that recorded nothing",
+      );
+    } finally {
+      // Sealed against writing, so it cannot be removed while it stays that way.
+      await chmod(episode, 0o755);
+    }
+  });
+});
+
+test("a posting margin spent by one read-back leaves the rest unposted and unattempted", async () => {
+  // The margin is split for one create and one read-back per finding, and the
+  // read-back walks as many pages as GitHub claims. Four pages that answer slowly
+  // and a fifth killed by what is left of the margin spend the whole of it, and
+  // every call after that is one the round does not make at all.
+  await withWorktree(async ({ worktree, beside }) => {
+    await writeFile(join(worktree, ".squiz.json"), JSON.stringify({ rounds: 1 }), "utf8");
+    const harness = await harnessIn(beside, {
+      gh: {
+        ...REACHES_THE_REVIEW,
+        create: [{ stdout: CREATED }],
+        "read-back": [
+          { sleepMs: 25_000, stdout: readBackPageBefore("page-2") },
+          { sleepMs: 25_000, stdout: readBackPageBefore("page-3") },
+          { sleepMs: 25_000, stdout: readBackPageBefore("page-4") },
+          { sleepMs: 25_000, stdout: readBackPageBefore("page-5") },
+          { sleepMs: 25_000, stdout: readBackPageBefore("page-6") },
+        ],
+      },
+      reviewer: reviews([confirmed(86, "high", LANDED), confirmed(87, "medium", LOST)]),
+    });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0, "a window that closed must not stop the turn");
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings " +
+        "and to post the episode's summary: " +
+        "the time left for GitHub ran out before this call was made\n",
+    );
+
+    assert.deepEqual(
+      callKinds(harness),
+      [
+        "pull-request",
+        "threads",
+        "diff",
+        "create",
+        "read-back",
+        "read-back",
+        "read-back",
+        "read-back",
+        "read-back",
+      ],
+      "a call was made past the end of the window, where the runtime kills the hook",
+    );
+  });
+});
+
+test("a threads listing that cannot be finished runs no reviewer and posts nothing", async () => {
+  // The page that arrived is dropped with the rest. A reviewer handed a subset of
+  // the threads rules on a subset, and the round would then apply verdicts that
+  // close nothing while reading as a round that settled everything.
+  await withWorktree(async ({ worktree, beside }) => {
+    const harness = await harnessIn(beside, {
+      gh: {
+        "pull-request": [{ stdout: LISTING }],
+        threads: [{ stdout: threadsPageBefore("page-2") }, GATEWAY_REFUSED],
+      },
+      reviewer: reviews([confirmed(86, "high", LANDED)]),
+    });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: the threads on PR #142 could not be listed: ${GATEWAY_REASON}\n`,
+    );
+    assertOneLine(result.stderr);
+
+    assert.equal(harness.reviewerRuns(), 0, "a reviewer ran on a subset of the threads");
+    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "threads"]);
+  });
+});
+
+test("the calls before the review spending their share leave the last of them nothing", async () => {
+  // One deadline over the whole phase, not a bound on each of its calls. The
+  // lookup and the listing answer slowly enough that the diff is bounded by what
+  // they left rather than by the ceiling on a single call, which is what says the
+  // phase ran out rather than one call hanging.
+  await withWorktree(async ({ worktree, beside }) => {
+    const harness = await harnessIn(beside, {
+      gh: {
+        "pull-request": [{ sleepMs: 25_000, stdout: LISTING }],
+        threads: [{ sleepMs: 25_000, stdout: NO_THREADS }],
+        diff: [{ sleepMs: 25_000, stdout: DIFF }],
+      },
+      reviewer: reviews([confirmed(86, "high", LANDED)]),
+    });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    const spent =
+      /^squiz: no review ran: the diff of PR #142 could not be fetched: gh did not answer within (\d+(?:\.\d+)?) seconds, so GitHub could not be reached\n$/u.exec(
+        result.stderr,
+      );
+    assert.notEqual(spent, null, `the pointer does not name the call that ran out: ${result.stderr}`);
+    assert.ok(
+      Number(spent?.[1]) < 30,
+      `the diff was bounded by the ceiling on one call rather than by the phase: ${result.stderr}`,
+    );
+
+    assert.equal(harness.reviewerRuns(), 0);
+    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff"]);
+  });
+});
+
+test("a reviewer that writes prose and stops is retried once and reported as no review", async () => {
+  // Nothing declares a review complete but the reviewer, so prose and a clean
+  // exit is a review that did not finish rather than one that found nothing. The
+  // round runs a fresh process once before it reports it.
+  await withWorktree(async ({ worktree, beside }) => {
+    const harness = await harnessIn(beside, {
+      gh: REACHES_THE_REVIEW,
+      reviewer: {
+        said: "Nothing here looks wrong to me.",
+        stopReason: "stop",
+        findings: [],
+        finish: false,
+      },
+    });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "squiz: the review did not run: the reviewer reported nothing and did not finish its review\n",
+    );
+
+    assert.equal(harness.reviewerRuns(), 2, "the round is allowed one retry and has to take it");
+    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff"]);
+  });
 });
