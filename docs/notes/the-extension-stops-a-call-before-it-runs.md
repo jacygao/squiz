@@ -31,17 +31,27 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
   instance rather than anywhere in the TUI, so print mode reaches it, and the
   tool never executes. Nothing in a command can undo it, because the command
   never runs.
-- **Refuse `edit` and `write` by name, and the commands by matching their
-  text.** A review reports through the calls and has no use for a write
-  primitive, so the two tools need nothing read out of their arguments. The
+- **Refuse `edit` and `write` by name, and the commands by reading the words of
+  the command line.** A review reports through the calls and has no use for a
+  write primitive, so the two tools need nothing read out of their arguments. The
   commands that have to be matched are only the ones that move `HEAD` while
   leaving the worktree as it was: `git commit`, `git commit --amend`, `git reset
   --soft`, `git checkout -B`, `git update-ref` and `git push`.
-- **Say in the code, where the list is defined, that matching text is not a
-  boundary.** It refuses a reviewer that is not trying to get around the list.
-  Quoting, a script file, an encoded string and `sh -c` each defeat it. Escalating
-  the matching is an arms race, and a comment claiming more than the code delivers
-  is worse than none.
+- **Match the subcommand where a command is run, and not the text of an
+  argument.** A substring of the whole line is wrong in both directions. `grep -n
+  'git commit' tracked.txt` changes nothing and was refused, which stops a
+  reviewer reading the history it is reviewing. `git -C . commit --allow-empty`
+  and `git reset HEAD~1 --soft` move `HEAD` and were allowed, which is the
+  mutation the list exists to stop. So the line is split into the commands it
+  runs, at `;`, `|`, `&`, a newline and a parenthesis. A quoted argument stays one
+  word and is never read as a command. The subcommand is the first word after
+  `git` that is not an option, and a listed flag counts wherever it sits in the
+  call.
+- **Say in the code, where the list is defined, that splitting a line into words
+  is not a boundary.** It refuses a reviewer that is not trying to get around the
+  list. Quoting, a script file, an encoded string and `sh -c` each defeat it.
+  Escalating the matching is an arms race, and a comment claiming more than the
+  code delivers is worse than none.
 - **Refuse a `bash` call whose command cannot be read, rather than running it.**
   The field the command arrives in is `pi`'s. One it renames would otherwise
   leave every pattern matching nothing, which reads exactly like a reviewer that
@@ -97,6 +107,12 @@ whether any handler is registered and returns without emitting when none is. So
 a subscription that goes missing leaves every round clean, every count zero, and
 nothing anywhere saying so.
 
+`git`'s own options come before the subcommand, and these take the word after
+them: `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--exec-path` and
+`--config-env`. Their `--option=value` spellings need no list of their own,
+because a word opening with `-` is an option and the subcommand is the first word
+that is not one.
+
 ## Limits
 
 - **No model was run.** Everything here comes from reading `pi`'s shipped
@@ -104,7 +120,10 @@ nothing anywhere saying so.
   call the way `pi` dispatches it. Nothing establishes that a reviewer reaches
   for these commands, how often, or what it does once refused.
 - **The matching is defeated by anything that means to defeat it**, and the code
-  says so. What the list holds is a reviewer acting in good faith.
+  says so. What the list holds is a reviewer acting in good faith. A command run
+  by another command — after `env`, `xargs` or `ssh` — is read as that command's
+  arguments and matches nothing, and a heredoc's body is read as script rather
+  than as text.
 - **One machine, macOS, `pi` 0.85.1.** The extension runner, the hook
   installation and the agent loop's tool preparation are all `pi` internals, and
   none of them is in its documented interface.

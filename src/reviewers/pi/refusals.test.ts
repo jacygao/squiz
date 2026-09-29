@@ -13,7 +13,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { grants } from "./argv.ts";
-import { refuse, refusedCommands, refusedTools, wasRefused } from "./refusals.ts";
+import {
+  refuse,
+  type RefusedCommand,
+  refusedCommands,
+  refusedTools,
+  wasRefused,
+} from "./refusals.ts";
 
 /** One tool call, in the shape `pi` emits it: the fields the handler never reads included. */
 function called(toolName: string, input: unknown): { toolName: string; input: unknown } {
@@ -55,11 +61,53 @@ const wouldChangeTheCommit: readonly string[] = [
 /** What a review does with a shell, none of which moves anything. */
 const leavesTheCommitAlone: readonly string[] = [
   "npm test",
+  "git status",
   "git status --porcelain",
+  "git log --oneline -20",
   "git log -S lastSaid --oneline",
+  "git show HEAD --stat",
   "git blame src/threads.ts",
   "git diff HEAD~1 HEAD",
+  "git diff --stat origin/main...HEAD",
   "rg --files-with-matches lastSaid",
+];
+
+/**
+ * The reviewer reaching a listed mutation through options it would reach for
+ * anyway.
+ *
+ * Each of these was run in a repository of its own: every one moved `HEAD` and
+ * left the tree byte for byte as it was, which is the change this list exists to
+ * stop.
+ */
+const REACHED_THROUGH_GIT_OPTIONS: readonly string[] = [
+  "git -C . commit --allow-empty -m 'record review'",
+  "git -c commit.gpgsign=false commit --allow-empty -m 'record review'",
+  "git reset HEAD~1 --soft",
+  "git --git-dir=.git commit -m x",
+  "git --git-dir .git --work-tree . commit -m x",
+  "git --namespace review commit -m x",
+  "git -P push --force origin HEAD",
+  "git --no-pager checkout -B threads/last-said",
+  "GIT_AUTHOR_NAME=squiz git commit -m x",
+  "/usr/bin/git commit -m x",
+];
+
+/**
+ * A listed command written where a command is not run.
+ *
+ * Each of these reads and changes nothing. A reviewer told that its `grep` would
+ * change the commit is a reviewer that cannot investigate the code it is
+ * reviewing, and the refusal count says the same thing either way.
+ */
+const NAMES_A_COMMAND_WITHOUT_RUNNING_IT: readonly string[] = [
+  "grep -n 'git commit' tracked.txt",
+  "git log -S 'git commit' --oneline -- tracked.txt",
+  "git log --grep 'git push' --oneline",
+  "rg --fixed-strings 'git reset --soft' src",
+  "echo 'git commit -m x' > /tmp/squiz/note.txt",
+  "grep -rn 'git commit; git push' src",
+  "man git commit",
 ];
 
 test("the tools a review has no use for are refused by name", () => {
@@ -96,7 +144,11 @@ test("every command that would change the commit is refused", () => {
 test("every entry on the list matches the command it is written as", () => {
   assert.notEqual(refusedCommands.length, 0, "an empty list refuses nothing and says nothing");
   for (const entry of refusedCommands) {
-    assert.equal(refuse(shell(entry))?.block, true, `\`${entry}\` matches nothing, not even itself`);
+    const reason = reasonFor(shell(entry.named));
+    assert.ok(
+      reason.includes(`\`${entry.named}\``),
+      `\`${entry.named}\` was refused as something else: ${reason}`,
+    );
   }
 });
 
@@ -106,6 +158,39 @@ test("the shell a review actually needs is left alone", () => {
       refuse(shell(command)),
       undefined,
       `${command} was refused, and a reviewer that cannot run it cannot verify a finding`,
+    );
+  }
+});
+
+/**
+ * A command that carries `git`'s own options before the subcommand is the same
+ * command. A reviewer not trying to get around the list reaches these by typing
+ * git the way git is typed.
+ */
+test("git's own options do not hide the subcommand behind them", () => {
+  for (const command of REACHED_THROUGH_GIT_OPTIONS) {
+    const reason = reasonFor(shell(command));
+    assert.match(
+      reason,
+      /changes what the coding agent commits/u,
+      `${command} was refused for some other reason: ${reason}`,
+    );
+  }
+});
+
+/** `--soft` is what makes the reset invisible, and git takes it in any position. */
+test("the reset that leaves the tree alone is refused wherever --soft sits", () => {
+  assert.equal(refuse(shell("git reset --soft HEAD~1"))?.block, true);
+  assert.equal(refuse(shell("git reset HEAD~1 --soft"))?.block, true);
+  assert.equal(refuse(shell("git -C /tmp/worktree reset HEAD~2 --soft"))?.block, true);
+});
+
+test("a listed command written inside an argument is an argument, not a command", () => {
+  for (const command of NAMES_A_COMMAND_WITHOUT_RUNNING_IT) {
+    assert.equal(
+      refuse(shell(command)),
+      undefined,
+      `${command} runs nothing on the list, and a reviewer refused it cannot read the history`,
     );
   }
 });
@@ -146,12 +231,13 @@ test("a shell call whose command cannot be read is refused rather than run", () 
 /**
  * The limit, asserted rather than only described.
  *
- * A command is matched as text, and text is not a boundary: this evasion runs.
- * Refusing it would take escalating the matching, which is an arms race this
- * does not enter — the tools needing no matching go by name, and the list only
- * has to cover the commands that move `HEAD` without touching the tree.
+ * A word the shell would build out of quoting or substitution is left alone
+ * rather than guessed at, so this evasion runs. Refusing it would take a shell,
+ * which is an arms race this does not enter — the tools needing no matching go
+ * by name, and the list only has to cover the commands that move `HEAD` without
+ * touching the tree.
  */
-test("matching as text refuses a reviewer that is not trying to get around it, and no more", () => {
+test("splitting into words refuses a reviewer not trying to get around it, and no more", () => {
   assert.equal(refuse(shell('git "com"mit -m x')), undefined);
   assert.equal(refuse(shell("git $(echo commit) -m x")), undefined);
 });
@@ -204,5 +290,7 @@ test("the handler answers rather than throwing, whatever the call carries", () =
 /** The lists hold against a caller that would add to them at runtime. */
 test("neither list can be added to", () => {
   assert.throws(() => (refusedTools as string[]).push("read"));
-  assert.throws(() => (refusedCommands as string[]).push("git status"));
+  assert.throws(() =>
+    (refusedCommands as RefusedCommand[]).push({ named: "git status", subcommand: "status" }),
+  );
 });
