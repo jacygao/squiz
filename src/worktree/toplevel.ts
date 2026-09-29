@@ -11,6 +11,8 @@
 
 import { spawnSync } from "node:child_process";
 
+import type { Deadline } from "../reviewers/deadline.ts";
+
 /** Where the worktree's root is, or why git could not say. */
 export type ToplevelLookup =
   | { readonly outcome: "resolved"; readonly path: string }
@@ -19,17 +21,26 @@ export type ToplevelLookup =
 /**
  * Ask git for the root of the worktree holding `directory`.
  *
+ * `until` bounds the call: git is killed at it, and the answer is a `failed` that
+ * says the time ran out. Without one the call runs as long as git does.
+ *
  * Never throws. A git that is missing, a directory that is no repository and a
  * git that answered nothing all come back as `failed`, carrying the reason as a
  * single line.
  */
-export function worktreeToplevel(directory: string): ToplevelLookup {
+export function worktreeToplevel(directory: string, until?: Deadline): ToplevelLookup {
+  if (until?.passed() === true) return failed(RAN_OUT);
+
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd: directory,
     encoding: "utf8",
+    // A timeout of zero is no timeout at all, so a deadline with nothing left
+    // still bounds the call.
+    ...(until === undefined ? {} : { timeout: Math.max(1, until.remaining()) }),
   });
 
   if (result.error !== undefined) {
+    if (ranOut(result.error)) return failed(RAN_OUT);
     return failed(`git could not be run: ${result.error.message}`);
   }
   if (result.status !== 0) {
@@ -44,6 +55,13 @@ export function worktreeToplevel(directory: string): ToplevelLookup {
   // there is nothing here to run a round against.
   if (path === "") return failed("git named no worktree for this directory");
   return { outcome: "resolved", path };
+}
+
+/** What a call killed at its bound says, which is never that there is no worktree. */
+const RAN_OUT = "git ran out of the time it was given";
+
+function ranOut(error: Error): boolean {
+  return "code" in error && error.code === "ETIMEDOUT";
 }
 
 function failed(reason: string): ToplevelLookup {

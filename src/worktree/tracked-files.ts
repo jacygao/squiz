@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readSync, readlinkSync, type Stats } from "node:fs";
 import { join } from "node:path";
 
+import type { Deadline } from "../reviewers/deadline.ts";
 import { worktreeToplevel } from "./toplevel.ts";
 
 /** A worktree's files at one moment, or why git could not say. */
@@ -75,28 +76,33 @@ const STATUS_ARGUMENTS = [
  * permitted, and the reviewer's own CLI compiles into the scratch space inside
  * the tree on every round.
  *
- * Never throws. A git that is missing, a directory that is no repository, and a
- * path that cannot be read all come back as `failed`, carrying the reason as a
- * single line.
+ * `until` bounds the whole reading, git and the hashing alike: a git that has not
+ * answered by it is killed, the walk stops at the next path, and the answer is a
+ * `failed` saying the time ran out. Without one the reading runs as long as the
+ * worktree takes, which is a caller that has nothing else to spend.
+ *
+ * Never throws. A git that is missing, a directory that is no repository, a path
+ * that cannot be read and a reading that ran out of time all come back as
+ * `failed`, carrying the reason as a single line.
  */
-export function readTrackedFiles(directory: string): TrackedFilesReading {
-  const toplevel = worktreeToplevel(directory);
+export function readTrackedFiles(directory: string, until?: Deadline): TrackedFilesReading {
+  const toplevel = worktreeToplevel(directory, until);
   if (toplevel.outcome === "failed") return { outcome: "failed", reason: toplevel.reason };
   const root = toplevel.path;
 
-  const reported = git(root, STATUS_ARGUMENTS);
+  const reported = git(root, STATUS_ARGUMENTS, until);
   if (!reported.ran) return { outcome: "failed", reason: reported.reason };
   // `ls-files` answers about the directory it runs in and names paths relative
   // to it, so it runs at the root, where it covers the whole worktree and names
   // a path the way a status does. `--stage` carries each entry's mode and
   // object, and the object is the only place a submodule's revision is written.
-  const listed = git(root, ["ls-files", "-z", "--stage"]);
+  const listed = git(root, ["ls-files", "-z", "--stage"], until);
   if (!listed.ran) return { outcome: "failed", reason: listed.reason };
   const staged = stagedEntries(listed.stdout);
   if (!staged.listed) return { outcome: "failed", reason: staged.reason };
 
   const status = statusOf(records(reported.stdout));
-  const content = contentOf(root, staged.entries, untrackedIn(status));
+  const content = contentOf(root, staged.entries, untrackedIn(status), until);
   if (!content.read) return { outcome: "failed", reason: content.reason };
 
   return { outcome: "read", root, status, content: content.paths };
@@ -197,6 +203,7 @@ function contentOf(
   root: string,
   entries: readonly StagedEntry[],
   untracked: readonly string[],
+  until?: Deadline,
 ): Content {
   const wanted: readonly { readonly path: string; readonly marker?: string }[] = [
     ...entries.map((entry) =>
@@ -219,8 +226,13 @@ function contentOf(
       content.set(path, marker);
       continue;
     }
+    // Read between paths as well as inside one, so a worktree of many small files
+    // is bounded as well as a worktree of one enormous one.
+    if (until?.passed() === true) return { read: false, reason: RAN_OUT };
     try {
-      content.set(path, standsAt(join(root, path)));
+      const stands = standsAt(join(root, path), until);
+      if (stands === null) return { read: false, reason: RAN_OUT };
+      content.set(path, stands);
     } catch (cause) {
       // A path the worktree does not hold is a deletion, which is a change to
       // name rather than a reading that failed.
@@ -235,12 +247,13 @@ function contentOf(
 }
 
 /**
- * What stands at one path, as a value two readings can be compared by.
+ * What stands at one path, as a value two readings can be compared by, or `null`
+ * where the reading ran out of time inside it.
  *
  * The kind is part of it, so a file replaced by a link to a file of the same
  * content is a change, and so is one replaced by a pipe.
  */
-function standsAt(path: string): string {
+function standsAt(path: string, until?: Deadline): string | null {
   const entry = lstatSync(path);
   // A link is read rather than followed. What it points at may be outside the
   // worktree, or not there at all, and neither is this worktree's content.
@@ -249,7 +262,10 @@ function standsAt(path: string): string {
   // never arrive, and no timer interrupts a synchronous open, so a reading that
   // tried it would hang the round and the round would be killed with nothing
   // posted.
-  if (entry.isFile()) return `file:${hashOfFile(path)}`;
+  if (entry.isFile()) {
+    const hashed = hashOfFile(path, until);
+    return hashed === null ? null : `file:${hashed}`;
+  }
   return `kind:${kindOf(entry)}`;
 }
 
@@ -262,13 +278,20 @@ function kindOf(entry: Stats): string {
   return "unknown";
 }
 
-/** Hashed in chunks, so that a large file is never held in memory. */
-function hashOfFile(path: string): string {
+/**
+ * Hashed in chunks, so that a large file is never held in memory, and `null`
+ * where the deadline passed before the end of it.
+ *
+ * The clock is read between chunks, because one file can be larger than
+ * everything else in the worktree together.
+ */
+function hashOfFile(path: string, until?: Deadline): string | null {
   const digest = createHash("sha256");
   const chunk = Buffer.allocUnsafe(64 * 1024);
   const file = openSync(path, "r");
   try {
     for (;;) {
+      if (until?.passed() === true) return null;
       const read = readSync(file, chunk, 0, chunk.length, null);
       if (read === 0) break;
       digest.update(chunk.subarray(0, read));
@@ -287,16 +310,22 @@ type GitOutput =
   | { readonly ran: true; readonly stdout: string }
   | { readonly ran: false; readonly reason: string };
 
-function git(root: string, args: readonly string[]): GitOutput {
+function git(root: string, args: readonly string[], until?: Deadline): GitOutput {
+  if (until?.passed() === true) return { ran: false, reason: RAN_OUT };
+
   const result = spawnSync("git", args, {
     cwd: root,
     encoding: "utf8",
     // Node's default stops at a mebibyte and hands back what it got, so a list
     // of paths arrives as one that reads whole with files missing from the end.
     maxBuffer: Infinity,
+    // A timeout of zero is no timeout at all, so a deadline with nothing left
+    // still bounds the call.
+    ...(until === undefined ? {} : { timeout: Math.max(1, until.remaining()) }),
   });
 
   if (result.error !== undefined) {
+    if (ranOut(result.error)) return { ran: false, reason: RAN_OUT };
     return { ran: false, reason: `git could not be run: ${result.error.message}` };
   }
   if (result.status !== 0) {
@@ -314,6 +343,18 @@ function records(stdout: string): readonly string[] {
 
 function describeExit(status: number | null, signal: NodeJS.Signals | null): string {
   return status === null ? `git was killed by ${signal ?? "a signal"}` : `git exited ${status}`;
+}
+
+/**
+ * What a reading cut short at its bound says.
+ *
+ * Its own answer, and never a tree nobody touched: a caller that read this as
+ * `unchanged` would report a reviewer that changed nothing.
+ */
+const RAN_OUT = "the reading ran out of the time it was given";
+
+function ranOut(error: Error): boolean {
+  return "code" in error && error.code === "ETIMEDOUT";
 }
 
 function isMissing(error: unknown): boolean {

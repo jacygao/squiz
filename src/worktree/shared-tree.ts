@@ -40,6 +40,11 @@
  * Removing the marker is hygiene rather than correctness: a marker whose process
  * has exited already reads as no round running.
  *
+ * **Nothing here waits without a bound.** Asking git for the toplevel and asking
+ * ps about a process are both calls that can hang, and no clock outside a
+ * subprocess reaches one already running. So the lookup is given a deadline, and
+ * every call it makes runs under it.
+ *
  * Two toplevels are compared as directories rather than as strings. Symlinks and
  * a case-insensitive filesystem give one directory several spellings, and two
  * spellings of the shared tree must not read as two trees.
@@ -63,7 +68,8 @@ import {
 import { dirname, join } from "node:path";
 
 import { readState } from "../loop/episode-state.ts";
-import { episodeAt, type Episode } from "../loop/episode.ts";
+import { episodeAt, episodeNamed, type Episode } from "../loop/episode.ts";
+import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { worktreeToplevel } from "./toplevel.ts";
 
 /** An episode of this worktree that has not reported its close. */
@@ -97,14 +103,31 @@ export type MarkWrite =
 const markerName = "running.json";
 
 /**
+ * The longest the marker's write spends asking the system about this process.
+ *
+ * Its own bound rather than the round's. The marker is what another round reads to
+ * find this one, so it is written whatever this round has left of its window, and
+ * what it must not do is wait on a ps that will not answer.
+ */
+const MARKER_BOUND_MS = 5_000;
+
+/**
  * The live episodes of the worktree holding `directory`, other than the one
  * `agentId` keys.
+ *
+ * `until` bounds the whole lookup, git and every ps under it alike. A lookup cut
+ * short at it is `unknown`, carrying what it was doing when the time went, and
+ * never `alone`.
  *
  * Never throws. The episode asking is never among them, whatever its state file
  * and its marker say.
  */
-export function otherLiveEpisodes(directory: string, agentId: string): OtherEpisodes {
-  const toplevel = worktreeToplevel(directory);
+export function otherLiveEpisodes(
+  directory: string,
+  agentId: string,
+  until: Deadline,
+): OtherEpisodes {
+  const toplevel = worktreeToplevel(directory, until);
   if (toplevel.outcome === "failed") {
     return { outcome: "unknown", reason: `the worktree could not be resolved: ${toplevel.reason}` };
   }
@@ -142,7 +165,13 @@ export function otherLiveEpisodes(directory: string, agentId: string): OtherEpis
     // A directory no episode key could have produced holds nobody's episode.
     if (episode === undefined) continue;
 
-    const liveness = livenessOf(episode, here.identity);
+    // The clock is read between episodes as well as inside one, so a tree holding
+    // many of them is bounded as well as one whose ps will not answer.
+    if (until.passed()) {
+      untold.push(EPISODES_RAN_OUT);
+      break;
+    }
+    const liveness = livenessOf(episode, here.identity, until);
     if (liveness.state === "live") live.push({ id: episode.id, pid: liveness.pid });
     else if (liveness.state === "unknown") untold.push(liveness.reason);
   }
@@ -167,7 +196,7 @@ export function otherLiveEpisodes(directory: string, agentId: string): OtherEpis
 export function markRoundRunning(episode: Episode): MarkWrite {
   const path = markerFor(episode);
 
-  const started = startTimeOf(process.pid);
+  const started = startTimeOf(process.pid, deadlineIn(MARKER_BOUND_MS));
   // A marker that cannot be told from a reused pid is worse than no marker,
   // because it outlives the round: every later round in this tree would read a
   // pid it cannot judge, and none of them could name what is in flight.
@@ -218,8 +247,8 @@ type Liveness =
   | { readonly state: "ended" }
   | { readonly state: "unknown"; readonly reason: string };
 
-function livenessOf(episode: Episode, here: DirectoryIdentity): Liveness {
-  const round = roundIn(episode, here);
+function livenessOf(episode: Episode, here: DirectoryIdentity, until: Deadline): Liveness {
+  const round = roundIn(episode, here, until);
   if (round.state === "running") return { state: "live", pid: round.pid };
 
   const recorded = readState(episode);
@@ -264,7 +293,7 @@ type Round =
   | { readonly state: "none" }
   | { readonly state: "unknown"; readonly reason: string };
 
-function roundIn(episode: Episode, here: DirectoryIdentity): Round {
+function roundIn(episode: Episode, here: DirectoryIdentity, until: Deadline): Round {
   const read = markerIn(episode);
   if (read.outcome === "absent") return { state: "none" };
   if (read.outcome === "unreadable") return { state: "unknown", reason: read.reason };
@@ -282,7 +311,7 @@ function roundIn(episode: Episode, here: DirectoryIdentity): Round {
   // removal did not take.
   if (!present.there) return { state: "none" };
 
-  const started = startTimeOf(marker.pid);
+  const started = startTimeOf(marker.pid, until);
   if (started.outcome === "failed") return { state: "unknown", reason: started.reason };
   if (started.outcome === "gone") return { state: "none" };
   // The pid was reused: what holds it now is not the round that wrote this.
@@ -331,22 +360,6 @@ function markerIn(episode: Episode): MarkerRead {
   return { outcome: "read", marker: { pid, startedAt, toplevel } };
 }
 
-/**
- * The episode whose state the directory named `name` holds, or nothing where no
- * episode key could have produced that name.
- *
- * A name that is not what the key would have been stripped to is nobody's
- * episode, and reading it would read at paths no episode owns.
- */
-function episodeNamed(worktree: string, name: string): Episode | undefined {
-  try {
-    const episode = episodeAt(worktree, name);
-    return episode.id === name ? episode : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 type Presence =
   | { readonly outcome: "asked"; readonly there: boolean }
   | { readonly outcome: "failed"; readonly reason: string };
@@ -382,16 +395,25 @@ type StartTime =
  * inspection that was interrupted establishes nothing, and read as a process
  * that has gone it would answer that a live round had ended.
  *
+ * `until` bounds the call. A ps killed at it is `failed` saying the time ran out,
+ * because a caller that read that as `gone` would answer the same way.
+ *
  * The words are never parsed, only compared, so the locale and the time zone are
  * pinned to keep one process from wording itself differently in two sessions.
  */
-function startTimeOf(pid: number): StartTime {
+function startTimeOf(pid: number, until: Deadline): StartTime {
+  if (until.passed()) return { outcome: "failed", reason: PS_RAN_OUT };
+
   const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+    // A timeout of zero is no timeout at all, so a deadline with nothing left
+    // still bounds the call.
+    timeout: Math.max(1, until.remaining()),
   });
 
   if (result.error !== undefined) {
+    if (ranOut(result.error)) return { outcome: "failed", reason: PS_RAN_OUT };
     return { outcome: "failed", reason: `ps could not be run: ${result.error.message}` };
   }
   if (result.status === null) {
@@ -413,6 +435,17 @@ function startTimeOf(pid: number): StartTime {
     outcome: "failed",
     reason: `ps exited ${result.status}: ${complaint === "" ? said : complaint}`,
   };
+}
+
+/** What a ps cut short at the lookup's bound says, which is never a process that has gone. */
+const PS_RAN_OUT = "ps ran out of the time it was given";
+
+/** What a lookup that could not reach every episode says, which is never `alone`. */
+const EPISODES_RAN_OUT =
+  "the episodes of the worktree were not all asked about before the time ran out";
+
+function ranOut(error: Error): boolean {
+  return "code" in error && error.code === "ETIMEDOUT";
 }
 
 /**

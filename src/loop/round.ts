@@ -36,6 +36,8 @@ import {
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
+import { clearRoundRunning } from "../worktree/shared-tree.ts";
+import { readAfterReviewer, readBeforeReviewer, type RoundConfinement } from "./confinement.ts";
 import {
   readState,
   recordRound,
@@ -115,6 +117,19 @@ export type RoundAccount = {
   readonly verdicts: AppliedVerdicts;
 };
 
+/** What the readings taken around the reviewer established. */
+export type AroundTheReviewer = {
+  /**
+   * What the reviewer did to the worktree, and which other episodes were live in
+   * it. Absent where no reviewer ran, which is every conclusion reached before
+   * the review.
+   *
+   * Nothing here is reported by the round. The summary comment names it, and a
+   * mutated tree never changes what the round concluded or what it posted.
+   */
+  readonly confinement?: RoundConfinement;
+};
+
 /** What one round concluded. */
 export type RoundConclusion =
   /** No open pull request has this branch as its head: nothing ran, nothing posted. */
@@ -126,7 +141,7 @@ export type RoundConclusion =
    */
   | { readonly outcome: "episode-over" }
   /** Another round. The coding agent is handed the open threads, with this reason. */
-  | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount)
+  | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount & AroundTheReviewer)
   /** This round ended the episode, for the reason the decision gave. */
   | ({
       readonly outcome: "close";
@@ -144,12 +159,13 @@ export type RoundConclusion =
        * this pull request again. The caller reports the write that failed.
        */
       readonly recorded: StateWrite;
-    } & RoundAccount)
+    } & RoundAccount &
+      AroundTheReviewer)
   /**
    * The round failed. Never a clean pass: `failure` says whose failure it was,
    * and an honest empty review is not one of them.
    */
-  | {
+  | ({
       readonly outcome: "failed";
       readonly failure: RoundFailure;
       readonly reason: string;
@@ -162,7 +178,7 @@ export type RoundConclusion =
        * round that reviewed.
        */
       readonly salvaged?: RoundAccount;
-    };
+    } & AroundTheReviewer);
 
 /**
  * Run one round of the loop and return what it concluded.
@@ -175,6 +191,11 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
   } catch (cause) {
     // A throw here is this harness's own defect. The round is still a value.
     return failed("harness", `the round could not be run: ${reasonFor(cause)}`);
+  } finally {
+    // Every path the round ends on comes through here, a throw included. A marker
+    // left behind already reads as no round in flight, so clearing it keeps them
+    // from piling up in a worktree rather than making any answer right.
+    clearRoundRunning(setup.episode);
   }
 }
 
@@ -241,6 +262,10 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   const unmade = makeDirectories(episode);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
+  // Taken before the reviewer's bound is worked out, so that what the reading
+  // spends shortens the review rather than the posting that follows it.
+  const around = readBeforeReviewer(episode, beforePosting);
+
   const seconds = reviewSeconds(config.timeout, beforePosting);
   if (seconds === null) {
     return failed(
@@ -266,7 +291,11 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     seconds,
   );
 
-  const recording = keepCost(episode, state, review);
+  // Taken here rather than on the reviewed path alone. A reviewer killed at its
+  // bound is the one most likely to have left a write behind.
+  const confinement = readAfterReviewer(around, window);
+
+  const recording = keepCost(episode, state, review, confinement);
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
 
@@ -281,7 +310,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     margin: deadlineIn(Math.min(window.remaining(), postingMs)),
   };
 
-  if (review.outcome !== "reviewed") return salvage(review, handedOver, posting);
+  if (review.outcome !== "reviewed") return salvage(review, handedOver, posting, confinement);
 
   const account = report(review, handedOver, posting);
   const threads = [
@@ -301,11 +330,20 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   );
 
   if (decision.next === "close") {
-    return closeAfterReview(episode, decision.because, account, recorded, handedOver, posting);
+    return closeAfterReview(
+      episode,
+      decision.because,
+      account,
+      recorded,
+      handedOver,
+      posting,
+      confinement,
+    );
   }
   return {
     outcome: "block",
     reason: blockingReason({ pullRequest: pullRequest.number, posted: account.posted, threads }),
+    confinement,
     ...account,
   };
 }
@@ -483,7 +521,12 @@ function makeDirectories(episode: Episode): string | null {
  *
  * A setup problem records what it spent without recording a round.
  */
-function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<EpisodeState> {
+function keepCost(
+  episode: Episode,
+  state: EpisodeState,
+  review: Review,
+  confinement: RoundConfinement,
+): Step<EpisodeState> {
   const recorded = withSpend(state, review);
   // Nothing was spent and no round ran, so there is nothing to keep. Writing
   // anyway would put a write that could fail in front of the reason the reviewer
@@ -495,7 +538,16 @@ function keepCost(episode: Episode, state: EpisodeState, review: Review): Step<E
     // Nothing is posted on a state file that would not take the round. A round
     // that posted its findings and recorded nothing is one the next round
     // repeats comment for comment.
-    return { ended: failed("harness", `nothing was posted: ${written.reason}`) };
+    return {
+      ended: {
+        outcome: "failed",
+        failure: "harness",
+        reason: `nothing was posted: ${written.reason}`,
+        // The reviewer ran and both readings were taken, and the tree has moved on
+        // by the time anything could ask again.
+        confinement,
+      },
+    };
   }
   return { step: recorded };
 }
@@ -622,6 +674,7 @@ function closeAfterReview(
   state: EpisodeState,
   handedOver: readonly ReviewThread[],
   on: Posting,
+  confinement: RoundConfinement,
 ): RoundConclusion {
   const summary = postEpisodeSummary(
     {
@@ -634,7 +687,7 @@ function closeAfterReview(
     },
     { directory: on.directory, until: on.margin },
   );
-  return closing(episode, because, summary, state, account);
+  return closing(episode, because, summary, state, account, confinement);
 }
 
 /**
@@ -656,9 +709,17 @@ function closing(
   summary: EpisodeSummary,
   state: EpisodeState,
   account: RoundAccount,
+  confinement?: RoundConfinement,
 ): RoundConclusion {
   const recorded = writeState(episode, { ...state, closeReported: true });
-  return { outcome: "close", because, summary, recorded, ...account };
+  return {
+    outcome: "close",
+    because,
+    summary,
+    recorded,
+    ...(confinement === undefined ? {} : { confinement }),
+    ...account,
+  };
 }
 
 type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
@@ -687,15 +748,22 @@ function salvage(
   review: FailedReview,
   handedOver: readonly ReviewThread[],
   on: Posting,
+  confinement: RoundConfinement,
 ): RoundConclusion {
   const kept = review.findings.length;
   if (kept === 0 && review.verdicts.length === 0) {
-    return failed(review.outcome, reviewerFailed(review, 0));
+    return {
+      outcome: "failed",
+      failure: review.outcome,
+      reason: reviewerFailed(review, 0),
+      confinement,
+    };
   }
   return {
     outcome: "failed",
     failure: review.outcome,
     reason: reviewerFailed(review, kept),
+    confinement,
     salvaged: report(review, ruledOn(handedOver, review.verdicts), on),
   };
 }
