@@ -43,15 +43,35 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
   reviewer reading the history it is reviewing. `git -C . commit --allow-empty`
   and `git reset HEAD~1 --soft` move `HEAD` and were allowed, which is the
   mutation the list exists to stop. So the line is split into the commands it
-  runs, at `;`, `|`, `&`, a newline and a parenthesis. A quoted argument stays one
-  word and is never read as a command. The subcommand is the first word after
-  `git` that is not an option, and a listed flag counts wherever it sits in the
-  call.
+  runs, at `;`, `|`, `&`, a newline and a parenthesis. The subcommand is the
+  first word after `git` that is not an option, and a listed flag counts wherever
+  it sits in the call.
+- **Split the line with the shell's own quoting rules, in a function of its own
+  that is tested on its own.** Quoting read loosely is wrong in both directions
+  at once, and a matcher that refuses too much looks like one that refuses too
+  little. A closing quote read where `\"` was written takes the next command
+  into the argument. That let `printf '%s\n' "a \" b"; git commit` through. The
+  same reading lets the text inside a quoted argument out as a command, and that
+  refused `grep -F "a \"; git commit; \" b"`. An empty quoted word dropped rather
+  than kept left `-C` taking the subcommand as its value, and that let
+  `git -C "" commit` through. The rules the splitter reads: inside single quotes
+  every character stands for itself; inside double quotes a backslash escapes
+  `"`, `\`, `$` and a backtick and stands for itself before anything else;
+  outside quotes a backslash escapes whatever follows it; and a quoted empty
+  string is a word. A table of lines to the words expected out of them tests the
+  splitter without going near the matcher.
+- **Read a short option's value written onto the flag, for the options on a
+  named list of those that take one.** `git checkout -Breview-copy` is git's
+  ordinary spelling of `-B review-copy`, and an exact match on `-B` let it
+  through. Only a flag on that list is read as the opening of a word, so `--soft`
+  does not match `--softly`.
 - **Say in the code, where the list is defined, that splitting a line into words
   is not a boundary.** It refuses a reviewer that is not trying to get around the
-  list. Quoting, a script file, an encoded string and `sh -c` each defeat it.
-  Escalating the matching is an arms race, and a comment claiming more than the
-  code delivers is worse than none.
+  list. A word the shell would build out of quoting or substitution is left alone
+  rather than matched, so `git "com"mit` and `git $(echo commit)` run, and so do
+  a script file, an encoded string and `sh -c`. Escalating the matching is an
+  arms race, and a comment claiming more than the code delivers is worse than
+  none.
 - **Refuse a `bash` call whose command cannot be read, rather than running it.**
   The field the command arrives in is `pi`'s. One it renames would otherwise
   leave every pattern matching nothing, which reads exactly like a reviewer that
@@ -113,6 +133,14 @@ them: `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--exec-path` and
 because a word opening with `-` is an option and the subcommand is the first word
 that is not one.
 
+**`git -C ""` changes no directory and runs the subcommand after it.** git only
+chdirs when the argument has a character in it, so the empty string is accepted
+and the commit goes through. The word has to survive the splitting for the
+option to take it.
+
+`-B` takes its value attached as well as apart, so `git checkout -Breview-copy`
+is `git checkout -B review-copy`.
+
 ## Limits
 
 - **No model was run.** Everything here comes from reading `pi`'s shipped
@@ -124,6 +152,10 @@ that is not one.
   by another command — after `env`, `xargs` or `ssh` — is read as that command's
   arguments and matches nothing, and a heredoc's body is read as script rather
   than as text.
+- **A short option written in a cluster is not read.** `-Breview-copy` matches
+  `-B` and `-qB review-copy` does not. The splitting decides the words; which
+  letters of a word git would read as separate options is git's own parsing,
+  and nothing here does it.
 - **One machine, macOS, `pi` 0.85.1.** The extension runner, the hook
   installation and the agent loop's tool preparation are all `pi` internals, and
   none of them is in its documented interface.

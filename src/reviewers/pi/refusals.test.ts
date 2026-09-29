@@ -69,6 +69,7 @@ const leavesTheCommitAlone: readonly string[] = [
   "git blame src/threads.ts",
   "git diff HEAD~1 HEAD",
   "git diff --stat origin/main...HEAD",
+  "git -C \"\" status --porcelain",
   "rg --files-with-matches lastSaid",
 ];
 
@@ -107,6 +108,8 @@ const NAMES_A_COMMAND_WITHOUT_RUNNING_IT: readonly string[] = [
   "rg --fixed-strings 'git reset --soft' src",
   "echo 'git commit -m x' > /tmp/squiz/note.txt",
   "grep -rn 'git commit; git push' src",
+  "grep -B2 -A2 'git commit' src",
+  'grep -F "a \\"; git commit; \\" b" tracked.txt',
   "man git commit",
 ];
 
@@ -176,6 +179,52 @@ test("git's own options do not hide the subcommand behind them", () => {
       `${command} was refused for some other reason: ${reason}`,
     );
   }
+});
+
+/**
+ * `git -C ""` changes no directory and runs the subcommand after it, and the
+ * reviewer's commit went through in a repository of its own.
+ *
+ * An empty argument dropped from the split leaves `-C` taking the subcommand as
+ * its value, and the commit is never read.
+ */
+test("an empty option value does not stand in for the subcommand", () => {
+  assert.equal(refuse(shell('git -C "" commit --allow-empty -m x'))?.block, true);
+  assert.equal(refuse(shell("git -C '' push --force origin HEAD"))?.block, true);
+});
+
+/**
+ * `-B` takes a value, and git reads it written onto the flag as readily as
+ * written after it. The reviewer's `-Breview-copy` moved `HEAD` and left the
+ * tree as it was.
+ */
+test("a short option's value written onto the flag is still the flag", () => {
+  assert.equal(refuse(shell("git checkout -Breview-copy HEAD~1"))?.block, true);
+  assert.equal(refuse(shell("git checkout -B review-copy HEAD~1"))?.block, true);
+});
+
+/** A flag taking no value is the whole word, so a longer word is some other flag. */
+test("a flag is not matched as the opening of a longer word", () => {
+  assert.equal(refuse(shell("git reset --softly HEAD~1")), undefined);
+  assert.equal(refuse(shell("git reset --soft-landing HEAD~1")), undefined);
+  assert.equal(refuse(shell("git checkout -b review-copy")), undefined);
+});
+
+/**
+ * The quoting of one argument decides where the next command starts. A closing
+ * quote read where an escaped one was written either takes the command after it
+ * into the argument or lets the text inside it out as a command.
+ */
+test("an escaped quote moves no command across the boundary, in either direction", () => {
+  assert.equal(
+    refuse(shell('grep -F "a \\"; git commit; \\" b" tracked.txt')),
+    undefined,
+    "the commit is inside the pattern, and a reviewer refused this cannot search the tree",
+  );
+  assert.equal(
+    refuse(shell("printf '%s\\n' \"a \\\" b\"; git commit --allow-empty -m x"))?.block,
+    true,
+  );
 });
 
 /** `--soft` is what makes the reset invisible, and git takes it in any position. */

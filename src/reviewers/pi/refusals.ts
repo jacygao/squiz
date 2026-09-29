@@ -13,21 +13,26 @@
  * do: the ones that move `HEAD` while leaving the worktree byte for byte as it
  * was, which is the change nothing downstream can see.
  *
- * **A command line is split into words, and the split is not a shell.** It
- * refuses a reviewer that is not trying to get around the list, and it does not
- * bound one that is. Quoting, a script file, an encoded string and `sh -c` each
- * defeat it, and a reviewer that means to commit still can. A command handed to
- * another command to run — after `env`, `xargs` or `ssh` — is read as that
- * command's arguments and matches nothing. A heredoc's body is not told from the
- * script around it, so a line inside one that reads as a refused command is
- * refused. What keeps the gap small is that the tools needing no matching go by
- * name, and that the list only has to cover the commands which move `HEAD`
- * without touching the tree.
+ * **A command line is split into words, and the split is not a shell.** The
+ * splitting reads the quoting, so a separator inside an argument stays inside it
+ * and a separator outside one ends a command. It expands nothing, and a word
+ * that carried a quote or a backslash is left alone rather than matched. So the
+ * split refuses a reviewer that is not trying to get around the list and does
+ * not bound one that is: `git "com"mit`, `git $(echo commit)`, a script file, an
+ * encoded string and `sh -c` all run, and a reviewer that means to commit still
+ * can. A command handed to another command to run — after `env`, `xargs` or
+ * `ssh` — is read as that command's arguments and matches nothing. A heredoc's
+ * body is not told from the script around it, so a line inside one that reads as
+ * a refused command is refused. What keeps the gap small is that the tools
+ * needing no matching go by name, and that the list only has to cover the
+ * commands which move `HEAD` without touching the tree.
  *
  * `pi` is not a dependency of this package and nothing here may make it one, so
  * the call and the answer are described structurally, as the extension's own
  * types are.
  */
+
+import { splitIntoCommands, type Word } from "./words.ts";
 
 /** One tool call, as `pi` offers it to a handler before running it. */
 export type ToolCall = {
@@ -116,8 +121,8 @@ const GIT_OPTIONS_TAKING_A_VALUE: readonly string[] = [
   "--config-env",
 ];
 
-/** Where one command ends and the next one begins. */
-const ENDS_A_COMMAND: ReadonlySet<string> = new Set([";", "\n", "|", "&", "(", ")"]);
+/** The flags on the list that take a value, which git also takes attached. */
+const FLAGS_TAKING_AN_ATTACHED_VALUE: readonly string[] = ["-B"];
 
 /**
  * The words that can stand in front of a command without being the command.
@@ -140,17 +145,6 @@ const STANDS_BEFORE_A_COMMAND: ReadonlySet<string> = new Set([
 
 /** `GIT_AUTHOR_NAME=squiz git commit` runs git, with the assignment in front of it. */
 const AN_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
-
-/**
- * One word of a command line.
- *
- * A word that carried a quote or a backslash is not plain, and nothing matches
- * against it: what the shell would make of it is more than splitting can say.
- */
-type Word = {
-  readonly text: string;
-  readonly plain: boolean;
-};
 
 /** A `git` call, read down to the subcommand. */
 type GitCall = {
@@ -221,7 +215,7 @@ function refusal(said: string): Refusal {
  * command the line does invoke, and that command is read instead.
  */
 function refusedIn(line: string): RefusedCommand | undefined {
-  for (const words of commandsIn(line)) {
+  for (const words of splitIntoCommands(line)) {
     const git = gitCallIn(words);
     if (git === undefined) continue;
     const matched = refusedCommands.find(
@@ -234,9 +228,24 @@ function refusedIn(line: string): RefusedCommand | undefined {
   return undefined;
 }
 
-/** Whether the flag is among the words, as a word of its own and plainly written. */
+/** Whether the flag is among the words, plainly written, whichever spelling it takes. */
 function carries(words: readonly Word[], flag: string): boolean {
-  return words.some((word) => word.plain && word.text === flag);
+  return words.some((word) => word.plain && spells(word.text, flag));
+}
+
+/**
+ * Whether the word is that flag.
+ *
+ * A short option taking a value takes it attached as well as apart, and git
+ * reads the two the same way, so `-Breview-copy` is `-B`. Every other flag is
+ * the whole word or nothing, which is what keeps `--soft` off `--softly`. A
+ * cluster of short options — the `-B` of `-qB review-copy` — is a third
+ * spelling, and this does not read it.
+ */
+function spells(word: string, flag: string): boolean {
+  if (word === flag) return true;
+  if (!FLAGS_TAKING_AN_ATTACHED_VALUE.includes(flag)) return false;
+  return word.length > flag.length && word.startsWith(flag);
 }
 
 /**
@@ -270,68 +279,6 @@ function standsBeforeACommand(word: Word | undefined): boolean {
   if (word === undefined) return false;
   if (AN_ASSIGNMENT.test(word.text)) return true;
   return word.plain && STANDS_BEFORE_A_COMMAND.has(word.text);
-}
-
-/**
- * The line as the commands it invokes, each one its own words.
- *
- * Quotes are read only far enough to know which characters are text and which
- * separate one command from the next, so that a command named inside an argument
- * stays inside it. A word is what a run of whitespace ends, and the quotes and
- * backslashes themselves are dropped from it.
- */
-function commandsIn(line: string): readonly (readonly Word[])[] {
-  const commands: Word[][] = [];
-  let words: Word[] = [];
-  let text = "";
-  let plain = true;
-  let quote: string | null = null;
-
-  function endWord(): void {
-    if (text !== "") words.push({ text, plain });
-    text = "";
-    plain = true;
-  }
-
-  function endCommand(): void {
-    endWord();
-    if (words.length !== 0) commands.push(words);
-    words = [];
-  }
-
-  for (let at = 0; at < line.length; at += 1) {
-    const char = line[at] ?? "";
-    if (quote !== null) {
-      if (char === quote) quote = null;
-      else text += char;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      plain = false;
-      continue;
-    }
-    if (char === "\\") {
-      at += 1;
-      const escaped = line[at];
-      // A backslash before a newline joins the two lines and leaves no word behind.
-      if (escaped === undefined || escaped === "\n") continue;
-      text += escaped;
-      plain = false;
-      continue;
-    }
-    if (ENDS_A_COMMAND.has(char)) {
-      endCommand();
-      continue;
-    }
-    if (/\s/u.test(char)) {
-      endWord();
-      continue;
-    }
-    text += char;
-  }
-  endCommand();
-  return commands;
 }
 
 /**
