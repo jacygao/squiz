@@ -25,10 +25,11 @@ exited 0.
   nothing to say.** Both leave an empty transcript. Nothing about the plugin
   loading says the command will run, so the two are told apart by the exit code
   in the event stream rather than by output.
-- **The commands § 6 has the coding agent run by name need nothing for an
-  install.** An install puts the plugin's `bin/` on the Bash tool's `PATH` as
-  `--plugin-dir` does, so `squiz threads`, `squiz reply` and `squiz resolve`
-  resolve under both.
+- **The name the coding agent runs resolves under an install as it does under
+  `--plugin-dir`.** An install puts the plugin's `bin/` on the Bash tool's `PATH`,
+  so `squiz threads` and `squiz reply` find the binary either way. What was
+  established is the lookup of `squiz` itself; which commands it dispatches is its
+  own question and nothing here measures it.
 
 ## Needs your input
 
