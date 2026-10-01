@@ -125,8 +125,8 @@ the shell inherited:
 On Linux the file is `/proc/<pid>/environ`, mode `-r--------` and owned by the
 uid, holding the variables NUL-separated. `stat` reports its size as 0 and the
 read returned 5,112 to 5,149 bytes. It is one read per process. `ps eww -p <pid>`
-returns the same content in 5,193 bytes, and `ps -ww -p <pid> eo pid=,args=` in
-5,135. The flag is `-E` on macOS and `e` on Linux.
+returns the same content in 5,193 to 5,249 bytes, and `ps -ww -p <pid> eo
+pid=,args=` in 5,135 to 5,191. The flag is `-E` on macOS and `e` on Linux.
 
 ### Leaving a process behind, named for the round
 
