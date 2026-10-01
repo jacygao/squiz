@@ -189,6 +189,12 @@ the wrap at 99,999 and the restart near 100.
   build, test suite or compiler was measured, and nothing here says how long a
   real machine sustains a thousand a second.
 
+- **The strangers that took the numbers were started on purpose, each detached so
+  that it led a group.** What the run establishes is that the numbers were handed
+  out again inside the round, and that a new process holding one is signalled. How
+  often a machine's own next process both takes a recorded number and leads a
+  group was not measured.
+
 - **The wrap point is reckoned from the counter's own arithmetic**, not read from
   a kernel variable, and the number it restarts from was not seen.
 
