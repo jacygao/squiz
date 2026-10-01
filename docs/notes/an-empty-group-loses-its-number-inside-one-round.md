@@ -11,8 +11,8 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 ## Intent
 
 - **Nothing said whether a group whose leader has been reaped can be shown to be
-  the round's own.** Every process in such a group began during the round, and so
-  would every process of a stranger's group that took the number after the
+  the round's own.** Every process in such a group began during the round, and
+  so would every process of a stranger's group that took the number after the
   round's own emptied.
 - **Nothing said how close a machine comes to handing a recorded number to a
   stranger inside one round.** The age test rests on that distance being long.
@@ -35,11 +35,11 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
   a round, every one of them younger than the round, and the round signalled all
   200 and killed them.
 
-- **The age reading does not establish what § 4 says it does.** § 4 has the round
-  signal a recorded group only where the system says it is still the round's own.
-  The reading separates a group older than the round from a younger one. It does
-  not separate the round's own group from a stranger's that took the number, and
-  on macOS that case is a hundred seconds of build load away.
+- **The age reading does not establish what § 4 says it does.** § 4 has the
+  round signal a recorded group only where the system says it is still the
+  round's own. The reading separates a group older than the round from a younger
+  one. It does not separate the round's own group from a stranger's that took
+  the number, and on macOS that case is a hundred seconds of build load away.
 
 - **Name the round in the surviving process's `argv[0]`, not in its
   environment.** macOS withholds a process's environment from `ps -E` where the
@@ -69,19 +69,19 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 ## Needs your input
 
 - **Whether to leave one process of the round's own alive in each recorded
-  group.** It costs a line in the shell prefix and one `sleep` per shell tool for
-  the rest of the round, and it answers the question outright: the number cannot
-  be taken while the group holds it, and the process that holds it carries the
-  round's name where every `ps` on both systems prints it. Recommended: take it.
-  The alternative is a round that sends `SIGTERM`, and then `SIGKILL`, to a
-  process of the user's own that it never started, which this measurement reached
-  in 106 seconds.
+  group.** It costs a line in the shell prefix and one `sleep` per shell tool
+  for the rest of the round, and it answers the question outright: the number
+  cannot be taken while the group holds it, and the process that holds it
+  carries the round's name where every `ps` on both systems prints it.
+  Recommended: take it. The alternative is a round that sends `SIGTERM`, and
+  then `SIGKILL`, to a process of the user's own that it never started, which
+  this measurement reached in 106 seconds.
 
 - **What a shell with no `exec -a` should mean.** The line that leaves the
   process behind is bash's, and the prefix is silent about its own failures by
-  design, so under a shell without it no process is left and the round is back to
-  the age test with nothing saying so. Recommended: have the round refuse a group
-  it finds no process of its own in, and report the refusal. A round that
+  design, so under a shell without it no process is left and the round is back
+  to the age test with nothing saying so. Recommended: have the round refuse a
+  group it finds no process of its own in, and report the refusal. A round that
   recorded groups and signalled none is then visible rather than silent.
 
 ## Reference
@@ -92,17 +92,17 @@ The reading the round makes of each recorded group:
 ps -o pid=,pgid=,etime= -g <the recorded numbers, comma separated>
 ```
 
-`-g` selects a process group on macOS and a session on Linux. On Linux
+`-g` selects a process group on macOS and a session on Linux. On Linux,
 `ps -g 2503` returned pid 2503 of group 2503 and pid 2505 of group 2505, both of
-session 2503, and `ps -g 2505` returned nothing: a recorded number that is no
+session 2503, and `ps -g 2505` returned nothing. A recorded number that is no
 session's gets no rows there, so such a group is neither signalled nor refused.
-macOS prints no session for any process — `ps -o sess=` gave `0` for every one,
+macOS prints no session for any process: `ps -o sess=` gave `0` for every one,
 pid 1 included.
 
 ### Reading a process's environment
 
-On macOS the environment follows the command in the same `ps` call that reads the
-age, so nothing more is run:
+On macOS the environment follows the command in the same `ps` call that reads
+the age, so nothing more is run:
 
 ```
 ps -Eww -o pid=,pgid=,etime=,command= -g <the recorded numbers>
@@ -124,9 +124,10 @@ the shell inherited:
 
 On Linux the file is `/proc/<pid>/environ`, mode `-r--------` and owned by the
 uid, holding the variables NUL-separated. `stat` reports its size as 0 and the
-read returned 5,112 to 5,149 bytes. It is one read per process. `ps eww -p <pid>`
-returns the same content in 5,193 to 5,249 bytes, and `ps -ww -p <pid> eo
-pid=,args=` in 5,135 to 5,191. The flag is `-E` on macOS and `e` on Linux.
+read returned 5,112 to 5,149 bytes. It is one read per process.
+`ps eww -p <pid>` returns the same content in 5,193 to 5,249 bytes, and
+`ps -ww -p <pid> eo pid=,args=` in 5,135 to 5,191. The flag is `-E` on macOS and
+`e` on Linux.
 
 ### Leaving a process behind, named for the round
 
@@ -136,29 +137,38 @@ Run inside the recording shell, after the line that records the group:
 exec -a "squiz-<the round>" /bin/sleep 900 >/dev/null 2>&1 &
 ```
 
-`ps -o pid=,pgid=,command= -g <the group>` then prints `84354 84353
-squiz-0ddba11 120`, and the name is there for `/bin/sleep`, whose environment the
-same `ps` withholds. It survived a command that `exec`s. `exec -a` is bash's, and
-`/bin/sh -c "sleep 120" "squiz-0ddba11"` does not stand in for it: the shell
-execs its last command and the name goes with the shell.
+`ps -o pid=,pgid=,command= -g <the group>` then prints
+`84354 84353 squiz-0ddba11 120`, and the name is there for `/bin/sleep`, whose
+environment the same `ps` withholds. It survived a command that `exec`s.
+`exec -a` is bash's, and `/bin/sh -c "sleep 120" "squiz-0ddba11"` does not stand
+in for it: the shell execs its last command and the name goes with the shell.
 
 A process carrying the round's name is not a proof of the round's own group. One
 can be put into a group the round never created, where that group is in the
-reviewer's own session: `perl -e 'use POSIX; POSIX::setpgid(0,<group>);
-exec("node", ...)'` joined a group holding a process of the user's own, and
-`ps -Eww -g <group>` then showed the round's token in it.
+reviewer's own session. This joined a group holding a process of the user's own,
+and `ps -Eww -g <group>` then showed the round's token in it:
+
+```sh
+perl -e 'use POSIX; POSIX::setpgid(0,<group>); exec("node", "-e", "...")'
+```
 
 ### Forging a record
 
 The path reaches the shell as `SQUIZ_GROUPS`. `printenv SQUIZ_GROUPS` printed
-`/var/folders/.../round.<uuid>/groups`, and
-`printf '%s\n' <a pid> >> "$SQUIZ_GROUPS"` appended a number. `recordedGroups`
-returned both the shell's own number and the appended one, `stopRecordedGroups`
-returned `{"signalled":[6030],"refused":[]}`, and the process named 6030 was
-gone. The same run on Linux signalled and killed the appended number too.
+`/var/folders/.../round.<uuid>/groups`, and this appended a number of its own:
+
+```sh
+printf '%s\n' <a pid> >> "$SQUIZ_GROUPS"
+```
+
+`recordedGroups` then returned both the shell's own number and the appended one,
+`stopRecordedGroups` returned `{"signalled":[6030],"refused":[]}`, and the
+process named 6030 was gone. The same run on Linux signalled and killed the
+appended number too.
 
 `SQUIZ_GROUPS=` appears in the `ps -Eww` output of every `node` the round runs,
-so the path is readable by anything of the user's uid, not by the reviewer alone.
+so the path is readable by anything of the user's uid, not by the reviewer
+alone.
 
 ### How fast a number comes round
 
@@ -182,33 +192,33 @@ the wrap at 99,999 and the restart near 100.
 
 - **No `pi` ran.** The code measured is `src/reviewers/groups.ts` of the branch
   `reviewers/the-shell-records-its-group`, copied into a scratch directory and
-  imported from there. The shells were `/bin/bash` started detached, the way `pi`
-  starts one, with the prefix prepended as a line.
+  imported from there. The shells were `/bin/bash` started detached, the way
+  `pi` starts one, with the prefix prepended as a line.
 
 - **The allocation rate came from one shell loop running `/usr/bin/true`.** No
   build, test suite or compiler was measured, and nothing here says how long a
   real machine sustains a thousand a second.
 
-- **The strangers that took the numbers were started on purpose, each detached so
-  that it led a group.** What the run establishes is that the numbers were handed
-  out again inside the round, and that a new process holding one is signalled. How
-  often a machine's own next process both takes a recorded number and leads a
-  group was not measured.
+- **The strangers that took the numbers were started on purpose, each detached
+  so that it led a group.** What the run establishes is that the numbers were
+  handed out again inside the round, and that a new process holding one is
+  signalled. How often a machine's own next process both takes a recorded number
+  and leads a group was not measured.
 
-- **The wrap point is reckoned from the counter's own arithmetic**, not read from
-  a kernel variable, and the number it restarts from was not seen.
+- **The wrap point is reckoned from the counter's own arithmetic**, not read
+  from a kernel variable, and the number it restarts from was not seen.
 
 - **Why macOS withholds an environment was not established.** Every program it
   withheld for sits in `/bin` or `/usr/bin`, and the two it showed run from
-  elsewhere. A copy of `/bin/sleep` would have separated the program from where it
-  sits, and the copy will not run.
+  elsewhere. A copy of `/bin/sleep` would have separated the program from where
+  it sits, and the copy will not run.
 
 - **Whether root reads such an environment on macOS was not tested.** Nothing
   here ran as root, which is the case that matters.
 
 - **Whether the round's shells share a session with processes of the user's own
-  was not established.** That is what a forged witness needs, and macOS prints no
-  session for any process, so this machine cannot answer it.
+  was not established.** That is what a forged witness needs, and macOS prints
+  no session for any process, so this machine cannot answer it.
 
 - **The 200 processes left behind were measured against the pid space, not
   against `pi`.** Nothing says what `pi` makes of a shell tool whose group keeps
