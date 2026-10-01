@@ -213,7 +213,7 @@ const COMMENTS: readonly Split[] = [
   { line: "echo \\#1", commands: [[plain("echo"), built("#1")]] },
   { line: "git log --grep=x#y", commands: [[plain("git"), plain("log"), plain("--grep=x#y")]] },
   { line: "curl host/path#frag", commands: [[plain("curl"), plain("host/path#frag")]] },
-  // The quotes open the word, so the `#` after them opens a comment of its own.
+  // An empty quoted word is a word, and the `#` after the space that ends it is a comment.
   { line: 'echo "" #c', commands: [[plain("echo"), built("")]] },
 ];
 
