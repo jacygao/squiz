@@ -43,7 +43,7 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 
 - **Name the round in the surviving process's `argv[0]`, not in its
   environment.** macOS withholds a process's environment from `ps -E` where the
-  program is one of Apple's own, and a backgrounded `sleep`, `tail` or `bash`
+  program is one the system ships, and a backgrounded `sleep`, `tail` or `bash`
   loop is exactly that case. It withholds nothing from `argv`.
 
 - **Read a token in the environment as an answer on Linux and as half an answer
@@ -192,8 +192,12 @@ the wrap at 99,999 and the restart near 100.
 - **The wrap point is reckoned from the counter's own arithmetic**, not read from
   a kernel variable, and the number it restarts from was not seen.
 
-- **Whether root reads an Apple program's environment on macOS was not tested.**
-  Nothing here ran as root, which is the case that matters.
+- **Why macOS withholds an environment was not established.** Every program it
+  withheld for is one the system ships, and the two it showed are not, and a copy
+  of `/bin/sleep` could not be measured because the copy will not run.
+
+- **Whether root reads such an environment on macOS was not tested.** Nothing
+  here ran as root, which is the case that matters.
 
 - **Whether the round's shells share a session with processes of the user's own
   was not established.** That is what a forged witness needs, and macOS prints no
