@@ -35,11 +35,11 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
   a round, every one of them younger than the round, and the round signalled all
   200 and killed them.
 
-- **§ 4 says the round signals a recorded group only where the system says it is
-  still the round's own, and the age reading does not establish that.** It
-  separates a group older than the round from a younger one. It does not separate
-  the round's own group from a stranger's that took the number, and on macOS that
-  case is a hundred seconds of build load away.
+- **The age reading does not establish what § 4 says it does.** § 4 has the round
+  signal a recorded group only where the system says it is still the round's own.
+  The reading separates a group older than the round from a younger one. It does
+  not separate the round's own group from a stranger's that took the number, and
+  on macOS that case is a hundred seconds of build load away.
 
 - **Name the round in the surviving process's `argv[0]`, not in its
   environment.** macOS withholds a process's environment from `ps -E` where the
