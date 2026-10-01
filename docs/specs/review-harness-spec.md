@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.47 (draft)
+**Version:** 0.48 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -343,17 +343,27 @@ reach for touches the tree, the reporting calls included: what a report reaches
 is the round that is reading the reviewer's output, and nothing on disk.
 
 **At `deep` the grant includes `bash`, which is itself a write primitive.** A
-reviewer at `deep` can write to a tracked file, and three mechanisms bound what
+reviewer at `deep` can write to a tracked file, and four mechanisms bound what
 follows. None is configurable, and each applies where the third column says.
 
 | Mechanism | Guards against | Applies |
 |---|---|---|
 | **Scratch space.** `TMPDIR` points at `.squiz/<episode>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
-| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Everything else, including a write made through the shell. | Except in a shared worktree, where nothing detects such a write |
+| **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref`, `git push` — which the comparison cannot see, because every file is left exactly as it was. | At `deep`, where a shell is granted |
+| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Every write that was not refused, including one made through the shell. | Except in a shared worktree, where nothing detects such a write |
 
-The first two prevent, and the third detects. A tracked file that changed during
-a round is named in the summary comment.
+The first three prevent, and the fourth detects. A tracked file that changed
+during a round is named in the summary comment.
+
+**A refused call never reaches a shell, and the reviewer reads the refusal as
+that call's own error** while it is still there to choose something else. A
+command is read the way the shell splits it, and a refused name counts where a
+command runs rather than wherever the name appears: a listed command written
+inside another command's argument is an argument. A word the shell would build
+out of quoting or substitution is left alone, so what the refusals hold is a
+reviewer acting in good faith rather than one working around them. The
+comparison is what covers everything they do not.
 
 ### Adapters
 
