@@ -26,6 +26,7 @@ const ENDS_A_COMMAND: ReadonlySet<string> = new Set([";", "\n", "|", "&", "(", "
 const SINGLE_QUOTE = "'";
 const DOUBLE_QUOTE = '"';
 const BACKSLASH = "\\";
+const COMMENT = "#";
 
 /**
  * What a backslash escapes inside double quotes.
@@ -47,6 +48,11 @@ const ESCAPED_IN_DOUBLE_QUOTES: ReadonlySet<string> = new Set([DOUBLE_QUOTE, BAC
  * - Inside double quotes, a backslash escapes `"`, `\`, `$` and a backtick, and
  *   stands for itself before anything else. Only an unescaped double quote
  *   closes them.
+ *
+ * A `#` where a word starts opens a comment, and the shell reads the rest of the
+ * line as nothing: a quote inside it opens nothing and a separator inside it
+ * ends no command. Written anywhere else it is a character of the word — quoted,
+ * escaped, or against a word already begun, as in `--grep=x#y`.
  *
  * A quoted empty string is a word: `git -C "" commit` is four words, and the
  * third of them is empty. A quote left open runs to the end of the line, which
@@ -112,6 +118,16 @@ export function splitIntoCommands(line: string): readonly (readonly Word[])[] {
       }
       take(char);
       take(escaped);
+      continue;
+    }
+
+    // A word already begun takes the `#` as one of its characters, so only an
+    // unquoted `#` with no word open is a comment.
+    if (char === COMMENT && !open) {
+      const newline = line.indexOf("\n", at + 1);
+      if (newline === -1) break;
+      // The newline closes the comment, and the next pass reads it as the separator it is.
+      at = newline - 1;
       continue;
     }
 

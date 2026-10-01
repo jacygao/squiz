@@ -227,6 +227,31 @@ test("an escaped quote moves no command across the boundary, in either direction
   );
 });
 
+/**
+ * A comment is not the text of a command, in either direction.
+ *
+ * The apostrophe in the first of these opened a quote that absorbed the line
+ * after it, and a plain `git commit` ran: `HEAD` moved and the tree stayed as it
+ * was. The `;` in the second invented a commit the shell never runs, and an
+ * ordinary `git status` was refused for it.
+ */
+test("a command is refused after a comment, and a comment refuses nothing of its own", () => {
+  assert.equal(
+    refuse(shell("# Record the reviewer's result\ngit commit --allow-empty -m review"))?.block,
+    true,
+  );
+  assert.equal(
+    refuse(shell("git status --porcelain # example: git status; git commit -m x")),
+    undefined,
+    "the commit is inside a comment, and a reviewer refused this cannot read the tree",
+  );
+  assert.equal(
+    refuse(shell("echo '# not a comment' && git commit -m x"))?.block,
+    true,
+    "a quoted `#` opens no comment, and the commit after it is a command",
+  );
+});
+
 /** `--soft` is what makes the reset invisible, and git takes it in any position. */
 test("the reset that leaves the tree alone is refused wherever --soft sits", () => {
   assert.equal(refuse(shell("git reset --soft HEAD~1"))?.block, true);

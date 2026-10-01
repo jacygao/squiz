@@ -170,6 +170,53 @@ const SEPARATORS_INSIDE_QUOTES: readonly Split[] = [
   },
 ];
 
+/**
+ * A `#` where a word starts is a comment, and a `#` anywhere else is a character
+ * of the word.
+ *
+ * What a comment holds decides nothing, so the quote and the separator rules
+ * above stop at it. Read as text instead, an apostrophe in a comment swallows
+ * the command on the next line and a `;` in one invents a command the shell
+ * never runs.
+ */
+const COMMENTS: readonly Split[] = [
+  {
+    line: "# Record the reviewer's result\ngit commit --allow-empty -m review",
+    commands: [
+      [plain("git"), plain("commit"), plain("--allow-empty"), plain("-m"), plain("review")],
+    ],
+  },
+  {
+    line: '# say "no" to it\ngit commit -m x',
+    commands: [[plain("git"), plain("commit"), plain("-m"), plain("x")]],
+  },
+  {
+    line: "git status # then: git commit; git push | wc -l",
+    commands: [[plain("git"), plain("status")]],
+  },
+  {
+    line: "git add --all; # git commit\ngit status",
+    commands: [
+      [plain("git"), plain("add"), plain("--all")],
+      [plain("git"), plain("status")],
+    ],
+  },
+  { line: "# nothing here", commands: [] },
+  {
+    line: "echo '# not a comment' && git commit",
+    commands: [
+      [plain("echo"), built("# not a comment")],
+      [plain("git"), plain("commit")],
+    ],
+  },
+  { line: 'echo "#1"', commands: [[plain("echo"), built("#1")]] },
+  { line: "echo \\#1", commands: [[plain("echo"), built("#1")]] },
+  { line: "git log --grep=x#y", commands: [[plain("git"), plain("log"), plain("--grep=x#y")]] },
+  { line: "curl host/path#frag", commands: [[plain("curl"), plain("host/path#frag")]] },
+  // The quotes open the word, so the `#` after them opens a comment of its own.
+  { line: 'echo "" #c', commands: [[plain("echo"), built("")]] },
+];
+
 test("a command line splits into the commands it runs and the words of each", () => {
   splitsInto(SPLITS);
 });
@@ -184,6 +231,10 @@ test("a backslash inside double quotes escapes the quote and leaves the argument
 
 test("a separator inside quotes does not end the command", () => {
   splitsInto(SEPARATORS_INSIDE_QUOTES);
+});
+
+test("a comment runs to the newline, and a # written elsewhere is a character of a word", () => {
+  splitsInto(COMMENTS);
 });
 
 /**

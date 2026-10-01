@@ -60,6 +60,16 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
   outside quotes a backslash escapes whatever follows it; and a quoted empty
   string is a word. A table of lines to the words expected out of them tests the
   splitter without going near the matcher.
+- **Skip a comment before reading the quotes and the separators inside it.** A
+  `#` where a word starts opens a comment, and the shell reads the rest of the
+  line as nothing. Read as text, a comment is wrong in both directions at once.
+  The apostrophe in `# Record the reviewer's result` opened a quote that absorbed
+  the line after it, and the plain `git commit` written there ran: `HEAD` moved
+  and the tree stayed as it was. The `;` in `git status --porcelain # example:
+  git status; git commit -m x` invented a commit the shell never runs, and that
+  refused an ordinary `git status`. A `#` written anywhere else is a character of
+  the word: quoted, escaped, or against a word already begun, as in
+  `--grep=x#y`.
 - **Read a short option's value written onto the flag, for the options on a
   named list of those that take one.** `git checkout -Breview-copy` is git's
   ordinary spelling of `-B review-copy`, and an exact match on `-B` let it
@@ -140,6 +150,9 @@ option to take it.
 
 `-B` takes its value attached as well as apart, so `git checkout -Breview-copy`
 is `git checkout -B review-copy`.
+
+**`pi` runs a `bash` call in `/bin/bash --noprofile --norc`, fed on stdin.** That
+shell is not interactive, so a `#` where a word starts is a comment every time.
 
 ## Limits
 

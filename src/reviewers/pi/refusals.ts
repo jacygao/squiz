@@ -15,17 +15,19 @@
  *
  * **A command line is split into words, and the split is not a shell.** The
  * splitting reads the quoting, so a separator inside an argument stays inside it
- * and a separator outside one ends a command. It expands nothing, and a word
- * that carried a quote or a backslash is left alone rather than matched. So the
- * split refuses a reviewer that is not trying to get around the list and does
- * not bound one that is: `git "com"mit`, `git $(echo commit)`, a script file, an
- * encoded string and `sh -c` all run, and a reviewer that means to commit still
- * can. A command handed to another command to run — after `env`, `xargs` or
- * `ssh` — is read as that command's arguments and matches nothing. A heredoc's
- * body is not told from the script around it, so a line inside one that reads as
- * a refused command is refused. What keeps the gap small is that the tools
- * needing no matching go by name, and that the list only has to cover the
- * commands which move `HEAD` without touching the tree.
+ * and a separator outside one ends a command. It reads a comment too: a command
+ * written after a `#` is one the shell never runs, and nothing here refuses it.
+ * It expands nothing, and a word that carried a quote or a backslash is left
+ * alone rather than matched. So the split refuses a reviewer that is not trying
+ * to get around the list and does not bound one that is: `git "com"mit`,
+ * `git $(echo commit)`, a script file, an encoded string and `sh -c` all run,
+ * and a reviewer that means to commit still can. A command handed to another
+ * command to run — after `env`, `xargs` or `ssh` — is read as that command's
+ * arguments and matches nothing. A heredoc's body is not told from the script
+ * around it, so a line inside one that reads as a refused command is refused.
+ * What keeps the gap small is that the tools needing no matching go by name,
+ * and that the list only has to cover the commands which move `HEAD` without
+ * touching the tree.
  *
  * `pi` is not a dependency of this package and nothing here may make it one, so
  * the call and the answer are described structurally, as the extension's own
