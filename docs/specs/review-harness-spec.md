@@ -351,7 +351,7 @@ follows. None is configurable, and each applies where the third column says.
 | **Scratch space.** `TMPDIR` points at `.squiz/<episode>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
 | **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref`, `git push` — which the comparison cannot see, because every file is left exactly as it was. | At `deep`, where a shell is granted |
-| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | Every write that was not refused, including one made through the shell. | Except in a shared worktree, where nothing detects such a write |
+| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell. | Except in a shared worktree, where nothing detects such a write |
 
 The first three prevent, and the fourth detects. A tracked file that changed
 during a round is named in the summary comment.
@@ -362,8 +362,15 @@ command is read the way the shell splits it, and a refused name counts where a
 command runs rather than wherever the name appears: a listed command written
 inside another command's argument is an argument. A word the shell would build
 out of quoting or substitution is left alone, so what the refusals hold is a
-reviewer acting in good faith rather than one working around them. The
-comparison is what covers everything they do not.
+reviewer acting in good faith rather than one working around them.
+
+**A command that moves `HEAD` and is not refused is neither prevented nor
+detected.** The comparison reads the worktree rather than where `HEAD` points, so
+a commit leaves `git status` and every tracked file exactly as they were and the
+comparison reports that nothing changed. `git "com"mit` is such a command: the
+quoting puts it outside what the refusals match, and the commit it makes is
+outside what the comparison sees. The two mechanisms overlap on a write to a
+file, and neither one covers this.
 
 ### Adapters
 
