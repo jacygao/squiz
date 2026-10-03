@@ -38,15 +38,39 @@ import {
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
+import {
+  KEEPER_VARIABLE,
+  RECORD_VARIABLE,
+  type RoundSpace,
+  stopRecordedGroups,
+} from "./groups.ts";
 
 /**
  * How long a killed reviewer is given to exit before it is killed outright, and
  * again before the round stops waiting for it.
  *
- * A round that reaches its time bound therefore returns within twice this of
- * reaching it, which is what the margin left for posting has to cover.
+ * The reviewer's own group is stopped first and the groups its shells recorded
+ * after it, each on its own escalation, so the signals a round sends after
+ * reaching its time bound take four times this at most. What the readings between
+ * them take is bounded separately, below.
  */
 const GRACE_MS = 2_000;
+
+/**
+ * The longest one round's shutdown spends asking the system what is in the groups
+ * its shells recorded.
+ *
+ * Its own bound, and not part of the round's. It covers the readings rather than
+ * the signals, which keep the grace above: a `ps` that will not answer has no
+ * bound of its own, and the round would sit in its cleanup until the runtime
+ * killed the hook — with the review already paid for, its spend unrecorded and
+ * nothing posted. A reading cut short at this leaves the groups it covered alone,
+ * which is the same answer a machine without `ps` gets.
+ *
+ * This and four times the grace together are what the margin left for posting has
+ * to cover.
+ */
+const INSPECTION_MS = 5_000;
 
 /**
  * What one round of review came to, and how many of the reviewer's calls it
@@ -119,6 +143,22 @@ export async function runRound(
     return { outcome: "setup", cost: unspent, reason: unmade, refusals: 0, ...nothingReported };
   }
 
+  // What the CLI reads from a file rather than from its command line is put in
+  // place before anything starts. A confinement that is not in place is not a
+  // round to run: at `deep` it is what the round reaches a detached tool by.
+  const confinement = adapter.confine(invocation);
+  if (confinement.outcome === "failed") {
+    return {
+      outcome: "setup",
+      cost: unspent,
+      reason: confinement.reason,
+      refusals: 0,
+      ...nothingReported,
+    };
+  }
+
+  const environment = environmentOf(invocation, scratch, confinement.environment);
+
   let spent = unspent;
   // Added up rather than replaced, unlike the reports below: each refusal is a
   // call that was stopped, and a second attempt does not undo one.
@@ -127,7 +167,7 @@ export async function runRound(
   for (let attempts = 1; ; attempts += 1) {
     let ran: Attempt;
     try {
-      ran = await attempt(adapter, invocation, scratch, bound);
+      ran = await attempt(adapter, invocation, environment, bound);
     } catch (cause) {
       // A throw here is this harness's own bug. The round is still a value.
       return {
@@ -180,6 +220,30 @@ export async function runRound(
 /** No findings and no verdicts: what an attempt the reviewer told nothing carries. */
 const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] });
 
+/**
+ * The environment the reviewer runs in.
+ *
+ * `TMPDIR` is the scratch space, so a probe script cannot land in the tree under
+ * review. The record's own variable is named here rather than by the adapter: it
+ * is the harness's, and every shell the reviewer starts inherits it, so the line
+ * the adapter delivers carries no path of its own.
+ */
+function environmentOf(
+  invocation: Invocation,
+  scratch: string,
+  confinement: Readonly<Record<string, string>>,
+): NodeJS.ProcessEnv {
+  const space = invocation.roundSpace;
+  return {
+    ...process.env,
+    TMPDIR: scratch,
+    ...confinement,
+    ...(space === undefined
+      ? {}
+      : { [RECORD_VARIABLE]: space.shellRecord, [KEEPER_VARIABLE]: space.keeperName }),
+  };
+}
+
 /** How one attempt ended, what it spent getting there, and what it got through. */
 type Attempt = {
   readonly cost: RoundCost;
@@ -225,13 +289,13 @@ const COMPLAINT_LIMIT = 2_000;
 async function attempt(
   adapter: Adapter,
   invocation: Invocation,
-  scratch: string,
+  environment: NodeJS.ProcessEnv,
   bound: Deadline,
 ): Promise<Attempt> {
   const line = adapter.argv(invocation);
   const options: SpawnOptionsWithStdioTuple<StdioNull, StdioPipe, StdioPipe> = {
     cwd: line.directory,
-    env: { ...process.env, TMPDIR: scratch },
+    env: environment,
     // The reviewer leads its own process group, so that stopping it stops the
     // tools it started. At depth `read` the grant is the only thing keeping the
     // reviewer off the code under review, and a tool outliving the round that
@@ -288,6 +352,7 @@ async function attempt(
     child,
     group: child.pid,
     gone: () => hasStopped(child) || unstarted,
+    space: invocation.roundSpace,
   };
 
   // Read as the chunks arrive, so that a reviewer flooding its output is
@@ -455,7 +520,7 @@ function endedAs(command: string, child: ChildProcess): string {
 /** How often the reviewer's group is asked whether anything of it is left. */
 const POLL_MS = 25;
 
-/** What one round owns: the reviewer, and the process group it leads. */
+/** What one round owns: the reviewer, its own group, and the groups its shells led. */
 type Owned = {
   readonly child: ChildProcess;
   /**
@@ -465,25 +530,45 @@ type Owned = {
   readonly group: number | undefined;
   /** Whether the reviewer itself is gone, including where it never started. */
   readonly gone: () => boolean;
+  /**
+   * Where the shells the reviewer started recorded the groups they lead. Absent
+   * at a depth granting no shell, where nothing detaches and nothing records.
+   */
+  readonly space: RoundSpace | undefined;
 };
 
 /**
  * Stop the reviewer and everything it started, and do not return while any of
  * it might still be running.
  *
- * `SIGTERM` to the process group first, which makes the reviewer kill its own
- * children and exit. Anything of the group still there after the grace is
- * killed outright, and each wait is bounded, so a reviewer that answers neither
- * signal cannot hold the round open.
+ * Two groups of processes, because a reviewer CLI that starts a shell tool
+ * detached puts that shell in a group of its own, which the reviewer's group is
+ * not. The reviewer's group goes first, so that nothing new starts while the
+ * record is being read, and the groups the shells recorded go after it.
  *
- * **The reviewer's own exit does not end this.** A tool it started sits in the
- * same group and can outlive it, whether because the reviewer finished first or
- * because the reviewer took the signal and the tool did not. At depth `read`
- * the grant is the only thing keeping the round off the code under review, and
- * a tool that outlives the round is outside the grant as much as outside the
- * bound.
+ * **The reviewer's own exit does not end this.** A tool it started can outlive
+ * it, whether because the reviewer finished first or because the reviewer took
+ * the signal and the tool did not. At depth `read` the grant is the only thing
+ * keeping the round off the code under review, and a tool that outlives the
+ * round is outside the grant as much as outside the bound.
  */
 async function stop(owned: Owned): Promise<void> {
+  await stopReviewer(owned);
+  const { space } = owned;
+  // One deadline for the whole of the inspection, so that a record naming many
+  // groups is bounded as well as a single `ps` that will not answer.
+  if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
+}
+
+/**
+ * Stop the reviewer's own process group.
+ *
+ * `SIGTERM` first, which makes the reviewer kill its own children and exit.
+ * Anything of the group still there after the grace is killed outright, and each
+ * wait is bounded, so a reviewer that answers neither signal cannot hold the
+ * round open.
+ */
+async function stopReviewer(owned: Owned): Promise<void> {
   if (owned.gone() && !groupRuns(owned)) return;
   signal(owned, "SIGTERM");
   if (await settled(owned, GRACE_MS)) return;

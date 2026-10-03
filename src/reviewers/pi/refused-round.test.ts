@@ -123,6 +123,9 @@ function invocationIn(tree: string): Invocation {
     scratchDirectory: ".squiz/agent-1/scratch",
     depth: "deep",
     thinking: "medium",
+    // No space, so nothing records a group. What a refused call does is the whole
+    // of what this reads, and it never reaches a shell.
+    roundSpace: undefined,
   };
 }
 

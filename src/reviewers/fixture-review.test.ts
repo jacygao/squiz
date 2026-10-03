@@ -290,6 +290,7 @@ function invocationIn(tree: string): Invocation {
     scratchDirectory,
     depth: "read",
     thinking: "medium",
+    roundSpace: undefined,
   };
 }
 

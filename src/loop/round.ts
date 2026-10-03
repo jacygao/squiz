@@ -34,6 +34,7 @@ import {
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
+import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
@@ -280,22 +281,39 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     );
   }
 
-  const review = await runReview(
-    setup.adapter,
-    {
-      directory,
-      charterFile: setup.charterFile,
-      prompt: composePrompt(
-        { pullRequest, diff: fetched.diff, threads: handedOver },
-        { depth: config.depth, command: config.test },
-      ),
-      sessionDirectory: episode.sessionDirectory,
-      scratchDirectory: episode.scratchDirectory,
-      thinking: config.thinking,
-      depth: config.depth,
-    },
-    seconds,
-  );
+  // Only `deep` grants a shell, and only a shell detaches, so at `read` there is
+  // nothing for a round to record and nothing for it to reach. One value says
+  // so, and the reviewer's round and the adapter both read it.
+  const space = config.depth === "deep" ? makeRoundSpace(episode.directory) : undefined;
+  if (space !== undefined && space.outcome === "failed") {
+    return failed("harness", `no review ran: ${space.reason}`);
+  }
+  const roundSpace = space === undefined ? undefined : space.space;
+
+  let review: Review;
+  try {
+    review = await runReview(
+      setup.adapter,
+      {
+        directory,
+        charterFile: setup.charterFile,
+        prompt: composePrompt(
+          { pullRequest, diff: fetched.diff, threads: handedOver },
+          { depth: config.depth, command: config.test },
+        ),
+        sessionDirectory: episode.sessionDirectory,
+        scratchDirectory: episode.scratchDirectory,
+        thinking: config.thinking,
+        depth: config.depth,
+        roundSpace,
+      },
+      seconds,
+    );
+  } finally {
+    // Whatever the round became, what it wrote for itself is this round's alone
+    // and nothing reads it again.
+    if (roundSpace !== undefined) discardRoundSpace(roundSpace);
+  }
 
   // Taken here rather than on the reviewed path alone. A reviewer killed at its
   // bound is the one most likely to have left a write behind.

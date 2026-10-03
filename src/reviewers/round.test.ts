@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { type Adapter, type Invocation, unspent } from "./adapter.ts";
+import { type Adapter, type Confinement, type Invocation, unspent } from "./adapter.ts";
+import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { grants } from "./pi/argv.ts";
 import { parse } from "./pi/parse.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
@@ -341,6 +342,7 @@ test("a process that ran and said nothing and a spawn that failed are both setup
         directory: invocation.directory,
       }),
       parse,
+      confine: handsNothingOver,
       grants,
     };
     const never = await runRound(missing, at(tree), 10);
@@ -411,6 +413,7 @@ test("an attempt that ended past the bound is not tried again", async () => {
         while (Date.now() < until) await Promise.resolve();
         return { cost: unspent, result: { kind: "unparsed", reason: "nothing there" } };
       },
+      confine: handsNothingOver,
       grants,
     };
     const round = await runRound(starving, at(tree), 0.1);
@@ -429,6 +432,7 @@ test("a reviewer that is not installed is a setup problem, named as one", async 
         directory: invocation.directory,
       }),
       parse,
+      confine: handsNothingOver,
       grants,
     };
     const round = await runRound(missing, at(tree), 10);
@@ -462,6 +466,7 @@ test("an adapter that throws reading the output is output that could not be read
         };
       },
       parse: () => Promise.reject(new Error("the adapter fell over")),
+      confine: handsNothingOver,
       grants,
     };
     const round = await runRound(throwing, at(tree), 10);
@@ -564,6 +569,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
         });
         throw new Error("the adapter fell over before it started");
       },
+      confine: handsNothingOver,
       grants,
     };
 
@@ -606,6 +612,63 @@ test("a tool that outlives a reviewer which took the signal is stopped too", asy
     const round = await runRound(reviewer(obedient(tree)).adapter, at(tree), BOUND);
     assert.equal(round.outcome, "timed-out");
     assert.ok(await gone(toolIn(tree)), "the tool outlived the round that started it");
+  });
+});
+
+/**
+ * A tool the reviewer put in a group of its own is outside the group the round
+ * signals, so the round's own signal never reaches it. What reaches it is the
+ * record the shell wrote before it ran anything.
+ */
+test("a tool the reviewer detached into a group of its own is stopped with the round", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(detachingAndLeaving(tree)).adapter, atDeep(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.ok(
+      await gone(toolIn(tree)),
+      "a tool in a group of its own outlived the round that started it",
+    );
+  });
+});
+
+test("the reviewer is told where to record, and told nothing where there is no record", async () => {
+  await inATree(async (tree) => {
+    const invocation = atDeep(tree);
+    const told = await runRound(reviewer(reporting("process.env.SQUIZ_GROUPS")).adapter, invocation, 10);
+    assert.equal(headlineOf(told), invocation.roundSpace?.shellRecord);
+
+    const none = await runRound(reviewer(reporting("process.env.SQUIZ_GROUPS")).adapter, at(tree), 10);
+    assert.equal(headlineOf(none), "undefined", "a depth granting no shell has nothing to record");
+  });
+});
+
+test("what the adapter puts on the environment reaches the reviewer", async () => {
+  await inATree(async (tree) => {
+    const running = reviewer(reporting("process.env.PI_CODING_AGENT_DIR"));
+    const adapter: Adapter = {
+      ...running.adapter,
+      confine: () => ({ outcome: "prepared", environment: { PI_CODING_AGENT_DIR: "/somewhere" } }),
+    };
+    assert.equal(headlineOf(await runRound(adapter, atDeep(tree), 10)), "/somewhere");
+  });
+});
+
+/**
+ * A confinement that is not in place is not a round to run: at `deep` it is what
+ * the round reaches a detached tool by, and a round that ran anyway would leave
+ * every tool the reviewer detached running.
+ */
+test("a confinement that could not be put in place is a setup problem, and nothing is run", async () => {
+  await inATree(async (tree) => {
+    const running = reviewer(reviewing);
+    const adapter: Adapter = {
+      ...running.adapter,
+      confine: () => ({ outcome: "failed", reason: "the settings could not be written" }),
+    };
+    const round = await runRound(adapter, atDeep(tree), 10);
+    assert.equal(round.outcome, "setup");
+    assert.equal(round.outcome === "setup" ? round.reason : "", "the settings could not be written");
+    assert.equal(running.starts(), 0);
   });
 });
 
@@ -701,6 +764,45 @@ function obedient(tree: string): string {
   return withTool(tree, "setInterval(() => {}, 1000);");
 }
 
+/**
+ * A reviewer that starts a tool through a shell of its own group, waits for the
+ * tool to be up, and then does what it is told.
+ *
+ * It is what a CLI that starts each shell tool detached leaves behind: the shell
+ * leads a group the reviewer's own signal never reaches, and the lines the shell
+ * runs first are what name it and hold its number.
+ *
+ * The shell runs the real prefix, so the group is recorded and held the way a
+ * round's own shells record and hold theirs. A fixture that wrote the number
+ * itself would leave the round judging a group nothing of the round was in.
+ */
+function detaching(tree: string, andThen: string): string {
+  const pidFile = join(tree, "pids");
+  const readyFile = join(tree, "ready");
+  const toolFile = join(tree, "tool.js");
+  const command = [
+    shellPrefix,
+    `'${process.execPath}' '${toolFile}' &`,
+    `printf '%s %s\\n' "$$" "$!" > '${pidFile}'`,
+  ].join("\n");
+  return [
+    'const { spawn } = require("node:child_process");',
+    'const fs = require("node:fs");',
+    `fs.writeFileSync(${JSON.stringify(toolFile)}, ${JSON.stringify(deafly(readyFile))});`,
+    `spawn("/bin/bash", ["-c", ${JSON.stringify(command)}], { stdio: "ignore", detached: true });`,
+    "const until = Date.now() + 10000;",
+    `const up = () => fs.existsSync(${JSON.stringify(readyFile)}) && fs.existsSync(${JSON.stringify(pidFile)});`,
+    "while (!up() && Date.now() < until) {}",
+    andThen,
+  ].join("\n");
+}
+
+/** A reviewer that detaches a tool, reviews, and leaves while the tool is running. */
+function detachingAndLeaving(tree: string): string {
+  const answer = JSON.stringify(reportingMessage + reported);
+  return detaching(tree, `process.stdout.write(${answer}, () => process.exit(0));`);
+}
+
 /** A reviewer that never reached the model, which says so on stderr and exits. */
 const refusingToStart = [
   "process.stderr.write('Error: Unknown provider \"nosuchprovider\". Use --list-models to see available providers/models.\\n');",
@@ -759,6 +861,7 @@ function reviewer(...scripts: readonly string[]): Running {
       starts += 1;
       return { command: process.execPath, args: ["-e", script], directory: invocation.directory };
     },
+    confine: handsNothingOver,
     parse,
     grants,
   };
@@ -774,7 +877,24 @@ function at(tree: string): Invocation {
     scratchDirectory,
     depth: "read",
     thinking: "medium",
+    roundSpace: undefined,
   };
+}
+
+/** The same invocation at the depth that grants a shell, with a record to match. */
+function atDeep(tree: string): Invocation {
+  const made = makeRoundSpace(join(tree, ".squiz/agent-1"));
+  assert.equal(made.outcome, "made", "the round's own space must be there before the reviewer starts");
+  return {
+    ...at(tree),
+    depth: "deep",
+    roundSpace: made.outcome === "made" ? made.space : undefined,
+  };
+}
+
+/** An adapter whose CLI is handed nothing outside its command line. */
+function handsNothingOver(): Confinement {
+  return { outcome: "prepared", environment: {} };
 }
 
 /** A fresh work tree, removed however the test ends. */

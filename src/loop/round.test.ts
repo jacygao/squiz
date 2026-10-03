@@ -173,6 +173,11 @@ type Ran = {
   readonly markedWhenStarted: readonly boolean[];
   /** Whether the marker naming this round was still there once the round ended. */
   readonly markerLeft: boolean;
+  /**
+   * Whether the round's own space was still there once the round had ended, or
+   * `null` where the round was handed none.
+   */
+  readonly roundSpaceLeft: boolean | null;
   readonly state: EpisodeState | null;
   /** The state file exactly as it stands, `null` where there is no file at all. */
   readonly stateSource: string | null;
@@ -462,6 +467,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     let running = 0;
     const current = (): Reviewer => reviewers[running] ?? setup.reviewer;
     const adapter: Adapter = {
+      confine: () => ({ outcome: "prepared", environment: {} }),
       argv: (invocation) => {
         invocations.push(invocation);
         // Read here rather than after the round: the reviewer is told to write
@@ -516,6 +522,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       directoriesReady,
       markedWhenStarted,
       markerLeft: existsSync(marker),
+      roundSpaceLeft: spaceLeft(invocations),
       state: stateIn(stateSource),
       stateSource,
       elapsedMs,
@@ -528,6 +535,12 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     unlock(join(worktree, ".squiz"));
     await rm(root, { recursive: true, force: true });
   }
+}
+
+/** Whether the space the round made for itself outlived the round. */
+function spaceLeft(invocations: readonly Invocation[]): boolean | null {
+  const space = invocations[0]?.roundSpace;
+  return space === undefined ? null : existsSync(space.directory);
 }
 
 /** Let `directory` and everything under it be written again, where it is there. */
@@ -905,6 +918,36 @@ test("the configured test command reaches a reviewer at `deep` and not one at `r
     false,
     "a reviewer with no shell was named a command to run the tests with",
   );
+});
+
+/**
+ * Only `deep` grants a shell, and only a shell puts a tool in a group of its
+ * own. At `read` there is nothing to record, so nothing is recorded and nothing
+ * is read back: a record at `read` would have the round signalling numbers no
+ * reviewer of that depth could have written.
+ *
+ * The record lives in the episode's directory, which is gitignored, so the
+ * comparison of tracked files never reads it as a change. Its name is the
+ * round's own and it goes when the round ends, so a later round can take neither
+ * it nor what a killed round left behind for its own.
+ */
+test("a round at `deep` records its shells' groups, and one at `read` records nothing", async () => {
+  const deep = await runInFixture({
+    answers: POSTING,
+    reviewer: reviews({}),
+    config: { depth: "deep" },
+  });
+  const read = await runInFixture({ answers: POSTING, reviewer: reviews({}), config: {} });
+
+  const space = deep.invocations[0]?.roundSpace;
+  assert.ok(space !== undefined, "a reviewer with a shell was handed nowhere to record");
+  assert.ok(
+    space.shellRecord.startsWith(join(space.directory, "")),
+    `the record is at ${space.shellRecord}, which is outside the round's own space`,
+  );
+  assert.match(space.directory, /\.squiz\//u, "the record is outside the episode's own directory");
+  assert.equal(deep.roundSpaceLeft, false, "the round's own space outlived the round");
+  assert.equal(read.invocations[0]?.roundSpace, undefined);
 });
 
 /**
