@@ -224,6 +224,8 @@ what detects a write made through the shell it grants.
       worktrees, as the specification shows.
 - [ ] A round that fails posts a failure comment naming what failed and what
       else it established, and prints the same reason on stderr.
+- [ ] A round runs inside a 540-second window, and `timeout` defaults to 360
+      and rejects anything above it.
 - [ ] The plugin ships the review skill, and a dispatched subagent whose brief
       does not mention squiz loads it and works a real pull request's threads to
       exit 0 or 3.

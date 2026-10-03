@@ -391,7 +391,8 @@ for a subagent the session did not dispatch: its firing for a state under review
 waits for that round and posts nothing of its own. Such a firing holds that
 subagent until the round ends.
 
-The hook's own timeout is 600 seconds, the same as the window under § 7. Its shell
+The hook's registration declares a timeout of 600 seconds, a minute over the
+window under § 7. Its shell
 does not have the plugin's `bin/` on its `PATH`, so the registration names the
 binary through `${CLAUDE_PLUGIN_ROOT}`.
 
@@ -1104,7 +1105,7 @@ The round is a failed one and closes no episode, so the line is written by the
 round that closes the episode later, from the episode's state:
 
 ```markdown
-- The review was cut short by the 480-second time bound in round 2, and the round kept only the findings it had reported by then
+- The review was cut short by the 360-second time bound in round 2, and the round kept only the findings it had reported by then
 ```
 
 A review that finished on its own has no such line, however close to the bound
@@ -1141,7 +1142,7 @@ Each round is written to the episode's local state file as the round finishes,
 before anything is posted:
 
 ```json
-{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 481.2, "cutShortAtSeconds": 480 }
+{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 361.2, "cutShortAtSeconds": 360 }
 ```
 
 - `dollars` and `tokens` are what the round spent, the dollars being zero where
@@ -1314,7 +1315,7 @@ reason its failure comment gives, then each thing the comment lists, then where
 the comment went:
 
 ```
-squiz: review failed: the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings
+squiz: review failed: the reviewer was stopped at the time bound of 360 seconds, after reporting 2 findings
 squiz: `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
 squiz: the failure is posted on PR #41
 ```
@@ -1439,7 +1440,7 @@ worktree, and a comparison that could not be taken. A round that salvaged findin
 says how many it posted as threads.
 
 ```markdown
-**Squiz review failed — the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings**
+**Squiz review failed — the reviewer was stopped at the time bound of 360 seconds, after reporting 2 findings**
 
 Both findings are posted as threads. The review is still open, and the next run of `squiz review` reviews again.
 
@@ -1485,7 +1486,7 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 480 seconds | The reviewer process is killed, the round records that the bound cut it short, and it posts the findings reported before the kill. |
+| **Time**, per round | 360 seconds | The reviewer process is killed, the round records that the bound cut it short, and it posts the findings reported before the kill. |
 | **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
@@ -1518,38 +1519,36 @@ posted nothing at all.
 A failed round that confirmed nothing has no findings to post and no verdicts to
 apply. It still posts its failure comment under § 7.
 
-**A round runs inside a window of 600 seconds, the longest a coding agent in
-Claude Code can ask a foreground shell command to run.** The command runs inside
-the coding agent's own tool call, and the agent waits on it. A review takes
-several minutes, and Claude Code gives a command 120 seconds unless the agent
-asks for more, so the instruction under § 9 tells the agent to pass its tool's
-longest timeout.
+**A round runs inside a window of 540 seconds, a minute under the longest
+timeout a coding agent in Claude Code can give a foreground shell command.** The
+command runs inside the coding agent's own tool call, and the agent waits on it.
+Claude Code gives a command 120 seconds unless the agent asks for more, so the
+instruction under § 9 tells the agent to pass its tool's longest timeout of
+600 seconds.
 
-A command that outruns the agent's timeout moves to the background, and the
-instruction tells the agent to wait for it. A foreground subagent often ends its
-run instead, which stops the command and every process under it, the reviewer
-included (§ 2). The round then ends as a command stopped from outside. A window
-equal to the longest timeout leaves the round no room for its stopping overrun or
-its own start, so a round that runs long is moved, and often lost.
+The minute is for what the window does not measure: the process starting before
+the window opens, and the overrun of stopping the reviewer after it closes. A
+command that outruns the agent's timeout moves to the background. A foreground
+subagent often ends its run then, which stops the command and every process
+under it, the reviewer included (§ 2). So a round ends inside one shell call, or
+is often lost.
 
-**The window is not settled.** Two ways out of this are open:
+The window is interim. It exists because a reviewer runs inside the coding
+agent's shell call. Where reviewers run as sessions of their own, a direction the
+P2 row Paired sessions names, no shell call bounds a round.
 
-- **A window of 540 seconds**, so that a round, its overrun included, ends inside
-  one shell call. The time bound and the shares shrink to fit.
-- **A review started detached from the command**, so that the review outlives the
-  command, and a rerun of `squiz review` on the same state attaches to the review
-  in progress instead of starting one. This rests on something not measured:
-  whether a detached process survives the runtime stopping the command's tree.
-  The runtime signals a child in a session of its own as well, so it may not.
-
-Until one is chosen, the window is 600 seconds.
+**A review started detached from the command is not part of the design.** It would
+have let a review outlive the shell call, with a rerun of `squiz review`
+attaching to the review in progress. Reviewers running as sessions of their own
+remove the same limit, and the detached review would be built only to be
+replaced.
 
 The stall threshold does not bound a round. A subagent waiting on a shell command
 is making progress, however long the command runs.
 
-The window is stated once, in the code. The hook's registration declares the
-same 600 seconds as its own timeout, because the runtime cancels a hook that
-outlives it, and a test holds the two together.
+The window is stated once, in the code. The hook's registration declares a
+timeout of 600 seconds, the stall threshold at which the runtime cancels a hook
+that holds a subagent, and the window sits a minute inside it there too.
 
 A run that waits for another's round waits for that round's end, which its window
 bounds. The waiting counts against the waiting caller's own timeout, so a caller
@@ -1562,8 +1561,10 @@ it rather than by an allowance handed out when the share begins.
 | Share | How long | What runs in it |
 |---|---|---|
 | Before the review | 60 seconds | The pull request lookup, the threads listing and the diff |
-| The review | The time bound, and never past what is left of the window | The reviewer |
-| Posting | What is left of the window, and never more than 120 seconds | The findings, the verdicts and the summary comment |
+| The review | The time bound, 360 seconds at most, and never past what is left of the window | The reviewer |
+| Posting | What is left of the window, and never more than 120 seconds | The findings, the verdicts, the summary comment and the failure comment |
+
+The three add up to the window: 60, 360 and 120 seconds make 540.
 
 The time bound is the most a reviewer may run rather than a promise of that
 long: it is given what the project configured or what is left of the window,
@@ -1738,11 +1739,8 @@ are settled:
 - A command stopped from outside, and every process under it, gets `SIGTERM`, and
   `SIGKILL` one to two seconds later.
 
-Two remain:
+One remains:
 
-- **Whether a process started detached from `squiz review` survives the runtime
-  stopping the command.** It decides whether the window's second option under § 7
-  is open at all.
 - **Whether a subagent handed a long exit-2 output works every thread.** The
   output is cut to about 10,000 characters (§ 2). Measure that a subagent reads
   the file named on its first line, or fetches each thread, when several threads
@@ -1851,12 +1849,12 @@ its own branch. Squiz does not create them, and does not remove them.
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
-| `timeout` | 480 | Seconds one round's reviewer may run, settable 1 to 480 |
+| `timeout` | 360 | Seconds one round's reviewer may run, settable 1 to 360 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 `timeout` defaults to the most it may be, so a project can lower the time bound
-and cannot raise it. The rest of the 600-second window belongs to the calls the
+and cannot raise it. The rest of the 540-second window belongs to the calls the
 round makes before and after the review, and a reviewer is given what is left of
 the window rather than the whole of what is configured. The review budget names
 the shares.
