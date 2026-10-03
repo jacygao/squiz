@@ -22,6 +22,13 @@ Fix the meaning of each heading level and hold to it:
 Do not add, remove, rename, or reorder H2 sections unless asked. If a change
 seems to need a new H2, say so in the reply and ask before adding it.
 
+## Who reads it
+
+An agent builds from this document. A person decides from it.
+
+The agent needs every fact present, or it invents one. The person needs each fact
+stated once, or they stop reading. A fact stated once and concretely serves both.
+
 ## Principles
 
 - **The spec is a standalone document** — never reference the conversation,
@@ -40,3 +47,6 @@ seems to need a new H2, say so in the reply and ask before adding it.
 ## Resources
 
 `docs/specs/review-harness-spec.md` is the worked example.
+
+`.claude/rules/prose.md` governs the sentences themselves, and specs are in its
+scope. It carries the reading test that catches what the rules above do not.

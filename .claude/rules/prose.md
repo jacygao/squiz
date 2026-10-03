@@ -36,6 +36,10 @@ Read it once, at speed. Where you go back, the sentence is wrong rather than the
 reader. Everything above is what usually fails that, for use when it fails and
 the reason is not obvious.
 
+**Run it on the finished text, as a pass of its own.** A sentence that restates
+its neighbour reads well to whoever just wrote it, because the idea is already in
+mind; it reads as padding only to someone meeting it cold.
+
 ## Reference: one row, before and after
 
 Before:
