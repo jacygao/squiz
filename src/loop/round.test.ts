@@ -581,6 +581,21 @@ function stateIn(source: string | null): EpisodeState | null {
   }
 }
 
+/**
+ * The state with each round cut down to what it spent.
+ *
+ * How long a reviewer ran is the clock's, so no fixture can name it in advance.
+ * The bound that cut a round short stays out too, and the tests about it read it
+ * off the state itself.
+ */
+function untimed(state: EpisodeState | null): EpisodeState | null {
+  if (state === null) return null;
+  return {
+    ...state,
+    rounds: state.rounds.map(({ dollars, tokens, messages }) => ({ dollars, tokens, messages })),
+  };
+}
+
 function git(directory: string, args: readonly string[]): void {
   execFileSync("git", [...args], { cwd: directory, stdio: "ignore" });
 }
@@ -1122,7 +1137,7 @@ test("the round's cost is recorded in the episode state with its token count", a
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.deepEqual(ran.state, {
+  assert.deepEqual(untimed(ran.state), {
     rounds: [ANSWER_COST],
     spentOutsideRounds: unspent,
   });
@@ -1425,7 +1440,7 @@ test("a round that reached the token bound closes the episode", async () => {
     "a round the bound closed must not read as the reviewer having failed",
   );
   assert.deepEqual(
-    ran.state?.rounds.at(-1),
+    untimed(ran.state)?.rounds.at(-1),
     wide,
     "the dollars are still recorded beside the tokens the bound was read from",
   );
@@ -1448,7 +1463,7 @@ test("a reviewer killed at its bound is a failed round and not an empty review",
     "a round with no review posts nothing",
   );
   assert.deepEqual(
-    ran.state,
+    untimed(ran.state),
     { rounds: [floor], spentOutsideRounds: unspent },
     "a killed round's floor is what it reported before it was stopped, and it counts against the cap",
   );
@@ -1465,7 +1480,7 @@ test("a reviewer nothing can be read from is reported unavailable", async () => 
   assert.equal(ran.conclusion.failure, "unavailable");
   assert.deepEqual(ran.kinds, ["prlist", "threads", "diff"]);
   assert.deepEqual(
-    ran.state?.rounds,
+    untimed(ran.state)?.rounds,
     [{ dollars: 0.02, tokens: 600, messages: 2 }],
     "the retry is a second process on the same round, and the round records what both spent",
   );
@@ -1562,7 +1577,7 @@ test("a round posts the findings the reviewer reported before it failed, whateve
     assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "create", "lookup"]);
     assert.match(ran.conclusion.reason, /kept the 1 finding the reviewer had reported/u);
     assert.deepEqual(
-      ran.state?.rounds ?? [],
+      untimed(ran.state)?.rounds ?? [],
       rounds,
       `${failure} recorded a cost that is not what the round had when it failed`,
     );
@@ -2735,4 +2750,56 @@ test("a state file written before the worktree evidence existed is read as an ep
       "- The episode ended at its round cap rather than with nothing left open",
     ].join("\n"),
   );
+});
+
+/**
+ * A killed reviewer and a finished one both end with their findings posted, so
+ * the posting proves nothing about which of the two a round was. The reviewer
+ * here outlives a real bound of one second, and the record and the comment are
+ * what is asserted.
+ *
+ * Two rounds, because a round the reviewer failed posts no summary: the cut is
+ * reported by the round that closes the episode after it.
+ */
+test("a round the time bound cut short is recorded, and the closing summary says so", async () => {
+  const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: TWO_ROUNDS,
+    sequences: THREADS_OF_TWO_ROUNDS,
+    reviewer: hangs(floor, { findings: [finding("The flag is never read")] }),
+    andThen: [{ reviewer: FIXES_IT }],
+  });
+
+  assert.ok(ran.conclusions[0]?.outcome === "failed");
+  assert.equal(ran.conclusions[0].failure, "timed-out");
+  assert.ok(ran.conclusion.outcome === "close");
+
+  const [cut, finished] = ran.state?.rounds ?? [];
+  assert.equal(cut?.cutShortAtSeconds, 1, "the killed round names the bound that ended it");
+  assert.ok(
+    (cut?.elapsedSeconds ?? 0) >= 1,
+    `a round killed at a one-second bound ran ${cut?.elapsedSeconds} seconds`,
+  );
+  assert.equal(finished?.cutShortAtSeconds, undefined, "a review that finished was cut short by nothing");
+
+  assert.match(
+    summaryBody(ran),
+    /\n- The review was cut short by the 1-second time bound in round 1, and the round kept only the findings it had reported by then$/u,
+  );
+});
+
+test("a reviewer that exits on its own records how long it ran, and no cut", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 1 },
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const [round] = ran.state?.rounds ?? [];
+  assert.equal(typeof round?.elapsedSeconds, "number", "every round records how long its reviewer ran");
+  assert.ok((round?.elapsedSeconds ?? -1) >= 0);
+  assert.equal(round?.cutShortAtSeconds, undefined);
+  assert.doesNotMatch(summaryBody(ran), /cut short/u);
 });

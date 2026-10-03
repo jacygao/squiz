@@ -20,10 +20,9 @@ import type { GhCall } from "../github/gh.ts";
 import { renderSummary } from "../github/summary-body.ts";
 import { postSummary, type SummaryPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
-import type { RoundCost } from "../reviewers/adapter.ts";
 import { classifyAtClose } from "./classify.ts";
 import type { ConfinementEvidence } from "./confinement.ts";
-import type { EpisodeState } from "./episode-state.ts";
+import type { EpisodeState, RoundRecord } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
 import type { AppliedVerdicts } from "./verdicts.ts";
@@ -47,11 +46,11 @@ export type EpisodeSummary =
 export type ClosingRound = {
   readonly pullRequest: number;
   /**
-   * What each round of the episode spent, in the order the rounds ran, this round
-   * included. Read from the episode's state file, which is the only thing that
-   * carries a round's cost past the round.
+   * Each round of the episode, in the order the rounds ran, this round included.
+   * Read from the episode's state file, which is the only thing that carries a
+   * round's cost, or the bound that cut it short, past the round.
    */
-  readonly rounds: readonly RoundCost[];
+  readonly rounds: readonly RoundRecord[];
   /**
    * Every thread this round handed the reviewer, as it was listed before the
    * review ran.

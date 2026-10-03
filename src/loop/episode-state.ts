@@ -22,14 +22,31 @@ import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import type { ConfinementEvidence } from "./confinement.ts";
 import type { Episode } from "./episode.ts";
 
+/**
+ * One round as the state file keeps it: what it spent, how long its reviewer ran,
+ * and the time bound that ended the reviewer where one did.
+ *
+ * A file written before the last two were recorded carries neither, so a reader
+ * takes neither as given.
+ */
+export type RoundRecord = RoundCost & {
+  /** Wall-clock seconds from starting the reviewer to having it stopped, to a tenth. */
+  readonly elapsedSeconds?: number;
+  /**
+   * The time bound, in whole seconds, where the bound ended a review the reviewer
+   * had not finished. Absent on a review that finished on its own, including one
+   * that declared itself finished just before the bound.
+   */
+  readonly cutShortAtSeconds?: number;
+};
+
 /** What the rounds of one episode have established so far. */
 export type EpisodeState = {
   /**
-   * What each round spent, in the order the rounds ran. Rounds are appended and
-   * never edited, so the number of entries is the number of rounds that have
-   * run.
+   * Each round, in the order the rounds ran. Rounds are appended and never
+   * edited, so the number of entries is the number of rounds that have run.
    */
-  readonly rounds: readonly RoundCost[];
+  readonly rounds: readonly RoundRecord[];
   /**
    * What the episode spent on attempts that were not rounds.
    *
@@ -140,13 +157,13 @@ export function writeState(episode: Episode, state: EpisodeState): StateWrite {
 }
 
 /**
- * The state with one more round's spend on the end.
+ * The state with one more round on the end.
  *
  * The count of rounds is the count of entries, so a round that spent nothing
  * still appends one.
  */
-export function recordRound(state: EpisodeState, cost: RoundCost): EpisodeState {
-  return { ...state, rounds: [...state.rounds, cost] };
+export function recordRound(state: EpisodeState, round: RoundRecord): EpisodeState {
+  return { ...state, rounds: [...state.rounds, round] };
 }
 
 /**
@@ -189,13 +206,13 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     return unreadable(`${path}: "rounds" is ${render(recorded)} rather than an array`);
   }
 
-  const rounds: RoundCost[] = [];
+  const rounds: RoundRecord[] = [];
   for (const [index, entry] of recorded.entries()) {
-    const round = costFrom(entry);
+    const round = roundFrom(entry);
     if ("problem" in round) {
       return unreadable(`${path}: round ${index + 1} ${round.problem}`);
     }
-    rounds.push(round.cost);
+    rounds.push(round.round);
   }
 
   const outside = spentOutsideRoundsIn(parsed, path);
@@ -301,6 +318,39 @@ function spentOutsideRoundsIn(parsed: Record<string, unknown>, path: string): Re
 
 type ReadCost = { readonly cost: RoundCost } | { readonly problem: string };
 
+type ReadRound = { readonly round: RoundRecord } | { readonly problem: string };
+
+/**
+ * One round's entry: its cost, and whatever timing the file carries for it.
+ *
+ * Timing that is absent is a file written before it was recorded. Timing that is
+ * there and cannot be read is a failure, because the cut it records is what the
+ * summary reports, and dropping it would report a review cut short as one that
+ * finished.
+ */
+function roundFrom(entry: unknown): ReadRound {
+  const read = costFrom(entry);
+  if ("problem" in read) return read;
+  if (!isRecord(entry)) return { problem: `is ${render(entry)} rather than a JSON object` };
+
+  const elapsed = entry["elapsedSeconds"];
+  if (elapsed !== undefined && !isAmount(elapsed)) {
+    return { problem: `has "elapsedSeconds" as ${render(elapsed)}` };
+  }
+  const cut = entry["cutShortAtSeconds"];
+  if (cut !== undefined && !isCount(cut)) {
+    return { problem: `has "cutShortAtSeconds" as ${render(cut)}` };
+  }
+
+  return {
+    round: {
+      ...read.cost,
+      ...(elapsed === undefined ? {} : { elapsedSeconds: elapsed }),
+      ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
+    },
+  };
+}
+
 function costFrom(entry: unknown): ReadCost {
   if (!isRecord(entry)) return { problem: `is ${render(entry)} rather than a JSON object` };
 
@@ -327,7 +377,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** A pull request is numbered from 1, so 0 is a number nothing has. */
+/** A time bound is whole seconds and at least one, so 0 is a bound nothing has. */
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
