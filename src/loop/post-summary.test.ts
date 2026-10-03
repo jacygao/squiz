@@ -276,7 +276,7 @@ test("a round that could not compare its worktree says so in the comment it post
         "**Notes**",
         "",
         "- About the change as a whole: The queue duplicates the scheduler",
-        "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+        "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
           " the worktree is shared with live episode 2f3a",
         "- Another episode was in the worktree while the reviewer ran: 2f3a",
         "- The episode ended at its round cap rather than with nothing left open",

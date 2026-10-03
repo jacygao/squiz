@@ -438,6 +438,25 @@ test("every file that changed while the reviewer ran is named in Notes", () => {
   );
 });
 
+// A commit leaves every file as it was, so a moved HEAD is named on its own line.
+test("every move of HEAD is named in Notes, after the files that changed", () => {
+  assert.equal(
+    aboutTheWorktree({
+      changed: ["src/queue.ts"],
+      moved: [
+        "from refs/heads/feature-a at 1111 to refs/heads/feature-a at 2222",
+        "from refs/heads/feature-a at 2222 to a detached HEAD at 2222",
+      ],
+    }),
+    [
+      ...quietOpens,
+      "- A file changed in the worktree while the reviewer ran: `src/queue.ts`",
+      "- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 1111 to refs/heads/feature-a at 2222",
+      "- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 2222 to a detached HEAD at 2222",
+    ].join("\n"),
+  );
+});
+
 /**
  * A round that found nothing and a round that never looked compose the same
  * comment if this is wrong, and the wrong one reads as reassurance.
@@ -451,7 +470,7 @@ test("a comparison the round never took does not read as a worktree nothing chan
     comment,
     [
       ...quietOpens,
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         " the worktree is shared with live episode 91bc",
     ].join("\n"),
   );
@@ -473,7 +492,7 @@ test("a comparison that was taken and could not be had says so", () => {
     comment,
     [
       ...quietOpens,
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         " the reading before could not be taken: git exited 128",
     ].join("\n"),
   );
@@ -492,7 +511,7 @@ test("the other episodes in the worktree are named where the tree was shared", (
     }),
     [
       ...quietOpens,
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         " the worktree is shared with live episodes 2f3a, 91bc",
       "- Other episodes were in the worktree while the reviewer ran: 2f3a, 91bc",
     ].join("\n"),
@@ -507,7 +526,7 @@ test("one other episode in the worktree reads as one", () => {
     }),
     [
       ...quietOpens,
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         " the worktree is shared with live episode 2f3a",
       "- Another episode was in the worktree while the reviewer ran: 2f3a",
     ].join("\n"),
@@ -528,7 +547,7 @@ test("a round that could not tell who else was in the worktree says so", () => {
     comment,
     [
       ...quietOpens,
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         " the live episodes of the worktree could not be established: ps was killed by SIGKILL",
       "- A round could not tell whether another episode was in the worktree" +
         " while the reviewer ran: ps was killed by SIGKILL",
@@ -571,7 +590,7 @@ test("a reason carrying newlines is one line of Notes", () => {
     comment,
     [
       ...quietOpens,
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         " the reading before could not be taken: git exited 128 fatal: not a repository",
     ].join("\n"),
   );

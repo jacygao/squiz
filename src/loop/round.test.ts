@@ -2579,6 +2579,69 @@ test("a file the first round changed is named in the comment the closing round p
   );
 });
 
+/** A reviewer that moved `HEAD` through its shell with `move`, and reviewed. */
+function movesHeadThenReviews(move: string, findings: readonly Finding[]): Reviewer {
+  return { command: "/bin/sh", args: ["-c", move], parse: reviews({ findings }).parse };
+}
+
+/**
+ * A move that leaves the branch is told to the coding agent by the round that
+ * blocks.
+ *
+ * The next firing gates on the branch `HEAD` names then, and finds no pull request
+ * for it. That firing reads nothing the episode saved, so a move kept only for the
+ * summary is reported by nothing at all.
+ */
+test("a reviewer that detached HEAD is named in the blocking reason, before the next firing finds no pull request", async () => {
+  const ran = await runInFixture({
+    answers: TWO_ROUNDS,
+    sequences: THREADS_OF_TWO_ROUNDS,
+    reviewer: movesHeadThenReviews("git checkout --quiet --detach", [
+      finding("The flag is never read"),
+    ]),
+    andThen: [{ reviewer: FIXES_IT }],
+  });
+
+  assert.deepEqual(
+    ran.conclusions.map((conclusion) => conclusion.outcome),
+    ["block", "no-pull-request"],
+  );
+  assert.ok(ran.conclusions[0]?.outcome === "block");
+  assert.match(
+    ran.conclusions[0].reason,
+    new RegExp(
+      `\`HEAD\` moved while the reviewer ran: from refs/heads/${BRANCH} at [0-9a-f]{40} to a detached HEAD at [0-9a-f]{40}`,
+      "u",
+    ),
+    "the next firing finds no pull request and reports nothing, so the blocking reason is the move's one report",
+  );
+});
+
+test("a reviewer that switched to a branch with no pull request is named in the blocking reason", async () => {
+  const ran = await runInFixture({
+    answers: TWO_ROUNDS,
+    sequences: { ...THREADS_OF_TWO_ROUNDS, prlist: [PR_LIST, "[]"] },
+    reviewer: movesHeadThenReviews("git checkout --quiet -b elsewhere", [
+      finding("The flag is never read"),
+    ]),
+    andThen: [{ reviewer: FIXES_IT }],
+  });
+
+  assert.deepEqual(
+    ran.conclusions.map((conclusion) => conclusion.outcome),
+    ["block", "no-pull-request"],
+  );
+  assert.ok(ran.conclusions[0]?.outcome === "block");
+  assert.match(
+    ran.conclusions[0].reason,
+    new RegExp(
+      `\`HEAD\` moved while the reviewer ran: from refs/heads/${BRANCH} at ([0-9a-f]{40}) to refs/heads/elsewhere at \\1`,
+      "u",
+    ),
+    "the next firing finds no pull request and reports nothing, so the blocking reason is the move's one report",
+  );
+});
+
 /**
  * A worktree an earlier round shared, and could not compare, reaches the comment
  * too.
@@ -2621,7 +2684,7 @@ test("a worktree the first round shared is named in the comment the closing roun
       "",
       "**Notes**",
       "",
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         ` the worktree is shared with live episode ${OTHER_AGENT_ID}`,
       `- Another episode was in the worktree while the reviewer ran: ${OTHER_AGENT_ID}`,
     ].join("\n"),

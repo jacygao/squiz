@@ -46,7 +46,9 @@
  * that finished and the posting after it.
  *
  * Nothing here reports. What the readings establish is carried to the round's
- * close, and the summary comment is what names it.
+ * close, and the summary comment is what names it. A move of `HEAD` is named
+ * by the round that blocks as well, because the next firing gates on the branch
+ * `HEAD` names then and may find no pull request to close the episode on.
  *
  * **What a round established outlives the round.** A round that blocks posts no
  * comment, so each round's readings are added to what the episode has established
@@ -102,7 +104,7 @@ export type TrackedFilesAnswer = TrackedFilesComparison | NotTaken;
 
 /** What the round established about the worktree its reviewer ran in. */
 export type RoundConfinement = {
-  /** What the reviewer did to the paths a commit could carry. */
+  /** What the reviewer did to the paths a commit could carry, and to `HEAD`. */
   readonly trackedFiles: TrackedFilesAnswer;
   /**
    * The other episodes found live in the worktree, at either asking.
@@ -138,6 +140,11 @@ export type ConfinementEvidence = {
   /** Every tracked path a round found changed, once each, in path order. */
   readonly changed: readonly string[];
   /**
+   * Every move of `HEAD` a round found, as one line naming both ends, once each,
+   * in the order the rounds found them.
+   */
+  readonly moved: readonly string[];
+  /**
    * Why a round took no comparison, or could not have the one it took, in the
    * order the rounds established it.
    *
@@ -154,6 +161,7 @@ export type ConfinementEvidence = {
 /** An episode whose rounds established nothing, which is no note at all. */
 export const nothingEstablished: ConfinementEvidence = {
   changed: [],
+  moved: [],
   uncompared: [],
   shared: [],
   unestablished: [],
@@ -191,6 +199,7 @@ export function evidenceWith(
   const had = before ?? nothingEstablished;
   const evidence: ConfinementEvidence = {
     changed: byValue(had.changed, pathsChanged(round.trackedFiles)),
+    moved: byRound(had.moved, listed(headMovedIn(round))),
     uncompared: byRound(had.uncompared, whyUncompared(round.trackedFiles)),
     shared: byValue(had.shared, whoSharedIt(round.otherEpisodes)),
     unestablished: byRound(had.unestablished, whyUnestablished(round.otherEpisodes)),
@@ -200,6 +209,20 @@ export function evidenceWith(
 
 function pathsChanged(answer: TrackedFilesAnswer): readonly string[] {
   return answer.outcome === "changed" ? answer.paths : [];
+}
+
+/**
+ * The move of `HEAD` one round found, as one line naming both ends, or
+ * `undefined` where it found none.
+ */
+export function headMovedIn(round: RoundConfinement): string | undefined {
+  const answer = round.trackedFiles;
+  if (answer.outcome !== "changed" || answer.head === undefined) return undefined;
+  return `from ${answer.head.before} to ${answer.head.after}`;
+}
+
+function listed(entry: string | undefined): readonly string[] {
+  return entry === undefined ? [] : [entry];
 }
 
 function whyUncompared(answer: TrackedFilesAnswer): readonly string[] {
@@ -243,7 +266,13 @@ function byRound(had: readonly string[], found: readonly string[]): readonly str
 }
 
 function anything(evidence: ConfinementEvidence): boolean {
-  const lists = [evidence.changed, evidence.uncompared, evidence.shared, evidence.unestablished];
+  const lists = [
+    evidence.changed,
+    evidence.moved,
+    evidence.uncompared,
+    evidence.shared,
+    evidence.unestablished,
+  ];
   return lists.some((list) => list.length > 0);
 }
 

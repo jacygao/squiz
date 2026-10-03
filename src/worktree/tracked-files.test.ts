@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -498,5 +498,152 @@ test("a tracked link is read by where it points, and one pointing nowhere is no 
       outcome: "changed",
       paths: ["link.ts"],
     });
+  });
+});
+
+/** Commit with nothing staged, under an identity the test supplies. */
+function commitAgain(directory: string, ...args: readonly string[]): void {
+  git(
+    directory,
+    "-c",
+    "user.email=squiz@example.invalid",
+    "-c",
+    "user.name=Squiz",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--quiet",
+    ...args,
+  );
+}
+
+function headMoveOf(comparison: TrackedFilesComparison): unknown {
+  return comparison.outcome === "changed" ? comparison.head : undefined;
+}
+
+test("an amend on a clean tree moves HEAD, and is named though every file is the same", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    const was = revisionOf(root);
+    const before = reading(root);
+
+    commitAgain(root, "--amend", "--message", "the change under review, amended");
+    const after = reading(root);
+
+    assert.deepEqual([...after.status.keys()], [], "the tree is as clean as it was");
+    assert.deepEqual(after.content, before.content, "and every file holds what it held");
+    assert.deepEqual(compareTrackedFiles(before, after), {
+      outcome: "changed",
+      paths: [],
+      head: {
+        before: `refs/heads/review/the-round at ${was}`,
+        after: `refs/heads/review/the-round at ${revisionOf(root)}`,
+      },
+    });
+  });
+});
+
+test("a commit on a clean tree moves HEAD", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    const before = reading(root);
+
+    commitAgain(root, "--allow-empty", "--message", "the reviewer's own");
+
+    assert.equal(compareTrackedFiles(before, reading(root)).outcome, "changed");
+  });
+});
+
+// The next commit the coding agent makes lands on the branch HEAD names, so a
+// switch of branch at the same commit is a change to what it would commit.
+test("a switch to another branch at the same commit moves HEAD", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    const at = revisionOf(root);
+    const before = reading(root);
+
+    git(root, "checkout", "--quiet", "-B", "review/elsewhere");
+
+    assert.deepEqual(headMoveOf(compareTrackedFiles(before, reading(root))), {
+      before: `refs/heads/review/the-round at ${at}`,
+      after: `refs/heads/review/elsewhere at ${at}`,
+    });
+  });
+});
+
+test("a detached HEAD is read by its commit", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    const at = revisionOf(root);
+    const before = reading(root);
+
+    git(root, "checkout", "--quiet", "--detach");
+
+    assert.equal(reading(root).head, `a detached HEAD at ${at}`);
+    assert.deepEqual(headMoveOf(compareTrackedFiles(before, reading(root))), {
+      before: `refs/heads/review/the-round at ${at}`,
+      after: `a detached HEAD at ${at}`,
+    });
+  });
+});
+
+test("a HEAD with no commit yet is a reading, and a first commit moves it", async () => {
+  await withTemporaryDirectory(async (root) => {
+    git(root, "init", "--quiet", "--initial-branch", "review/the-round");
+
+    const before = reading(root);
+    assert.equal(before.head, "refs/heads/review/the-round with no commit");
+
+    commitAgain(root, "--allow-empty", "--message", "the first");
+
+    assert.deepEqual(headMoveOf(compareTrackedFiles(before, reading(root))), {
+      before: "refs/heads/review/the-round with no commit",
+      after: `refs/heads/review/the-round at ${revisionOf(root)}`,
+    });
+  });
+});
+
+/**
+ * Run `body` with a `git` that refuses to name the branch `HEAD` points at, and
+ * hands every other call to the real git.
+ */
+async function withGitThatCannotReadHead<T>(body: () => T): Promise<T> {
+  const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
+  assert.equal(real.status, 0, "the test needs the real git to stand behind the fake");
+
+  return await withTemporaryDirectory(async (directory) => {
+    const fake = join(directory, "git");
+    const script = [
+      "#!/bin/sh",
+      `[ "$1" = symbolic-ref ] && { echo "fatal: HEAD is unreadable" >&2; exit 128; }`,
+      `exec '${real.stdout.trim()}' "$@"`,
+      "",
+    ];
+    await writeFile(fake, script.join("\n"), "utf8");
+    await chmod(fake, 0o755);
+    const previous = process.env["PATH"];
+    process.env["PATH"] = `${directory}:${previous ?? ""}`;
+    try {
+      return body();
+    } finally {
+      if (previous === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = previous;
+    }
+  });
+}
+
+test("a HEAD that could not be read is a reading that could not be taken", async () => {
+  await withTemporaryDirectory(async (root) => {
+    await treeWithTrackedFiles(root);
+    const before = reading(root);
+
+    const after = await withGitThatCannotReadHead(() => readTrackedFiles(root));
+    const answer = compareTrackedFiles(before, after);
+
+    assert.equal(answer.outcome, "unknown", "a HEAD nobody read is not a HEAD that did not move");
+    assert.equal(
+      reasonOf(answer),
+      "the reading after could not be taken: git exited 128: fatal: HEAD is unreadable",
+    );
   });
 });

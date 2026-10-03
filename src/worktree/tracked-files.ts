@@ -1,10 +1,12 @@
 /**
- * A reading of a worktree's files, tracked and untracked, and what two readings
- * disagree about.
+ * A reading of a worktree's files, tracked and untracked, and of where its `HEAD`
+ * points, and what two readings disagree about.
  *
  * Two readings, one taken before the reviewer runs and one when it exits, are
  * what catches a write the reviewer made through the shell. A shell is itself a
- * write primitive, and nothing else names the file it changed.
+ * write primitive, and nothing else names the file it changed. A commit changes
+ * what the coding agent would commit while leaving every file as it was, so
+ * `HEAD` is part of the reading.
  *
  * Nothing here writes to the worktree it reads, git's index included. A
  * mechanism that dirties what it measures is worse than none.
@@ -33,8 +35,13 @@ export type TrackedFilesReading =
        * those, or that nothing stands there at all.
        */
       readonly content: ReadonlyMap<string, string>;
+      /** Where `HEAD` points, as one line: the branch and its commit, or the commit. */
+      readonly head: string;
     }
   | { readonly outcome: "failed"; readonly reason: string };
+
+/** `HEAD` as two readings found it, where the two differ. */
+export type HeadMove = { readonly before: string; readonly after: string };
 
 /**
  * What two readings say about a worktree.
@@ -45,7 +52,13 @@ export type TrackedFilesReading =
  */
 export type TrackedFilesComparison =
   | { readonly outcome: "unchanged" }
-  | { readonly outcome: "changed"; readonly paths: readonly string[] }
+  | {
+      readonly outcome: "changed";
+      /** Possibly empty, where `HEAD` moved and no path changed. */
+      readonly paths: readonly string[];
+      /** Absent where `HEAD` did not move. */
+      readonly head?: HeadMove;
+    }
   | { readonly outcome: "unknown"; readonly reason: string };
 
 const STATUS_ARGUMENTS = [
@@ -67,7 +80,7 @@ const STATUS_ARGUMENTS = [
 
 /**
  * Read what stands at every path of the worktree holding `directory` that a
- * commit could carry.
+ * commit could carry, and where its `HEAD` points.
  *
  * Tracked paths and untracked ones both count, because a file the coding agent
  * has not staged is still one it would commit. Gitignored paths are absent,
@@ -105,11 +118,14 @@ export function readTrackedFiles(directory: string, until?: Deadline): TrackedFi
   const content = contentOf(root, staged.entries, untrackedIn(status), until);
   if (!content.read) return { outcome: "failed", reason: content.reason };
 
-  return { outcome: "read", root, status, content: content.paths };
+  const head = headOf(root, until);
+  if (!head.read) return { outcome: "failed", reason: head.reason };
+
+  return { outcome: "read", root, status, content: content.paths, head: head.at };
 }
 
 /**
- * Name every path the two readings disagree about.
+ * Name every path the two readings disagree about, and `HEAD` where it moved.
  *
  * A path is named where git's status for it differs, and where what stands at it
  * differs, so a file whose content changed under a status entry that did not is
@@ -147,8 +163,41 @@ export function compareTrackedFiles(
     )
     .sort();
 
+  if (before.head !== after.head) {
+    return { outcome: "changed", paths: changed, head: { before: before.head, after: after.head } };
+  }
   if (changed.length === 0) return { outcome: "unchanged" };
   return { outcome: "changed", paths: changed };
+}
+
+type Head =
+  | { readonly read: true; readonly at: string }
+  | { readonly read: false; readonly reason: string };
+
+/**
+ * Where `HEAD` points, as one line.
+ *
+ * The branch counts as well as the commit. A switch to another branch at the same
+ * commit leaves every file as it was and sends the coding agent's next commit to a
+ * branch the pull request is not on.
+ */
+function headOf(root: string, until?: Deadline): Head {
+  // Exit 1 with nothing said is a detached `HEAD`, which is an answer.
+  const branch = git(root, ["symbolic-ref", "--quiet", "HEAD"], until, [0, 1]);
+  if (!branch.ran) return { read: false, reason: branch.reason };
+  const named = branch.status === 0 ? branch.stdout.trim() : null;
+
+  // Exit 1 with nothing said is a name that resolves to no commit. On a branch
+  // that is a branch nothing has been committed to yet.
+  const commit = git(root, ["rev-parse", "--quiet", "--verify", "HEAD^{commit}"], until, [0, 1]);
+  if (!commit.ran) return { read: false, reason: commit.reason };
+  const at = commit.status === 0 ? commit.stdout.trim() : null;
+
+  if (named === null) {
+    if (at === null) return { read: false, reason: "a detached HEAD names no commit" };
+    return { read: true, at: `a detached HEAD at ${at}` };
+  }
+  return { read: true, at: at === null ? `${named} with no commit` : `${named} at ${at}` };
 }
 
 /** The two letters git gave each path it named. */
@@ -307,10 +356,19 @@ function digestOf(bytes: Buffer): string {
 }
 
 type GitOutput =
-  | { readonly ran: true; readonly stdout: string }
+  | { readonly ran: true; readonly stdout: string; readonly status: number }
   | { readonly ran: false; readonly reason: string };
 
-function git(root: string, args: readonly string[], until?: Deadline): GitOutput {
+/**
+ * `answers` are the exit statuses that are answers rather than failures. One
+ * other than 0 is an answer only where git said nothing on stderr.
+ */
+function git(
+  root: string,
+  args: readonly string[],
+  until?: Deadline,
+  answers: readonly number[] = [0],
+): GitOutput {
   if (until?.passed() === true) return { ran: false, reason: RAN_OUT };
 
   const result = spawnSync("git", args, {
@@ -328,12 +386,15 @@ function git(root: string, args: readonly string[], until?: Deadline): GitOutput
     if (ranOut(result.error)) return { ran: false, reason: RAN_OUT };
     return { ran: false, reason: `git could not be run: ${result.error.message}` };
   }
-  if (result.status !== 0) {
+  const answered =
+    result.status === 0 ||
+    (result.status !== null && answers.includes(result.status) && result.stderr.trim() === "");
+  if (!answered || result.status === null) {
     const said = result.stderr.split("\n", 1)[0]?.trim() ?? "";
     const exit = describeExit(result.status, result.signal);
     return { ran: false, reason: said === "" ? `${exit} and said nothing` : `${exit}: ${said}` };
   }
-  return { ran: true, stdout: result.stdout };
+  return { ran: true, stdout: result.stdout, status: result.status };
 }
 
 /** The NUL-terminated records of git's output, without the empty trailer. */
