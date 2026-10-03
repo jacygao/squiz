@@ -1,6 +1,6 @@
 # Session Interface: What Squiz Asks of Muster
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -131,9 +131,17 @@ its message and exits 4 at once.
 
 `squiz hook` is the command muster's trigger runs. It resolves the pull
 request whose head is the branch checked out where the event fired. Where that
-state has no record, it ensures the round host and sends `review-ready`. It
-prints `watch squiz-coder-<number>` in every case where a pull request exists,
-so muster wakes the coding agent with whatever squiz sends next.
+state has no record, it ensures the round host and sends `review-ready`. On a
+`stop` or `pi-settled` event it prints `watch squiz-coder-<number>` wherever a
+pull request exists, so muster wakes the coding agent with whatever squiz sends
+next.
+
+**The inbox and the wake reach full sessions only.** A Claude Code subagent has
+ended by the time its `SubagentStop` fires, and in auto mode it has handed back,
+so no `threads-open` reaches it. For a subagent coder the loop closes only
+because the subagent runs `squiz review` itself and waits for it, which is
+#290's route. `squiz hook` on `subagent-stop` still starts the review, and
+prints no `watch` line.
 
 ## 5. The message kinds
 
@@ -151,10 +159,15 @@ reply, from anyone other than the reviewer, on a thread the reviewer opened, or
 | `stop` | A person, a coordinator | `squiz-reviewer-<n>` | `now=yes` or `now=no` | End the round host after the running round, or at once, failing that round with a failure comment. |
 | `threads-open` | The round host | `squiz-coder-<n>` | `pr= head= round= threads= next=` | Threads are open. Work them. The harness spec's exit 2. |
 | `closed` | The round host | `squiz-coder-<n>` | `pr= head= exit= next=` | The episode closed, with `exit` 0 or 3. |
-| `failed` | The round host | `squiz-coder-<n>` | `pr= head= next=` | The round failed. `next` prints the reason. The harness spec's exit 1. |
+| `failed` | The round host | `squiz-coder-<n>` | `pr= head= next=` | The round failed. The harness spec's exit 1. |
 
-`next` is always `squiz review <n>`, which prints the recorded result and starts
-no round.
+`next` is the command that reads the outcome and starts nothing:
+
+- **`threads-open` and `closed`:** `squiz review <n>`. The state is reviewed, so
+  it prints the recorded result and starts no round.
+- **`failed`:** `squiz status`. Its line for the state gives the reason the
+  failure comment gives. `squiz review <n>` would send `re-review` for a failed
+  state and start a round, so it is never the `next` of a failure.
 
 ## 6. What squiz guarantees
 
@@ -212,7 +225,7 @@ directory, the charter, and #290's CLI with exits 0 to 3.
 | The 480-second ceiling on the time bound | **Moves.** It becomes a wall-clock guard on a runaway round, with no ceiling. |
 | #291's 540-second question | **Gone** for the round. 540 seconds stays as the default wait of `squiz review`. |
 | The stall watchdog | **Does not apply.** Nothing holds a subagent. |
-| #278, a block that reaches no agent | **Gone.** No hook blocks. A coding agent is woken by muster, or reads the outcome with `squiz review`. |
+| #278, a block that reaches no agent | **Gone for full sessions**, Claude Code or `pi`, which muster wakes. **Unchanged for subagents**, which no message reaches: the loop closes only where the subagent runs `squiz review` itself and waits, as under #290. |
 | #265, helper firings | **Harmless** since #290's one review per state. |
 | #264's remainder, a subagent working by path | **Gone** for sessions started in their own worktree. It stays for a subagent dispatched by path. |
 | #276, an invisible reviewer | **Gone.** |
