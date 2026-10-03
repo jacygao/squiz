@@ -163,7 +163,7 @@ flowchart TD
     B --> K{Episode already closed?}
     K -->|yes| D[Exit 0, nothing happens]
     K -->|no| C{Pull request for this branch?}
-    C -->|no| D
+    C -->|no| L[Exit 0, stderr names the branch<br/>and the directory it looked in]
     C -->|yes| E[Reviewer runs locally against<br/>the working tree]
     E --> F[Findings posted as threads<br/>on the pull request]
     F --> G{Threads open and rounds remaining?}
@@ -181,8 +181,13 @@ flowchart TD
    consulted, because an episode that is over stays over whatever a bound would now
    allow.
 2. **Gate on the pull request.** The hook looks for a pull request whose head is
-   the current branch. If there is none it exits 0, and no review runs and
-   nothing is posted.
+   the branch checked out in the directory it runs in. If there is none, or HEAD
+   is detached, it exits 0, no review runs, and nothing is posted. stderr names
+   the branch and the worktree it was looked for in:
+
+   ```
+   squiz: no review ran: no open pull request has "main" as its head, in /work/squiz
+   ```
 3. **Run the reviewer.** The harness spawns the reviewer as a separate local
    agent process, hands it the pull request for scope and intent together with
    the threads the reviewer itself opened on it, and lets it read the working
@@ -255,6 +260,27 @@ Each subagent that opens a pull request works in its own git worktree on its own
 branch. A branch can be checked out in only one worktree at a time, so the two
 go together.
 
+The hook runs in the subagent's own working directory, which is fixed when the
+subagent is dispatched: wherever the dispatching session's shell stood at that
+moment. Neither a `cd` by the subagent nor a later `cd` by the dispatcher moves
+it.
+
+**A subagent that opens a pull request is dispatched with `isolation:
+"worktree"`**, and its first command switches to its own branch:
+
+```bash
+git switch -c <area>/<short-name> origin/main
+```
+
+Claude Code creates that worktree at `.claude/worktrees/agent-<agent_id>` from
+`origin/main`, on a branch named `worktree-agent-<agent_id>`, and the hook runs
+there. The switch puts the subagent's branch where the gate looks for it.
+
+A subagent told to work in a worktree by path is reviewed against the directory
+it was dispatched from, which is usually the primary tree on `main`. The gate
+finds no pull request there and passes, with the line under step 2 naming the
+branch and the tree it looked in.
+
 ```mermaid
 flowchart TD
     R[(Repository - one object store)]
@@ -276,8 +302,6 @@ flowchart TD
 The worktrees share one object store and nothing else. Each hook resolves its
 own working directory, so one reviewer sees one subagent's change and posts to
 one pull request. One worktree, one branch, one pull request, one episode.
-
-The worktrees are created by whatever dispatches the subagents.
 
 A worktree lives exactly as long as its episode. The harness removes it when the
 episode closes, whether or not the pull request has been merged. Work that
@@ -1042,7 +1066,7 @@ nothing retries one.
 | The reviewer exceeds the ceiling | The runtime signals the hook's process group and the hook's descendants, in the same instant, so none of the round's own cleanup runs. `SIGKILL` follows only where the runtime outlives the grace, so a reviewer or tool that ignores `SIGTERM` can go on spending and writing. A process that has left both targets is signalled by neither. The subagent is recorded as failed and the coding agent is told nothing ran, so the work it dispatched reads as work that did not happen. |
 | GitHub is unreachable | Exit 0 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | `gh` cannot be run at all | Exit 0, nothing posted, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
-| The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is the round's silent exit. |
+| The calls before the review run out of time | Exit 0, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request, which is no failure. |
 | The threads on the pull request cannot all be listed | Exit 0, nothing posted, and no review runs. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay. A later round makes the rest again. |
 | The window is gone before the findings are posted | Exit 0, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window: a call made there is one the runtime kills the hook during, and the round would end having said nothing at all. |
@@ -1057,22 +1081,33 @@ nothing retries one.
 
 ### The hook's stderr
 
-Claude Code surfaces the hook's stderr, and two different things are written
-there. They stay apart.
+The hook writes two different things to stderr. They stay apart.
 
 **The blocking reason**, written when a round exits 2. It names the open threads,
 the commands that work them, and a move of `HEAD` the round found, and the coding
-agent reads it as its next instruction.
+agent reads it as its next instruction. Nothing else is written beside it.
 
-**The failure pointer**, written when a round exits 0 having failed. One line,
-naming what failed:
+**The pointer**, written when the hook exits 0 having failed, or having found no
+pull request to review. One line, naming what failed, or the branch and the
+worktree the gate looked in:
 
 ```
 squiz: round 3 found 3 findings and could not post them to PR #142
+squiz: no review ran: HEAD is detached in /work/squiz, so no pull request has it as its head
 ```
+
+Every other exit 0 writes nothing: a closing round with nothing it failed to
+post, and a firing for an episode that has already reported its close.
 
 The pointer is a pointer rather than a report, and it must not grow into a
 second output format.
+
+Where an exit-0 line reaches is the runtime's choice. In print mode it is
+recorded in the subagent's transcript as the `stderr` of a `hook_success`
+attachment, and it reaches the `stream-json` output only under
+`--include-hook-events`. Neither the parent session's model nor the session's
+result is given it. Whether an interactive session shows it to a person is not
+established.
 
 ### The review budget
 

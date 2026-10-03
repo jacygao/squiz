@@ -143,7 +143,13 @@ export type AroundTheReviewer = {
 /** What one round concluded. */
 export type RoundConclusion =
   /** No open pull request has this branch as its head: nothing ran, nothing posted. */
-  | { readonly outcome: "no-pull-request" }
+  | {
+      readonly outcome: "no-pull-request";
+      /** The branch the gate asked about, or `null` where HEAD was detached. */
+      readonly branch: string | null;
+      /** The worktree git was asked in. */
+      readonly directory: string;
+    }
   /**
    * The episode had already reported its close, so this firing ran nothing and
    * posted nothing. Its comment is on the pull request, or the firing that could
@@ -383,11 +389,11 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
 /**
  * The pull request this round reviews, or the conclusion the gate reached.
  *
- * A branch with no pull request is silent: no review runs and nothing is posted.
- * A git or a `gh` that could not answer is a failure and is named, because an
- * install that failed and read as a branch with no pull request looks exactly
- * like the harness working normally, every round and forever. The time for
- * GitHub running out is one of those, and never an answer of none.
+ * A branch with no pull request is no failure: no review runs and nothing is
+ * posted. A git or a `gh` that could not answer is a failure and is named,
+ * because an install that failed and read as a branch with no pull request looks
+ * exactly like the harness working normally, every round and forever. The time
+ * for GitHub running out is one of those, and never an answer of none.
  */
 function gate(call: GhCall): Step<PullRequest> {
   const branch = currentBranch(call.directory);
@@ -399,9 +405,12 @@ function gate(call: GhCall): Step<PullRequest> {
       ),
     };
   }
+  const directory = call.directory;
   // A detached HEAD is no branch, so no pull request can have it as a head. An
-  // answer of none rather than a failure, and none is silent.
-  if (branch.outcome === "detached") return { ended: { outcome: "no-pull-request" } };
+  // answer of none rather than a failure.
+  if (branch.outcome === "detached") {
+    return { ended: { outcome: "no-pull-request", branch: null, directory } };
+  }
 
   const lookup = findPullRequestForBranch(branch.name, call);
   if (lookup.outcome === "failed") {
@@ -413,7 +422,9 @@ function gate(call: GhCall): Step<PullRequest> {
       ),
     };
   }
-  if (lookup.outcome === "none") return { ended: { outcome: "no-pull-request" } };
+  if (lookup.outcome === "none") {
+    return { ended: { outcome: "no-pull-request", branch: branch.name, directory } };
+  }
   return { step: lookup };
 }
 

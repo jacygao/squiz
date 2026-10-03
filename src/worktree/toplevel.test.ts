@@ -53,7 +53,7 @@ function resolved(directory: string): string {
 }
 
 test("the worktree root comes back rather than the directory the hook fired in", async () => {
-  // The hook is given the session's directory, which is somewhere inside the
+  // The hook runs in the subagent's directory, which is somewhere inside the
   // worktree and not necessarily its root. An episode's state hangs off the
   // root, so the two must not be confused.
   await withTemporaryDirectory(async (root) => {

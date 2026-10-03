@@ -55,7 +55,7 @@ test("the branch checked out in the directory is the one that comes back", async
 });
 
 test("the branch resolves the same from a subdirectory of the worktree", async () => {
-  // The hook is given the session's directory, which is inside the worktree and
+  // The hook runs in the subagent's directory, which is inside the worktree and
   // not necessarily its root.
   await withTemporaryDirectory(async (directory) => {
     commitOn(directory, "review/the-gate");

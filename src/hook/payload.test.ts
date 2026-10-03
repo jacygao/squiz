@@ -15,7 +15,7 @@ const PROMPT_ID = "59893e32-bf05-4243-8b68-062d0f8767ef";
  *
  * The fields that are not read are here because they are what a reader of this
  * module reaches for by mistake: `prompt_id` is one string for every subagent
- * in a session, `cwd` is the session's directory, and `stop_hook_active` says
+ * in a session, `cwd` is where the hook already runs, and `stop_hook_active` says
  * what happened before this firing.
  */
 function payloadText(over: Readonly<Record<string, unknown>> = {}): string {

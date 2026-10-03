@@ -1,6 +1,6 @@
 /**
  * The failure pointer: the one line the hook writes to stderr when a round
- * exits 0 having failed.
+ * exits 0 having failed, or having found no pull request to review.
  *
  * The hook's other stderr channel, the blocking reason a round exits 2 with,
  * does not come through here. There is one function because there is one line,

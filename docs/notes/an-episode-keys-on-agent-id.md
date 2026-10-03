@@ -56,7 +56,7 @@ sixteen invocations recorded.
 |---|---|---|
 | `session_id` | string | UUID of the session that dispatched the subagent. Shared by every subagent in that session |
 | `transcript_path` | string | `…/<session_id>.jsonl` — the parent session's transcript |
-| `cwd` | string | The session's working directory, not the subagent's |
+| `cwd` | string | The subagent's working directory, which is where the dispatcher's shell stood when it dispatched the subagent, and where the hook runs. `a-subagents-hook-runs-where-it-was-dispatched.md` records the measurement |
 | `prompt_id` | string | UUID of the user turn in the parent session. Not per subagent, and not stable across an episode |
 | `permission_mode` | string | `acceptEdits` in every run here |
 | `agent_id` | string | The subagent's id. The episode key |
@@ -114,8 +114,8 @@ unique within one session.
 ### Two subagents in one session share everything except the id
 
 In the concurrent run both subagents reported the same `session_id`, the same
-`prompt_id`, and the same `cwd`. Only `agent_id` and `agent_transcript_path`
-told them apart. Anything separating two live episodes has to come from one of
+`prompt_id`, and the same `cwd`, because both were dispatched from one directory.
+Only `agent_id` and `agent_transcript_path` told them apart. Anything separating two live episodes has to come from one of
 those two fields.
 
 `background_tasks` carries the ids of the other live subagents in the session,

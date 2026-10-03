@@ -10,7 +10,8 @@
  * composed and nothing else, because the runtime hands that text to the coding
  * agent as its next instruction. A round that exits 0 having failed writes one
  * line saying what failed, and `failureIn` is the only place that line is
- * composed.
+ * composed. A pass for want of a pull request writes one line of the same shape,
+ * composed by `unreviewedIn`.
  */
 
 import { fileURLToPath } from "node:url";
@@ -63,8 +64,8 @@ export async function runHook(firing: Firing): Promise<HookExit> {
     return 2;
   }
 
-  const failure = failureIn(conclusion);
-  if (failure !== null) reportFailure(failure);
+  const line = failureIn(conclusion) ?? unreviewedIn(conclusion);
+  if (line !== null) reportFailure(line);
   return 0;
 }
 
@@ -86,13 +87,31 @@ export function failureIn(conclusion: RoundConclusion): string | null {
       // could not put on the pull request is the only thing left to say.
       return closingFailure(conclusion);
     // A blocked round's stderr is its reason alone. A branch nobody opened a pull
-    // request for had nothing to run, and an episode that had already reported its
-    // close ran nothing either: what it came to was said when it closed.
+    // request for failed at nothing, and an episode that had already reported its
+    // close ran nothing: what it came to was said when it closed.
     case "block":
     case "no-pull-request":
     case "episode-over":
       return null;
   }
+}
+
+/**
+ * The one line a pass for want of a pull request is reported as, or `null` for
+ * every other conclusion.
+ *
+ * Not a failure, and still said. A branch with no pull request and a subagent
+ * whose hook fired in a tree it never worked in both reach the gate as a branch
+ * nobody opened a pull request for, so the branch and the directory are the only
+ * things that tell them apart.
+ */
+export function unreviewedIn(conclusion: RoundConclusion): string | null {
+  if (conclusion.outcome !== "no-pull-request") return null;
+  const { branch, directory } = conclusion;
+  if (branch === null) {
+    return `no review ran: HEAD is detached in ${directory}, so no pull request has it as its head`;
+  }
+  return `no review ran: no open pull request has ${JSON.stringify(branch)} as its head, in ${directory}`;
 }
 
 /** A round that failed, which may have salvaged what the reviewer had reported. */

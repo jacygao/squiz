@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,7 +15,7 @@ const shim = fileURLToPath(new URL("../bin/squiz", import.meta.url));
 const cliEntry = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
 
-// Anywhere that is not the plugin. The hook is given the session's directory,
+// Anywhere that is not the plugin. The hook runs in the subagent's directory,
 // which is not even the worktree root, so every run here starts somewhere the
 // entry point cannot be reached from by a relative path.
 //
@@ -64,6 +65,12 @@ after(async () => {
   await rm(elsewhere, { recursive: true, force: true });
   await rm(onABranch, { recursive: true, force: true });
 });
+
+/** The one line a firing in `elsewhere` writes, which says the entry point ran. */
+function detachedHere(): string {
+  const directory = realpathSync(elsewhere);
+  return `squiz: no review ran: HEAD is detached in ${directory}, so no pull request has it as its head\n`;
+}
 
 function git(args: readonly string[]): void {
   gitIn(elsewhere, args);
@@ -137,15 +144,7 @@ test("the shim resolves the entry point from a working directory that is not the
 
   assert.equal(result.code, 0, `the shim did not run: ${result.stderr}`);
   assert.equal(result.stdout, "");
-  assert.equal(result.stderr, "");
-});
-
-test("a round that finds nothing to say writes nothing", async () => {
-  const result = await run(shim, ["hook"], { cwd: elsewhere, input: PAYLOAD });
-
-  assert.equal(result.code, 0);
-  assert.equal(result.stderr, "", "silence is what a clean review looks like");
-  assert.equal(result.stdout, "", "the runtime reads the two streams differently");
+  assert.equal(result.stderr, detachedHere());
 });
 
 test("the binary runs by name off PATH, through a symlink to the shim", async () => {
@@ -164,7 +163,7 @@ test("the binary runs by name off PATH, through a symlink to the shim", async ()
 
     assert.equal(result.code, 0, `squiz did not resolve or did not run: ${result.stderr}`);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "");
+    assert.equal(result.stderr, detachedHere());
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

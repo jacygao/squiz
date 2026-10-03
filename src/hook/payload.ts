@@ -8,7 +8,8 @@
  * Three other fields look usable and are not. `prompt_id` is per user turn in
  * the parent session, so it is one string for every subagent running under that
  * turn and a different one between one subagent's own stops. `cwd` is the
- * session's directory rather than the worktree. `stop_hook_active` is true from
+ * directory the hook already runs in, so it says nothing the hook does not
+ * know. `stop_hook_active` is true from
  * the second firing of an episode onward, which is every firing where the loop
  * means to block, so reading it as a reason to stop would cap every episode at
  * one round.

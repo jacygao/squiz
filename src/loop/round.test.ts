@@ -1676,13 +1676,15 @@ test("a salvaged round posts on what is left of the window, not on a fresh margi
   );
 });
 
-test("a branch with no pull request runs nothing and says nothing", async () => {
+test("a branch with no pull request runs nothing, and names the branch and where it looked", async () => {
   const ran = await runInFixture({
     answers: { prlist: "[]" },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.deepEqual(ran.conclusion, { outcome: "no-pull-request" });
+  assert.ok(ran.conclusion.outcome === "no-pull-request");
+  assert.equal(ran.conclusion.branch, BRANCH);
+  assert.match(ran.conclusion.directory, /\/tree$/u, "the worktree the gate asked git in");
   assert.deepEqual(ran.kinds, ["prlist"]);
   assert.equal(ran.invocations.length, 0);
   assert.equal(ran.stateSource, null);
@@ -1695,7 +1697,9 @@ test("a detached HEAD is no branch, so the round ends before gh is asked", async
     reviewer: reviews({}),
   });
 
-  assert.deepEqual(ran.conclusion, { outcome: "no-pull-request" });
+  assert.ok(ran.conclusion.outcome === "no-pull-request");
+  assert.equal(ran.conclusion.branch, null, "a detached HEAD names no branch");
+  assert.match(ran.conclusion.directory, /\/tree$/u, "the worktree the gate asked git in");
   assert.deepEqual(ran.kinds, []);
 });
 
