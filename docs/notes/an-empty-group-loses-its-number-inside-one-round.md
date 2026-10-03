@@ -3,7 +3,7 @@ settles: "§ 4 — what a round can establish about a recorded process group who
 issue: 246
 recorded: 2026-10-01
 versions: { macos: 26.6.2, node: 24.15.0, bash: 3.2.57, ubuntu: 24.04.5, procps: 4.0.4 }
-recheck-when: macOS changes what ps -E withholds, Linux's pid_max default changes, or the round's time bound grows
+recheck-when: macOS changes what ps -E withholds, Linux's pid_max default changes, or the round's time bound or grace grows
 ---
 
 # An empty group loses its number inside one round
@@ -17,16 +17,29 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 
 ## Decisions
 
-- **Hold a recorded number with a process of the round's own, named in
-  `argv[0]`.** A number cannot be handed out while its group still holds a
-  process, and `argv[0]` is the one place both systems show a name for
-  `/bin/sleep`.
+- **Hold each recorded number with an ordinary `sleep` of the round's own, named
+  in `argv[0]`.** A number cannot be handed out while its group still holds a
+  process, and `argv[0]` is the one place both systems show a name for `sleep`.
+  Without it a round sends `SIGTERM`, and then `SIGKILL`, to a process of the
+  user's own that it never started, which this measurement reached in 106
+  seconds. The holder answers `SIGTERM` like anything else, and it can: only the first
+  reading asks for it.
+
+- **Before `SIGKILL`, accept a group only where it still holds a process the
+  first reading found.** A group that still holds one never emptied, so its number
+  was never free to hand out, and it is the group that was signalled. The holder
+  cannot answer this question, because it is in the group the `SIGTERM` went to.
+
+- **Refuse a group that holds no process of the round's own.** That is what a
+  shell without `exec -a` leaves: the recording line runs and the holder does
+  not, so the group is unclaimable rather than wrongly claimed, and a detached
+  tool is left running.
 
 - **Do not treat the age test as a guard on macOS.** The pid space comes round in
   about 100 seconds against a round's 480-second bound, so a stranger holding a
   recorded number is younger than the round exactly as the round's own shells
-  are. This contradicts § 4, which has the round signal only where the system
-  says the group is still its own.
+  are. The round still refuses a group holding anything older than itself, but
+  that is not what tells its group from a stranger's.
 
 - **Leave the reviewer's ability to forge the record alone.** At `deep` its shell
   runs with the user's permissions and can signal those processes itself, so a
@@ -34,30 +47,14 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 
 ## Needs your input
 
-- **Whether to leave one process of the round's own alive in each recorded
-  group.** It costs a line in the shell prefix and one process per shell tool for
-  the rest of the round, and it answers the question the age test cannot: the
-  number cannot be taken while the group holds it, and the holder carries the
-  round's name where every `ps` on both systems prints it. Recommended: take it.
-  The alternative is a round that sends `SIGTERM`, and then `SIGKILL`, to a
-  process of the user's own that it never started, which this measurement reached
-  in 106 seconds. **Which program holds it is unresolved**, and an ordinary
-  `/bin/sleep` is not the answer: it dies on the round's own `SIGTERM`, before the
-  reading that decides whether to escalate.
-
-- **What a shell with no `exec -a` should mean.** The line that leaves the
-  process behind is bash's, and the prefix is silent about its own failures by
-  design, so under a shell without it no process is left and the round is back
-  to the age test with nothing saying so. Recommended: have the round refuse a
-  group it finds no process of its own in, and report the refusal. A round that
-  recorded groups and signalled none is then visible rather than silent.
+- Nothing.
 
 ## Reference
 
 The reading the round makes of each recorded group:
 
 ```
-ps -o pid=,pgid=,etime= -g <the recorded numbers, comma separated>
+ps -o pid=,pgid=,etime=,command= -g <the recorded numbers, comma separated>
 ```
 
 `-g` selects a process group on macOS and a session on Linux. On Linux,
@@ -68,6 +65,17 @@ session's gets no rows there, so such a group is neither signalled nor refused.
 macOS prints no session in `ps`: `ps -o sess=` gave `0` for every process, pid 1
 included. The session is still readable there through `getsid(2)`, reachable as
 `os.getsid()` in `/usr/bin/python3`.
+
+### What each reading accepts
+
+| | Before `SIGTERM` | Before `SIGKILL` |
+|---|---|---|
+| Nothing in the group began before the round | Required | Required |
+| A process named for this round's holder | Required | Not asked |
+| A process whose pid the first reading found | Not asked | Required |
+
+The pids the second reading looks for are every process the first reading found
+in any group it accepted, not only that group's own.
 
 ### Reading a process's environment
 
@@ -101,23 +109,24 @@ read returned 5,112 to 5,149 bytes. It is one read per process.
 
 ### Leaving a process behind, named for the round
 
-Run inside the recording shell, after the line that records the group:
+The prefix runs these after the line that records the group, with
+`SQUIZ_KEEPER` holding the round's name:
 
 ```sh
-exec -a "squiz-<the round>" /bin/sleep 900 >/dev/null 2>&1 &
+{ [ -n "${SQUIZ_KEEPER:-}" ] && exec -a "${SQUIZ_KEEPER}" sleep 900 >/dev/null 2>&1 & } 2>/dev/null || :
+disown 2>/dev/null || :
 ```
 
-`ps -o pid=,pgid=,command= -g <the group>` then prints
+Measured with the line `exec -a "squiz-<the round>" /bin/sleep 900`,
+`ps -o pid=,pgid=,command= -g <the group>` printed
 `84354 84353 squiz-0ddba11 120`, and the name is there for `/bin/sleep`, whose
 environment the same `ps` withholds. It survived a command that `exec`s.
 `exec -a` is bash's, and `/bin/sh -c "sleep 120" "squiz-0ddba11"` does not stand
 in for it: the shell execs its last command and the name goes with the shell.
 
-**A holder must outlive the `SIGTERM` the round sends first.** The shutdown
-signals the group, waits the grace, and establishes the group's identity a second
-time before it escalates, because a `SIGKILL` cannot be taken back. An ordinary
-`/bin/sleep` dies on that first signal, so a group holding a tool that ignores
-`SIGTERM` has lost its holder by the second reading:
+**The holder is gone by the second reading wherever the group outlived the
+first signal.** The round's `SIGTERM` reaches the holder with everything else,
+and a tool that ignores it stays:
 
 ```
 before TERM   52506 52505 squiz-term01 900
@@ -125,10 +134,17 @@ before TERM   52506 52505 squiz-term01 900
 after TERM    52507 52505 /bin/bash -c trap "" TERM; sleep 300
 ```
 
-A round that refuses a group with no holder of its own then refuses this one and
-leaves the tool running, which is the case the escalation exists for. A holder
-that ignores `SIGTERM` and dies at `SIGKILL` is what the two readings need, and
-which program should hold it that way was not measured.
+A second reading that asked for the holder would refuse this group and leave
+running the tool the escalation exists for. Pid 52507 is what the first reading
+saw, so the reading by pid accepts the group and kills it.
+
+**A tool that answers `SIGTERM` by leaving a fresh process behind and exiting is
+not killed.** Every process the group then holds began after the first reading,
+so the second refuses it with "nothing in it was there when the round signalled
+it", and the fresh process runs on. A holder that ignored `SIGTERM` would still
+be there and would let this group be killed. That design was abandoned: the
+holder raced the round's own signal, and its test passed alone, failed inside its
+file, and passed again once instrumentation added twenty milliseconds.
 
 A process carrying the round's name is not a proof of the round's own group. One
 can be put into a group the round never created, where that group is in the
@@ -151,7 +167,8 @@ printf '%s\n' <a pid> >> "$SQUIZ_GROUPS"
 `recordedGroups` then returned both the shell's own number and the appended one,
 `stopRecordedGroups` returned `{"signalled":[6030],"refused":[]}`, and the
 process named 6030 was gone. The same run on Linux signalled and killed the
-appended number too.
+appended number too. That run predates the holder, which the first reading now
+asks for, and was not repeated against it.
 
 `SQUIZ_GROUPS=` appears in the `ps -Eww` output of every `node` the round runs,
 so the path is readable by anything of the user's uid, not by the reviewer
@@ -195,6 +212,13 @@ the wrap at 99,999 and the restart near 100.
 - **The wrap point is reckoned from the counter's own arithmetic**, not read
   from a kernel variable, and the number it restarts from was not seen.
 
+- **The reading by pid also rests on no pid coming round inside the grace.** A
+  group whose shell was still running at the first reading has the shell's pid
+  among those found, and that pid is the group's own number. Were the group to
+  empty and that number lead a stranger's group within the grace, the second
+  reading would accept it. The grace is two seconds against a wrap of about 100
+  on macOS, and nothing here measured a pid coming round that fast.
+
 - **Why macOS withholds an environment was not established.** Every program it
   withheld for sits in `/bin` or `/usr/bin`, and the two it showed run from
   elsewhere. A copy of `/bin/sleep` would have separated the program from where
@@ -215,6 +239,10 @@ the wrap at 99,999 and the restart near 100.
   a process alive for the rest of the round. The one left behind here held no
   pipe of the shell's, because its output went to `/dev/null`.
 
-- **A bound for how long such a process should live was neither chosen nor
-  measured.** A round killed before it signals leaves them running until their
-  own `sleep` ends.
+- **The holder's 900 seconds were chosen, not measured.** It is longer than a
+  round's bound, and a round killed before it signals leaves holders running
+  until their own `sleep` ends.
+
+- **A refusal reaches no channel yet.** A round that refuses a group, whether it
+  holds no holder or only processes the first reading never saw, says so in the
+  value it returns and nowhere a person reads.
