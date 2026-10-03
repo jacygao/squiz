@@ -20,20 +20,21 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 - **Hold each recorded number with an ordinary `sleep` of the round's own, named
   in `argv[0]`.** A number cannot be handed out while its group still holds a
   process, and `argv[0]` is the one place both systems show a name for `sleep`.
-  Without it a round sends `SIGTERM`, and then `SIGKILL`, to a process of the
-  user's own that it never started, which this measurement reached in 106
-  seconds. The holder answers `SIGTERM` like anything else, and it can: only the first
-  reading asks for it.
+  A round that judged by age alone sent `SIGTERM`, and then `SIGKILL`, to a
+  process of the user's own that it never started, which this measurement
+  reached in 106 seconds. The holder answers `SIGTERM` like anything else, and it
+  can: only the first reading asks for it.
 
 - **Before `SIGKILL`, accept a group only where it still holds a process the
   first reading found.** A group that still holds one never emptied, so its number
   was never free to hand out, and it is the group that was signalled. The holder
   cannot answer this question, because it is in the group the `SIGTERM` went to.
 
-- **Refuse a group that holds no process of the round's own.** That is what a
-  shell without `exec -a` leaves: the recording line runs and the holder does
-  not, so the group is unclaimable rather than wrongly claimed, and a detached
-  tool is left running.
+- **Refuse a group that still holds something but no process of the round's
+  own.** That is what a shell without `exec -a` leaves when its command started
+  something: the recording line runs and the holder does not, so the group is
+  unclaimable rather than wrongly claimed, and a detached tool is left running.
+  A group that holds nothing is neither signalled nor refused.
 
 - **Do not treat the age test as a guard on macOS.** The pid space comes round in
   about 100 seconds against a round's 480-second bound, so a stranger holding a
@@ -70,12 +71,16 @@ included. The session is still readable there through `getsid(2)`, reachable as
 
 | | Before `SIGTERM` | Before `SIGKILL` |
 |---|---|---|
-| Nothing in the group began before the round | Required | Required |
+| Nothing in the group older than the round, plus 2 seconds | Required | Required |
 | A process named for this round's holder | Required | Not asked |
 | A process whose pid the first reading found | Not asked | Required |
 
 The pids the second reading looks for are every process the first reading found
 in any group it accepted, not only that group's own.
+
+The 2 seconds are slack for `ps`, which counts elapsed time in whole seconds, so
+a shell started in the same second as the record can report a second more than
+the round has run.
 
 ### Reading a process's environment
 
@@ -117,7 +122,7 @@ The prefix runs these after the line that records the group, with
 disown 2>/dev/null || :
 ```
 
-Measured with the line `exec -a "squiz-<the round>" /bin/sleep 900`,
+Measured with the line `exec -a "squiz-<the round>" /bin/sleep 120`,
 `ps -o pid=,pgid=,command= -g <the group>` printed
 `84354 84353 squiz-0ddba11 120`, and the name is there for `/bin/sleep`, whose
 environment the same `ps` withholds. It survived a command that `exec`s.
@@ -205,8 +210,8 @@ the wrap at 99,999 and the restart near 100.
 
 - **The strangers that took the numbers were started on purpose, each detached
   so that it led a group.** What the run establishes is that the numbers were
-  handed out again inside the round, and that a new process holding one is
-  signalled. How often a machine's own next process both takes a recorded number
+  handed out again inside the round, and that a new process holding one was
+  signalled by the age test alone, before the holder. How often a machine's own next process both takes a recorded number
   and leads a group was not measured.
 
 - **The wrap point is reckoned from the counter's own arithmetic**, not read
