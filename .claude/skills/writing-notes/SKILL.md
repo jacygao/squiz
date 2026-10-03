@@ -29,14 +29,16 @@ recheck-when: pi upgrades
 
 ## Intent
 
-<Why the note exists: one bullet per question that was open before the work.>
+<One line per question the work set out to answer. That they were open is why
+the note exists, so do not say it again in each one.>
 
 ## Decisions
 
 <What to do, then a sentence on why. Lead with the decision: if "so what do I
 do?" returns a different sentence, you led with the reason. Every decision
-answers a question above; one that answers none was invented. Detail stays in
-Reference.>
+answers a question above; one that answers none was invented, and more decisions
+than questions is the sign that some were. A finding is not a decision, and the
+evidence for a decision is not a second decision. Detail stays in Reference.>
 
 ## Needs your input
 
@@ -77,6 +79,8 @@ that would invalidate the finding, so `grep -L` finds what to re-run.
 
 ## Resources
 
+- `.claude/rules/prose.md` — governs the sentences, and `docs/notes/` is in its
+  scope. Its reading test is run on the finished note, as a pass of its own
 - `docs/specs/review-harness-spec.md` — cited by H2 number, never by title
 - The `writing-pull-requests` skill — where the method and the evidence go
   instead
