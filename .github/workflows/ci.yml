@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # GitHub sometimes starts no run for a pull request's push, and then reports no
+  # checks at all — which reads exactly like a repository that runs none. This is
+  # how a run is started by hand for a branch when that happens.
+  workflow_dispatch:
 
 permissions:
   contents: read
