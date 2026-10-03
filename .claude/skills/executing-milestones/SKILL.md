@@ -165,13 +165,17 @@ Every brief carries:
   where a broken thing and a correct thing produce the same output: the hook
   exits 0 on every failure path by design, so a hook that throws looks exactly
   like a branch with no pull request. Name what tells the two apart
+- **Red, then green.** Write each test first and watch it fail for the reason it
+  names, then write the code that makes it pass. A test that was never seen
+  failing has not shown it can, and is deleted rather than kept
 - What to prove rather than assume, and to file a `needs-human` issue instead of
   shipping something it could not verify
 - **The pull request body ends at its last real section.** No generated-with
   footer, no session link, no co-author trailer, in the body or in the commits
 - The worktree it was given, which it works in and never leaves
 - Report back: the pull request number, the checks it ran with their output,
-  what it filed, and **what it could not determine**
+  each new test's failure as it first ran, what it filed, and **what it could
+  not determine**
 
 **An agent that reports what it could not determine has done its job.** That
 answer is yours to resolve, not theirs to guess:
@@ -201,14 +205,16 @@ Run the repository's checks there and compare them against the baseline you took
 before dispatching. A failure present in both is inherited, and chasing it in
 this branch is wasted work.
 
-Then **mutation-test the guard that matters**. Delete the check, run the suite,
-confirm something fails, restore it.
+Run the test files the change touches, not the whole suite, while agents are
+running theirs. A machine running several suites at once fails the
+timing-sensitive tests, and a red result that load caused says nothing about the
+branch.
 
-This matters most where the failure paths are deliberately quiet. Delete the
-pull request gate and run the suite: if it stays green, the tests are asserting
-that nothing happened, which is also what the gate produces when it works. Green
-tests are not evidence that a guard is held; a test can pass because it broke
-something else on the way to the guard.
+Then **read each new test against the failure it was reported to have**. A
+report that shows no red for a test, or shows one that failed for another reason
+(an import, a typo, a missing fixture), has not shown the test can catch
+anything. Send it back rather than proving it yourself. A test with no red
+is deleted.
 
 Remove the verification worktree when done.
 
@@ -243,7 +249,7 @@ answer rather than the question.
 
 **Decide anything recoverable from the specification, the code, or a
 measurement.** Which frontier issues go out together, how the briefs are
-written, which guard to mutation-test, whether a finding is fixed here or filed
+written, which tests to run, whether a finding is fixed here or filed
 as its own issue.
 
 **Ask anything that trades cost against product.** A runtime dependency, since
