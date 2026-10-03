@@ -75,6 +75,7 @@ test("the command line is the one the specification gives", () => {
       "--no-session",
       "--session-dir",
       ".squiz/agent-7/session",
+      "--no-approve",
       "--no-extensions",
       "--extension",
       extensionFile,
@@ -129,6 +130,25 @@ test("the reporting calls are loaded from a file that is there to load", () => {
 test("no extension but the harness's own is loaded, at both depths", () => {
   for (const depth of depths) {
     assert.ok(lineAt(depth).args.includes("--no-extensions"), `depth ${depth} loads what it finds`);
+  }
+});
+
+/**
+ * `pi` merges a trusted project's own `.pi/settings.json` over the user's global
+ * settings, and a trust decision saved against any directory above the worktree
+ * trusts it. A tree under review that set `shellCommandPrefix` would replace the
+ * line the round records its shell groups with, and no shell would record
+ * anything: the round would report itself prepared with the mechanism absent.
+ *
+ * The same file could name the model the review runs on and the prompt the charter
+ * is appended to, so what this withholds is not the prefix alone.
+ */
+test("the tree under review is not trusted to configure the reviewer, at either depth", () => {
+  for (const depth of depths) {
+    assert.ok(
+      lineAt(depth).args.includes("--no-approve"),
+      `depth ${depth} lets the tree under review set pi's own settings`,
+    );
   }
 });
 

@@ -20,6 +20,17 @@
  * reaches the user's own file, which is where it would have gone anyway. Only
  * `settings.json` is the round's, and the user's own copy of it is never written.
  *
+ * **A trusted project's own settings would merge over the mirror**, which is why
+ * the command line untrusts the tree under review. `shellCommandPrefix` is a
+ * string, so a project that set one would replace the round's line outright and
+ * no shell would record anything. Writing the setting into the tree instead is not
+ * open: the file would stand in the worktree under review, where the round's own
+ * reading of the files reports it as a change the round made.
+ *
+ * So the prefix the project configured is resolved here rather than by `pi`, and
+ * the recording line goes in front of it. It still runs; nothing else of the
+ * project's does.
+ *
  * Nothing here throws. Every outcome is a value the caller reads.
  */
 
@@ -42,6 +53,9 @@ const AGENT_DIRECTORY_VARIABLE = "PI_CODING_AGENT_DIR";
 
 /** What `pi` calls the file holding the setting, inside that directory. */
 const SETTINGS_FILE = "settings.json";
+
+/** What `pi` calls the directory a project's own settings sit in, inside the tree. */
+const PROJECT_DIRECTORY = ".pi";
 
 /** The setting whose value `pi` runs inside every shell tool, before the command. */
 const PREFIX_SETTING = "shellCommandPrefix";
@@ -74,7 +88,7 @@ export function confine(invocation: Invocation): Confinement {
     link(theirs, mine);
     writeFileSync(
       join(mine, SETTINGS_FILE),
-      `${JSON.stringify(withPrefix(settings.settings), null, 2)}\n`,
+      `${JSON.stringify(withPrefix(settings.settings, invocation.directory), null, 2)}\n`,
       "utf8",
     );
   } catch (cause) {
@@ -139,11 +153,34 @@ function readSettings(path: string): SettingsRead {
  * In front, because a prefix of the user's that exits or fails would otherwise
  * stop the recording line from ever running.
  */
-function withPrefix(settings: Record<string, unknown>): Record<string, unknown> {
-  const theirs = settings[PREFIX_SETTING];
+function withPrefix(
+  settings: Record<string, unknown>,
+  directory: string,
+): Record<string, unknown> {
+  const theirs = configuredPrefix(settings, directory);
   const mine =
     typeof theirs === "string" && theirs !== "" ? `${shellPrefix}\n${theirs}` : shellPrefix;
   return { ...settings, [PREFIX_SETTING]: mine };
+}
+
+/**
+ * The prefix `pi` would resolve if it read the tree under review, the project's
+ * own file included.
+ *
+ * A project that sets the key replaces the global value rather than adding to it,
+ * which is what merging two strings comes to, so the project's own is the whole of
+ * the answer wherever it is there. A value that is not a string sets no prefix,
+ * exactly as it would for `pi`.
+ *
+ * A project file that is missing or will not read contributes nothing, and that is
+ * `pi`'s own reading too: the command line untrusts the tree, so `pi` drops the
+ * file whole whatever is in it.
+ */
+function configuredPrefix(global: Record<string, unknown>, directory: string): unknown {
+  const project = readSettings(join(directory, PROJECT_DIRECTORY, SETTINGS_FILE));
+  if ("problem" in project) return global[PREFIX_SETTING];
+  if (PREFIX_SETTING in project.settings) return project.settings[PREFIX_SETTING];
+  return global[PREFIX_SETTING];
 }
 
 /**

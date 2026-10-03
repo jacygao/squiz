@@ -118,6 +118,67 @@ test("the round's own line runs before a prefix the user configured", () => {
   });
 });
 
+/**
+ * `pi` merges a trusted project's own settings over the user's global ones, and
+ * one string key replaces the other rather than adding to it. A project prefix
+ * would therefore leave the round's recording line unrun, with the round reporting
+ * itself prepared and no shell recording anything.
+ *
+ * The command line untrusts the tree, so the project's file reaches `pi` through
+ * this and nowhere else. What it configured still runs, and runs second.
+ */
+test("a prefix the tree under review configured runs, after the round's own line", () => {
+  inADirectory((root) => {
+    const theirs = agentDirectory(root, { shellCommandPrefix: "export GLOBAL_PREFIX=1" });
+    const worktree = projectIn(root, { shellCommandPrefix: "export PROJECT_PREFIX=1" });
+    const mine = preparedIn(theirs, spaceIn(root), worktree);
+    assert.equal(
+      settingsIn(mine)["shellCommandPrefix"],
+      `${shellPrefix}\nexport PROJECT_PREFIX=1`,
+      "pi resolves the project's prefix over the global one, so the round's line goes in front of it",
+    );
+  });
+});
+
+/**
+ * The other way of making the round's line effective is to write the setting into
+ * the tree, and it is not open: an untracked file in the worktree is one the
+ * round's own reading of the files reports as a change the round made.
+ */
+test("nothing is written into the tree under review", () => {
+  inADirectory((root) => {
+    const theirs = agentDirectory(root, {});
+    const worktree = projectIn(root, { shellCommandPrefix: "export PROJECT_PREFIX=1" });
+    const before = readFileSync(join(worktree, ".pi", "settings.json"), "utf8");
+
+    preparedIn(theirs, spaceIn(root), worktree);
+
+    assert.deepEqual(entriesIn(worktree), [".pi"]);
+    assert.deepEqual(entriesIn(join(worktree, ".pi")), ["settings.json"]);
+    assert.equal(readFileSync(join(worktree, ".pi", "settings.json"), "utf8"), before);
+  });
+});
+
+/**
+ * A project file `pi` would not read is one it drops whole, so reading it here has
+ * to come to the same thing: the user's own global prefix, and the round's line in
+ * front of it.
+ */
+test("a project file that will not read leaves the user's own prefix where it was", () => {
+  inADirectory((root) => {
+    const theirs = agentDirectory(root, { shellCommandPrefix: "export GLOBAL_PREFIX=1" });
+    const worktree = join(root, "worktree");
+    mkdirSync(join(worktree, ".pi"), { recursive: true });
+    writeFileSync(join(worktree, ".pi", "settings.json"), "{ not json", "utf8");
+
+    const mine = preparedIn(theirs, spaceIn(root), worktree);
+    assert.equal(
+      settingsIn(mine)["shellCommandPrefix"],
+      `${shellPrefix}\nexport GLOBAL_PREFIX=1`,
+    );
+  });
+});
+
 test("settings that will not read fail the round rather than being dropped", () => {
   inADirectory((root) => {
     const theirs = join(root, "agent");
@@ -145,15 +206,27 @@ function agentDirectory(root: string, settings: Record<string, unknown>): string
   return directory;
 }
 
+/** A tree under review holding the project settings given, which `pi` reads at `.pi/`. */
+function projectIn(root: string, settings: Record<string, unknown>): string {
+  const worktree = join(root, "worktree");
+  mkdirSync(join(worktree, ".pi"), { recursive: true });
+  writeFileSync(
+    join(worktree, ".pi", "settings.json"),
+    `${JSON.stringify(settings, null, 2)}\n`,
+    "utf8",
+  );
+  return worktree;
+}
+
 function spaceIn(root: string): RoundSpace {
   const made = makeRoundSpace(join(root, "episode"));
   assert.equal(made.outcome, "made");
   return made.outcome === "made" ? made.space : ({} as RoundSpace);
 }
 
-function at(roundSpace: RoundSpace | undefined): Invocation {
+function at(roundSpace: RoundSpace | undefined, directory = "/tmp/squiz/worktree"): Invocation {
   return {
-    directory: "/tmp/squiz/worktree",
+    directory,
     charterFile: "/tmp/squiz/plugin/charter.md",
     prompt: "Review pull request 142.",
     sessionDirectory: ".squiz/agent-7/session",
@@ -165,8 +238,8 @@ function at(roundSpace: RoundSpace | undefined): Invocation {
 }
 
 /** The directory `pi` is pointed at, having prepared it. */
-function preparedIn(theirs: string, space: RoundSpace): string {
-  const prepared = withAgentDirectory(theirs, () => confine(at(space)));
+function preparedIn(theirs: string, space: RoundSpace, directory?: string): string {
+  const prepared = withAgentDirectory(theirs, () => confine(at(space, directory)));
   assert.equal(prepared.outcome, "prepared", JSON.stringify(prepared));
   const mine = prepared.outcome === "prepared" ? prepared.environment["PI_CODING_AGENT_DIR"] : "";
   assert.ok(mine !== undefined && mine !== "", "nothing pointed pi at a directory");
