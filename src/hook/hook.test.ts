@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import type { Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { SummaryPosting } from "../github/summary.ts";
+import type { RoundConfinement } from "../loop/confinement.ts";
 import type { StateWrite } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
@@ -40,6 +41,7 @@ import type { EpisodeSummary } from "../loop/post-summary.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import type { RoundConclusion, RoundFailure } from "../loop/round.ts";
 import type { AppliedVerdict } from "../loop/verdicts.ts";
+import type { MarkWrite } from "../worktree/shared-tree.ts";
 import { failureIn } from "./hook.ts";
 import { failureLine } from "./report.ts";
 
@@ -499,6 +501,67 @@ test("a salvaged round that could not apply a verdict says that too", () => {
     pointerFor(conclusion),
     `${reason}; it failed to apply 1 of 2 verdicts on PR #142`,
   );
+});
+
+/** Where a round's marker goes, and the error its write ended on. */
+const UNMARKED_REASON =
+  "/work/tree/.squiz/a1e3196c5ad0f2410/running.json could not be written: EISDIR: illegal operation on a directory";
+const UNMARKED: MarkWrite = { outcome: "failed", reason: UNMARKED_REASON };
+
+/** `conclusion`, around a reviewer whose round wrote its marker or failed to. */
+function around(conclusion: RoundConclusion, marked: MarkWrite): RoundConclusion {
+  const confinement: RoundConfinement = {
+    trackedFiles: { outcome: "unchanged" },
+    otherEpisodes: { outcome: "alone" },
+    marked,
+  };
+  return { ...conclusion, confinement } as RoundConclusion;
+}
+
+test("a close whose marker could not be written names the path and the reason", () => {
+  const conclusion = around(closedRound("nothing-open"), UNMARKED);
+
+  assert.equal(
+    pointerFor(conclusion),
+    "the round closed the episode on PR #142 having failed to mark itself as running for " +
+      `the other episodes of the worktree: ${UNMARKED_REASON}`,
+  );
+});
+
+test("a marker that could not be written follows everything a close failed at", () => {
+  const conclusion = around(
+    closedRound("round-cap", [unpostable("the anchor is off")], [], undefined, SUMMARY_REFUSED),
+    UNMARKED,
+  );
+
+  assert.match(
+    pointerFor(conclusion),
+    /^the round closed the episode on PR #142 having failed to post 1 of 1 findings and to post the episode's summary: .* and to mark itself as running for the other episodes of the worktree: .*running\.json could not be written: EISDIR: /u,
+  );
+});
+
+test("a failed round whose marker could not be written says so after the failure", () => {
+  const reason = "the reviewer was killed at its 480-second bound";
+  const conclusion = around(failedRound("timed-out", reason), UNMARKED);
+
+  assert.match(
+    pointerFor(conclusion),
+    /^the reviewer was killed at its 480-second bound; it failed to mark itself as running for the other episodes of the worktree: .*running\.json could not be written: /u,
+  );
+});
+
+test("a round whose marker was written says nothing of it", () => {
+  const written: MarkWrite = { outcome: "written" };
+
+  assert.equal(failureIn(around(closedRound("nothing-open"), written)), null);
+  assert.equal(
+    pointerFor(around(failedRound("timed-out", "the reviewer was killed"), written)),
+    "the reviewer was killed",
+  );
+});
+
+test("a blocked round's marker is not reported, because its stderr is the coding agent's", () => {
+  assert.equal(failureIn(around(blockedRound("Address the open threads.\n"), UNMARKED)), null);
 });
 
 test("every pointer the hook composes is one line", () => {
@@ -999,16 +1062,18 @@ type Tools = {
 };
 
 /**
- * A `PATH` carrying git and nothing else that matters.
+ * A `PATH` carrying git and ps and nothing else that matters.
  *
  * The system's own `PATH` is left out so that a reviewer installed on the
- * machine running the tests cannot be started by one of them.
+ * machine running the tests cannot be started by one of them. ps stays, because
+ * a round without it cannot mark itself as running and says so.
  */
 async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
   const path = join(directory, "tools");
   const argumentLog = join(directory, "gh-arguments");
   mkdirSync(path);
-  symlinkSync(whichGit(), join(path, "git"));
+  symlinkSync(onSystemPath("git"), join(path, "git"));
+  symlinkSync(onSystemPath("ps"), join(path, "ps"));
 
   if (gh !== null) {
     const binary = join(path, "gh");
@@ -1022,7 +1087,7 @@ async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
         // Every call reads its stdin, or a call carrying a body signals the
         // writer instead of answering it. A call carrying none sees an empty
         // stdin, so there is nothing to tell the two apart for. `read` does it
-        // because it is a builtin: `PATH` here holds git and gh alone.
+        // because it is a builtin: `PATH` here holds git, ps and gh alone.
         "while read -r line; do :; done",
         "case $1 in",
         `  pr) printf '%s' ${quote(gh.pullRequests ?? "")} ;;`,
@@ -1049,10 +1114,10 @@ async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
   };
 }
 
-function whichGit(): string {
+function onSystemPath(name: string): string {
   for (const entry of (process.env["PATH"] ?? "").split(":")) {
     if (entry === "") continue;
-    const candidate = join(entry, "git");
+    const candidate = join(entry, name);
     try {
       accessSync(candidate, constants.X_OK);
       return candidate;
@@ -1060,7 +1125,7 @@ function whichGit(): string {
       // Not this entry. The next one, or none at all.
     }
   }
-  return assert.fail("git is not on PATH, and every fixture here needs it");
+  return assert.fail(`${name} is not on PATH, and every fixture here needs it`);
 }
 
 function quote(text: string): string {
@@ -1347,11 +1412,12 @@ async function withWorktree<T>(body: (fixture: Fixture) => Promise<T>): Promise<
 }
 
 /**
- * A `PATH` carrying git, a fake `gh` and a fake reviewer, and the logs the two
- * fakes write.
+ * A `PATH` carrying git, ps, a fake `gh` and a fake reviewer, and the logs the
+ * two fakes write.
  *
  * The system's own `PATH` is left out so that a `gh` or a reviewer installed on
- * the machine running the tests cannot be reached by one of them.
+ * the machine running the tests cannot be reached by one of them. ps stays,
+ * because a round without it cannot mark itself as running and says so.
  */
 async function harnessIn(
   beside: string,
@@ -1361,7 +1427,8 @@ async function harnessIn(
   const ghLog = join(beside, "gh-calls");
   const reviewerLog = join(beside, "reviewer-runs");
   mkdirSync(path);
-  symlinkSync(whichGit(), join(path, "git"));
+  symlinkSync(onSystemPath("git"), join(path, "git"));
+  symlinkSync(onSystemPath("ps"), join(path, "ps"));
   await writeFile(ghLog, "", "utf8");
   await writeFile(reviewerLog, "", "utf8");
   await standIn(path, "gh", ghScript(plan.gh, ghLog));
@@ -1723,6 +1790,48 @@ test("a state file that will not take the round after the review posts nothing",
       // Sealed against writing, so it cannot be removed while it stays that way.
       await chmod(episode, 0o755);
     }
+  });
+});
+
+/** A round that reviews, finds nothing, and closes the episode with its summary up. */
+const CLOSES_CLEAN: GhPlan = { ...REACHES_THE_REVIEW, summary: [{ stdout: SUMMARY_UP }] };
+
+test("a marker the round could not write is named on stderr and nowhere on the pull request", async () => {
+  // A directory where the marker goes: the rename that would put it there fails,
+  // and nothing else the round writes is in its way.
+  await withWorktree(async ({ worktree, beside }) => {
+    const marker = join(worktree, ".squiz", AGENT_ID, "running.json");
+    await mkdir(join(marker, "occupied"), { recursive: true });
+    const harness = await harnessIn(beside, { gh: CLOSES_CLEAN, reviewer: reviews([]) });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0, "a round no other episode can find must not stop the turn");
+    assert.equal(result.stdout, "");
+    assert.ok(
+      result.stderr.startsWith(
+        "squiz: the round closed the episode on PR #142 having failed to mark itself as " +
+          `running for the other episodes of the worktree: ${marker} could not be written: `,
+      ),
+      `the pointer does not name the marker and why it was not written: ${result.stderr}`,
+    );
+    assertOneLine(result.stderr);
+
+    const summary = harness.ghCalls().find((call) => call.kind === "summary");
+    const body = String(sentBy(summary as GhCallRecord)["body"]);
+    assert.ok(!body.includes("running.json"), `the marker reached the summary: ${body}`);
+  });
+});
+
+test("a marker the round wrote is not mentioned anywhere", async () => {
+  await withWorktree(async ({ worktree, beside }) => {
+    const harness = await harnessIn(beside, { gh: CLOSES_CLEAN, reviewer: reviews([]) });
+
+    const result = squizHook(worktree, harness.path, payload());
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, "", "a round that marked itself reported a marker anyway");
+    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff", "summary"]);
   });
 });
 

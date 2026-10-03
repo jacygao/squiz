@@ -19,6 +19,7 @@ import { loadConfig } from "../config/config.ts";
 import { episodeAt } from "../loop/episode.ts";
 import {
   runRound,
+  type AroundTheReviewer,
   type RoundAccount,
   type RoundConclusion,
   type RoundSetup,
@@ -101,7 +102,8 @@ type FailedRound = Extract<RoundConclusion, { readonly outcome: "failed" }>;
 type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
 
 /**
- * What the round failed at, and what of the review it could not put up with it.
+ * What the round failed at, what of the review it could not put up with it, and
+ * the marker it could not write.
  *
  * The failure is what the line opens on, because nothing a round managed to post
  * makes it a round that succeeded. What it could not post follows, on the same
@@ -109,16 +111,14 @@ type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
  * is as lost as any other.
  */
 function failedFailure(round: FailedRound): string {
-  const { salvaged } = round;
-  if (salvaged === undefined) return round.reason;
-  const unreported = unreportedBy(salvaged);
-  if (unreported === null) return round.reason;
-  return `${round.reason}; it failed to ${unreported} on PR #${salvaged.pullRequest}`;
+  const failures = [unsalvagedBy(round), unmarkedBy(round)].filter((what) => what !== null);
+  if (failures.length === 0) return round.reason;
+  return `${round.reason}; it failed to ${failures.join(" and to ")}`;
 }
 
 /**
- * What a closing round failed to put on the pull request, or `null` where it
- * failed at nothing.
+ * What a closing round failed at, on the pull request and in the harness, or
+ * `null` where it failed at nothing.
  *
  * A close is the end of the episode. Nothing is stored to retry, and no later
  * round reads the same code to make the same comment again. A closing round is
@@ -126,9 +126,12 @@ function failedFailure(round: FailedRound): string {
  * review.
  */
 function closingFailure(round: ClosedRound): string | null {
-  const failures = [unreportedBy(round), summaryLostBy(round), closeUnrecordedBy(round)].filter(
-    (what) => what !== null,
-  );
+  const failures = [
+    unreportedBy(round),
+    summaryLostBy(round),
+    closeUnrecordedBy(round),
+    unmarkedBy(round),
+  ].filter((what) => what !== null);
   if (failures.length === 0) return null;
   const at = `PR #${round.pullRequest}`;
   return `the round closed the episode on ${at} having failed to ${failures.join(" and to ")}`;
@@ -159,8 +162,8 @@ function summaryLostBy(round: ClosedRound): string | null {
 /**
  * The close the episode could not record, or `null` where it recorded it.
  *
- * Last on the line, because it is the only part of a close that is about the
- * harness rather than about the pull request.
+ * After everything about the pull request, because it is about the harness.
+ * The marker follows it, because it is about another episode.
  *
  * A close nothing recorded is a close no later firing can read. That firing finds
  * the rounds in the state file and no close, which is what an interruption leaves
@@ -171,6 +174,30 @@ function summaryLostBy(round: ClosedRound): string | null {
 function closeUnrecordedBy(round: ClosedRound): string | null {
   if (round.recorded.outcome !== "failed") return null;
   return `record the episode's close: ${round.recorded.reason}`;
+}
+
+/**
+ * The marker this round could not write, or `null` where it wrote one or never
+ * tried.
+ *
+ * A round no other episode can find lets one starting meanwhile take a
+ * comparison that names this reviewer's writes as its own. That harm lands on
+ * another pull request, so the summary does not carry it and this line is the
+ * only place it is said. A blocked round does not say it, because its stderr is
+ * the coding agent's next instruction.
+ */
+function unmarkedBy(round: AroundTheReviewer): string | null {
+  const marked = round.confinement?.marked;
+  if (marked === undefined || marked.outcome === "written") return null;
+  return `mark itself as running for the other episodes of the worktree: ${marked.reason}`;
+}
+
+/** What a failed round salvaged and could not put up, or `null` where nothing was lost. */
+function unsalvagedBy(round: FailedRound): string | null {
+  const { salvaged } = round;
+  if (salvaged === undefined) return null;
+  const unreported = unreportedBy(salvaged);
+  return unreported === null ? null : `${unreported} on PR #${salvaged.pullRequest}`;
 }
 
 /**

@@ -131,8 +131,9 @@ export type AroundTheReviewer = {
    * it. Absent where no reviewer ran, which is every conclusion reached before
    * the review.
    *
-   * Nothing here is reported by the round. The summary comment names it, and a
-   * mutated tree never changes what the round concluded or what it posted.
+   * Nothing here is reported by the round. The summary comment names what the
+   * readings found and the hook names a marker that was not written. Neither
+   * changes what the round concluded or what it posted.
    */
   readonly confinement?: RoundConfinement;
 };
