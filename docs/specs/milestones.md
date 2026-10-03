@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.12 (draft)
+**Version:** 0.13 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -25,12 +25,10 @@ A written finding in `docs/notes/` for each of:
 
 - [ ] `SubagentStop` fires, exit 2 feeds its reason back into the subagent's
       open turn, and the subagent resumes.
-- [ ] **The hook payload's fields, named exactly.** An episode is keyed on the
-      subagent's id from that payload. Confirm the field exists and is the same
-      every time that subagent stops. If it does not exist, record the fallback
-      key — worktree toplevel, branch, or pull request number are each viable,
-      since there is one of each per episode — and amend the specification
-      before M1.
+- [ ] **The hook payload's fields, named exactly.** M1 to M6 keyed an episode
+      on the subagent's id from that payload, so confirm the field exists and is
+      the same every time that subagent stops. M7 rekeys the episode on the pull
+      request's number, which no payload field decides.
 - [ ] Whether `stop_hook_active` is set on re-entry. The loop re-blocks
       deliberately and must not be confused with the runtime's own loop guard.
 - [ ] The hook's working directory resolves the right worktree, and two
@@ -48,13 +46,14 @@ not worked around.
 
 The repository becomes a loadable plugin with a `squiz` binary and a
 `SubagentStop` hook that does the one thing needing no dependencies: gate on the
-pull request and exit 0.
+pull request and exit 0. The hook is the Claude Code trigger the specification
+keeps; `squiz review`, which exits 1 at the gate, arrives in M7.
 
 Covers the plugin manifest, the hook registration, `bin/` and `src/`,
 `tsconfig.json`, `tsc --noEmit` and tests in CI, `.squiz/` in `.gitignore`,
 `.squiz.json` loading with its six defaults and range validation, the top-level
-trap that turns any throw into exit 0, and the single-line stderr reporter every
-later milestone writes through.
+trap that turns any throw in the hook into exit 0, and the single-line stderr
+reporter every later milestone writes through.
 
 ### Acceptance criteria
 
@@ -118,7 +117,7 @@ This milestone needs a scratch repository and pull request to test against.
 ## M4 — The reviewer
 
 `charter.md`, the `pi` adapter's `argv`, `parse` and `grants`, and the spawn
-harness: working directory, `TMPDIR` at `.squiz/<episode>/scratch/`,
+harness: working directory, `TMPDIR` at the episode's `scratch/` directory,
 `< /dev/null`, the time bound, one parse retry, cost extraction, and the prompt
 carrying the pull request and the existing threads. Depth `read` only: the
 `bash` grant is M7's, along with the comparison that detects what it can do.
@@ -140,11 +139,16 @@ carrying the pull request and the existing threads. Depth `read` only: the
 
 ## M5 — The round
 
-The loop composes M3 and M4. Episode state under `.squiz/<episode>/`, whose
-directory name is the subagent's `agent_id` stripped to a safe character set
+The loop composes M3 and M4. Episode state under a directory in `.squiz/`, whose
+name is the subagent's `agent_id` stripped to a safe character set
 before it becomes a path component, and the round itself: gate, review, post new
 findings as threads, apply each verdict to the thread it names, then exit 2 with
 a blocking reason or exit 0 at the cap.
+
+Everything here was built as the hook. M7 moves the round behind
+`squiz review <number>`, keys the episode on the pull request's number, and gives
+the command its own exit statuses. The hook keeps the exit 2 and exit 0 described
+here, as the Claude Code trigger.
 
 ### Acceptance criteria
 
@@ -160,11 +164,13 @@ a blocking reason or exit 0 at the cap.
       without treating it as tampering.
 - [ ] A cap of 1 reviews once and never blocks. A cap of R blocks at most R−1
       times.
-- [ ] Every row of the specification's failure table exits 0 when exercised.
-- [ ] The episode closes by exiting 0 and recording final state.
+- [ ] Every row of the specification's failure table exits the hook 0 when
+      exercised.
+- [ ] The episode closes by exiting the hook 0 and recording final state.
 
 The blocking reason on exit 2 and the one-line failure pointer on exit 0 are
-separate channels and stay separate.
+separate channels and stay separate. Under `squiz review` they become stdout
+and stderr.
 
 ## M6 — The summary comment
 
@@ -185,12 +191,55 @@ three-block comment, posted once and never edited.
 
 ## M7 — Confinement detection, shared trees, and depth `deep`
 
+`squiz review <number>` becomes the one entry point: it reviews a pull request's
+head commit once, waits for it, and prints what is open. The coding agent runs it,
+and the `SubagentStop` hook becomes a trigger that resolves the pull request and
+calls it. An episode is keyed on the pull request's number, with a record per head
+commit and latest reply, and `squiz status` lists the reviews. A round that fails posts a failure
+comment. This comes first in the milestone, because until it lands no finding
+squiz posts reaches a coding agent in auto mode, and squiz cannot review this
+milestone's own pull requests.
+
 The tracked-file comparison, taken before the reviewer starts and again when it
 exits, and shared-tree detection comparing `git rev-parse --show-toplevel`
 against the live episodes. Depth `deep` ships here, because the comparison is
 what detects a write made through the shell it grants.
 
 ### Acceptance criteria
+
+- [ ] The specification's prerequisites for `squiz review` each have a finding in
+      `docs/notes/`, and any that contradicts the specification is reconciled
+      there before the command is built.
+- [ ] `squiz review` exits 0, 2, 3, 4 and 1 in the cases the specification
+      gives, and prints each as it shows.
+- [ ] One deadline bounds each invocation, waiting included, and no invocation
+      outlives its window. A run that waited for its own state's round returns
+      that round's result, or exits 1 with the recorded reason where it failed,
+      starting no round and posting no second failure comment. A run that waited for an older state's round, or whose
+      deadline arrived mid-wait, starts no round and exits 4. A run that did not
+      wait reviews with what is left of its deadline.
+- [ ] A run on a closed episode runs no round and prints the close. A run on a
+      state under review waits for that review and returns its result, and a run
+      on a state already reviewed returns that result without a round.
+- [ ] A new commit, or a new reply on one of the reviewer's threads, starts a
+      round. A disputed finding with no commit after it is ruled `withdrawn` or
+      `open`, and the round counts against the cap.
+- [ ] The hook calls the same review, and two firings for one state post one
+      set of threads.
+- [ ] `squiz status` lists running, finished and failed reviews across
+      worktrees, as the specification shows.
+- [ ] A round that fails posts a failure comment naming what failed and what
+      else it established, and prints the same reason on stderr.
+- [ ] A round runs inside a 540-second window from `squiz review` and a
+      600-second one from the hook. Pre-review calls are capped at 30 seconds
+      and come off the reviewer's time, posting has a 60-second reserve, and
+      `timeout` defaults to 480 on the command path and 540 on the hook path.
+- [ ] Each round's state records `postingSeconds`.
+- [ ] The plugin ships the review skill, and a dispatched subagent whose brief
+      does not mention squiz loads it and works a real pull request's threads to
+      exit 0 or 3.
+- [ ] `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor`
+      reports whether the skill or the section is there.
 
 - [ ] A file mutated during a run is named in the summary.
 - [ ] Two live episodes on one toplevel disable the comparison for that round.
@@ -201,15 +250,13 @@ what detects a write made through the shell it grants.
 ## M8 — Episode boundaries
 
 The token bound read before a round starts and again when one records what it
-spent, worktree removal at episode close, and an audit that every failure path
-reaches the stderr channel with a useful line.
+spent, and an audit that every failure path reaches the stderr channel with a
+useful line.
 
 ### Acceptance criteria
 
 - [ ] An episode whose round reached the token bound closes with the findings it
       has, and the summary says the bound was reached.
-- [ ] A clean, pushed worktree is removed at close. A dirty or unpushed one
-      stays and is named on stderr.
 - [ ] No failure path is silent.
 
 M7 and M8 do not depend on each other.
