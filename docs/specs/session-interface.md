@@ -1,6 +1,6 @@
 # Session Interface: What Squiz Asks of Muster
 
-**Version:** 0.4 (draft)
+**Version:** 0.5 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -30,7 +30,7 @@ harness spec" below. Its CLI stays the core, and nothing here is built yet.
 | D3 | Whether a reviewer keeps its context from one round to the next | No. A fresh `pi` session for every round | § 4 |
 | D4 | Whether the reviewer reviews the coding agent's worktree or a snapshot of the head commit | A snapshot, in a worktree of the reviewer's own, because a live coding session may be editing while a round runs | § 6 |
 | D5 | What replaces the time bound | A wall-clock guard the project sets, with no ceiling, and the token bound enforced while the round runs | § 8 |
-| D6 | What `squiz review` does when its wait runs out | Exit 4, "still reviewing, run the command again". A rerun attaches to the same round | § 4 |
+| D6 | What `squiz review` does when its wait runs out | The harness spec's exit 4, "still reviewing", now also for a round this run asked for. A rerun attaches to the same round | § 4 |
 | D8 | Whether the reviewer may answer a disputed thread in words | Yes, as an optional reply carried by an `open` verdict | § 6 |
 | D10 | Whether Herdr's own `pi` extension loads into the reviewer | Not decided. It may be what makes Herdr show the reviewer's state, and it breaks the rule that only squiz's extension loads. Spike S6 in muster's document comes first | § 4 |
 | D11 | Whether squiz's own `SubagentStop` registration stays once muster's triggers exist | No. Muster registers the hooks, and squiz is the command they run | § 9 |
@@ -144,10 +144,12 @@ Full output: /work/squiz/.squiz/41/review.txt
 Squiz is still reviewing PR #41 at 3f9c2e0, in session squiz-41-r2. Run `squiz review 41` again to wait for it.
 ```
 
-The harness spec gives 0, 2 and 3 an outcome and reads every other status, 1
-among them, as "could not run". 4 would fall into that reading, so the skill and
-the `AGENTS.md` text gain a line for it. `squiz review --no-wait <number>` sends
-its message and exits 4 at once.
+Exit 4 is the harness spec § 6's "still reviewing", and the skill and the
+`AGENTS.md` text already tell the coding agent to run the command again on it.
+There it covers a run that waited on another caller's round. Here it covers the
+run's own request as well, because the round runs in the round host and never
+inside the command. `squiz review --no-wait <number>` sends its message and
+exits 4 at once.
 
 ### `squiz hook`
 
@@ -223,7 +225,7 @@ which appends to the report file and the progress log.
 
 | Path | Change |
 |---|---|
-| `src/cli.ts` | Adds `squiz host`, `squiz review --no-wait`, and exit 4. `squiz hook` becomes muster's trigger command. |
+| `src/cli.ts` | Adds `squiz host` and `squiz review --no-wait`. `squiz hook` becomes muster's trigger command. |
 | `src/review/` (#290) | `squiz review` sends a message and waits on the record. `squiz status` names each round's reviewer session, and ends the round's line with its resume command. |
 | `src/host/` | New. The round host. |
 | `src/hook/` | Resolves the pull request and sends `review-ready`. It no longer runs a round, and the exit-2 block goes. |
@@ -233,7 +235,7 @@ which appends to the report file and the progress log.
 | `src/reviewers/pi/argv.ts` | The command line in § 4. |
 | `src/reviewers/pi/extension.ts` | Writes the report file and the progress log. Shuts `pi` down after `finish_review`, and on `agent_settled` without one after recording an unfinished end. Stops at the token bound. `execute` takes its fifth argument, the context `ctx.shutdown()` belongs to. |
 | `src/reviewers/pi/stream.ts`, `parse.ts`, `output.ts`, `cost.ts` | Read the report file rather than the JSON stream. |
-| `skills/squiz-review/SKILL.md` | Exit 4. A main session told it will be woken may end its turn. |
+| `skills/squiz-review/SKILL.md` | A main session told it will be woken may end its turn. |
 
 **Kept as they are:** the finding contract, the comment format and every
 comment, the GitHub client and its 30-second bound per call, the tracked-file
