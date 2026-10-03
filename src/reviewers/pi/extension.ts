@@ -1,12 +1,13 @@
 /**
- * The extension `pi` loads, which gives the reviewer a call to report each
- * finding through as it confirms it.
+ * The extension `pi` loads: the calls the reviewer reports each finding
+ * through, and the handler that refuses the calls which would change what the
+ * coding agent commits.
  *
  * Nothing in the harness imports this. `pi` loads it from the path on the
  * command line, compiles it and the modules it imports, and runs the default
  * export once with its own API. So the types here describe as much of that API
- * as the three calls use, structurally: the package is not a dependency of this
- * one and nothing here may make it one.
+ * as the three calls and the one subscription use, structurally: the package is
+ * not a dependency of this one and nothing here may make it one.
  *
  * A report that is not one the harness could compose a comment or a mutation
  * from is refused, and the refusal reaches the reviewer as the call's error
@@ -15,6 +16,7 @@
  */
 
 import { readFinding, readVerdict } from "../../findings/reported.ts";
+import { type Refusal, refuse, type ToolCall } from "./refusals.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 
 /** One block of what a call answers with. Only text is ever returned here. */
@@ -44,9 +46,16 @@ type ToolDefinition = {
   readonly execute: (toolCallId: string, params: unknown) => Promise<ToolResult>;
 };
 
-/** As much of `pi`'s extension API as registering these three calls needs. */
+/** As much of `pi`'s extension API as the three calls and the handler need. */
 export type Registrar = {
   readonly registerTool: (tool: ToolDefinition) => void;
+  /**
+   * Subscribe to an event `pi` offers a handler before it acts.
+   *
+   * `pi` passes a second argument this never reads, and takes a handler that
+   * answers nothing as one that objects to nothing.
+   */
+  readonly on: (event: "tool_call", handler: (call: ToolCall) => Refusal | undefined) => void;
 };
 
 /**
@@ -113,7 +122,7 @@ const verdictParameters = {
 const finishParameters = { type: "object", properties: {} };
 
 /**
- * Register the three calls.
+ * Register the three calls, and subscribe the refusal.
  *
  * The threads already ruled on are held here, so that a second ruling on one
  * thread is refused while the reviewer can still decide which of the two it
@@ -122,6 +131,10 @@ const finishParameters = { type: "object", properties: {} };
  */
 export default function reportAsYouGo(pi: Registrar): void {
   const ruled = new Set<string>();
+
+  // `pi` runs a tool the moment no handler objects, so a subscription that goes
+  // missing takes the whole refusal with it and says nothing.
+  pi.on("tool_call", refuse);
 
   pi.registerTool({
     name: REPORT_FINDING,

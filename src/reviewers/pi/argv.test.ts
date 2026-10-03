@@ -5,6 +5,7 @@ import { test } from "node:test";
 import type { Depth, Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
 import { argv, extensionFile, grants } from "./argv.ts";
+import { refusedTools } from "./refusals.ts";
 import { reportingTools } from "./reporting.ts";
 
 /**
@@ -160,6 +161,21 @@ test("edit and write appear in no command line, at either depth", () => {
         `depth ${depth} names ${writer} somewhere on its command line: ${whole}`,
       );
     }
+  }
+});
+
+/**
+ * Nothing is refused at `read`, and the grant is why: the shell is not there and
+ * neither writer is. A round at `read` that refused nothing is the grant holding
+ * rather than the handler having gone missing, and that reading only stands
+ * while the grant carries none of them.
+ */
+test("the read grant carries nothing the refusal would have to catch", () => {
+  for (const name of [...refusedTools, "bash"]) {
+    assert.ok(
+      !grants.read.includes(name),
+      `depth read grants ${name}, so a round at read that refused nothing says nothing about the handler`,
+    );
   }
 });
 

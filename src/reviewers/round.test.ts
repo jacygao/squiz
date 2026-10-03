@@ -73,6 +73,7 @@ test("a reviewer that floods and does not stop is killed at the bound", async ()
       outcome: "timed-out",
       cost: spentOnce,
       seconds: BOUND,
+      refusals: 0,
       findings: review.findings,
       verdicts: [],
     });
@@ -91,6 +92,7 @@ test("a reviewer that says nothing and does not stop is killed at the bound", as
       outcome: "timed-out",
       cost: unspent,
       seconds: BOUND,
+      refusals: 0,
       findings: [],
       verdicts: [],
     });
@@ -312,6 +314,7 @@ test("a run that completed no message is not tried again", async () => {
       outcome: "setup",
       cost: { dollars: 0, tokens: 0, messages: 1 },
       reason: "no credential for the provider",
+      refusals: 0,
       findings: [],
       verdicts: [],
     });
@@ -555,6 +558,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
           cost: { dollars: 0.004, tokens: 100, messages: 1 },
           findings: [],
           verdicts: [],
+          refusals: 0,
           finished: false,
           broken: undefined,
         });
