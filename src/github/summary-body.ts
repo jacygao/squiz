@@ -18,15 +18,18 @@ import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
 import type { ConfinementEvidence } from "../loop/confinement.ts";
+import type { RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
-import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSpendLine } from "./spend-line.ts";
 
 /** What the episode came to, which is everything the comment is written from. */
 export type ClosedEpisode = {
-  /** What each round spent, in the order the rounds ran. Its length is the rounds run. */
-  readonly rounds: readonly RoundCost[];
+  /**
+   * Each round as the episode's state recorded it, in the order the rounds ran.
+   * Its length is the rounds run.
+   */
+  readonly rounds: readonly RoundRecord[];
   /** Every thread of this review on the pull request, as the status it ended in. */
   readonly threads: readonly ClassifiedThread[];
   /**
@@ -174,9 +177,10 @@ function oneLine(text: string): string {
  * Notes, or nothing at all.
  *
  * The findings come in the order they were posted, which runs `high` severity
- * first. What the episode established about the worktree follows them, and the
- * bound that closed the episode comes last: the findings are each about one
- * defect, the worktree is about the rounds, and the bound is about the episode.
+ * first. What the episode established about the worktree follows them, then the
+ * rounds the time bound cut short, and the bound that closed the episode comes
+ * last: the findings are each about one defect, the worktree and the cuts are
+ * about the rounds, and the bound is about the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
   const found = episode.confinement;
@@ -187,6 +191,7 @@ function notes(episode: ClosedEpisode): readonly string[] {
     ...whatWasNotCompared(found.uncompared),
     ...whoElseWasHere(found.shared),
     ...whoWasNotEstablished(found.unestablished),
+    ...cutShort(episode.rounds),
     ...closedEarly(episode.because),
   ];
   if (lines.length === 0) return [];
@@ -246,6 +251,24 @@ function whoWasNotEstablished(reasons: readonly string[]): readonly string[] {
     (reason) =>
       "- A round could not tell whether another episode was in the worktree" +
       ` while the reviewer ran: ${oneLine(reason)}`,
+  );
+}
+
+/**
+ * One line per round whose review the time bound ended before the reviewer
+ * finished it.
+ *
+ * A killed reviewer's findings are posted like a finished one's, so nothing else
+ * on the pull request tells a person that part of the change was never read.
+ */
+function cutShort(rounds: readonly RoundRecord[]): readonly string[] {
+  return rounds.flatMap((round, index) =>
+    round.cutShortAtSeconds === undefined
+      ? []
+      : [
+          `- The review was cut short by the ${round.cutShortAtSeconds}-second time bound` +
+            ` in round ${index + 1}, and the round kept only the findings it had reported by then`,
+        ],
   );
 }
 

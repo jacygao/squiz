@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.54 (draft)
+**Version:** 0.55 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -925,8 +925,9 @@ Three blocks, in this order.
    finding carries; a tracked file that changed while the reviewer ran; a `HEAD`
    that moved while the reviewer ran, with what it was and what it became; other
    episodes that shared the worktree; a round that could not tell whether the
-   worktree was shared or what changed in it; and a cap or bound that ended the
-   episode early.
+   worktree was shared or what changed in it; a round whose review the time
+   bound cut short, with the round's number and the bound; and a cap or bound
+   that ended the episode early.
 
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
@@ -954,6 +955,20 @@ comparison read them:
 - `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to refs/heads/feature-a at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 ```
 
+**A round whose review the time bound cut short is a line of its own.** Its
+findings are on the pull request like a finished review's, so nothing else tells
+a person that the reviewer stopped before it had read everything it meant to.
+The round is a failed one and closes no episode, so the line is written by the
+round that closes the episode later, from the episode's state:
+
+```markdown
+- The review was cut short by the 480-second time bound in round 2, and the round kept only the findings it had reported by then
+```
+
+A review that finished on its own has no such line, however close to the bound
+it ran. So has one that reported its review complete before the bound and was
+stopped writing its closing message after it.
+
 A round whose review did not run closes no episode, so no comment reports one.
 The round's failure is announced on the hook's stderr instead.
 
@@ -980,8 +995,25 @@ Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1
 
 Notes is omitted when there is nothing to report.
 
-What each round spent is written to the episode's local state file as the round
-finishes: the tokens, and the dollars where the reviewer's CLI priced the model.
+Each round is written to the episode's local state file as the round finishes,
+before anything is posted:
+
+```json
+{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 481.2, "cutShortAtSeconds": 480 }
+```
+
+- `dollars` and `tokens` are what the round spent, the dollars being zero where
+  the reviewer's CLI did not price the model. `messages` is how many assistant
+  messages the two cover.
+- `elapsedSeconds` is the wall clock from starting the reviewer to having it
+  stopped, to a tenth of a second. A round that ran the reviewer twice counts
+  both runs.
+- `cutShortAtSeconds` is the time bound the round ran under, present only where
+  the bound ended a review the reviewer had not finished.
+
+A state file written before the last two fields existed has neither, and reads
+back as rounds with no timing and no cut. A field that is there and does not
+hold a number of the right kind makes the file unreadable, like any other.
 
 The comment leads with the tokens, because every reviewer reports them and not
 every reviewer is priced. A model run on a subscription has no dollar figure at
@@ -1115,7 +1147,7 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 480 seconds | The reviewer process is killed and the round posts the findings reported before the kill. |
+| **Time**, per round | 480 seconds | The reviewer process is killed, the round records that the bound cut it short, and it posts the findings reported before the kill. |
 | **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
@@ -1127,6 +1159,13 @@ The kill also yields a cost: the assistant messages that completed carry their
 own, and the round records that sum as its last tracked cost. The findings and
 the figure are read from the same moment of the run, so a round never reports a
 cost from one moment beside findings from another.
+
+**The round records that the bound cut it short.** Its entry in the episode's
+state carries the bound it ran under, and the summary the episode closes with
+names the round and the bound in Notes (§ 5). A killed review and a finished one
+both leave findings on the pull request, and that line is what tells them apart.
+A reviewer that reported its review complete before the bound is a review that
+finished, whenever its process stopped, and records no cut.
 
 **What a failed round salvaged goes on the pull request, and the round is a
 failed round still.** The findings the reviewer confirmed are posted and the

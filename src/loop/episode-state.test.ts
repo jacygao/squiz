@@ -52,6 +52,20 @@ test("state written comes back as it was written", (t) => {
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
+test("how long each round ran, and the bound that cut one short, come back as written", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [
+      { ...firstRound, elapsedSeconds: 41.3 },
+      { ...secondRound, elapsedSeconds: 480.2, cutShortAtSeconds: 480 },
+    ],
+    spentOutsideRounds: unspent,
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
 test("the episode's directory is made by the write that needs it", (t) => {
   const episode = episodeIn(t);
   assert.deepEqual(writeState(episode, { rounds: [], spentOutsideRounds: unspent }), { outcome: "written" });
@@ -120,6 +134,14 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "confinement": {"shared": {}}}`,
   `{"rounds": [], "confinement": {"uncompared": [null]}}`,
   `{"rounds": [], "confinement": {"unestablished": 1}}`,
+  // How long a round ran, and the bound that cut it short, are the measurements a
+  // later reading takes from this file. A figure that is there and cannot be read
+  // would be a measurement nobody took.
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": "12"}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": -1}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 0}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 2.5}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": true}]}`,
 ];
 
 for (const contents of unreadableContents) {

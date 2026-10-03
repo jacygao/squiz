@@ -333,6 +333,33 @@ test("the round cap is a note, because nothing reviewed what is still open again
   );
 });
 
+/**
+ * A killed reviewer and a finished one both leave findings on the pull request,
+ * so this line is the whole of what tells a person the review stopped early.
+ */
+test("a round the time bound cut short is a note naming the round and the bound", () => {
+  const comment = renderSummary({
+    ...quiet,
+    rounds: [
+      round(0.0061, 20_100),
+      { ...round(0.0042, 9_800), elapsedSeconds: 481.7, cutShortAtSeconds: 480 },
+      { ...round(0.0013, 3_100), elapsedSeconds: 40.2 },
+    ],
+    because: "round-cap",
+  });
+  assert.ok(
+    comment.endsWith(
+      [
+        "**Notes**",
+        "",
+        "- The review was cut short by the 480-second time bound in round 2, and the round kept only the findings it had reported by then",
+        "- The episode ended at its round cap rather than with nothing left open",
+      ].join("\n"),
+    ),
+    `the cut was not noted: ${comment}`,
+  );
+});
+
 test("the token bound is a note", () => {
   const comment = renderSummary({ ...quiet, because: "token-bound" });
   assert.ok(

@@ -300,6 +300,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   const roundSpace = space === undefined ? undefined : space.space;
 
   let review: Review;
+  const reviewStarted = Date.now();
   try {
     review = await runReview(
       setup.adapter,
@@ -323,12 +324,13 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     // and nothing reads it again.
     if (roundSpace !== undefined) discardRoundSpace(roundSpace);
   }
+  const elapsedSeconds = Math.round((Date.now() - reviewStarted) / 100) / 10;
 
   // Taken here rather than on the reviewed path alone. A reviewer killed at its
   // bound is the one most likely to have left a write behind.
   const confinement = readAfterReviewer(around, window);
 
-  const recording = keepCost(episode, state, review, confinement);
+  const recording = keepCost(episode, state, review, elapsedSeconds, confinement);
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
 
@@ -568,9 +570,10 @@ function keepCost(
   episode: Episode,
   state: EpisodeState,
   review: Review,
+  elapsedSeconds: number,
   confinement: RoundConfinement,
 ): Step<EpisodeState> {
-  const recorded = withSpend(state, review, confinement);
+  const recorded = withSpend(state, review, elapsedSeconds, confinement);
   // Nothing was spent and no round ran, so there is nothing to keep. Writing
   // anyway would put a write that could fail in front of the reason the reviewer
   // gave, and report the wrong failure.
@@ -600,7 +603,8 @@ function keepCost(
  * was no round.
  *
  * Two ledgers, and an attempt goes in exactly one of them. A round appends its
- * cost, and the entry count is what the cap spends. A setup problem spends no
+ * cost, how long its reviewer ran, and the bound where the bound is what ended the
+ * reviewer; the entry count is what the cap spends. A setup problem spends no
  * round, and what it spent is added to the episode's spend all the same: an
  * attempt can complete a paid response and still end as a setup problem, and an
  * episode that forgot those tokens would hand another reviewer a bound it had
@@ -612,10 +616,17 @@ function keepCost(
 function withSpend(
   state: EpisodeState,
   review: Review,
+  elapsedSeconds: number,
   confinement: RoundConfinement,
 ): EpisodeState | null {
   const kept = withConfinement(state, confinement);
-  if (isRound(review)) return recordRound(kept, review.cost);
+  if (isRound(review)) {
+    return recordRound(kept, {
+      ...review.cost,
+      elapsedSeconds,
+      ...(review.outcome === "timed-out" ? { cutShortAtSeconds: review.seconds } : {}),
+    });
+  }
   if (nothingSpent(review.cost)) return null;
   return recordSpendOutsideRounds(kept, review.cost);
 }
