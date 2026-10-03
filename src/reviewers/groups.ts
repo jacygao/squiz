@@ -9,11 +9,23 @@
  * reviewer exits: the line is written whatever happens next.
  *
  * **A recorded identifier is not an identity.** The shell that wrote it exits
- * first and is reaped, and the number is then free for anything to hold. So a
- * group is signalled only where the system says every process in it started
- * during this round, and a group nothing could be established about is left
- * alone: a stranger's process killed over a reused number is worse than a tool
- * left running.
+ * first and is reaped, and the number is then free for anything to hold. The
+ * space of numbers turns over in well under one round, so a number left unheld
+ * does not merely risk naming something else: it is expected to.
+ *
+ * So every shell leaves a process of this round's own in its group, under a name
+ * no other round uses. The number cannot be handed out while that keeper holds
+ * it, and the name is what the reading recognises. A group is signalled where it
+ * holds a keeper of this round and where the system says nothing in it predates
+ * the round; a group that holds neither is left alone, because a stranger's
+ * process killed over a number it was handed is worse than a tool left running.
+ *
+ * **The reading taken before `SIGKILL` rests on the processes the first reading
+ * saw, not on the keeper.** A group's number cannot be handed out while anything
+ * is still in it, so a group that still holds one of those processes never
+ * emptied and is the group that was signalled. That is what the escalation needs,
+ * and the keeper cannot supply it: the keeper is in the group the `SIGTERM` went
+ * to, and a keeper that answered it is gone by the second reading.
  *
  * The guard is against a stale number and against a record the reviewer garbled,
  * not against a reviewer that sets out to forge one. It cannot be: the record's
@@ -42,22 +54,65 @@ import { deadlineIn } from "./deadline.ts";
 export const RECORD_VARIABLE = "SQUIZ_GROUPS";
 
 /**
- * The line every shell runs before the command it was given.
+ * The variable naming this round's keeper, read by the prefix inside the shell.
+ *
+ * It holds a name no other round uses, so a group holding a process under it is
+ * this round's and not a later round's.
+ */
+export const KEEPER_VARIABLE = "SQUIZ_KEEPER";
+
+/**
+ * How many seconds a keeper holds its group's number.
+ *
+ * Longer than any round can last, so the number is still held when the round
+ * reads it at shutdown, and short enough that a round killed before it could
+ * signal anything leaves nothing behind for more than this.
+ *
+ * It has nothing to do with how long the keeper has to survive a signal, which
+ * is not at all: the keeper holds the number until the round's first reading, and
+ * the reading before `SIGKILL` rests on what that one saw.
+ */
+const KEEPER_SECONDS = 900;
+
+/**
+ * The lines every shell runs before the command it was given.
  *
  * `$$` is the shell's own identifier, and a shell started detached leads the
- * group that identifier names, so this records the group that holds everything
- * the command goes on to start.
+ * group that identifier names, so the first line records the group that holds
+ * everything the command goes on to start.
  *
- * It exits 0 whatever happens, and says nothing on either stream. A command that
- * is a comment or is empty leaves this as the last thing the shell ran, so a
- * non-zero status here would be reported as that command's, and a complaint here
- * would arrive in the reviewer's tool output as though the command had made it.
+ * **The second line is what makes the record mean anything later.** A group's
+ * number is free the moment the group empties, and the shell is reaped seconds
+ * after it exits, so a number recorded and then left unheld comes to name
+ * whatever the system hands it to next. A process of this round's own left in the
+ * group holds the number until the round signals it, and carries a name only this
+ * round uses where `ps` prints it for every program.
+ *
+ * The keeper is an ordinary sleep and answers `SIGTERM` like anything else. It
+ * has only to be there when the round first reads the group, because the reading
+ * before `SIGKILL` rests on the processes that first one saw.
+ *
+ * `exec -a` is a bash feature, and a shell without it starts no keeper. That
+ * leaves the group unclaimable rather than wrongly claimed: the round refuses it
+ * and a detached tool is left running, which is the safe direction. Nothing
+ * reports that refusal yet, so such a round is silent about what it did not
+ * reach.
+ *
+ * Both lines exit 0 whatever happens and say nothing on either stream. A command
+ * that is a comment or is empty leaves these as the last thing the shell ran, so
+ * a non-zero status here would be reported as that command's, and a complaint
+ * here would arrive in the reviewer's tool output as though the command had made
+ * it. The keeper's own streams go to `/dev/null` so that it holds neither of the
+ * shell's pipes open.
  *
  * The redirection of stderr comes first, because a record that cannot be opened
  * is the shell's own complaint rather than `printf`'s, and it is made before the
  * command that would have silenced it runs.
  */
-export const shellPrefix = `printf '%s\\n' "$$" 2>/dev/null >> "\${${RECORD_VARIABLE}:-/dev/null}" || :`;
+export const shellPrefix = [
+  `printf '%s\\n' "$$" 2>/dev/null >> "\${${RECORD_VARIABLE}:-/dev/null}" || :`,
+  `{ [ -n "\${${KEEPER_VARIABLE}:-}" ] && exec -a "\${${KEEPER_VARIABLE}}" sleep ${KEEPER_SECONDS} >/dev/null 2>&1 & } 2>/dev/null || :`,
+].join("\n");
 
 /** What one round owns on disk while it runs. */
 export type RoundSpace = {
@@ -71,6 +126,15 @@ export type RoundSpace = {
   readonly directory: string;
   /** The file every shell the reviewer starts records the group it leads in. */
   readonly shellRecord: string;
+  /**
+   * What this round's keepers are called, which no other round uses.
+   *
+   * A recorded group holding a process under this name is this round's own. That
+   * is what the record cannot say by itself: a number is free the moment its
+   * group empties, so one recorded and left unheld comes to name whatever the
+   * system hands it to next.
+   */
+  readonly keeperName: string;
   /**
    * When the space was made, which is before the reviewer started. Nothing the
    * round started can be older than this, and that is what tells a group of this
@@ -91,15 +155,22 @@ export type SpaceMade =
  * round that never had a record at all.
  */
 export function makeRoundSpace(directory: string): SpaceMade {
-  const mine = join(directory, `round.${randomUUID()}`);
+  const round = randomUUID();
+  const mine = join(directory, `round.${round}`);
   const shellRecord = join(mine, "groups");
+  // Short enough to read in a process listing, and carrying enough of the round's
+  // own identifier that no other round's keeper answers to it.
+  const keeperName = `squiz-${round.slice(0, 8)}`;
   try {
     mkdirSync(mine, { recursive: true });
     closeSync(openSync(shellRecord, "w"));
   } catch (cause) {
     return { outcome: "failed", reason: `${mine} could not be made: ${reasonFor(cause)}` };
   }
-  return { outcome: "made", space: { directory: mine, shellRecord, startedAt: Date.now() } };
+  return {
+    outcome: "made",
+    space: { directory: mine, shellRecord, keeperName, startedAt: Date.now() },
+  };
 }
 
 /** Remove the space. Never throws, and a removal that fails is not a failure. */
@@ -194,13 +265,13 @@ export async function stopRecordedGroups(
   const recorded = recordedGroups(space);
   if (recorded.length === 0) return { signalled: [], refused: [] };
 
-  const judged = judge(recorded, space.startedAt);
+  const judged = judge(recorded, space.startedAt, { by: "keeper", named: space.keeperName });
   for (const group of judged.mine) signal(group, "SIGTERM");
   const left = await remaining(judged.mine, graceMs);
   if (left.length > 0) {
     // The grace has passed, so a group that has gone may have taken its number
     // with it. What is killed outright is only what still answers for itself.
-    const again = judge(left, space.startedAt);
+    const again = judge(left, space.startedAt, { by: "continuity", pids: judged.pids });
     for (const group of again.mine) signal(group, "SIGKILL");
     await remaining(again.mine, graceMs);
     return { signalled: judged.mine, refused: [...judged.refused, ...again.refused] };
@@ -208,10 +279,17 @@ export async function stopRecordedGroups(
   return { signalled: judged.mine, refused: judged.refused };
 }
 
+/** What a reading asks the system for: the keeper before the signal, continuity after. */
+type Identity =
+  | { readonly by: "keeper"; readonly named: string }
+  | { readonly by: "continuity"; readonly pids: ReadonlySet<number> };
+
 type Judged = {
   /** The groups the system says hold only processes this round started. */
   readonly mine: readonly number[];
   readonly refused: readonly Refusal[];
+  /** Every process the reading found in the groups it judged the round's own. */
+  readonly pids: ReadonlySet<number>;
 };
 
 /**
@@ -220,10 +298,14 @@ type Judged = {
  * A group with nothing left in it is neither signalled nor refused: there is
  * nothing to send to and nothing was mistaken for anything.
  */
-function judge(groups: readonly number[], startedAt: number): Judged {
+function judge(groups: readonly number[], startedAt: number, identity: Identity): Judged {
   const reading = membersOf(groups);
   if ("problem" in reading) {
-    return { mine: [], refused: groups.map((group) => ({ group, reason: reading.problem })) };
+    return {
+      mine: [],
+      refused: groups.map((group) => ({ group, reason: reading.problem })),
+      pids: new Set(),
+    };
   }
 
   // Every process of a group this round started began after the record was made.
@@ -233,6 +315,7 @@ function judge(groups: readonly number[], startedAt: number): Judged {
   const roundSeconds = (Date.now() - startedAt) / 1_000 + CLOCK_SLACK_SECONDS;
   const mine: number[] = [];
   const refused: Refusal[] = [];
+  const pids = new Set<number>();
   for (const group of groups) {
     const members = reading.members.get(group);
     if (members === undefined) continue;
@@ -249,9 +332,28 @@ function judge(groups: readonly number[], startedAt: number): Judged {
       });
       continue;
     }
+    if (!holds(members, identity)) {
+      refused.push({ group, reason: missing(identity) });
+      continue;
+    }
     mine.push(group);
+    for (const member of members) pids.add(member.pid);
   }
-  return { mine, refused };
+  return { mine, refused, pids };
+}
+
+/** Whether the group's processes are what the identity asks for. */
+function holds(members: readonly Member[], identity: Identity): boolean {
+  if (identity.by === "keeper") return members.some((member) => member.named === identity.named);
+  return members.some((member) => identity.pids.has(member.pid));
+}
+
+/** Why the group was left alone, worded for the reading that left it. */
+function missing(identity: Identity): string {
+  if (identity.by === "keeper") {
+    return `nothing in it is a keeper of this round, ${identity.named}`;
+  }
+  return "nothing in it was there when the round signalled it";
 }
 
 /**
@@ -268,6 +370,8 @@ type Member = {
   readonly pid: number;
   /** `undefined` where `ps` gave an elapsed time that could not be read. */
   readonly seconds: number | undefined;
+  /** `argv[0]`, which is the name a keeper of this round was started under. */
+  readonly named: string;
 };
 
 type Membership =
@@ -300,13 +404,16 @@ function membersOf(groups: readonly number[]): Membership {
     const read = ask(batch);
     if ("problem" in read) return read;
     for (const row of read.rows.split("\n")) {
-      // The pid, the group, then the elapsed time, which holds no space.
-      const [pid, group, elapsed] = row.trim().split(/\s+/u);
+      // The pid, the group and the elapsed time hold no space between them, and
+      // the command holds as many as it likes, so only the first three are split
+      // off and the rest of the row is the command.
+      const [pid, group, elapsed, ...rest] = row.trim().split(/\s+/u);
       if (pid === undefined || group === undefined || elapsed === undefined) continue;
       const of = Number(group);
       if (!wanted.has(of)) continue;
       const held = members.get(of) ?? [];
-      held.push({ pid: Number(pid), seconds: elapsedSeconds(elapsed) });
+      // `argv[0]`, which is what a keeper was given its name as.
+      held.push({ pid: Number(pid), seconds: elapsedSeconds(elapsed), named: rest[0] ?? "" });
       members.set(of, held);
     }
   }
@@ -316,7 +423,7 @@ function membersOf(groups: readonly number[]): Membership {
 type Rows = { readonly rows: string } | { readonly problem: string };
 
 function ask(groups: readonly number[]): Rows {
-  const result = spawnSync("ps", ["-o", "pid=,pgid=,etime=", "-g", groups.join(",")], {
+  const result = spawnSync("ps", ["-o", "pid=,pgid=,etime=,command=", "-g", groups.join(",")], {
     encoding: "utf8",
     // The elapsed time is parsed, so nothing about it may be worded by a locale.
     env: { ...process.env, LC_ALL: "C" },

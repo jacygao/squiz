@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import {
   discardRoundSpace,
+  KEEPER_VARIABLE,
   makeRoundSpace,
+  RECORD_VARIABLE,
   recordedGroups,
   shellPrefix,
   stopRecordedGroups,
@@ -152,14 +162,159 @@ test("a record naming no process group is read as naming nothing", async () => {
   });
 });
 
-test("a group that has already gone is neither signalled nor refused", async () => {
+/**
+ * A shell that started nothing still leads a group its keeper holds, so the round
+ * reaches it and the keeper goes with it. A group left unheld would be a number
+ * free to name something else by the time the round read it.
+ */
+test("a shell that started nothing still has its group held, and the round signals it", async () => {
   await inADirectory(async (directory) => {
     const space = madeIn(directory);
     const shell = await shellRan("true", space);
+    assert.equal(running(shell), false, "the shell exits first, which is the case this is for");
+
+    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    assert.deepEqual(stopped.signalled, [shell]);
+    assert.deepEqual(stopped.refused, []);
+    assert.equal(
+      heldBy(shell, space.keeperName),
+      false,
+      "the round's own keeper outlived the round that started it",
+    );
+  });
+});
+
+/**
+ * Shutdown signals the group, waits the grace, then establishes identity again
+ * before `SIGKILL`. The keeper answers that first signal and is gone by the
+ * second reading, so what says the group is still this round's own is the
+ * stubborn tool itself: the first reading found it in the group, and a number
+ * cannot be handed out while anything still holds it.
+ *
+ * A second reading that asked for the keeper would refuse the group it had just
+ * signalled, leaving running the one tool the escalation exists for.
+ */
+test("a tool that ignores SIGTERM is still killed, because the round saw it in the group", async () => {
+  await inADirectory(async (directory) => {
+    const space = madeIn(directory);
+    const ready = join(directory, "ignoring");
+    const childFile = join(directory, "stubborn");
+    // The sleep is a child and answers the group's signal itself, so the loop is
+    // what keeps the tool there after the signal rather than the trap alone.
+    const tool = toolIn(
+      directory,
+      "ignores-term",
+      ['trap "" TERM', `: > ${ready}`],
+      "while true; do sleep 1; done",
+    );
+    const shell = await shellRan(`${tool} & printf '%s\\n' "$!" > ${childFile}`, space);
+    const child = Number(readFileSync(childFile, "utf8").trim());
+    await untilThere(ready);
+    assert.ok(running(child), "nothing was left running for the escalation to reach");
+
+    const stopped = await stopRecordedGroups(space, GRACE_MS);
+
+    assert.deepEqual(stopped.signalled, [shell]);
+    assert.deepEqual(stopped.refused, [], "the group was refused at the second reading");
+    assert.equal(
+      running(child),
+      false,
+      "a tool that ignored SIGTERM outlived the round, so the escalation never reached it",
+    );
+  });
+});
+
+/**
+ * The second reading accepts a group only where it still holds a process the
+ * first one found. Every process in this group began after the round signalled
+ * it, so nothing says the number was not handed on in between, and `SIGKILL`
+ * cannot be taken back.
+ *
+ * The tool answers `SIGTERM` by leaving a fresh process behind and exiting, which
+ * is what empties the group of everything the first reading saw while leaving it
+ * occupied.
+ */
+test("a group holding nothing the round saw in it is not killed outright", async () => {
+  await inADirectory(async (directory) => {
+    const space = madeIn(directory);
+    const ready = join(directory, "forking");
+    const afterFile = join(directory, "after-the-signal");
+    const tool = toolIn(
+      directory,
+      "forks-on-term",
+      [
+        `after() { sleep 30 & printf '%s\\n' "$!" > ${afterFile}; exit 0; }`,
+        "trap after TERM",
+        `: > ${ready}`,
+      ],
+      "sleep 30",
+    );
+    const shell = await shellRan(`${tool} &`, space);
+    await untilThere(ready);
+
+    const stopped = await stopRecordedGroups(space, GRACE_MS);
+
+    await untilThere(afterFile);
+    const after = Number(readFileSync(afterFile, "utf8").trim());
+    try {
+      assert.deepEqual(stopped.signalled, [shell]);
+      assert.equal(stopped.refused.length, 1, JSON.stringify(stopped.refused));
+      assert.match(stopped.refused[0]?.reason ?? "", /was there when the round signalled it/u);
+      assert.ok(
+        running(after),
+        "a group holding only processes the round never saw was killed outright",
+      );
+    } finally {
+      try {
+        process.kill(after, "SIGKILL");
+      } catch {
+        // Already gone, which the assertions above have already reported.
+      }
+    }
+  });
+});
+
+/**
+ * A shell whose keeper never started leaves the group to empty, and an empty
+ * group is neither this round's to signal nor a stranger's to refuse. This is
+ * what a shell without `exec -a` comes to.
+ */
+test("a group nothing holds is neither signalled nor refused", async () => {
+  await inADirectory(async (directory) => {
+    const space = madeIn(directory);
+    const { pid: shell } = await runShell("true", space, "no keeper");
     assert.equal(running(shell), false);
 
     const stopped = await stopRecordedGroups(space, GRACE_MS);
     assert.deepEqual(stopped, { signalled: [], refused: [] });
+  });
+});
+
+/**
+ * The number of a group left unheld is handed out again inside one round — the
+ * space turns over in well under a round's bound — and what takes it began after
+ * the round did, exactly as everything the round started did. So age says nothing
+ * here and the keeper is the whole of the answer.
+ */
+test("a group younger than the round but holding no keeper of it is left alone", async () => {
+  await inADirectory(async (directory) => {
+    const stranger = await detachedGroup(directory, "newcomer");
+    try {
+      const space = madeIn(directory);
+      writeFileSync(space.shellRecord, `${stranger.group}\n`, "utf8");
+
+      const stopped = await stopRecordedGroups(space, GRACE_MS);
+
+      assert.deepEqual(stopped.signalled, []);
+      assert.equal(stopped.refused.length, 1);
+      assert.match(stopped.refused[0]?.reason ?? "", /is a keeper of this round/u);
+      assert.ok(
+        running(stranger.child),
+        "a process younger than the round was killed over a number it was handed",
+      );
+    } finally {
+      stranger.stop();
+    }
   });
 });
 
@@ -193,6 +348,7 @@ test("a record that is not there names no groups", () => {
   const space: RoundSpace = {
     directory: "/no/such/directory",
     shellRecord: "/no/such/directory/groups",
+    keeperName: "squiz-nowhere",
     startedAt: Date.now(),
   };
   assert.deepEqual(recordedGroups(space), []);
@@ -252,11 +408,21 @@ type ShellOutput = {
  * It waits for the shell's own exit rather than for its output to close, because
  * a backgrounded descendant holds the pipe open after the shell has gone.
  */
-function runShell(command: string, space: RoundSpace): Promise<ShellOutput & { pid: number }> {
+function runShell(
+  command: string,
+  space: RoundSpace,
+  keeper: "keeper" | "no keeper" = "keeper",
+): Promise<ShellOutput & { pid: number }> {
   const child = spawn("/bin/bash", ["-c", `${shellPrefix}\n${command}`], {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, SQUIZ_GROUPS: space.shellRecord },
+    env: {
+      ...process.env,
+      [RECORD_VARIABLE]: space.shellRecord,
+      // Unset is what a shell without `exec -a` comes to: the group is recorded
+      // and nothing holds it.
+      ...(keeper === "keeper" ? { [KEEPER_VARIABLE]: space.keeperName } : {}),
+    },
   });
   let stdout = "";
   let stderr = "";
@@ -318,6 +484,41 @@ async function detachedGroup(directory: string, name: string): Promise<Stranger>
       }
     },
   };
+}
+
+/**
+ * A script in `directory` that sets itself up, says so, and then holds.
+ *
+ * The lines of `setup` run before the file the test waits on appears, so a test
+ * that waits for it knows the handler is installed. Without that the round's
+ * signal can arrive first, and a tool that died on it exercises nothing.
+ */
+function toolIn(
+  directory: string,
+  name: string,
+  setup: readonly string[],
+  hold: string,
+): string {
+  const path = join(directory, name);
+  writeFileSync(path, ["#!/bin/bash", ...setup, hold, ""].join("\n"), "utf8");
+  chmodSync(path, 0o755);
+  return path;
+}
+
+/** Wait for the file to appear, failing the test rather than hanging if it does not. */
+async function untilThere(path: string): Promise<void> {
+  const until = Date.now() + 5_000;
+  for (;;) {
+    if (existsSync(path)) return;
+    assert.ok(Date.now() < until, `${path} never appeared, so the tool never started`);
+    await pause(10);
+  }
+}
+
+/** Whether the group holds a process running under `named`. */
+function heldBy(group: number, named: string): boolean {
+  const read = spawnSync("ps", ["-o", "command=", "-g", String(group)], { encoding: "utf8" });
+  return read.stdout.split("\n").some((row) => row.trim().split(/\s+/u)[0] === named);
 }
 
 /** Whether the process is there, asked without signalling it. */

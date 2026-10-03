@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { type Adapter, type Confinement, type Invocation, unspent } from "./adapter.ts";
-import { makeRoundSpace } from "./groups.ts";
+import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { grants } from "./pi/argv.ts";
 import { parse } from "./pi/parse.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
@@ -765,24 +765,34 @@ function obedient(tree: string): string {
 }
 
 /**
- * A reviewer that starts a tool in a group of its own, records that group, waits
- * for the tool to be up, and then does what it is told.
+ * A reviewer that starts a tool through a shell of its own group, waits for the
+ * tool to be up, and then does what it is told.
  *
  * It is what a CLI that starts each shell tool detached leaves behind: the shell
- * leads a group the reviewer's own signal never reaches, and the line the shell
- * runs first is what names it.
+ * leads a group the reviewer's own signal never reaches, and the lines the shell
+ * runs first are what name it and hold its number.
+ *
+ * The shell runs the real prefix, so the group is recorded and held the way a
+ * round's own shells record and hold theirs. A fixture that wrote the number
+ * itself would leave the round judging a group nothing of the round was in.
  */
 function detaching(tree: string, andThen: string): string {
   const pidFile = join(tree, "pids");
   const readyFile = join(tree, "ready");
+  const toolFile = join(tree, "tool.js");
+  const command = [
+    shellPrefix,
+    `'${process.execPath}' '${toolFile}' &`,
+    `printf '%s %s\\n' "$$" "$!" > '${pidFile}'`,
+  ].join("\n");
   return [
     'const { spawn } = require("node:child_process");',
     'const fs = require("node:fs");',
-    `const tool = spawn(process.execPath, ["-e", ${JSON.stringify(deafly(readyFile))}], { stdio: "ignore", detached: true });`,
-    `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + tool.pid);`,
-    'fs.appendFileSync(process.env.SQUIZ_GROUPS, tool.pid + "\\n");',
+    `fs.writeFileSync(${JSON.stringify(toolFile)}, ${JSON.stringify(deafly(readyFile))});`,
+    `spawn("/bin/bash", ["-c", ${JSON.stringify(command)}], { stdio: "ignore", detached: true });`,
     "const until = Date.now() + 10000;",
-    `while (!fs.existsSync(${JSON.stringify(readyFile)}) && Date.now() < until) {}`,
+    `const up = () => fs.existsSync(${JSON.stringify(readyFile)}) && fs.existsSync(${JSON.stringify(pidFile)});`,
+    "while (!up() && Date.now() < until) {}",
     andThen,
   ].join("\n");
 }

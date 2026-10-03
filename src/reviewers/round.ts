@@ -38,7 +38,12 @@ import {
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
-import { RECORD_VARIABLE, type RoundSpace, stopRecordedGroups } from "./groups.ts";
+import {
+  KEEPER_VARIABLE,
+  RECORD_VARIABLE,
+  type RoundSpace,
+  stopRecordedGroups,
+} from "./groups.ts";
 
 /**
  * How long a killed reviewer is given to exit before it is killed outright, and
@@ -217,7 +222,9 @@ function environmentOf(
     ...process.env,
     TMPDIR: scratch,
     ...confinement,
-    ...(space === undefined ? {} : { [RECORD_VARIABLE]: space.shellRecord }),
+    ...(space === undefined
+      ? {}
+      : { [RECORD_VARIABLE]: space.shellRecord, [KEEPER_VARIABLE]: space.keeperName }),
   };
 }
 
