@@ -26,7 +26,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -43,6 +42,7 @@ import { fileURLToPath } from "node:url";
 import type { LineFinding } from "../findings/finding.ts";
 import type { PullRequest } from "../github/pull-request.ts";
 import type { ReviewThread } from "../github/threads.ts";
+import { standIn } from "../testing/stand-in.ts";
 import type { Invocation, RoundCost, ThreadVerdict } from "./adapter.ts";
 import { pi } from "./pi/adapter.ts";
 import { extensionFile } from "./pi/argv.ts";
@@ -336,7 +336,7 @@ async function inTheFixture(run: (fixture: Fixture) => Promise<void>): Promise<v
     write(tree, head);
     commit(tree, "Add lastSaid");
 
-    process.env["PATH"] = `${standIn(under)}${delimiter}${wasOnPath}`;
+    process.env["PATH"] = `${piIn(under)}${delimiter}${wasOnPath}`;
     await run({ tree, diff: diffOf(tree) });
   } finally {
     process.env["PATH"] = wasOnPath;
@@ -394,20 +394,13 @@ function git(args: readonly string[], tree: string): string {
 }
 
 /**
- * The stand-in written as an executable named `pi`, and the directory to put at
- * the front of `PATH` so that the command line the adapter builds finds it.
- *
- * A shell shim rather than the script itself, because an extensionless file's
- * module system is whatever the directory it happens to sit in says it is.
+ * The stand-in as a command named `pi`, and the directory to put at the front of
+ * `PATH` so that the command line the adapter builds finds it.
  */
-function standIn(under: string): string {
+function piIn(under: string): string {
   const bin = join(under, "bin");
   mkdirSync(bin);
-  const script = join(bin, "reviewer.cjs");
-  writeFileSync(script, reviewer);
-  const shim = join(bin, "pi");
-  writeFileSync(shim, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`);
-  chmodSync(shim, 0o755);
+  standIn(bin, "pi", reviewer, "node");
   return bin;
 }
 

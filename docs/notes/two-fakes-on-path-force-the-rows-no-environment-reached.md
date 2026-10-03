@@ -94,10 +94,12 @@ recheck-when: § 7's rows change, the window's shares change, or pi's stream sha
   the call before it to answer as the shared deadline passes, and nothing here
   arranges that.
 
-- **Budget three minutes of wall clock for the two rows that are about time.**
-  The pre-review share is 60 seconds and the posting share is 120, neither is
-  configurable, and reaching either means spending it. The two tests measured
-  60.1 and 121.1 seconds.
+- **Run the two rows that are about time on a tenth of each share.** Reaching a
+  share means spending it, and the real ones are 60 and 120 seconds. The tests
+  run the hook with `RoundSetup`'s `preReviewMs` and `marginMs` lowered, which
+  have no path from `.squiz.json`, and each slow call takes a tenth of its
+  first length. They were first forced on the real shares, at 60.1 and 121.1
+  seconds, and printed the lines below.
 
 - **A reviewer that writes prose and stops is what reaches the retry.** Two
   processes ran, and the round reported the reviewer unavailable. What makes it
@@ -228,10 +230,10 @@ and that is the state the paging read-back reaches.
   Both spend their share on a `gh` that is slow on purpose. Nothing here measures
   how much of either share the harness's own calls take against real GitHub.
 
-- **Each row was forced once, on one machine.** The two timed rows measured 60.1
-  and 121.1 seconds of wall clock, and both have about 5 seconds of slack in the
-  pages that answer. A machine slow enough to spend that would fail them rather
-  than pass them wrongly.
+- **Each row was forced once, on one machine.** On the real shares the two timed
+  rows had about 5 seconds of slack in the pages that answer, and on a tenth of
+  them they have about half a second. A machine slow enough to spend that would
+  fail them rather than pass them wrongly.
 
 - **The refused create was refused with HTTP 502.** A 422 naming an anchor field
   is a different outcome — the finding goes to the summary rather than being

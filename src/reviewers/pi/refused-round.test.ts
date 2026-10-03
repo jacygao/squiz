@@ -24,12 +24,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { standIn } from "../../testing/stand-in.ts";
 import type { Invocation } from "../adapter.ts";
 import { runRound } from "../round.ts";
 import { pi } from "./adapter.ts";
@@ -161,7 +162,7 @@ async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void>
     git(["add", "--all"], tree);
     git(["commit", "--quiet", "--message", "Add lastSaid"], tree);
 
-    process.env["PATH"] = `${standIn(under)}${delimiter}${wasOnPath}`;
+    process.env["PATH"] = `${piIn(under)}${delimiter}${wasOnPath}`;
     await run(tree);
   } finally {
     process.env["PATH"] = wasOnPath;
@@ -179,20 +180,13 @@ function git(args: readonly string[], tree: string): string {
 }
 
 /**
- * The stand-in written as an executable named `pi`, and the directory to put at
- * the front of `PATH` so the command line the adapter builds finds it.
- *
- * A shell shim rather than the script itself, because an extensionless file's
- * module system is whatever the directory it happens to sit in says it is.
+ * The stand-in as a command named `pi`, and the directory to put at the front of
+ * `PATH` so the command line the adapter builds finds it.
  */
-function standIn(under: string): string {
+function piIn(under: string): string {
   const bin = join(under, "bin");
   mkdirSync(bin);
-  const script = join(bin, "reviewer.cjs");
-  writeFileSync(script, reviewer);
-  const shim = join(bin, "pi");
-  writeFileSync(shim, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`);
-  chmodSync(shim, 0o755);
+  standIn(bin, "pi", reviewer, "node");
   return bin;
 }
 

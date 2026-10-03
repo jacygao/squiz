@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { standIn } from "../testing/stand-in.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "./threads.ts";
 
 const pullRequestId = "PR_kwDOUEd2qM8AAAABDNPXSA";
@@ -49,8 +50,7 @@ async function withFakeGh<T>(
         await writeFile(join(directory, `status.${nth}`), String(answer.status), "utf8");
       }
     }
-    await writeFile(join(directory, "gh"), script(directory), "utf8");
-    await chmod(join(directory, "gh"), 0o755);
+    standIn(directory, "gh", script(directory));
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     return await body({
       calls: () => Number.parseInt(read(join(directory, "count")) || "0", 10),
@@ -576,8 +576,8 @@ test("a listing the deadline cut short fails, and the pages that arrived go with
       // The clock stands still until the first page has been served and then
       // jumps past the deadline, so the listing is cut at a page boundary
       // whatever the machine is doing. What is left of it is also the first gh's
-      // real timeout, so the budget has to outlast the first start of a new
-      // executable, which macOS can stretch to seconds while other suites run.
+      // real timeout, so the budget has to outlast the fake starting on a
+      // machine other suites are loading.
       const until = deadlineIn(60_000, () => (gh.calls() === 0 ? 0 : 120_000));
       const result = listReviewThreads(pullRequestId, { directory: tmpdir(), until });
 

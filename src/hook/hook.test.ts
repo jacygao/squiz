@@ -23,7 +23,16 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,14 +48,16 @@ import type { Episode } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
 import type { EpisodeSummary } from "../loop/post-summary.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
-import type { RoundConclusion, RoundFailure } from "../loop/round.ts";
+import type { RoundConclusion, RoundFailure, RoundSetup } from "../loop/round.ts";
 import type { AppliedVerdict } from "../loop/verdicts.ts";
+import { standIn } from "../testing/stand-in.ts";
 import type { MarkWrite } from "../worktree/shared-tree.ts";
 import { failureIn, unreviewedIn } from "./hook.ts";
 import { failureLine } from "./report.ts";
 
 const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
 const hookModule = new URL("./hook.ts", import.meta.url).href;
+const roundModule = new URL("../loop/round.ts", import.meta.url).href;
 
 const PULL_REQUEST = 142;
 const BRANCH = "review/the-round";
@@ -1106,9 +1117,9 @@ async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
   symlinkSync(onSystemPath("ps"), join(path, "ps"));
 
   if (gh !== null) {
-    const binary = join(path, "gh");
-    await writeFile(
-      binary,
+    standIn(
+      path,
+      "gh",
       [
         "#!/bin/sh",
         'for argument in "$@"; do',
@@ -1127,9 +1138,7 @@ async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
         `exit ${gh.status ?? 0}`,
         "",
       ].join("\n"),
-      "utf8",
     );
-    await chmod(binary, 0o755);
   }
 
   return {
@@ -1166,6 +1175,44 @@ function quote(text: string): string {
 function squizHook(directory: string, path: string, text: string): Run {
   const result = spawnSync(process.execPath, [cli, "hook"], {
     cwd: directory,
+    encoding: "utf8",
+    input: text,
+    env: { ...process.env, PATH: path },
+  });
+  assert.equal(result.error, undefined, `the hook could not be run: ${String(result.error)}`);
+  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+/** The shares of a round's window a test lowers so as not to wait the real ones out. */
+type Lowered = Pick<RoundSetup, "marginMs" | "preReviewMs">;
+
+/**
+ * Run the hook as `squizHook` does, with the round's shares lowered.
+ *
+ * Through the hook's own seam for the round, so the gate, the posting, the exit
+ * code and stderr are the real ones and only the shares are the test's. No trap
+ * around it, as in `fire`.
+ */
+function squizHookLowered(fixture: Fixture, path: string, text: string, lowered: Lowered): Run {
+  const source = join(fixture.beside, "lowered-hook.mjs");
+  writeFileSync(
+    source,
+    [
+      `import { runHook } from ${JSON.stringify(hookModule)};`,
+      `import { runRound } from ${JSON.stringify(roundModule)};`,
+      ``,
+      `const lowered = ${JSON.stringify(lowered)};`,
+      `process.exitCode = await runHook({`,
+      `  stdin: process.stdin,`,
+      `  directory: process.cwd(),`,
+      `  round: (setup) => runRound({ ...setup, ...lowered }),`,
+      `});`,
+      ``,
+    ].join("\n"),
+    "utf8",
+  );
+  const result = spawnSync(process.execPath, [source], {
+    cwd: fixture.worktree,
     encoding: "utf8",
     input: text,
     env: { ...process.env, PATH: path },
@@ -1491,28 +1538,14 @@ async function harnessIn(
   symlinkSync(onSystemPath("ps"), join(path, "ps"));
   await writeFile(ghLog, "", "utf8");
   await writeFile(reviewerLog, "", "utf8");
-  await standIn(path, "gh", ghScript(plan.gh, ghLog));
-  await standIn(path, "pi", reviewerScript(plan.reviewer, reviewerLog));
+  standIn(path, "gh", ghScript(plan.gh, ghLog), "node");
+  standIn(path, "pi", reviewerScript(plan.reviewer, reviewerLog), "node");
 
   return {
     path,
     ghCalls: () => recorded(ghLog).map((line) => JSON.parse(line) as GhCallRecord),
     reviewerRuns: () => recorded(reviewerLog).length,
   };
-}
-
-/**
- * A script written as an executable `name` on the `PATH` the hook is given.
- *
- * A shell shim rather than the script itself, because an extensionless file's
- * module system is whatever the directory it happens to sit in says it is.
- */
-async function standIn(path: string, name: string, script: string): Promise<void> {
-  const file = join(path, `${name}.cjs`);
-  await writeFile(file, script, "utf8");
-  const shim = join(path, name);
-  await writeFile(shim, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(file)} "$@"\n`, "utf8");
-  await chmod(shim, 0o755);
 }
 
 function recorded(file: string): readonly string[] {
@@ -1900,24 +1933,29 @@ test("a posting margin spent by one read-back leaves the rest unposted and unatt
   // read-back walks as many pages as GitHub claims. Four pages that answer slowly
   // and a fifth killed by what is left of the margin spend the whole of it, and
   // every call after that is one the round does not make at all.
-  await withWorktree(async ({ worktree, beside }) => {
+  //
+  // A tenth of the real margin and of each page, so a page still answers inside
+  // its share of the margin and the fifth is still killed by what is left.
+  const slow = 2_500;
+  await withWorktree(async (fixture) => {
+    const { worktree, beside } = fixture;
     await writeFile(join(worktree, ".squiz.json"), JSON.stringify({ rounds: 1 }), "utf8");
     const harness = await harnessIn(beside, {
       gh: {
         ...REACHES_THE_REVIEW,
         create: [{ stdout: CREATED }],
         "read-back": [
-          { sleepMs: 25_000, stdout: readBackPageBefore("page-2") },
-          { sleepMs: 25_000, stdout: readBackPageBefore("page-3") },
-          { sleepMs: 25_000, stdout: readBackPageBefore("page-4") },
-          { sleepMs: 25_000, stdout: readBackPageBefore("page-5") },
-          { sleepMs: 25_000, stdout: readBackPageBefore("page-6") },
+          { sleepMs: slow, stdout: readBackPageBefore("page-2") },
+          { sleepMs: slow, stdout: readBackPageBefore("page-3") },
+          { sleepMs: slow, stdout: readBackPageBefore("page-4") },
+          { sleepMs: slow, stdout: readBackPageBefore("page-5") },
+          { sleepMs: slow, stdout: readBackPageBefore("page-6") },
         ],
       },
       reviewer: reviews([confirmed(86, "high", LANDED), confirmed(87, "medium", LOST)]),
     });
 
-    const result = squizHook(worktree, harness.path, payload());
+    const result = squizHookLowered(fixture, harness.path, payload(), { marginMs: 12_000 });
 
     assert.equal(result.code, 0, "a window that closed must not stop the turn");
     assert.equal(result.stdout, "");
@@ -1979,17 +2017,21 @@ test("the calls before the review spending their share leave the last of them no
   // lookup and the listing answer slowly enough that the diff is bounded by what
   // they left rather than by the ceiling on a single call, which is what says the
   // phase ran out rather than one call hanging.
-  await withWorktree(async ({ worktree, beside }) => {
-    const harness = await harnessIn(beside, {
+  //
+  // A tenth of the real share and of each call, so the first two still answer
+  // and the diff is still left less than it needs.
+  const slow = 2_500;
+  await withWorktree(async (fixture) => {
+    const harness = await harnessIn(fixture.beside, {
       gh: {
-        "pull-request": [{ sleepMs: 25_000, stdout: LISTING }],
-        threads: [{ sleepMs: 25_000, stdout: NO_THREADS }],
-        diff: [{ sleepMs: 25_000, stdout: DIFF }],
+        "pull-request": [{ sleepMs: slow, stdout: LISTING }],
+        threads: [{ sleepMs: slow, stdout: NO_THREADS }],
+        diff: [{ sleepMs: slow, stdout: DIFF }],
       },
       reviewer: reviews([confirmed(86, "high", LANDED)]),
     });
 
-    const result = squizHook(worktree, harness.path, payload());
+    const result = squizHookLowered(fixture, harness.path, payload(), { preReviewMs: 6_000 });
 
     assert.equal(result.code, 0);
     assert.equal(result.stdout, "");
@@ -1999,8 +2041,8 @@ test("the calls before the review spending their share leave the last of them no
       );
     assert.notEqual(spent, null, `the pointer does not name the call that ran out: ${result.stderr}`);
     assert.ok(
-      Number(spent?.[1]) < 30,
-      `the diff was bounded by the ceiling on one call rather than by the phase: ${result.stderr}`,
+      Number(spent?.[1]) * 1_000 < slow,
+      `the diff was bounded by something other than what the phase left it: ${result.stderr}`,
     );
 
     assert.equal(harness.reviewerRuns(), 0);

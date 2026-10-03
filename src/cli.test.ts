@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -10,6 +10,7 @@ import { threadListing } from "./cli.ts";
 import { renderComment } from "./findings/comment.ts";
 import type { LineFinding } from "./findings/finding.ts";
 import type { ReviewThread, ThreadComment } from "./github/threads.ts";
+import { standIn } from "./testing/stand-in.ts";
 
 const shim = fileURLToPath(new URL("../bin/squiz", import.meta.url));
 const cliEntry = fileURLToPath(new URL("./cli.ts", import.meta.url));
@@ -620,8 +621,7 @@ async function withFakeGh(args: readonly string[], api: ApiAnswer): Promise<Fake
     await writeFile(join(directory, "api.out"), api.stdout ?? "", "utf8");
     await writeFile(join(directory, "api.err"), api.stderr ?? "", "utf8");
     await writeFile(join(directory, "api.status"), String(api.status ?? 0), "utf8");
-    await writeFile(join(directory, "gh"), fakeGh(directory), "utf8");
-    await chmod(join(directory, "gh"), 0o755);
+    standIn(directory, "gh", fakeGh(directory));
 
     const result = await run(shim, args, {
       cwd: onABranch,

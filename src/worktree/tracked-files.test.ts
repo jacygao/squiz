@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { standIn } from "../testing/stand-in.ts";
 import {
   compareTrackedFiles,
   readTrackedFiles,
@@ -612,15 +613,13 @@ async function withGitThatCannotReadHead<T>(body: () => T): Promise<T> {
   assert.equal(real.status, 0, "the test needs the real git to stand behind the fake");
 
   return await withTemporaryDirectory(async (directory) => {
-    const fake = join(directory, "git");
     const script = [
       "#!/bin/sh",
       `[ "$1" = symbolic-ref ] && { echo "fatal: HEAD is unreadable" >&2; exit 128; }`,
       `exec '${real.stdout.trim()}' "$@"`,
       "",
     ];
-    await writeFile(fake, script.join("\n"), "utf8");
-    await chmod(fake, 0o755);
+    standIn(directory, "git", script.join("\n"));
     const previous = process.env["PATH"];
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     try {

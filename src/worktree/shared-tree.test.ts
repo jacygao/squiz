@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +10,7 @@ import { writeState } from "../loop/episode-state.ts";
 import { episodeAt } from "../loop/episode.ts";
 import { unspent } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { standIn } from "../testing/stand-in.ts";
 import {
   clearRoundRunning,
   markRoundRunning,
@@ -95,9 +96,7 @@ async function withPsThat<T>(script: string, body: () => Promise<T> | T): Promis
   const directory = await mkdtemp(join(tmpdir(), "squiz-ps-"));
   const previous = process.env["PATH"];
   try {
-    const fake = join(directory, "ps");
-    await writeFile(fake, `#!/bin/sh\n${script}\n`, "utf8");
-    await chmod(fake, 0o755);
+    standIn(directory, "ps", `#!/bin/sh\n${script}\n`);
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     return await body();
   } finally {
