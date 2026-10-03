@@ -391,9 +391,8 @@ for a subagent the session did not dispatch: its firing for a state under review
 waits for that round and posts nothing of its own. Such a firing holds that
 subagent until the round ends.
 
-The hook's registration declares a timeout of 600 seconds, a minute over the
-window under § 7. Its shell
-does not have the plugin's `bin/` on its `PATH`, so the registration names the
+The hook's round runs inside the 600-second window § 7 gives the hook, which is
+also the timeout its registration declares. Its shell does not have the plugin's `bin/` on its `PATH`, so the registration names the
 binary through `${CLAUDE_PLUGIN_ROOT}`.
 
 ### Parallel coding agents
@@ -1105,7 +1104,7 @@ The round is a failed one and closes no episode, so the line is written by the
 round that closes the episode later, from the episode's state:
 
 ```markdown
-- The review was cut short by the 360-second time bound in round 2, and the round kept only the findings it had reported by then
+- The review was cut short by the 480-second time bound in round 2, and the round kept only the findings it had reported by then
 ```
 
 A review that finished on its own has no such line, however close to the bound
@@ -1138,11 +1137,11 @@ Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1
 
 Notes is omitted when there is nothing to report.
 
-Each round is written to the episode's local state file as the round finishes,
-before anything is posted:
+Each round is written to the episode's local state file as the review finishes,
+before anything is posted, and its posting time is added once posting ends:
 
 ```json
-{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 361.2, "cutShortAtSeconds": 360 }
+{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 481.2, "cutShortAtSeconds": 480, "postingSeconds": 4.3 }
 ```
 
 - `dollars` and `tokens` are what the round spent, the dollars being zero where
@@ -1153,9 +1152,13 @@ before anything is posted:
   both runs.
 - `cutShortAtSeconds` is the time bound the round ran under, present only where
   the bound ended a review the reviewer had not finished.
+- `postingSeconds` is the wall clock from the first call of the posting reserve to
+  the last, to a tenth of a second. It is absent where the round posted nothing,
+  and where the round was stopped before posting ended.
 
-A state file written before the last two fields existed has neither, and reads
-back as rounds with no timing and no cut. A field that is there and does not
+A state file written before `elapsedSeconds`, `cutShortAtSeconds` and
+`postingSeconds` existed has none of them, and reads back as rounds with no
+timing and no cut. A field that is there and does not
 hold a number of the right kind makes the file unreadable, like any other.
 
 The comment leads with the tokens, because every reviewer reports them and not
@@ -1315,7 +1318,7 @@ reason its failure comment gives, then each thing the comment lists, then where
 the comment went:
 
 ```
-squiz: review failed: the reviewer was stopped at the time bound of 360 seconds, after reporting 2 findings
+squiz: review failed: the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings
 squiz: `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
 squiz: the failure is posted on PR #41
 ```
@@ -1418,7 +1421,7 @@ nothing retries one.
 | The command is stopped from outside | The coding agent's tool or a person ends the command before the round ends. What reaches the reviewer and its tools depends on the signal sent, which is not established for any coding agent. Where it is `SIGKILL`, none of the round's own cleanup runs. The reviewing record is left naming a process that has gone, so the next run on that commit starts a round, and the episode stays live. No failure comment is posted, because nothing of the round is left to post it. |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. stderr is the channel. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
-| The calls before the review run out of time | Exit 1, and no review runs. The failure comment and stderr say which call had nothing left, where the posting share can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
+| The calls before the review run out of time | Exit 1, and no review runs. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
 | The window is gone before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the window it would be posted in is gone. Nothing is attempted past the end of the window, which is the round's bound on its own run inside the coding agent's tool call. |
@@ -1440,7 +1443,7 @@ worktree, and a comparison that could not be taken. A round that salvaged findin
 says how many it posted as threads.
 
 ```markdown
-**Squiz review failed — the reviewer was stopped at the time bound of 360 seconds, after reporting 2 findings**
+**Squiz review failed — the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings**
 
 Both findings are posted as threads. The review is still open, and the next run of `squiz review` reviews again.
 
@@ -1450,7 +1453,7 @@ Both findings are posted as threads. The review is still open, and the next run 
 The reason on the first line is the reason the command prints on stderr, word for
 word, and each item of the list is a line there too, as § 6 shows.
 
-The failure comment is posted in the posting share, after the salvaged findings,
+The failure comment is posted in the posting reserve, after the salvaged findings,
 under the same deadline. It is never edited, and each failed round posts its own.
 Where GitHub cannot be reached, or the window is gone, nothing is posted, and
 stderr is the only channel.
@@ -1486,7 +1489,7 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 360 seconds | The reviewer process is killed, the round records that the bound cut it short, and it posts the findings reported before the kill. |
+| **Time**, per round | 480 seconds from `squiz review`, 540 from the hook | The reviewer process is killed, the round records that the bound cut it short, and it posts the findings reported before the kill. |
 | **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
@@ -1508,7 +1511,7 @@ finished, whenever its process stopped, and records no cut.
 
 **What a failed round salvaged goes on the pull request, and the round is a
 failed round still.** The findings the reviewer confirmed are posted and the
-verdicts it reported are applied, in the posting share and under the same
+verdicts it reported are applied, in the posting reserve and under the same
 deadline a finished review's posting runs under. None of that decides what the
 round became. The outcome is the reviewer's own, the cost is the floor the
 failure left, and the round neither hands threads back to the coding agent nor
@@ -1519,23 +1522,26 @@ posted nothing at all.
 A failed round that confirmed nothing has no findings to post and no verdicts to
 apply. It still posts its failure comment under § 7.
 
-**A round runs inside a window of 540 seconds, a minute under the longest
-timeout a coding agent in Claude Code can give a foreground shell command.** The
-command runs inside the coding agent's own tool call, and the agent waits on it.
-Claude Code gives a command 120 seconds unless the agent asks for more, so the
-instruction under § 9 tells the agent to pass its tool's longest timeout of
-600 seconds.
+**A round runs inside a window, and the window depends on what started the
+round.**
 
-The minute is for what the window does not measure: the process starting before
-the window opens, and the overrun of stopping the reviewer after it closes. A
-command that outruns the agent's timeout moves to the background. A foreground
-subagent often ends its run then, which stops the command and every process
-under it, the reviewer included (§ 2). So a round ends inside one shell call, or
-is often lost.
+| Started by | Window | What bounds it |
+|---|---|---|
+| `squiz review`, in a shell call | 540 seconds | The shell call. The longest timeout a coding agent in Claude Code can give a foreground command is 600 seconds, and the window sits a minute inside it. |
+| The Claude Code hook | 600 seconds | The stall threshold, at which the runtime cancels a hook that holds a subagent. The hook's registration declares the same 600 seconds as its own timeout. |
 
-The window is interim. It exists because a reviewer runs inside the coding
-agent's shell call. Where reviewers run as sessions of their own, a direction the
-P2 row Paired sessions names, no shell call bounds a round.
+**On the command path the minute is the margin.** Claude Code gives a command 120
+seconds unless the agent asks for more, so the instruction under § 9 tells the
+agent to pass its tool's longest timeout. The minute covers what the window does
+not measure: the process starting before the window opens, and the overrun of
+stopping the reviewer after it closes. A command that outruns the agent's timeout
+moves to the background. A foreground subagent often ends its run then, which
+stops the command and every process under it, the reviewer included (§ 2). So a
+round ends inside one shell call, or is often lost.
+
+The command-path window is interim. It exists because a reviewer runs inside the
+coding agent's shell call. Where reviewers run as sessions of their own, a
+direction the P2 row Paired sessions names, no shell call bounds a round.
 
 **A review started detached from the command is not part of the design.** It would
 have let a review outlive the shell call, with a rerun of `squiz review`
@@ -1543,57 +1549,71 @@ attaching to the review in progress. Reviewers running as sessions of their own
 remove the same limit, and the detached review would be built only to be
 replaced.
 
-The stall threshold does not bound a round. A subagent waiting on a shell command
-is making progress, however long the command runs.
+The stall threshold does not bound the command path. A subagent waiting on a shell
+command is making progress, however long the command runs.
 
-The window is stated once, in the code. The hook's registration declares a
-timeout of 600 seconds, the stall threshold at which the runtime cancels a hook
-that holds a subagent, and the window sits a minute inside it there too.
+Each window is stated once, in the code. A test holds the hook's window to the
+timeout its registration declares.
 
-A run that waits for another's round waits for that round's end, which its window
-bounds. The waiting counts against the waiting caller's own timeout, so a caller
-that arrived late in a round waits less than a window.
+A run that waits for another's round waits for that round's end, which that
+round's window bounds. The waiting counts against the waiting caller's own
+timeout, so a caller that arrived late in a round waits less than a window.
 
-**A round divides the window into three shares.** The window is one moment the
-whole round is measured against, and every share is bounded by what is left of
-it rather than by an allowance handed out when the share begins.
+**A round divides its window into three parts.** The window is one moment the
+whole round is measured against, and every part is bounded by what is left of it
+rather than by an allowance handed out when the part begins.
 
-| Share | How long | What runs in it |
+| Part | How long | What runs in it |
 |---|---|---|
-| Before the review | 60 seconds | The pull request lookup, the threads listing and the diff |
-| The review | The time bound, 360 seconds at most, and never past what is left of the window | The reviewer |
-| Posting | What is left of the window, and never more than 120 seconds | The findings, the verdicts, the summary comment and the failure comment |
+| Before the review | At most 30 seconds | The pull request lookup, the threads listing and the diff |
+| The review | The rest of the window, less the posting reserve | The reviewer |
+| Posting | A reserve of 60 seconds | The findings, the verdicts, the summary comment and the failure comment |
 
-The three add up to the window: 60, 360 and 120 seconds make 540.
+**The reviewer's cap is the window less the posting reserve**, and what the calls
+before it spend comes off the reviewer's time. The 30 seconds are a cap on those
+calls, not a share set aside, so the reviewer's bound does not reserve them:
+
+| Started by | Window | Reviewer's cap | In practice |
+|---|---|---|---|
+| `squiz review` | 540 seconds | 480 seconds | About 478, after a fetch of about two seconds |
+| The Claude Code hook | 600 seconds | 540 seconds | About 538 |
 
 The time bound is the most a reviewer may run rather than a promise of that
-long: it is given what the project configured or what is left of the window,
-whichever is smaller. What the calls before it spend therefore shortens the
-review rather than pushing the round past the window. A round left no time to
-review in reports that and starts no reviewer, because a reviewer killed the
-moment it starts spends a round of the cap on a review nobody could have done.
+long: it is given what the project configured or what is left of the window less
+the posting reserve, whichever is smaller. What the calls before it spend
+therefore shortens the review rather than pushing the round past the window. A
+round left no time to review in reports that and starts no reviewer, because a
+reviewer killed the moment it starts spends a round of the cap on a review nobody
+could have done.
+
+**Sixty seconds of posting is several times what rounds have needed.** #275's
+round posted three findings within 4 seconds, and #261's busiest round posted its
+findings within about 25. A round that runs out of posting time loses what it had
+not posted, and says so, as the window row under § 7's failures sets out. Each
+round records how long its posting took (§ 5), so a reserve that has grown tight
+shows in the state files before it shows as lost findings.
 
 Stopping the reviewer runs after the moment the review had to be over by, and a
 reviewer that ignores the signal spends the grace and the kill there. The
 readings it takes of the groups its shells recorded are bounded as well, so
 nothing about stopping a round is unbounded. That overrun comes out of the
-posting rather than out of the window: a round whose window is gone by the time
+posting reserve rather than out of the window: a round whose window is gone by the time
 it has findings posts nothing and says so.
 
-**A share is one deadline every call inside it runs under, and a call with
-nothing left on it is not made at all.** How many calls a share holds is not
+**A part is one deadline every call inside it runs under, and a call with
+nothing left on it is not made at all.** How many calls a part holds is not
 known in advance: the threads listing pages, and one finding is a create and up
 to twenty pages of read-back. A bound on each call bounds every call and none of
-them together, so a share bounded that way is no bound.
+them together, so a part bounded that way is no bound.
 
 **No single call to GitHub may take more than 30 seconds.** A call that hangs
-spends the share belonging to every other call in it, and past the share, the
-window the coding agent is waiting on. A call that reaches either bound is
+spends the time belonging to every other call in its part, and past the part,
+the window the caller is waiting on. A call that reaches either bound is
 treated as GitHub being unreachable, so the round exits 1 and the comments that
 landed stay.
 
 This bound is not configurable. It is not a budget a project chooses but a
-guard on the window the coding agent waits inside.
+guard on the window the caller waits inside.
 
 **The token bound is on one round rather than on the episode.** A round whose
 tokens reached it closes the episode. The episode's own ceiling follows from the
@@ -1849,15 +1869,22 @@ its own branch. Squiz does not create them, and does not remove them.
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
-| `timeout` | 360 | Seconds one round's reviewer may run, settable 1 to 360 |
+| `timeout` | The path's cap | Seconds one round's reviewer may run, settable 1 to 540 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 
-`timeout` defaults to the most it may be, so a project can lower the time bound
-and cannot raise it. The rest of the 540-second window belongs to the calls the
-round makes before and after the review, and a reviewer is given what is left of
-the window rather than the whole of what is configured. The review budget names
-the shares.
+`timeout` defaults to the reviewer's cap on the path that started the round, so
+a project can lower the time bound and cannot raise it:
+
+| Started by | Default | Most it may be |
+|---|---|---|
+| `squiz review` | 480 | 480 |
+| The Claude Code hook | 540 | 540 |
+
+A value above a path's cap is held to that cap on that path, so a `timeout` of
+510 gives the hook's rounds 510 seconds and the command's rounds 480. Whatever
+the setting, a reviewer is given at most what is left of the window less the
+posting reserve. The review budget names the parts of the window.
 
 `tokens` is the review budget's other bound. The review budget says what it
 counts, when it is read, and what an episode's ceiling comes to under a given
