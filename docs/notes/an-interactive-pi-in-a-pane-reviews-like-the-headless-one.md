@@ -62,6 +62,14 @@ after `finish_review`.
 
   The harness then waits for the process to exit, and needs no idle detector.
 
+- **Close a settled reviewer's pane once the review finishes, keeping its
+  session.** The owner decided this on #295. The pane run drops `--no-session`,
+  and `--session-dir` points at `.squiz/<number>/`, where the session file
+  stays. Before the pane closes, it prints the
+  `pi --session-dir … --session <id>` line that resumes the session. Closing
+  is also what bounds a reviewer that never calls `finish_review`, and
+  questions put after the round would not be part of the review.
+
 - **Do not use RPC or JSON mode for the pane.** JSON mode is print mode: `hasUI`
   is false and it exits after the prompt. RPC mode works for squiz. The
   extension loaded, `ctx.mode` was `"rpc"`, the stream carried the same
@@ -72,15 +80,7 @@ after `finish_review`.
 
 ## Needs your input
 
-- **Whether a settled reviewer's pane may stay open for a person.** Shutting
-  down on `agent_settled` ends the session the moment the reviewer stops. That
-  is the bound on a reviewer that never calls `finish_review`, and it also
-  closes the pane before a person can ask the reviewer anything. Recommended:
-  shut down. Without `--no-session` the session file stays under
-  `--session-dir`, and the pane prints
-  the `pi --session-dir … --session <id>` line that resumes it. Questions put
-  after the round would not be part of the review, which is what D3 already
-  says.
+Nothing.
 
 ## Reference
 
