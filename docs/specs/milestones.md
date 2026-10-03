@@ -48,13 +48,14 @@ not worked around.
 
 The repository becomes a loadable plugin with a `squiz` binary and a
 `SubagentStop` hook that does the one thing needing no dependencies: gate on the
-pull request and exit 0.
+pull request and exit 0. The hook is the Claude Code trigger the specification
+keeps; `squiz review`, which exits 1 at the gate, arrives in M7.
 
 Covers the plugin manifest, the hook registration, `bin/` and `src/`,
 `tsconfig.json`, `tsc --noEmit` and tests in CI, `.squiz/` in `.gitignore`,
 `.squiz.json` loading with its six defaults and range validation, the top-level
-trap that turns any throw into exit 0, and the single-line stderr reporter every
-later milestone writes through.
+trap that turns any throw in the hook into exit 0, and the single-line stderr
+reporter every later milestone writes through.
 
 ### Acceptance criteria
 
@@ -146,6 +147,11 @@ before it becomes a path component, and the round itself: gate, review, post new
 findings as threads, apply each verdict to the thread it names, then exit 2 with
 a blocking reason or exit 0 at the cap.
 
+Everything here was built as the hook. M7 moves the round behind
+`squiz review <number>`, keys the episode on the pull request's number, and gives
+the command its own exit statuses. The hook keeps the exit 2 and exit 0 described
+here, as the Claude Code trigger.
+
 ### Acceptance criteria
 
 - [ ] Round 1 on a real pull request posts inline threads and exits 2, with a
@@ -160,11 +166,13 @@ a blocking reason or exit 0 at the cap.
       without treating it as tampering.
 - [ ] A cap of 1 reviews once and never blocks. A cap of R blocks at most R−1
       times.
-- [ ] Every row of the specification's failure table exits 0 when exercised.
-- [ ] The episode closes by exiting 0 and recording final state.
+- [ ] Every row of the specification's failure table exits the hook 0 when
+      exercised.
+- [ ] The episode closes by exiting the hook 0 and recording final state.
 
 The blocking reason on exit 2 and the one-line failure pointer on exit 0 are
-separate channels and stay separate.
+separate channels and stay separate. Under `squiz review` they become stdout
+and stderr.
 
 ## M6 — The summary comment
 
@@ -185,12 +193,14 @@ three-block comment, posted once and never edited.
 
 ## M7 — Confinement detection, shared trees, and depth `deep`
 
-`squiz review` replaces the `SubagentStop` hook: the coding agent runs it, and it
-runs one round, waits for it, and prints what is open. The hook registration and
-`squiz hook` are removed, and an episode is keyed on the pull request's number.
-It comes first in this milestone, because until it lands no finding squiz posts
-reaches a coding agent, and squiz cannot review this milestone's own pull
-requests.
+`squiz review <number>` becomes the one entry point: it reviews a pull request's
+head commit once, waits for it, and prints what is open. The coding agent runs it,
+and the `SubagentStop` hook becomes a trigger that resolves the pull request and
+calls it. An episode is keyed on the pull request's number, with a record per head
+commit, and `squiz status` lists the reviews. A round that fails posts a failure
+comment. This comes first in the milestone, because until it lands no finding
+squiz posts reaches a coding agent in auto mode, and squiz cannot review this
+milestone's own pull requests.
 
 The tracked-file comparison, taken before the reviewer starts and again when it
 exits, and shared-tree detection comparing `git rev-parse --show-toplevel`
@@ -204,9 +214,15 @@ what detects a write made through the shell it grants.
       there before the command is built.
 - [ ] `squiz review` exits 0, 2, 3 and 1 in the cases the specification gives,
       and prints each as it shows.
-- [ ] A run on a closed episode runs no round and prints the close. A run while
-      a round of the same episode is running starts none.
-- [ ] `hooks/hooks.json` is gone, and nothing in the plugin registers a hook.
+- [ ] A run on a closed episode runs no round and prints the close. A run on a
+      commit under review waits for that review and returns its result, and a
+      run on a commit already reviewed returns that result without a round.
+- [ ] The hook calls the same review, and two firings for one commit post one
+      set of threads.
+- [ ] `squiz status` lists running, finished and failed reviews across
+      worktrees, as the specification shows.
+- [ ] A round that fails posts a failure comment naming what failed and what
+      else it established, and prints the same reason on stderr.
 - [ ] Getting started's `AGENTS.md` text is in this repository's own
       `AGENTS.md`, and a dispatched subagent given only that text works a real
       pull request's threads to exit 0 or 3.

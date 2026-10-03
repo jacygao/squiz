@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.55 (draft)
+**Version:** 0.56 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -32,7 +32,7 @@ one of them is required.
 | Role | Today | Needed for |
 |---|---|---|
 | Git repository | `git` | The review runs against a working tree and a merge base. The repository needs a remote for a pull request to exist against. |
-| Runtime | Claude Code | Runs the coding agent, whose shell tool runs `squiz review`, and distributes the harness as a plugin. |
+| Runtime | Claude Code | Runs the coding agent, whose shell tool runs `squiz review`. Fires the `SubagentStop` hook, which is one trigger for a review. Distributes the harness as a plugin. |
 | Reviewer | `pi` | The agent that reads the change and reports what is wrong with it. It must run a different model from the coding agent. |
 | Forge | GitHub, through an authenticated `gh` | The pull request is where the review is conducted and recorded. |
 
@@ -78,7 +78,8 @@ to do all of the following:
 - Create a review comment on a file as a whole, carrying no line
 - Reply inside an existing review comment thread
 - Resolve a review thread, and re-open one
-- Post an issue-level comment on the pull request, for the summary
+- Post an issue-level comment on the pull request, for the summary and for a
+  round that failed
 
 Resolving and re-opening a review thread is available only through GitHub's
 GraphQL API. REST has no equivalent, so those two operations go through GraphQL.
@@ -98,57 +99,94 @@ the marker is the opening of the span rather than the whole of it.
 | The reviewer | `**Squiz reviewer · ` |
 | The coding agent | `**Squiz coding agent` |
 | The harness, at close | `**Squiz review — ` |
+| The harness, when a round fails | `**Squiz review failed — ` |
 
 A comment without one of those markers was written by a person.
 
 `**Squiz review` is itself a prefix of `**Squiz reviewer`, so the character
-after the name is what separates the summary from a review comment. A test for
-the summary that stops at the name matches every finding the reviewer posted.
+after the name is what separates the summary, the failure comment and a review
+comment. A test for the summary that stops at the name matches every finding the
+reviewer posted, and every failure.
 
 ## 3. The loop
 
 The loop runs the review from end to end. The coding agent opens its pull
-request and runs `squiz review`. The command runs one round: the reviewer reads
-the change, and its findings go onto the pull request as threads. The command
-waits for the round to end and prints what is still open. The agent works the
-threads, pushes, and runs the command again, until nothing is open or the round
-cap is reached.
+request and runs `squiz review <number>`. The command runs one round: the
+reviewer reads the change, and its findings go onto the pull request as threads.
+The command waits for the round to end and prints what is still open. The agent
+works the threads, pushes, and runs the command again, until nothing is open or
+the round cap is reached.
 
-The coding agent starts every round itself, and reads the review off the pull
-request. Nothing is put into its session from outside, so any coding agent that
-can run a shell command can be reviewed.
+**`squiz review <number>` is the harness's one entry point.** Anything that wants
+a pull request reviewed calls it: the coding agent's own shell, a coordinator, a
+CI job, or the Claude Code hook set out below. Each of those is
+a trigger, and the review is the same whichever one called it.
+
+**The loop closes only where the coding agent runs the command itself.** A
+trigger can start a review, but only the coding agent can work what it found.
+The coding agent reads the review off the pull request, and nothing has to be put
+into its session from outside, so any coding agent that can run a shell command
+can be reviewed.
 
 ### Terminology
 
 | Term | What it is |
 |---|---|
-| **Round** | One run of `squiz review` that reaches the reviewer: gate, review, post, decide. A round either leaves threads open for the coding agent, which starts the next round by running the command again, or ends the episode. |
+| **Round** | One review of one head commit of a pull request: gate, review, post, decide. A round either leaves threads open for the coding agent, which starts the next round by pushing a commit and running the command again, or ends the episode. |
 | **Episode** | Every round belonging to one pull request in one worktree. The round cap, the local state file and the summary comment are all per-episode; the review itself is per-round. |
 
 An episode is **live** from its first round until it closes, and its reviewer is
 reviewing or its coding agent is working on what the review said. It closes for
 one of three reasons: nothing is left open for another round to work, the round
 cap is spent, or a round reached the token bound. A round that failed closes
-nothing — the episode stays live, and the next run of the command runs another
-round.
+nothing — it posts a failure comment under § 7, the episode stays live, and the
+next run of the command on that commit runs another round.
 
 A live episode is one whose close has not been recorded. Nothing else makes an
 episode live or over: not whether a round is running at this instant, because
 between two rounds the coding agent is working and no round exists, and not how
 long ago anything happened.
 
-**An episode is keyed by the number of its pull request.** The command finds the
-pull request before it reads any state, so the key is known before the episode
-is. The state lives in `.squiz/<number>/` inside the worktree, and holds the round
-count, the cost of each round, what the episode spent on attempts that were no
-round, whether the episode has reported its close and whether anything was open
-at that close, what its rounds established about the worktree, the reviewer's
-session directory, and its scratch space.
+### The state file
 
-**A closed episode stays closed in its worktree.** Running the command there again
-runs no round and asks nothing of the reviewer; it prints the close, as § 6 shows.
-A second episode on the same pull request starts in another worktree on the same
-branch, which holds no state for it.
+**An episode is keyed by the number of its pull request.** Its state lives in
+`.squiz/<number>/` inside the worktree. The state file holds the round count, the
+cost of each round, what the episode spent on attempts that were no round,
+whether the episode has reported its close and what was open at that close, and
+what its rounds established about the worktree. The directory also holds the
+reviewer's session directory and its scratch space.
+
+**The state file also holds one record for each head commit the episode has
+seen.** The head commit is the one GitHub reports as the pull request's head when
+the command starts. Each record is in one of three states:
+
+| State | What it records |
+|---|---|
+| Reviewing | The process running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. |
+| Failed | The reason the round failed. |
+
+**A run reads the record for its commit before it does anything else.**
+
+- **Reviewing**, by a process that is still running: the run waits for that round
+  to end and returns its result. It starts no round of its own.
+- **Reviewing**, by a process that has gone: the round was killed. The run starts
+  a round.
+- **Reviewed**: the run returns that result, and starts no round. The threads it
+  prints are read from the pull request as they stand now.
+- **Failed**, or no record: the run starts a round.
+
+**Every trigger therefore gets one review per commit.** A second trigger for a
+commit already under review waits for the same round rather than running a
+second one, so two firings for one commit post one set of threads and at most one
+summary. A run for a new commit while a round of an older one is running waits
+for that round to end, then reviews its own commit. One episode runs one round at
+a time.
+
+**A closed episode stays closed in its worktree.** A run on a commit the episode
+never reviewed starts no round once the close is recorded; it prints the close,
+as § 6 shows. A second episode on the same pull request starts in another
+worktree on the same branch, which holds no state for it.
 
 What the rounds established about the worktree is four lists: the tracked paths
 any round found changed, the other episodes any round found in the worktree, why a
@@ -165,33 +203,27 @@ times one episode adds to these lists either.
 room left and adds nothing to a full one, so what an earlier round established is in
 the comment the closing round posts.
 
-While a round runs, the episode's directory also holds a marker naming that
-round's process and when that process started. A pid alone is reused, so the
-start time is what tells the round that holds it now from one that held it
-before. The marker is removed when the round ends, and it is gitignored, so the
-comparison of tracked files under Confinement never reads it as a change.
+The state file is gitignored with the rest of `.squiz/`, so the comparison of
+tracked files under Confinement never reads it as a change.
 
-**The marker is what makes an episode's first round visible.** The state file is
-written when a round records what it spent, which is after the review, so during
-a first round there is no state file to read a close from. Without the marker a
-second episode starting then would read the worktree as its own.
-
-**The marker also keeps an episode to one round at a time.** A run that finds the
-marker naming a process that is still running starts no round, and exits as a
-review that could not run. Two rounds of one episode at once would each post the
-same findings. A marker naming a process that has gone is a round that was killed,
-and the run goes ahead.
+**The reviewing record is what makes an episode's first round visible.** It is
+written before the reviewer starts, so a second episode starting during a first
+round finds it and does not read the worktree as its own.
 
 ### End-to-end workflow
 
 ```mermaid
 flowchart TD
-    A[Coding agent opens or pushes to its pull request] --> B[Agent runs squiz review]
-    B --> C{Pull request for this branch?}
-    C -->|no| L[Exit 1, stderr names the branch<br/>and the directory it looked in]
-    C -->|yes| K{Episode already closed?}
+    A[Coding agent opens or pushes to its pull request] --> B[Agent runs squiz review 41]
+    B --> C{Pull request 41's head<br/>checked out here?}
+    C -->|no| L[Exit 1, stderr names the branch<br/>and the directory]
+    C -->|yes| K{Episode closed?}
     K -->|yes| D[Print the close, exit 0 or 3]
-    K -->|no| E[Reviewer runs locally against<br/>the working tree]
+    K -->|no| R{Record for the head commit?}
+    R -->|reviewing| W[Wait for that round]
+    W --> P
+    R -->|reviewed| P[Print its result,<br/>exit as it did]
+    R -->|none or failed| E[Reviewer runs locally against<br/>the working tree]
     E --> F[Findings posted as threads<br/>on the pull request]
     F --> G{Threads open?}
     G -->|no| I[Post summary comment, exit 0]
@@ -204,21 +236,21 @@ flowchart TD
 
 ### A round, step by step
 
-1. **Gate on the pull request.** The command looks for a pull request whose head
-   is the branch checked out in the directory it was run in. If there is none, or
-   HEAD is detached, it exits 1, no review runs, and nothing is posted. stderr
-   names the branch and the worktree it was looked for in:
+1. **Gate on the pull request.** The command looks up pull request `<number>`
+   and checks that its head branch is the branch checked out in the directory it
+   was run in. If the pull request is not open, or that directory has another
+   branch or a detached HEAD, it exits 1, no review runs, and nothing is posted.
+   stderr names what it found:
 
    ```
-   squiz: no review ran: no open pull request has "main" as its head, in "/work/squiz"
+   squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
    ```
-2. **Gate on the episode.** The command reads the episode's state file. An episode
-   that has reported its close is over: the command prints the close and exits as
-   the close did, no reviewer runs, and nothing more is asked of GitHub. The round
-   cap and the token bound are not consulted, because an episode that is over
-   stays over whatever a bound would now allow. A live episode whose marker names
-   a running process has a round in flight, and the command exits 1 without
-   starting another.
+2. **Gate on the episode and the commit.** The command reads the episode's state
+   file. An episode that has reported its close is over: the command prints the
+   close and exits as the close did, and no reviewer runs. The round cap and the
+   token bound are not consulted, because an episode that is over stays over
+   whatever a bound would now allow. Otherwise the record for the head commit
+   decides, as The state file sets out, whether a round starts here.
 3. **Run the reviewer.** The harness spawns the reviewer as a separate local
    agent process, hands it the pull request for scope and intent together with
    the threads the reviewer itself opened on it, and lets it read the working
@@ -230,19 +262,19 @@ flowchart TD
    Each verdict the reviewer returned is applied to the thread it names: `fixed`
    and `withdrawn` close the thread, `open` re-opens it or leaves it open.
 5. **Print the open threads, or close.** If threads of this review are still open
-   and the round cap has not been reached, the command prints them and exits 2.
-   The coding agent works them and runs the command again. A thread a person
-   opened is counted by neither the arithmetic nor the output, so it never keeps
-   the loop going and an episode ends with one still open. § 6 shows what is
-   printed.
+   and the round cap has not been reached, the command records the result,
+   prints the open threads, and exits 2. The coding agent works them and runs the
+   command again. A thread a person opened is counted by neither the arithmetic
+   nor the output, so it never keeps the loop going and an episode ends with one
+   still open. § 6 shows what is printed.
 
    Where the round's comparison found that `HEAD` moved while the reviewer ran,
    the output ends with a paragraph naming both ends of the move, as Notes does
-   under § 5. A move to a detached `HEAD`, or to a branch with no pull request,
-   ends the next run at the gate, before it reads anything the episode recorded.
-   Unless `HEAD` returns to the pull request's branch, no later round of this
-   episode runs and no summary comment is posted, so this paragraph is the move's
-   one report.
+   under § 5. A move to a detached `HEAD`, or to another branch, ends the next run
+   at the gate, before it reads anything the episode recorded. Unless `HEAD`
+   returns to the pull request's branch, no later round of this episode runs and
+   no summary comment is posted, so this paragraph is the move's one report. A
+   round that failed reports its move in its failure comment, under § 7.
 6. **Close the episode.** Otherwise the harness posts one summary comment on the
    pull request and records the close in the episode's state. It exits 0 where
    nothing of this review is open, and 3 where the round cap or the token bound
@@ -255,6 +287,11 @@ to ask a question. It does not close threads. A thread closes when the reviewer'
 verdict closes it, so a closed thread means the reviewer read the code as it now
 stands and accepted it.
 
+**A round reviews a commit, so a reply alone starts no round.** A coding agent that
+answers every thread by disagreeing, and pushes nothing, runs the command on a
+commit already reviewed and is handed the same result. Nothing in the loop rules
+on that disagreement until a new commit is pushed.
+
 ### The round cap
 
 The cap defaults to 3 and is settable from 1 to 8. A cap of R hands open threads
@@ -263,19 +300,52 @@ whatever is still open. A cap of 1 reviews once and closes.
 
 ### What starts a round
 
-**The coding agent runs `squiz review`, and nothing else starts a round.** It runs
-it once it has opened its pull request, and again after each push that works the
-threads. The harness registers no hook and watches nothing.
+**A round starts only when something runs `squiz review <number>`.** The coding
+agent runs it once it has opened its pull request, and again after each push that
+works the threads. A coordinator or a CI job may run it as well, from a checkout of
+the pull request's branch, and is handed the same result the coding agent is.
 
-The instruction to run it is the host project's, in its `AGENTS.md`, and § 9 gives
-the text. An agent that never runs the command leaves a pull request no round has
-read, and nothing reports that. Such a pull request carries no comment with any of
-§ 2 Identity's markers.
+The instruction to the coding agent is the host project's, in its `AGENTS.md`, and
+§ 9 gives the text. Nothing forces an agent to follow it. An agent that never runs
+the command, in a runtime with no other trigger, leaves a pull request no round has
+read. Such a pull request carries no comment with any of § 2 Identity's markers.
 
-The command runs inside the coding agent's own shell tool call, and the agent
-waits on it. While a round runs, the coding agent is not editing the tree, unless
-its tool moved the command to the background. The review budget under § 7 says how
-long a round may take, and what the coding agent's own tool timeout does to it.
+The command runs inside the caller's own tool call or process, and the caller
+waits on it. While a round runs, a coding agent that called it is not editing the
+tree, unless its tool moved the command to the background. The review budget under
+§ 7 says how long a round may take, and what the coding agent's own tool timeout
+does to it.
+
+### The Claude Code hook
+
+**The `SubagentStop` hook is a trigger for Claude Code, and holds no logic of its
+own.** When a subagent stops, the hook resolves the pull request whose head is the
+branch checked out in its working directory, and runs the same review as
+`squiz review <number>`. Where it finds no pull request it exits 0, with the line
+under step 1 naming the branch and the directory.
+
+| The review | The hook |
+|---|---|
+| Exits 2 | Exits 2. The open threads, as § 6 prints them, are the blocking reason, which the runtime hands the subagent as its next instruction. |
+| Exits 0 or 3 | Exits 0, and writes nothing. |
+| Could not run | Exits 0, and writes the review's stderr lines. |
+
+**In auto mode the hook can start a review, and cannot get it worked.** A subagent
+in auto mode ends by handing back to its parent, and the runtime drops a block that
+arrives after the hand-back. The subagent is gone by the time the round's threads
+are posted, and nobody works them. So the loop closes only where the coding agent
+runs `squiz review` itself and works what it prints. Outside auto mode the block
+resumes the subagent, which works the threads and stops again.
+
+Because a run returns the result for a commit already reviewed, a hook firing after
+the coding agent has run the command itself starts no second round. The same holds
+for a subagent the session did not dispatch: its firing for a commit under review
+waits for that round and posts nothing of its own. Such a firing holds that
+subagent until the round ends.
+
+The hook's own timeout is 600 seconds, the same as the window under § 7. Its shell
+does not have the plugin's `bin/` on its `PATH`, so the registration names the
+binary through `${CLAUDE_PLUGIN_ROOT}`.
 
 ### Parallel coding agents
 
@@ -284,10 +354,10 @@ own branch. A branch can be checked out in only one worktree at a time, so the t
 go together.
 
 **The command reviews the worktree it is run in.** It resolves the toplevel with
-`git rev-parse --show-toplevel`, and the branch checked out there, from its own
-working directory, which is the coding agent's shell's. A coding agent working in
-a worktree by path runs the command from that path, and that worktree is the one
-reviewed.
+`git rev-parse --show-toplevel` from its own working directory, which is the
+caller's. A coding agent working in a worktree by path runs the command from that
+path, and that worktree is the one reviewed. The hook runs in the subagent's
+working directory, which is fixed when the subagent is dispatched.
 
 In this repository a Claude Code subagent that opens a pull request is dispatched
 with `isolation: "worktree"`, and its first command switches to its own branch:
@@ -904,7 +974,7 @@ A round that leaves threads open for the coding agent posts no summary and recor
 no close, because the comment is the close of the episode rather than the end of a
 round. A round the reviewer failed posts no summary either: it reached no decision
 about the episode, and counts taken from a review that did not finish would read
-as counts from one that did. The command's stderr carries that failure.
+as counts from one that did. It posts the failure comment under § 7 instead.
 
 The comment goes up after the round's findings and its verdicts, inside the
 window the round reserves for posting. Nothing is attempted past the end of that
@@ -912,14 +982,15 @@ window. Where the window is gone before the comment can be sent, no comment is
 posted and the command's stderr says the episode closed without its summary.
 
 A run that finds the round cap or the token bound already spent closes the
-episode and composes no comment. It runs no reviewer and lists none of the
-episode's threads, so a comment written from what it holds would report an episode
-that raised nothing. This close ends an episode that no comment will ever report,
-and the command's stderr says so. The line names the rounds the episode ran, because
-that is what tells a person whether findings are sitting on the pull request with
-nothing counting them. A bound lowered between runs reaches this: the episode
-reviewed, its last round left threads open, and the next run ends it. An episode that ran
-no round at all reaches it too, and the line says which of the two it was.
+episode without running a reviewer. A bound lowered between runs reaches this: the
+episode reviewed, its last round left threads open, and the next run ends it. The
+run lists the episode's threads, posts the summary comment from them and from what
+the episode recorded, and prints the open ones. It exits 3 where any are open and 0
+where none are, as any close does.
+
+An episode that ran no round at all reaches this too. It has no threads and nothing
+recorded, so it posts no summary, and the command's stderr says the episode closed
+before any round ran.
 
 ### What the comment carries
 
@@ -989,8 +1060,8 @@ A review that finished on its own has no such line, however close to the bound
 it ran. So has one that reported its review complete before the bound and was
 stopped writing its closing message after it.
 
-A round whose review did not run closes no episode, so no comment reports one.
-The round's failure is announced on the command's stderr instead.
+A round whose review did not run closes no episode, so no summary reports one.
+The round's failure comment reports it, under § 7.
 
 ### The format
 
@@ -1060,7 +1131,9 @@ reaches the `PATH` of any other coding agent is not specified.
 
 | Command | Run by | What it does |
 |---|---|---|
-| `squiz review` | The coding agent | Runs one round on the pull request for the current branch, waits for it, and prints what is open. |
+| `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews the head commit of pull request `<number>` once, waits for the review, and prints what is open. |
+| `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
+| `squiz hook` | Claude Code | The `SubagentStop` entry point, named in `hooks.json`. Resolves the pull request for its working directory and runs `squiz review` on it, as § 3 sets out. |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
 
@@ -1081,15 +1154,18 @@ rest of it at the first space.
 
 ### `squiz review`
 
-The command runs from the worktree the pull request's branch is checked out in.
-It takes no arguments. The exit status says what the coding agent does next:
+`squiz review <number>` runs from the worktree pull request `<number>`'s branch is
+checked out in. Where that commit was already reviewed, it prints that review's
+result and exits as it did, without starting a round. Where a review of it is
+running, it waits for that review and does the same. The exit status says what
+the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
 | 0 | Nothing of this review is open. The episode is closed. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, commits and pushes, and runs the command again. |
 | 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
-| Anything else | The review could not run. | Reports the line on stderr. |
+| Anything else | The review could not run. | Reports the lines on stderr. |
 
 Exit 1 is the status for a review that could not run. Every other status outside
 the table reads the same way, so a command that could not be started, or that
@@ -1108,7 +1184,7 @@ coding agent needs to work the thread.
 Threads open, exit 2:
 
 ```
-Squiz reviewed PR #41: round 1 of 3, 2 new findings.
+Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 
 2 threads are open:
 
@@ -1128,14 +1204,21 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
   The server bounds skew at two seconds, and `clock.ts:12` already allows for it.
 
 Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say
-what you changed or why you disagree. Commit and push, then run `squiz review`
-again.
+what you changed or why you disagree. Commit and push, then run
+`squiz review 41` again.
+```
+
+A run handed a result it did not produce says so on the first line, and prints the
+threads as they stand on the pull request now:
+
+```
+Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 ```
 
 Nothing open, exit 0:
 
 ```
-Squiz reviewed PR #41: round 2 of 3, no new findings.
+Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
 
 Nothing is open. The review is closed, and its summary is on the pull request.
 ```
@@ -1143,7 +1226,7 @@ Nothing is open. The review is closed, and its summary is on the pull request.
 Closed with threads open, exit 3:
 
 ```
-Squiz reviewed PR #41: round 3 of 3, no new findings.
+Squiz reviewed PR #41 at 77e0f19: round 3 of 3, no new findings.
 
 The round cap is reached. The review is closed with 1 thread open, and its summary
 is on the pull request. A person takes it from here.
@@ -1161,11 +1244,21 @@ A run on an episode that has already closed, exit 0 or 3 as the close was:
 Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
 ```
 
-The review could not run, exit 1, on stderr:
+The review could not run, exit 1, on stderr. A round that failed prints the
+reason its failure comment gives, then each thing the comment lists, then where
+the comment went:
 
 ```
-squiz: no review ran: no open pull request has "feature-a" as its head, in "/work/squiz"
-squiz: no review ran: a round of PR #41 is already running, as process 41207
+squiz: review failed: the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings
+squiz: `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+squiz: the failure is posted on PR #41
+```
+
+A run that failed before any round, or could not reach GitHub, prints one line:
+
+```
+squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
+squiz: no review ran: PR #41 is closed
 squiz: round 2 found 3 findings and could not post them to PR #41
 ```
 
@@ -1178,6 +1271,26 @@ output of a run that exits 2 or 3 ends with a paragraph naming both ends:
 
 Every number and every thread in the output is computed from what the round read
 back from the pull request, so the coding agent can check each one there.
+
+### `squiz status`
+
+`squiz status` lists every review recorded in any worktree of the repository, one
+line per pull request and head commit, newest first. It is read by a person
+watching the reviews, and by a coordinator deciding whether to wait. It starts
+nothing and asks nothing of GitHub.
+
+```
+PR    Commit   State      Started   Elapsed  Result                                           Worktree
+#41   8d21a4f  reviewing  07:13:05  3m 12s   —                                                .claude/worktrees/agent-a5336e10
+#41   3f9c2e0  reviewed   06:58:40  6m 31s   2 threads open                                   .claude/worktrees/agent-a5336e10
+#38   a1b2c3d  failed     06:40:02  8m 00s   the reviewer was stopped at the time bound       .claude/worktrees/agent-a077fff7
+#36   77e0f19  reviewed   05:54:13  6m 24s   closed, nothing open                             .claude/worktrees/i258
+```
+
+Elapsed is the time so far for a review that is running, and the time it took for
+one that finished. A reviewing record whose process has gone is listed as
+`killed`. The result of a review that failed is the reason its failure comment
+gives.
 
 ### The setup check
 
@@ -1192,9 +1305,11 @@ round's outcome standing keeps the outcome's status, 0, 2 or 3, and adds a line 
 stderr. The one end outside the harness's control is the command being stopped
 from outside, which the window exists to stay inside.
 
-**A failure is always announced.** Silence must never read as a clean review.
-The summary comment carries it whenever GitHub can be reached; the command's
-stderr carries what could not be posted.
+**A failure is always announced, on the pull request where GitHub can be
+reached.** Silence must never read as a clean review. A round that fails posts a
+failure comment, and a closing round's problems go into the summary comment. The
+command's stderr carries the same reason, and is the only channel for what could
+not be posted.
 
 **What ran and answered is reported by its answer.** Where `gh` ran and said what
 was wrong, that is what the round reports: the status it exited with, and the
@@ -1211,30 +1326,59 @@ nothing retries one.
 
 | Failure | Behaviour |
 |---|---|
-| The reviewer is not installed | Exit 1, nothing posted, and stderr names the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
-| The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. stderr carries the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
-| The reviewer's output cannot be read, and no retry recovers it | Exit 1, and what the reviewer reported before its output stopped being readable is posted. stderr says the review did not run. A retry whose output cannot be read either and a first attempt that left no time for a retry both arrive here. |
-| The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either. |
-| The reviewer exceeds the review budget | Exit 1. The reviewer process is killed, what it reported before the kill is posted, and stderr says how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. |
-| The command is stopped from outside | The coding agent's tool or a person ends the command before the round ends. What reaches the reviewer and its tools depends on the signal sent, which is not established for any coding agent. Where it is `SIGKILL`, none of the round's own cleanup runs. The marker is left naming a process that has gone, so the next run goes ahead, and the episode stays live. |
-| GitHub is unreachable | Exit 1 and nothing is posted. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
-| `gh` cannot be run at all | Exit 1, nothing posted, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
-| The calls before the review run out of time | Exit 1, nothing posted, and no review runs. stderr says which call had nothing left. A lookup that ran out of time is never read as a branch with no pull request. |
-| The threads on the pull request cannot all be listed | Exit 1, nothing posted, and no review runs. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
+| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
+| The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. The failure comment and stderr carry the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
+| The reviewer's output cannot be read, and no retry recovers it | Exit 1, and what the reviewer reported before its output stopped being readable is posted. The failure comment and stderr say the review did not run. A retry whose output cannot be read either and a first attempt that left no time for a retry both arrive here. |
+| The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. |
+| The reviewer exceeds the review budget | Exit 1, unless the round holds the reviewer's declaration, as the end of this row says. The reviewer process is killed, what it reported before the kill is posted, and the failure comment and stderr say how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. That round posts no failure comment, and exits 0, 2 or 3 as its outcome says. |
+| The command is stopped from outside | The coding agent's tool or a person ends the command before the round ends. What reaches the reviewer and its tools depends on the signal sent, which is not established for any coding agent. Where it is `SIGKILL`, none of the round's own cleanup runs. The reviewing record is left naming a process that has gone, so the next run on that commit starts a round, and the episode stays live. No failure comment is posted, because nothing of the round is left to post it. |
+| GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. stderr is the channel. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
+| `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
+| The calls before the review run out of time | Exit 1, and no review runs. The failure comment and stderr say which call had nothing left, where the posting share can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
+| The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
-| The window is gone before the findings are posted | Exit 1, and the findings are reported as unposted rather than as comments that landed. Nothing is attempted past the end of the window, which is the round's bound on its own run inside the coding agent's tool call. |
+| The window is gone before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the window it would be posted in is gone. Nothing is attempted past the end of the window, which is the round's bound on its own run inside the coding agent's tool call. |
 | The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub or the window answered. Nothing is retried: posting is a create, so a second attempt is a second comment. |
-| The episode closes with no summary composed at all | Exit 3, and stderr says the episode closed without one and how many rounds it ran. A bound lowered between runs closes an episode whose last round left threads open, and that close runs no reviewer and lists no threads, so nothing composes the comment its rounds earned. |
+| The episode closes before any round ran | Exit 0, and stderr says the episode closed before any round ran. An episode whose failed attempts spent the token bound before any round reaches this. There are no threads to print and nothing to summarise. |
 | The close cannot be written to the episode's state | The command exits as the close does, the comment stands as posted, and stderr names the write that failed. The episode then reads as one still open: the next run of the command reviews the pull request again and posts a second comment. Nothing else can be read from a state file that took no close, and a run that guessed the episode was over would drop the only report of a review that did run. |
-| The round cannot write its marker | The round reviews, compares and posts as it would have, and stderr adds the marker's path and the error. A second run started during this round is not refused. The summary comment does not carry it: the comparison a missing marker costs is another episode's. |
-| The local state file cannot be read or written | Exit 1. The harness stops reviewing and surfaces the underlying error rather than the word "failed". A read that fails ends the run before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
-| The harness itself throws | Trapped at the top level, exit 1. |
+| The round cannot write its reviewing record | Exit 1, and no review runs. A round nothing records is one a second trigger cannot find, and would run a second time beside. |
+| The local state file cannot be read or written | Exit 1. The harness stops reviewing, and the failure comment and stderr give the underlying error rather than the word "failed". A read that fails ends the run before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
+| The harness itself throws | Trapped at the top level, exit 1, on stderr only. A throw leaves nothing the round can trust to compose a comment from. |
 | The round cap is reached | Exit 3, or 0 where nothing is open. Findings still unresolved stay open, and the summary comment reports them. |
 | The token bound is reached | Exit 3, or 0 where nothing is open. The episode closes without starting another round, and the summary comment reports that the bound was reached rather than reporting the round as one the reviewer failed. |
 
+### The failure comment
+
+A round that fails posts one issue-level comment on the pull request saying so. It
+names what failed, and lists what else the round established: a tracked file that
+changed or a `HEAD` that moved while the reviewer ran, other episodes in the
+worktree, and a comparison that could not be taken. A round that salvaged findings
+says how many it posted as threads.
+
+```markdown
+**Squiz review failed — the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings**
+
+Both findings are posted as threads. The review is still open, and the next run of `squiz review` reviews again.
+
+- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+```
+
+The reason on the first line is the reason the command prints on stderr, word for
+word, and each item of the list is a line there too, as § 6 shows.
+
+The failure comment is posted in the posting share, after the salvaged findings,
+under the same deadline. It is never edited, and each failed round posts its own.
+Where GitHub cannot be reached, or the window is gone, nothing is posted, and
+stderr is the only channel.
+
+A run that ends at the gate posts no failure comment: a pull request whose branch
+is not checked out there is not one this run can say anything about. A run that
+waited for another's round, or was handed a result already recorded, posts
+nothing of its own.
+
 ### The command's stderr
 
-The command writes one line on stderr for each thing that failed: the line a run
+The command writes one line on stderr for each thing that failed: the lines a run
 that exits 1 ends on, and the line a run adds where something failed without
 changing its outcome. The outcome itself, the open threads included, is on stdout
 as § 6 shows. Both reach the coding agent as its shell tool's output.
@@ -1243,12 +1387,14 @@ as § 6 shows. Both reach the coding agent as its shell tool's output.
 squiz: round 3 found 3 findings and could not post them to PR #142
 squiz: no review ran: HEAD is detached in "/work/squiz", so no pull request has it as its head
 squiz: the review of PR #142 closed without its summary: GitHub answered 502
+squiz: the failure could not be posted on PR #142: GitHub answered 502
 ```
 
 A run with nothing that failed writes nothing on stderr.
 
-The line is a pointer rather than a report, and it must not grow into a second
-output format.
+A line is a pointer rather than a report, and stderr must not grow into a second
+output format. What a person needs to read about a failure is in the failure
+comment.
 
 ### The review budget
 
@@ -1306,7 +1452,13 @@ Claude Code also fails a subagent that makes no progress for 600 seconds. Whethe
 a subagent waiting on a shell command is making progress is not established. If
 it is not, a round that runs to the end of its window reaches that threshold too.
 
-The window is stated once, in the code. Nothing outside the harness declares it.
+The window is stated once, in the code. The hook's registration declares the
+same 600 seconds as its own timeout, because the runtime cancels a hook that
+outlives it, and a test holds the two together.
+
+A run that waits for another's round waits for that round's end, which its window
+bounds. The waiting counts against the waiting caller's own timeout, so a caller
+that arrived late in a round waits less than a window.
 
 **A round divides the window into three shares.** The window is one moment the
 whole round is measured against, and every share is bounded by what is left of
@@ -1404,13 +1556,15 @@ plugin is the package, so there is no separate packaging step.
 
 ```
 .claude-plugin/plugin.json   manifest: name, version, description
+hooks/hooks.json             the SubagentStop registration, the Claude Code trigger
 commands/                    slash commands; the setup check is the first
 bin/                         the CLI, on the Bash tool's PATH while enabled
 charter.md                   the standing review instructions, shipped as one file
 src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
-  review/                    the squiz review entry point, and what it prints and exits with
+  review/                    the squiz review entry point, what it prints and exits with, and squiz status
+  hook/                      the SubagentStop trigger, which resolves the pull request and calls the review
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution, shared-tree detection
   reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first
@@ -1437,7 +1591,8 @@ until something asks.
 
 | | | |
 |---|---|---|
-| **P0** | The command and the loop | `squiz review`, the pull request gate, the round cap, the exit statuses and what is printed with each, and the time bound on the reviewer |
+| **P0** | The command and the loop | `squiz review <number>`, the pull request gate, the record per head commit, the round cap, the exit statuses and what is printed with each, and the time bound on the reviewer |
+| **P0** | The Claude Code hook | The `SubagentStop` registration, which resolves the pull request for its worktree and calls the review |
 | **P0** | The `pi` adapter | The command line, the extension the reviewer reports through, the read of its output, and the `read` grant |
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<episode>/scratch/` |
 | **P0** | The charter | The standing rules handed to the reviewer every round |
@@ -1445,11 +1600,13 @@ until something asks.
 | **P0** | The GitHub client | Finding the pull request whose head is a branch, creating a thread anchored to a file and a line or to a file as a whole, reading the threads already on a pull request with their replies and resolved state, resolving and re-opening through GraphQL, and posting the summary comment |
 | **P0** | The coding agent's commands | `squiz threads` and `squiz reply`, which are how the coding agent works the threads |
 | **P0** | The summary comment | The counts, the cost, what needs a person, and the notes, composed when the episode closes |
+| **P0** | The failure comment | What failed and what else the round established, posted by a round that fails, with the same reason the command prints |
 | **P0** | The command's stderr | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub says nothing about why |
 | **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the pull request's number and living in the worktree |
 | **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison, and with the record each shell writes of the group it leads, or not at all |
 | **P1** | The tracked-file comparison | `git status`, the hashes of tracked files, and `HEAD`, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
+| **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
@@ -1459,6 +1616,7 @@ until something asks.
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
+| **P2** | Paired sessions | Each coding agent a full session of its own, paired with a reviewer session it talks to directly. Where this design is meant to go; nothing here is designed for it yet |
 | **P2** | A check that says a review is in progress | A status on the pull request that is not green while an episode is running, so the change does not read as ready to merge mid-review |
 
 Nothing at P2 gets an interface built for it in advance.
@@ -1467,8 +1625,8 @@ Nothing at P2 gets an interface built for it in advance.
 
 Facts the design rests on that have not been established. Each is settled before
 `squiz review` is built, and each result is written as a finding in
-`docs/notes/`. What was established for the hook this command replaces is
-already in `docs/notes/`.
+`docs/notes/`. What was established about the hook, which stays as the Claude
+Code trigger, is already in `docs/notes/`.
 
 Each is measured in a nested `claude -p` session dispatching a subagent in auto
 mode, with a stand-in command that sleeps and prints:
@@ -1509,14 +1667,15 @@ Four things in the host project, the last one optional.
    reviewer's session storage.
 2. Allow `squiz` in the project's Claude Code permissions, so the coding agent
    is not prompted every time it starts a round or works a thread.
-3. Tell the coding agent to run `squiz review`, in `AGENTS.md`. Nothing else
-   starts a round. The text:
+3. Tell the coding agent to run `squiz review`, in `AGENTS.md`. In Claude Code
+   the hook starts a review too, but only the coding agent can work what it
+   finds. The text:
 
    ```markdown
    ## Review
 
-   After you open a pull request, and after every push to it, run `squiz review`
-   from the worktree its branch is checked out in. It runs a review and waits
+   After you open a pull request, and after every push to it, run
+   `squiz review <number>` from the worktree its branch is checked out in. It runs a review and waits
    for it, which takes several minutes, so give the command your shell tool's
    longest timeout. In Claude Code that is 600000 milliseconds. If the command is
    moved to the background anyway, wait for it to finish and read its output
@@ -1525,7 +1684,8 @@ Four things in the host project, the last one optional.
    - **Exit 0:** nothing is open. You are done.
    - **Exit 2:** threads are open, and the command prints them. Fix what applies,
      reply on each thread with `squiz reply <id> <text>` to say what you changed
-     or why you disagree, commit and push, and run `squiz review` again.
+     or why you disagree, commit and push, and run `squiz review <number>`
+     again. A reply with no new commit gets no new review.
    - **Exit 3:** the review closed with threads still open. Do not run it again.
      Say in your report which threads are open.
    - **Anything else:** the review could not run. Put the line it printed in your
