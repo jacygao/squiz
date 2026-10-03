@@ -31,7 +31,7 @@ import {
   type RoundOutput,
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
-import { writeState, type EpisodeState } from "./episode-state.ts";
+import { readState, writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
@@ -128,6 +128,22 @@ type Setup = {
   readonly marginMs?: number;
   readonly windowMs?: number;
   readonly detached?: boolean;
+  /**
+   * The rounds after the first, in order.
+   *
+   * Each runs against the worktree the round before it left behind and reads the
+   * state file that round wrote, so what one round hands the next is what a
+   * fixture of several drives. A fixture of one round cannot reach a handover at
+   * all: whatever it supplies the composer is what the composer renders.
+   */
+  readonly andThen?: readonly Later[];
+};
+
+/** One round after the first: what happened before it, and the reviewer it runs. */
+type Later = {
+  /** The coding agent's turn, and anything else that happened between the rounds. */
+  readonly before?: (worktree: string) => void;
+  readonly reviewer: Reviewer;
 };
 
 /** One call to `gh`, as the fake took it. */
@@ -139,9 +155,12 @@ type Call = {
   readonly body: string;
 };
 
-/** Everything the round left behind, read before the fixture is removed. */
+/** Everything the rounds left behind, read before the fixture is removed. */
 type Ran = {
+  /** What the last round concluded, which is the only round a fixture of one ran. */
   readonly conclusion: RoundConclusion;
+  /** What each round concluded, in the order the rounds ran. */
+  readonly conclusions: readonly RoundConclusion[];
   /** The kind of each `gh` call, in the order the round made them. */
   readonly kinds: readonly Kind[];
   /** Every call in the order the round made them, with what it sent. */
@@ -368,11 +387,15 @@ async function drain(stdout: AsyncIterable<string | Uint8Array>): Promise<void> 
 }
 
 /**
- * Run one round against a fixture, and hand back everything it left behind.
+ * Run the fixture's rounds against one worktree, and hand back everything they
+ * left behind.
  *
  * A real git work tree and a real `gh` on `PATH`: the gate asks git which branch
  * is checked out and `gh` which pull request has it as a head, and a round that
  * reached neither would still pass against injected answers.
+ *
+ * The rounds run in order against the same episode, so a `gh` answer served in
+ * sequence is served to the round that asks for it next.
  */
 async function runInFixture(setup: Setup): Promise<Ran> {
   const root = await mkdtemp(join(tmpdir(), "squiz-round-"));
@@ -431,6 +454,13 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const invocations: Invocation[] = [];
     const directoriesReady: boolean[] = [];
     const markedWhenStarted: boolean[] = [];
+    const laterRounds = setup.andThen ?? [];
+    const reviewers = [setup.reviewer, ...laterRounds.map((later) => later.reviewer)];
+    // Which round is running, which is what says whose reviewer the adapter starts.
+    // One round can start more than one process, so the index is the round's rather
+    // than the process's.
+    let running = 0;
+    const current = (): Reviewer => reviewers[running] ?? setup.reviewer;
     const adapter: Adapter = {
       argv: (invocation) => {
         invocations.push(invocation);
@@ -443,24 +473,30 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         // starts unmarked is a round no other episode in this worktree can find.
         markedWhenStarted.push(existsSync(marker));
         return {
-          command: setup.reviewer.command ?? "/bin/sh",
-          args: [...(setup.reviewer.args ?? ["-c", "exit 0"])],
+          command: current().command ?? "/bin/sh",
+          args: [...(current().args ?? ["-c", "exit 0"])],
           directory: invocation.directory,
         };
       },
-      parse: setup.reviewer.parse,
+      parse: (stdout, progressSoFar) => current().parse(stdout, progressSoFar),
       grants: { read: ["read"], deep: ["read", "bash"] },
     };
 
+    const conclusions: RoundConclusion[] = [];
     const started = Date.now();
-    const conclusion = await runRound({
-      episode,
-      config: { ...defaultConfig, timeout: 5, ...setup.config },
-      adapter,
-      charterFile,
-      ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
-      ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
-    });
+    for (running = 0; running < reviewers.length; running += 1) {
+      laterRounds[running - 1]?.before?.(worktree);
+      conclusions.push(
+        await runRound({
+          episode,
+          config: { ...defaultConfig, timeout: 5, ...setup.config },
+          adapter,
+          charterFile,
+          ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
+          ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
+        }),
+      );
+    }
     const elapsedMs = Date.now() - started;
 
     const stateSource = existsSync(episode.stateFile)
@@ -468,7 +504,8 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       : null;
     const kinds = lines(join(binaries, "kinds")) as readonly Kind[];
     return {
-      conclusion,
+      conclusion: conclusions.at(-1) ?? assert.fail("the fixture ran no round at all"),
+      conclusions,
       kinds,
       calls: kinds.map((kind, at) => ({
         kind,
@@ -2390,5 +2427,202 @@ test("a cost that could not be recorded keeps what the readings established", as
     ran.kinds,
     ["prlist", "threads", "diff"],
     "nothing is posted on a state file that would not take the round",
+  );
+});
+
+/** Everything the two rounds of a closing episode need answering. */
+const TWO_ROUNDS: Answers = {
+  prlist: PR_LIST,
+  diff: DIFF,
+  create: CREATED,
+  lookup: LOOKUP,
+  resolve: RESOLVED,
+  summary: SUMMARY_POSTED,
+};
+
+/**
+ * The threads each round is handed: none for the first, and the one the first
+ * round opened for the second.
+ */
+const THREADS_OF_TWO_ROUNDS: Partial<Record<Kind, readonly string[]>> = {
+  threads: [listed([]), listed([{ id: "PRRT_new", isResolved: false }])],
+};
+
+/** The verdict that closes the thread the first round opened, leaving nothing open. */
+const FIXES_IT = reviews({ verdicts: [{ thread: "PRRT_new", verdict: "fixed" }] });
+
+/** The body of the one summary comment the episode posted. */
+function summaryBody(ran: Ran): string {
+  const posted = ran.calls.filter((call) => call.kind === "summary");
+  assert.equal(posted.length, 1, "the comment is posted once, and nothing ever edits it");
+  return sent(posted[0]?.body ?? "");
+}
+
+/** Another episode of the worktree reports its close, which leaves it no longer live. */
+function closeEpisode(worktree: string, agentId: string): void {
+  const other = episodeAt(worktree, agentId);
+  const read = readState(other);
+  assert.equal(read.outcome, "read", "the fixture's other episode must have a state file");
+  const written = writeState(other, {
+    rounds: [ANSWER_COST],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+  });
+  assert.equal(written.outcome, "written", "the other episode's close must be written");
+}
+
+/**
+ * The write an earlier round found reaches the comment the closing round posts.
+ *
+ * A round that blocks posts nothing, so the only comment the episode ever puts up
+ * is the closing round's, and a comment composed from that round's own readings
+ * reports the worktree of one round as the worktree of all of them. The closing
+ * round here touched nothing and compared the tree successfully, which is the
+ * answer that would overwrite the first round's.
+ *
+ * Two rounds, because one cannot reach the handover: whatever a fixture supplies
+ * the composer is what the composer renders.
+ */
+test("a file the first round changed is named in the comment the closing round posts", async () => {
+  const ran = await runInFixture({
+    answers: TWO_ROUNDS,
+    sequences: THREADS_OF_TWO_ROUNDS,
+    reviewer: writesThenReviews([finding("The flag is never read")]),
+    andThen: [{ reviewer: FIXES_IT }],
+  });
+
+  assert.ok(ran.conclusions[0]?.outcome === "block");
+  assert.deepEqual(
+    ran.conclusions[0].confinement?.trackedFiles,
+    { outcome: "changed", paths: [TRACKED] },
+    "the round that found the write posted no comment, so what it found is the episode's to carry",
+  );
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "nothing-open");
+  assert.deepEqual(
+    ran.conclusion.confinement?.trackedFiles,
+    { outcome: "unchanged" },
+    "the closing round compared the tree and found nothing, which the comment must not be composed from",
+  );
+  assert.deepEqual(ran.kinds, [
+    "prlist",
+    "threads",
+    "diff",
+    "create",
+    "lookup",
+    "prlist",
+    "threads",
+    "diff",
+    "resolve",
+    "summary",
+  ]);
+
+  assert.equal(
+    summaryBody(ran),
+    [
+      "**Squiz review — 2 rounds, 1 finding**",
+      "",
+      "Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0",
+      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
+      "",
+      "**Needs a person**",
+      "",
+      "Nothing needs a person.",
+      "",
+      "**Notes**",
+      "",
+      `- A file changed in the worktree while the reviewer ran: \`${TRACKED}\``,
+    ].join("\n"),
+  );
+});
+
+/**
+ * A worktree an earlier round shared, and could not compare, reaches the comment
+ * too.
+ *
+ * The other episode reports its close between the rounds, so the closing round has
+ * the tree to itself and compares it. Those are the two answers that would
+ * overwrite the first round's, and the first round's are the ones a person needs:
+ * nothing about its interval was established at all.
+ */
+test("a worktree the first round shared is named in the comment the closing round posts", async () => {
+  const ran = await runInFixture({
+    sharedWith: OTHER_AGENT_ID,
+    answers: TWO_ROUNDS,
+    sequences: THREADS_OF_TWO_ROUNDS,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+    andThen: [
+      { before: (worktree) => closeEpisode(worktree, OTHER_AGENT_ID), reviewer: FIXES_IT },
+    ],
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(
+    ran.conclusion.confinement?.otherEpisodes,
+    { outcome: "alone" },
+    "the closing round had the tree to itself, which the comment must not be composed from",
+  );
+  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
+
+  assert.equal(
+    summaryBody(ran),
+    [
+      "**Squiz review — 2 rounds, 1 finding**",
+      "",
+      "Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0",
+      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
+      "",
+      "**Needs a person**",
+      "",
+      "Nothing needs a person.",
+      "",
+      "**Notes**",
+      "",
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+        ` the worktree is shared with live episode ${OTHER_AGENT_ID}`,
+      `- Another episode was in the worktree while the reviewer ran: ${OTHER_AGENT_ID}`,
+    ].join("\n"),
+  );
+});
+
+/**
+ * A state file written before the episode kept what its rounds established still
+ * reads, and the round that reads it closes normally.
+ *
+ * Read as unreadable, the file would end the round before the reviewer ran, and
+ * every round of that episode after it.
+ */
+test("a state file written before the worktree evidence existed is read as an episode with none", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    stateSource: `{"rounds": [{"dollars": 0.04, "tokens": 1200, "messages": 3}]}\n`,
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_open", isResolved: false }]),
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: writesThenReviews(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "round-cap");
+  assert.equal(
+    summaryBody(ran),
+    [
+      "**Squiz review — 2 rounds, 1 finding**",
+      "",
+      "Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0",
+      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
+      "",
+      "**Needs a person**",
+      "",
+      "- `src/ui/card.ts:88` — The name says nothing. (open)",
+      "",
+      "**Notes**",
+      "",
+      `- A file changed in the worktree while the reviewer ran: \`${TRACKED}\``,
+      "- The episode ended at its round cap rather than with nothing left open",
+    ].join("\n"),
   );
 });

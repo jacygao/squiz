@@ -48,6 +48,12 @@
  * Nothing here reports. What the readings establish is carried to the round's
  * close, and the summary comment is what names it.
  *
+ * **What a round established outlives the round.** A round that blocks posts no
+ * comment, so each round's readings are added to what the episode has established
+ * and the closing round's comment names all of it. A comment composed from the
+ * closing round's readings alone would say a tree nobody touched for an episode
+ * whose first round named a mutated file.
+ *
  * Nothing here throws, and nothing here changes what the round does. A mutated
  * tree is reported rather than blocked on.
  */
@@ -115,6 +121,131 @@ export type RoundConfinement = {
    */
   readonly marked: MarkWrite;
 };
+
+/**
+ * What every round of one episode established about the worktree, which is what
+ * the summary comment's Notes are composed from.
+ *
+ * The episode's and never one round's. A round that blocks posts no comment, so
+ * what its readings found is reported by the round that closes the episode or by
+ * nothing at all.
+ *
+ * Only what Notes prints is here, and a round's own reading carries more than
+ * that. The marker is the part left out: a marker that was not written costs a
+ * later round its comparison, and that lands on another pull request.
+ */
+export type ConfinementEvidence = {
+  /** Every tracked path a round found changed, once each, in path order. */
+  readonly changed: readonly string[];
+  /**
+   * Why a round took no comparison, or could not have the one it took, in the
+   * order the rounds established it.
+   *
+   * One entry per distinct reason. A round that failed the same way as an earlier
+   * one adds nothing.
+   */
+  readonly uncompared: readonly string[];
+  /** Every other episode a round found in the worktree, by id, in id order. */
+  readonly shared: readonly string[];
+  /** Why a round could not establish who else was in the worktree, once each. */
+  readonly unestablished: readonly string[];
+};
+
+/** An episode whose rounds established nothing, which is no note at all. */
+export const nothingEstablished: ConfinementEvidence = {
+  changed: [],
+  uncompared: [],
+  shared: [],
+  unestablished: [],
+};
+
+/**
+ * The most entries one list keeps.
+ *
+ * Nothing bounds how many times an episode adds to one of these lists: an attempt
+ * that was no round spends none of the round cap and fails the same way every time
+ * the hook fires. Identical evidence collapses, so a repeat adds nothing, and this
+ * is what holds a reason that varies between firings. One round's own answer can
+ * reach it too, where the reviewer changed more paths than this.
+ *
+ * The entries kept are the earliest, which are the ones a later round must not
+ * push out.
+ */
+const MOST_KEPT = 64;
+
+/**
+ * What the episode has established, with what one round's readings found added to
+ * it.
+ *
+ * `undefined` where the rounds so far have established nothing, which is a
+ * worktree every reviewer left alone and had to itself. The episode's state file
+ * carries no field for that, so a file written before this one existed reads the
+ * same as one written for an episode with nothing to report.
+ *
+ * Never throws, and never drops what `before` holds.
+ */
+export function evidenceWith(
+  before: ConfinementEvidence | undefined,
+  round: RoundConfinement,
+): ConfinementEvidence | undefined {
+  const had = before ?? nothingEstablished;
+  const evidence: ConfinementEvidence = {
+    changed: byValue(had.changed, pathsChanged(round.trackedFiles)),
+    uncompared: byRound(had.uncompared, whyUncompared(round.trackedFiles)),
+    shared: byValue(had.shared, whoSharedIt(round.otherEpisodes)),
+    unestablished: byRound(had.unestablished, whyUnestablished(round.otherEpisodes)),
+  };
+  return anything(evidence) ? evidence : undefined;
+}
+
+function pathsChanged(answer: TrackedFilesAnswer): readonly string[] {
+  return answer.outcome === "changed" ? answer.paths : [];
+}
+
+function whyUncompared(answer: TrackedFilesAnswer): readonly string[] {
+  switch (answer.outcome) {
+    case "unchanged":
+    case "changed":
+      return [];
+    case "unknown":
+    case "not-taken":
+      return [answer.reason];
+  }
+}
+
+function whoSharedIt(episodes: OtherEpisodes): readonly string[] {
+  return episodes.outcome === "shared" ? episodes.episodes.map((other) => other.id) : [];
+}
+
+function whyUnestablished(episodes: OtherEpisodes): readonly string[] {
+  return episodes.outcome === "unknown" ? [episodes.reason] : [];
+}
+
+/**
+ * `had` and `found` as one list, once each, ordered by the value itself.
+ *
+ * The cap chooses which entries survive, and the order here only arranges the ones
+ * that did. Sorting before the cap would let a later round's entry that sorts early
+ * push out an earlier round's, which is the loss these lists exist to carry.
+ */
+function byValue(had: readonly string[], found: readonly string[]): readonly string[] {
+  return [...byRound(had, found)].sort();
+}
+
+/**
+ * `had` and `found` as one list, once each, the earlier round's entries first.
+ *
+ * What the cap drops is what arrived last. An entry the episode had already kept
+ * stays kept.
+ */
+function byRound(had: readonly string[], found: readonly string[]): readonly string[] {
+  return [...new Set([...had, ...found])].slice(0, MOST_KEPT);
+}
+
+function anything(evidence: ConfinementEvidence): boolean {
+  const lists = [evidence.changed, evidence.uncompared, evidence.shared, evidence.unestablished];
+  return lists.some((list) => list.length > 0);
+}
 
 /**
  * What one episode of the worktree has recorded, as a value two askings compare

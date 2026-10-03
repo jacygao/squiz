@@ -22,6 +22,7 @@ import { postSummary, type SummaryPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { classifyAtClose } from "./classify.ts";
+import type { ConfinementEvidence } from "./confinement.ts";
 import type { EpisodeState } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
@@ -71,6 +72,16 @@ export type ClosingRound = {
    * no summary at all, so nothing here is composed without a closing reason.
    */
   readonly because: ClosingReason;
+  /**
+   * What every round of the episode established about the worktree its reviewer
+   * ran in, read from the episode's state file.
+   *
+   * The episode's and not this round's. A round that blocks posts no comment, so
+   * what its readings found reaches a person through this or not at all, and a
+   * close composed from the closing round's own readings would report the
+   * worktree of one round as the worktree of the whole episode.
+   */
+  readonly confinement: ConfinementEvidence;
 };
 
 /**
@@ -87,6 +98,7 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Summary
     threads: classifyAtClose(closing),
     findings: closing.findings,
     because: closing.because,
+    confinement: closing.confinement,
   });
   return postSummary(closing.pullRequest, body, call);
 }
