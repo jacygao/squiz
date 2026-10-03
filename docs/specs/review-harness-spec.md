@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.55 (draft)
+**Version:** 0.56 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -660,15 +660,37 @@ which leaves the round thinking at the level those settings hold.
 
 ### Charter
 
+The charter gives the reviewer a method, worked in order every round:
+
+1. Rule on the threads it was handed, before reading anything else.
+2. Read the description, and list each concrete claim it makes about the code:
+   a number, a limit, a name, a path, "X is empty", "nothing else calls Y".
+3. Size the change from the diff. The size sets how much is read outside the
+   diff, never whether a hunk is worked.
+4. Work every hunk against the charter's fixed checklist, most important file
+   first. A sentence the change adds about the code, a number, a path or another
+   document joins the list of claims.
+5. Read outside the diff only to check a named suspicion: a claim, a caller, or
+   the guard that would refute a finding. One focused read or grep each.
+6. Before reporting a finding, try to disprove it: name the trigger and the
+   wrong result, quote the line, and read the guard that would stop it. A
+   finding with no trigger is not reported.
+7. Stop when every hunk is worked, every claim checked and every suspicion
+   settled, and call the finish. No further pass.
+
 The standing rules:
 
-- Read the pull request description for the intent and the declared scope of the
-  change. A finding that contradicts something the description declares out of
-  scope is not a finding.
+- A finding that contradicts something the description declares out of scope is
+  not a finding.
 - Report correctness bugs, convention violations, security problems, and tests
-  that assert nothing.
+  that assert nothing. A false sentence the change adds, in a note, a spec or a
+  comment, is a correctness bug.
 - Do not report formatting, naming, import order, anything the compiler catches,
-  or speculation. "Consider whether" means there is no finding.
+  or speculation. "Consider whether" means there is no finding. Do not report a
+  missing test, or a document the change did not touch that has fallen behind
+  it.
+- A defect in code the change did not touch is a finding only where the change
+  reaches it, through a new caller, input or path.
 - Verify before reporting. Read the file, grep the callers, and run the test
   where the depth grants a shell. A finding that could have been checked with
   the tools you were given and was not is not reportable.
@@ -833,8 +855,9 @@ where a line falls.
   project already has, or that the approach is wrong. It goes into the summary
   comment.
 
-The reviewer reads beyond the diff by design: untouched files, callers, history.
-A finding it makes there is still scoped to `line`, and it is anchored to the
+The reviewer reads beyond the diff to check a named suspicion: a claim the
+change makes, a caller of what it changed, or the guard that would refute a
+finding. A finding it makes there is still scoped to `line`, and it is anchored to the
 changed line that caused it, with the affected file and line named in the body.
 The reviewer does not go looking for the affected line to anchor to, and GitHub
 would refuse an anchor outside the diff in any case.
@@ -1310,6 +1333,7 @@ src/
   reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first
   github/                    the pull request, threads, replies, resolve and re-open, summary
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
+  measure/                   the changes a charter is measured on, and the tool that runs the reviewer once over one
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
 ```
