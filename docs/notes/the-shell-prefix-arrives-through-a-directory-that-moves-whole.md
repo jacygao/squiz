@@ -3,7 +3,7 @@ settles: "§ 4 — how a reviewer CLI is told to record the group of each shell 
 issue: 242
 recorded: 2026-09-29
 versions: { pi: 0.85.1, node: 24.15.0, bash: 3.2.57, macos: 26.6.2 }
-recheck-when: pi upgrades, pi's settings resolution changes, or the harness runs on Linux
+recheck-when: pi upgrades, pi's settings resolution changes, the harness runs on Linux, or squiz is given a credential that expires
 ---
 
 # The shell prefix arrives through a directory that moves whole
@@ -41,6 +41,14 @@ recheck-when: pi upgrades, pi's settings resolution changes, or the harness runs
   place, so the link is followed and no copy of the user's credential lands in
   the round's directory.
 
+- **Share the one credential file through the link, and leave a lost write
+  alone while the credential cannot expire.** Every round is handed a different
+  directory, so each `pi` takes its lock beside its own path and two of them hold
+  no lock in common over the one file they both write. Nothing fixes that from
+  outside `pi`, which decides where it locks. **The trigger for revisiting it is a
+  credential that expires**: only a refreshed token is ever written, so an API key
+  is never written at all and nothing can be lost.
+
 - **Ask the system about the group, not about the shell.** `pi` reaps each shell
   tool about a tenth of a second after it exits, and the group lives on holding
   whatever that shell backgrounded.
@@ -65,12 +73,7 @@ recheck-when: pi upgrades, pi's settings resolution changes, or the harness runs
 
 ## Needs your input
 
-- **Whether two `pi` processes writing `auth.json` through two directories can
-  lose one of the writes.** The lock file sits beside the path each process was
-  given, so a round's `pi` and the user's own take different locks over one file.
-  Only a refreshed OAuth token is ever written, and an API key is not.
-  Recommended: leave it until squiz runs against a provider whose credential
-  expires.
+- Nothing.
 
 ## Reference
 
@@ -147,3 +150,15 @@ $ ps -o pid=,pgid=,command= -g 23954
 - **Nothing was measured about a round whose reviewer ran many shells.** One
   shell, one recorded group. The reading is batched at 128 identifiers per `ps`
   on the argument list's account alone.
+
+- **Whether the provider replaces a refresh token when it is used was not
+  established.** It is what a lost write costs: where the old token stays valid
+  until it expires, losing a write loses nothing, and where using one retires it,
+  the process whose write was overwritten holds a token that is already dead.
+  Answer this before giving squiz a credential that expires.
+
+- **Two rounds refreshing at once was not provoked.** The locks were read from
+  where `pi` places them rather than raced. Concurrent rounds are ordinary —
+  several subagents stopping together give several episodes, each with a `pi` of
+  its own — so the case is reachable whenever the credential can expire.
+
