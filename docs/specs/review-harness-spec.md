@@ -186,7 +186,7 @@ flowchart TD
    the branch and the worktree it was looked for in:
 
    ```
-   squiz: no review ran: no open pull request has "main" as its head, in /work/squiz
+   squiz: no review ran: no open pull request has "main" as its head, in "/work/squiz"
    ```
 3. **Run the reviewer.** The harness spawns the reviewer as a separate local
    agent process, hands it the pull request for scope and intent together with
@@ -1093,7 +1093,7 @@ worktree the gate looked in:
 
 ```
 squiz: round 3 found 3 findings and could not post them to PR #142
-squiz: no review ran: HEAD is detached in /work/squiz, so no pull request has it as its head
+squiz: no review ran: HEAD is detached in "/work/squiz", so no pull request has it as its head
 ```
 
 Every other exit 0 writes nothing: a closing round with nothing it failed to

@@ -69,7 +69,7 @@ after(async () => {
 /** The one line a firing in `elsewhere` writes, which says the entry point ran. */
 function detachedHere(): string {
   const directory = realpathSync(elsewhere);
-  return `squiz: no review ran: HEAD is detached in ${directory}, so no pull request has it as its head\n`;
+  return `squiz: no review ran: HEAD is detached in ${JSON.stringify(directory)}, so no pull request has it as its head\n`;
 }
 
 function git(args: readonly string[]): void {

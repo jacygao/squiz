@@ -107,11 +107,13 @@ export function failureIn(conclusion: RoundConclusion): string | null {
  */
 export function unreviewedIn(conclusion: RoundConclusion): string | null {
   if (conclusion.outcome !== "no-pull-request") return null;
-  const { branch, directory } = conclusion;
-  if (branch === null) {
+  // Quoted, so a path's spaces and any line break in it come through unaltered.
+  const directory = JSON.stringify(conclusion.directory);
+  if (conclusion.branch === null) {
     return `no review ran: HEAD is detached in ${directory}, so no pull request has it as its head`;
   }
-  return `no review ran: no open pull request has ${JSON.stringify(branch)} as its head, in ${directory}`;
+  const branch = JSON.stringify(conclusion.branch);
+  return `no review ran: no open pull request has ${branch} as its head, in ${directory}`;
 }
 
 /** A round that failed, which may have salvaged what the reviewer had reported. */

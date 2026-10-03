@@ -46,6 +46,15 @@ test("every reason leaves as exactly one line", () => {
   }
 });
 
+test("whitespace within a line is left as it arrived", () => {
+  // A reason can carry a path, and a path with its spaces collapsed names a
+  // directory that does not exist.
+  assert.equal(
+    failureLine('no review ran in "/work/two  spaces/\ttab"'),
+    'squiz: no review ran in "/work/two  spaces/\ttab"\n',
+  );
+});
+
 test("a reason naming nothing still says that something failed", () => {
   // A bare prefix on stderr is silence dressed as a report, which a failure
   // must never be.

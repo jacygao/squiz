@@ -127,8 +127,9 @@ git fetch -q origin && git switch -c <area>/<short-name> origin/main
   names it before the subagent reports, so take it from there for verification
   and removal.
 - `.claude/worktrees/` is already in `.gitignore`.
-- **Remove the worktree once its pull request merges**, and the branch isolation
-  left behind with it:
+- **Remove the worktree once its pull request merges**, unless the harness
+  already removed it when the episode closed, and the branch isolation left
+  behind with it:
 
   ```bash
   git worktree remove <worktreePath>
