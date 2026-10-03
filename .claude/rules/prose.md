@@ -36,6 +36,12 @@ Read it once, at speed. Where you go back, the sentence is wrong rather than the
 reader. Everything above is what usually fails that, for use when it fails and
 the reason is not obvious.
 
+**Run it on the finished text, as a pass of its own.** Reading this file before
+writing catches nothing by itself. A sentence that restates its neighbour reads
+well while it is being written, because the idea is already in mind and the
+sentence confirms it; it only reads as padding to someone meeting it cold. Nothing
+but a second pass over what is now on the page puts you in that position.
+
 ## Reference: one row, before and after
 
 Before:
