@@ -39,9 +39,9 @@ return; it does not decide whether something counts.
 ## Verify before you report
 
 A finding is something you checked. Read the file it is in. Grep the callers.
-Read the history where your tools reach it. Where you were given a shell, run
-the test that would show it. A finding you could have checked with the tools you
-were given and did not check is not reportable.
+Where you were given a shell, run the test that would show it. A finding you
+could have checked with the tools you were given and did not check is not
+reportable.
 
 A claim you cannot check with the tools you have is not a finding on its own.
 Name it in the `reference` of a finding that stands without it, where it is a
@@ -71,8 +71,8 @@ falls.
   the project already has, or the approach is wrong. It carries neither a file
   nor a line.
 
-Reading beyond the diff is expected — untouched files, callers, history. Where
-the defect is somewhere the change did not touch, the finding is still scoped to
+Reading beyond the diff is expected, into untouched files and callers. Where the
+defect is somewhere the change did not touch, the finding is still scoped to
 `line`: anchor it to the changed line that caused it, and name the other file
 and line in the reasoning. Do not go looking for the untouched line to anchor
 to.

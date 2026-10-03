@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.54 (draft)
+**Version:** 0.55 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -191,8 +191,8 @@ flowchart TD
 3. **Run the reviewer.** The harness spawns the reviewer as a separate local
    agent process, hands it the pull request for scope and intent together with
    the threads the reviewer itself opened on it, and lets it read the working
-   tree directly: files the diff did not touch, callers, and git history. At
-   depth `deep` it also runs the tests. The reviewer never edits the code it is
+   tree directly: files the diff did not touch, and callers. At depth `deep` it
+   also runs the tests. The reviewer never edits the code it is
    reviewing.
 4. **Post the findings, and act on the verdicts.** Each new finding opens a new
    review comment thread, anchored to a file and a line or to a file as a whole.
@@ -833,7 +833,7 @@ where a line falls.
   project already has, or that the approach is wrong. It goes into the summary
   comment.
 
-The reviewer reads beyond the diff by design: untouched files, callers, history.
+The reviewer reads beyond the diff by design, into untouched files and callers.
 A finding it makes there is still scoped to `line`, and it is anchored to the
 changed line that caused it, with the affected file and line named in the body.
 The reviewer does not go looking for the affected line to anchor to, and GitHub
