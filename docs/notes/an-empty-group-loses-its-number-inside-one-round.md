@@ -10,61 +10,27 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 
 ## Intent
 
-- **Nothing said whether a group whose leader has been reaped can be shown to be
-  the round's own.** Every process in such a group began during the round, and
-  so would every process of a stranger's group that took the number after the
-  round's own emptied.
-- **Nothing said how close a machine comes to handing a recorded number to a
-  stranger inside one round.** The age test rests on that distance being long.
-- **Nothing said whether the reviewer can put a number of its own choosing into
-  the record.** The path is in the reviewer's own environment and the shell
-  appends to the file.
+- Whether a group whose leader has been reaped can be shown to be the round's own.
+- How close a machine comes to handing a recorded number to a stranger inside one
+  round.
+- Whether the reviewer can put a number of its own choosing into the record.
 
 ## Decisions
 
-- **Hold a recorded group's identity while the group lives, rather than reading
-  it back once the group has emptied.** A number cannot be handed to anything
-  while the group still holds a process. One `sleep` left behind in each of 200
-  recorded groups kept all 200 numbers through a full turn of the pid space;
-  with the same 200 groups empty, strangers took 199 of them.
+- **Hold a recorded number with a process of the round's own, named in
+  `argv[0]`.** A number cannot be handed out while its group still holds a
+  process, and `argv[0]` is the one place both systems show a name for
+  `/bin/sleep`.
 
-- **Do not treat the age test as a guard on macOS.** The pid space holds 99,999
-  numbers, and one ordinary shell loop running a program allocates about a
-  thousand a second, so the space comes round in about 100 seconds. A round's
-  time bound is 480. Strangers held 199 of 200 recorded numbers 106 seconds into
-  a round, every one of them younger than the round, and the round signalled all
-  200 and killed them.
+- **Do not treat the age test as a guard on macOS.** The pid space comes round in
+  about 100 seconds against a round's 480-second bound, so a stranger holding a
+  recorded number is younger than the round exactly as the round's own shells
+  are. This contradicts § 4, which has the round signal only where the system
+  says the group is still its own.
 
-- **The age reading does not establish what § 4 says it does.** § 4 has the
-  round signal a recorded group only where the system says it is still the
-  round's own. The reading separates a group older than the round from a younger
-  one. It does not separate the round's own group from a stranger's that took
-  the number, and on macOS that case is a hundred seconds of build load away.
-
-- **Name the round in the surviving process's `argv[0]`, not in its
-  environment.** macOS withholds a process's environment from `ps -E` where the
-  program is one the system ships, and a backgrounded `sleep`, `tail` or `bash`
-  loop is exactly that case. It withholds nothing from `argv`.
-
-- **Read a token in the environment as an answer on Linux and as half an answer
-  on macOS.** `/proc/<pid>/environ` is readable by the uid that owns the process
-  and carries the inherited variable whatever the program is. On macOS `ps -E`
-  carries it for `node` and for the Command Line Tools' Python, and carries
-  nothing at all for `/bin/sleep`, `/bin/bash` or `/usr/bin/perl`.
-
-- **Expect the reviewer to append any number it likes to the record.** The path
-  arrives in the shell as `SQUIZ_GROUPS`, the command the reviewer gives runs in
-  the shell the prefix ran in, and the file is the user's own to append to. A
-  command standing where the reviewer's stands printed the path and appended the
-  number of a process the round never started; the round signalled that number
-  and the process died. Hiding the path would not help: it is in the process
-  table for the uid to read.
-
-- **Leave the forged record alone, because it gives the reviewer nothing it does
-  not already have.** At `deep` the reviewer has a shell that runs with the
-  user's own permissions, so it can signal any of the user's processes itself,
-  under no age test and with any signal it likes. What the forged record changes
-  is who sent the signal, not what can be reached.
+- **Leave the reviewer's ability to forge the record alone.** At `deep` its shell
+  runs with the user's permissions and can signal those processes itself, so a
+  forged number changes who sent the signal rather than what can be reached.
 
 ## Needs your input
 
