@@ -10,87 +10,53 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
 
 ## Intent
 
-- **Nothing said whether a reviewer that moves `HEAD` could be stopped at all.**
-  The two options on the table were to detect the move and name it, or to accept
-  it as outside what the harness bounds. Both leave the commit changed.
-- **Nothing said whether an extension handler is reached at `--print --mode
-  json`**, which is the only mode the harness runs. The documented use of
-  extensions is the interactive TUI.
-- **Nothing said what a call the handler stops answers with**, or whether the
-  reviewer reads that answer while it can still choose something else.
-- **Nothing said what a handler that throws does.** A throw that let the call
-  through would be the worst of the three outcomes and the quietest.
-- **Nothing said how the round could count what it refused.** The extension runs
-  inside `pi` and the harness reads `pi`'s stdout, so a count has to travel as
-  part of the stream or not at all.
+- Whether a reviewer that moves `HEAD` can be stopped at all.
+- Whether an extension handler runs at `--print --mode json`, the only mode the
+  harness uses.
+- What a stopped call answers with, and whether the reviewer reads it while it can
+  still choose something else.
+- What a handler that throws does to the call.
+- How the round can count what it refused.
 
 ## Decisions
 
-- **Refuse the call from a `tool_call` handler the extension subscribes, and
-  return `{ block: true, reason }`.** `pi` installs the handler on the Agent
-  instance rather than anywhere in the TUI, so print mode reaches it, and the
-  tool never executes. Nothing in a command can undo it, because the command
-  never runs.
-- **Refuse `edit` and `write` by name, and the commands by reading the words of
-  the command line.** A review reports through the calls and has no use for a
-  write primitive, so the two tools need nothing read out of their arguments. The
-  commands that have to be matched are only the ones that move `HEAD` while
-  leaving the worktree as it was: `git commit`, `git commit --amend`, `git reset
-  --soft`, `git checkout -B`, `git update-ref` and `git push`.
-- **Match the subcommand where a command is run, and not the text of an
-  argument.** A substring of the whole line is wrong in both directions. `grep -n
-  'git commit' tracked.txt` changes nothing and was refused, which stops a
-  reviewer reading the history it is reviewing. `git -C . commit --allow-empty`
-  and `git reset HEAD~1 --soft` move `HEAD` and were allowed, which is the
-  mutation the list exists to stop. So the line is split into the commands it
-  runs, at `;`, `|`, `&`, a newline and a parenthesis. The subcommand is the
-  first word after `git` that is not an option, and a listed flag counts wherever
-  it sits in the call.
-- **Split the line with the shell's own quoting rules, in a function of its own
-  that is tested on its own.** Quoting read loosely is wrong in both directions
-  at once, and a matcher that refuses too much looks like one that refuses too
-  little. A closing quote read where `\"` was written takes the next command
-  into the argument. That let `printf '%s\n' "a \" b"; git commit` through. The
-  same reading lets the text inside a quoted argument out as a command, and that
-  refused `grep -F "a \"; git commit; \" b"`. An empty quoted word dropped rather
-  than kept left `-C` taking the subcommand as its value, and that let
-  `git -C "" commit` through. The rules the splitter reads: inside single quotes
-  every character stands for itself; inside double quotes a backslash escapes
-  `"`, `\`, `$` and a backtick and stands for itself before anything else;
-  outside quotes a backslash escapes whatever follows it; and a quoted empty
-  string is a word. A table of lines to the words expected out of them tests the
-  splitter without going near the matcher.
-- **Skip a comment before reading the quotes and the separators inside it.** A
-  `#` where a word starts opens a comment, and the shell reads the rest of the
-  line as nothing. Read as text, a comment is wrong in both directions at once.
-  The apostrophe in `# Record the reviewer's result` opened a quote that absorbed
-  the line after it, and the plain `git commit` written there ran: `HEAD` moved
-  and the tree stayed as it was. The `;` in `git status --porcelain # example:
-  git status; git commit -m x` invented a commit the shell never runs, and that
-  refused an ordinary `git status`. A `#` written anywhere else is a character of
-  the word: quoted, escaped, or against a word already begun, as in
-  `--grep=x#y`.
-- **Read a short option's value written onto the flag, for the options on a
-  named list of those that take one.** `git checkout -Breview-copy` is git's
-  ordinary spelling of `-B review-copy`, and an exact match on `-B` let it
-  through. Only a flag on that list is read as the opening of a word, so `--soft`
-  does not match `--softly`.
+- **Refuse the call from a `tool_call` handler the extension subscribes, returning
+  `{ block: true, reason }`.** `pi` installs the handler on the Agent instance
+  rather than anywhere in the TUI, so print mode reaches it, and the tool never
+  executes. Nothing in a command can undo it, because the command never runs.
+
+- **Refuse `edit` and `write` by name, and six `git` commands by reading the
+  command line.** A review reports through the calls and has no use for a write
+  primitive, so the two tools need nothing read out of their arguments. The
+  commands are the ones that move `HEAD` while leaving the worktree as it was:
+  `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`,
+  `git update-ref` and `git push`.
+
+- **Read the line the way the shell splits it, in a function of its own that is
+  tested on its own, and match a name only where a command runs.** A substring of
+  the whole line is wrong in both directions at once: it refuses a `grep` that
+  only reads, and lets through a commit written with git's ordinary options. So
+  the splitter honours the quoting rules, skips a comment, keeps an empty quoted
+  word, and reads a short option's value written onto its flag. The subcommand is
+  the first word after `git` that is not an option, and a listed flag counts
+  wherever it sits.
+
 - **Say in the code, where the list is defined, that splitting a line into words
   is not a boundary.** It refuses a reviewer that is not trying to get around the
-  list. A word the shell would build out of quoting or substitution is left alone
-  rather than matched, so `git "com"mit` and `git $(echo commit)` run, and so do
-  a script file, an encoded string and `sh -c`. Escalating the matching is an
-  arms race, and a comment claiming more than the code delivers is worse than
-  none.
+  list. A word the shell would build out of quoting or substitution is left alone,
+  so `git "com"mit` and `git $(echo commit)` run, and so do a script file, an
+  encoded string and `sh -c`. Escalating the matching is an arms race, and a
+  comment claiming more than the code delivers is worse than none.
+
 - **Refuse a `bash` call whose command cannot be read, rather than running it.**
-  The field the command arrives in is `pi`'s. One it renames would otherwise
-  leave every pattern matching nothing, which reads exactly like a reviewer that
-  ran no git.
-- **Count the refusals off the stream, by the text every refusal opens with.**
-  A blocked call emits a `tool_execution_end` with `isError` true whose result
-  carries the handler's reason, so the count needs no second channel. The round
-  reports it, because a reviewer that spent its window being refused returns the
-  findings of one that had nothing to say.
+  The field the command arrives in is `pi`'s, and one it renames would leave every
+  pattern matching nothing, which reads exactly like a reviewer that ran no git.
+
+- **Count the refusals off the stream, by the text every refusal opens with.** A
+  blocked call comes back as that call's own error result carrying the reason, so
+  the count needs no second channel. The round reports it, because a reviewer that
+  spent its window being refused returns the findings of one that had nothing to
+  say.
 
 ## Needs your input
 
