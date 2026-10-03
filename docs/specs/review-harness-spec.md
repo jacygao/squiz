@@ -48,7 +48,7 @@ each.
 | `pi` | 0.84.2 | `pi --version` |
 | Claude Code | 2.1.261 | `claude --version` |
 
-Three behaviours were established rather than assumed:
+Six behaviours were established rather than assumed:
 
 - **`gh pr comment` and `gh pr review` take a body only.** Neither accepts a
   path or a line, so every inline comment goes through `gh api`. Re-check with
@@ -61,11 +61,22 @@ Three behaviours were established rather than assumed:
   disabled the command is stopped instead, and a command a foreground subagent
   moved stops when that subagent's run ends. Documented, in Claude Code's tools
   reference under the Bash tool.
-- **Claude Code fails a subagent that makes no progress for 600 seconds.**
-  Measured against 2.1.270 with a hook holding the subagent; the threshold is
-  read from `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`, and the documentation says it
-  resets on each streaming progress event. Whether a subagent waiting on a shell
-  command is making progress is not established.
+- **A foreground subagent often ends its run while its moved command is still
+  running, and the command is stopped with it.** The runtime tells the subagent
+  not to end its turn; three of five foreground subagents ended it anyway.
+  Background subagents waited. Measured against 2.1.288.
+- **A command stopped from outside gets `SIGTERM`, and so does every process
+  under it, in the same instant**, including one started in a session of its
+  own. `SIGKILL` follows one to two seconds later for whatever ignored it.
+  Moving a command to the background sends nothing. Measured against 2.1.288.
+- **Claude Code fails a subagent that makes no progress for 600 seconds, and a
+  subagent waiting on a shell command is making progress.** A hook that holds a
+  subagent is not. The threshold is read from
+  `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`. Measured against 2.1.270 and 2.1.288.
+- **A failing command's output reaches the agent truncated to about 10,000
+  characters.** Claude Code reads every exit status but 0 as a failure for
+  `squiz`, and keeps a head-and-tail excerpt of a failing command's output, with
+  no path to the rest. Documented, in the tools reference's output limits.
 
 ### GitHub access
 
@@ -360,8 +371,12 @@ under step 1 naming the branch and the directory.
 | The review | The hook |
 |---|---|
 | Exits 2 | Exits 2. The open threads, as § 6 prints them, are the blocking reason, which the runtime hands the subagent as its next instruction. |
-| Exits 0 or 3 | Exits 0, and writes nothing. |
+| Exits 0 or 3 | Exits 0. It drops the outcome the review printed on stdout, and writes the review's stderr lines, where there are any. |
 | Could not run | Exits 0, and writes the review's stderr lines. |
+
+A stderr line is a failure the review could not put anywhere else, such as a
+summary comment GitHub refused, so the hook passes every one on whatever the
+review's status.
 
 **In auto mode the hook can start a review, and cannot get it worked.** A subagent
 in auto mode ends by handing back to its parent, and the runtime drops a block that
@@ -1021,9 +1036,12 @@ run lists the episode's threads, posts the summary comment from them and from wh
 the episode recorded, and prints the open ones. It exits 3 where any are open and 0
 where none are, as any close does.
 
-An episode that ran no round at all reaches this too. It has no threads and nothing
-recorded, so it posts no summary, and the command's stderr says the episode closed
-before any round ran.
+An episode that ran no round at all reaches this too, when its failed attempts
+spent the token bound. Such an attempt may still have posted the findings it
+salvaged, so the run lists the threads the same way. Where any of the reviewer's
+threads are on the pull request, it posts the summary, prints the open ones, and
+exits 3 or 0 as any close does. Only where there are none does it post no summary,
+exit 0, and say on stderr that the episode closed before any round ran.
 
 ### What the comment carries
 
@@ -1211,6 +1229,13 @@ crashed past the harness's own trap, is never read as a result.
 that failed without changing the outcome, such as a summary comment that could not
 be posted. A run that exits 1 prints nothing on stdout.
 
+**The first line names a file holding the whole output.** A run that exits 0, 2
+or 3 writes everything it prints on stdout to `.squiz/<number>/review.txt`, and
+prints that path first. Claude Code reads every status but 0 as a failure and
+cuts the output it hands the agent to about 10,000 characters, with no path to
+the rest, so several open threads can be lost from the middle of it. The file is
+replaced on every run.
+
 Each open thread is printed as its `squiz threads` line, followed by the thread's
 comments indented by two spaces. The first comment is given without its first
 line, which the `squiz threads` line already carries. That is the whole of what the
@@ -1219,6 +1244,7 @@ coding agent needs to work the thread.
 Threads open, exit 2:
 
 ```
+Full output: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 
 2 threads are open:
@@ -1243,16 +1269,18 @@ what you changed or why you disagree. Commit and push what you changed, then run
 `squiz review 41` again.
 ```
 
-A run handed a result it did not produce says so on the first line, and prints the
-threads as they stand on the pull request now:
+A run handed a result it did not produce says so in the line after the path, and
+prints the threads as they stand on the pull request now:
 
 ```
+Full output: /work/squiz/.squiz/41/review.txt
 Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 ```
 
 Nothing open, exit 0:
 
 ```
+Full output: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
 
 Nothing is open. The review is closed, and its summary is on the pull request.
@@ -1261,6 +1289,7 @@ Nothing is open. The review is closed, and its summary is on the pull request.
 Closed with threads open, exit 3:
 
 ```
+Full output: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 77e0f19: round 3 of 3, no new findings.
 
 The round cap is reached. The review is closed with 1 thread open, and its summary
@@ -1276,6 +1305,7 @@ bound is reached" instead.
 A run on an episode that has already closed, exit 0 or 3 as the close was:
 
 ```
+Full output: /work/squiz/.squiz/41/review.txt
 Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
 ```
 
@@ -1392,7 +1422,7 @@ nothing retries one.
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
 | The window is gone before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the window it would be posted in is gone. Nothing is attempted past the end of the window, which is the round's bound on its own run inside the coding agent's tool call. |
 | The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub or the window answered. Nothing is retried: posting is a create, so a second attempt is a second comment. |
-| The episode closes before any round ran | Exit 0, and stderr says the episode closed before any round ran. An episode whose failed attempts spent the token bound before any round reaches this. There are no threads to print and nothing to summarise. |
+| The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 5 says: with the summary, the open threads and exit 3 or 0 where those attempts left any of the reviewer's threads, and with exit 0 and a line on stderr where they left none. |
 | The close cannot be written to the episode's state | The command exits as the close does, the comment stands as posted, and stderr names the write that failed. The episode then reads as one still open: the next run of the command reviews the pull request again and posts a second comment. Nothing else can be read from a state file that took no close, and a run that guessed the episode was over would drop the only report of a review that did run. |
 | The round cannot write its reviewing record | Exit 1, and no review runs. A round nothing records is one a second trigger cannot find, and would run a second time beside. |
 | The local state file cannot be read or written | Exit 1. The harness stops reviewing, and the failure comment and stderr give the underlying error rather than the word "failed". A read that fails ends the run before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
@@ -1485,8 +1515,8 @@ closes the episode over what it managed to put up. A round that posted two findi
 then reported itself as a review that succeeded would be worse than one that
 posted nothing at all.
 
-A failed round that confirmed nothing posts nothing, and makes no call to GitHub
-at all.
+A failed round that confirmed nothing has no findings to post and no verdicts to
+apply. It still posts its failure comment under § 7.
 
 **A round runs inside a window of 600 seconds, the longest a coding agent in
 Claude Code can ask a foreground shell command to run.** The command runs inside
@@ -1495,15 +1525,27 @@ several minutes, and Claude Code gives a command 120 seconds unless the agent
 asks for more, so the instruction under § 9 tells the agent to pass its tool's
 longest timeout.
 
-A command that outruns the agent's timeout is not lost in Claude Code. It moves to
-the background and runs to its end, and the agent is told where its output is
-going. The instruction tells the agent to wait for it and read that output before
-it does anything else. A foreground subagent that finishes instead stops the
-command with it, and the round ends as a command stopped from outside.
+A command that outruns the agent's timeout moves to the background, and the
+instruction tells the agent to wait for it. A foreground subagent often ends its
+run instead, which stops the command and every process under it, the reviewer
+included (§ 2). The round then ends as a command stopped from outside. A window
+equal to the longest timeout leaves the round no room for its stopping overrun or
+its own start, so a round that runs long is moved, and often lost.
 
-Claude Code also fails a subagent that makes no progress for 600 seconds. Whether
-a subagent waiting on a shell command is making progress is not established. If
-it is not, a round that runs to the end of its window reaches that threshold too.
+**The window is not settled.** Two ways out of this are open:
+
+- **A window of 540 seconds**, so that a round, its overrun included, ends inside
+  one shell call. The time bound and the shares shrink to fit.
+- **A review started detached from the command**, so that the review outlives the
+  command, and a rerun of `squiz review` on the same state attaches to the review
+  in progress instead of starting one. This rests on something not measured:
+  whether a detached process survives the runtime stopping the command's tree.
+  The runtime signals a child in a session of its own as well, so it may not.
+
+Until one is chosen, the window is 600 seconds.
+
+The stall threshold does not bound a round. A subagent waiting on a shell command
+is making progress, however long the command runs.
 
 The window is stated once, in the code. The hook's registration declares the
 same 600 seconds as its own timeout, because the runtime cancels a hook that
@@ -1684,27 +1726,27 @@ Facts the design rests on that have not been established. Each is settled before
 `docs/notes/`. What was established about the hook, which stays as the Claude
 Code trigger, is already in `docs/notes/`.
 
-Each is measured in a nested `claude -p` session dispatching a subagent in auto
-mode, with a stand-in command that sleeps and prints:
+Five were measured in nested `claude -p` sessions with a stand-in command, and
+are settled:
 
-- **Whether a subagent waiting on a shell command for 600 seconds is failed by the
-  stall threshold.** The window is sized to the shell tool's longest timeout, and
-  the threshold is the same length. If waiting is no progress, the window has to
-  shrink below it.
-- **Whether a subagent passes the longest timeout when the instruction tells it
-  to**, and what it does when the command is moved to the background anyway:
-  waits for it, or hands back with the command still running.
-- **What a command receives when it is stopped from outside**: by the end of a
-  foreground subagent's run, and by a person's interrupt. The answer decides
-  whether a round stopped that way can stop its reviewer, or leaves it running.
-- **Whether a subagent runs the command again on exit 2**, works the threads in
-  between, and stops on 0, 1 and 3, given only the skill under § 9.
-- **Whether a subagent loads the plugin's skill when it opens a pull request**,
-  with nothing in its brief naming the skill. Claude Code's documentation says a
-  skill is loaded when its description matches, and promises nothing more. It
-  does not say whether a subagent sees a plugin's skills unless its definition
-  preloads them. If the skill is not loaded reliably, the `AGENTS.md` section is
-  the route for Claude Code too.
+- A subagent waiting on a shell command is not failed by the stall threshold.
+- A subagent told to pass the longest timeout passes it.
+- A subagent given only the § 9 text runs the command again on exit 2, works the
+  threads in between, and stops on 0, 1 and 3.
+- A subagent loads the plugin's skill once it opens a pull request, with nothing
+  in its brief naming it.
+- A command stopped from outside, and every process under it, gets `SIGTERM`, and
+  `SIGKILL` one to two seconds later.
+
+Two remain:
+
+- **Whether a process started detached from `squiz review` survives the runtime
+  stopping the command.** It decides whether the window's second option under § 7
+  is open at all.
+- **Whether a subagent handed a long exit-2 output works every thread.** The
+  output is cut to about 10,000 characters (§ 2). Measure that a subagent reads
+  the file named on its first line, or fetches each thread, when several threads
+  overflow it.
 
 ## 9. Adoption
 
@@ -1754,10 +1796,12 @@ background anyway, wait for it to finish and read its output before you do
 anything else.
 
 - **Exit 0:** nothing is open. You are done.
-- **Exit 2:** threads are open, and the command prints them. Fix what applies,
-  reply on each thread with `squiz reply <id> <text>` to say what you changed or
-  why you disagree, commit and push what you changed, and run
-  `squiz review <number>` again. A reply is reviewed even with no new commit.
+- **Exit 2:** threads are open, and the command prints them. Its first line names
+  a file holding the whole output. Where what you were shown is cut short, read
+  that file. Fix what applies, reply on each thread with `squiz reply <id> <text>`
+  to say what you changed or why you disagree, commit and push what you changed,
+  and run `squiz review <number>` again. A reply is reviewed even with no new
+  commit.
 - **Exit 3:** the review closed with threads still open. Do not run it again. Say
   in your report which threads are open.
 - **Anything else:** the review could not run. Put the lines it printed in your
@@ -1777,10 +1821,12 @@ shell tool's longest timeout. If the command is moved to the background anyway,
 wait for it to finish and read its output before you do anything else.
 
 - **Exit 0:** nothing is open. You are done.
-- **Exit 2:** threads are open, and the command prints them. Fix what applies,
-  reply on each thread with `squiz reply <id> <text>` to say what you changed or
-  why you disagree, commit and push what you changed, and run
-  `squiz review <number>` again. A reply is reviewed even with no new commit.
+- **Exit 2:** threads are open, and the command prints them. Its first line names
+  a file holding the whole output. Where what you were shown is cut short, read
+  that file. Fix what applies, reply on each thread with `squiz reply <id> <text>`
+  to say what you changed or why you disagree, commit and push what you changed,
+  and run `squiz review <number>` again. A reply is reviewed even with no new
+  commit.
 - **Exit 3:** the review closed with threads still open. Do not run it again. Say
   in your report which threads are open.
 - **Anything else:** the review could not run. Put the lines it printed in your
