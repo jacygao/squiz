@@ -118,6 +118,7 @@ const KEEPER_SECONDS = 900;
 export const shellPrefix = [
   `printf '%s\\n' "$$" 2>/dev/null >> "\${${RECORD_VARIABLE}:-/dev/null}" || :`,
   `{ [ -n "\${${KEEPER_VARIABLE}:-}" ] && exec -a "\${${KEEPER_VARIABLE}}" sleep ${KEEPER_SECONDS} >/dev/null 2>&1 & } 2>/dev/null || :`,
+  `disown 2>/dev/null || :`,
 ].join("\n");
 
 /** What one round owns on disk while it runs. */
