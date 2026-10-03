@@ -209,8 +209,8 @@ already under review waits for the same round rather than running a second one, 
 two firings for one commit and the same replies post one set of threads and at
 most one summary. One episode runs one round at a time. A run for a new state
 while a round of an older one is running waits for that round to end, and then
-exits 4 without reviewing its own state, because its deadline no longer holds a
-whole window (§ 7). The next run reviews it.
+exits 4 without reviewing its own state, because the wait spent its deadline
+(§ 7). The next run reviews it.
 
 **A reply is ruled on even where no commit follows it.** A coding agent that
 disputes a finding and pushes nothing runs the command again on a new state, and
@@ -1583,9 +1583,15 @@ gate, the threads listing, and any time spent waiting on another round.
 - **A run that waits does so until the other round ends or its own deadline
   arrives**, whichever is first. A command waiting on a hook's 600-second round
   stops waiting at its own 540 seconds.
-- **A round starts only where the whole window still fits inside what is left of
-  the deadline.** A run that waited on another round has spent part of it, so it
-  starts no round of its own. Where its state still needs one, it exits 4.
+- **A run that waited for a round of its own state returns that round's result**,
+  0, 2 or 3, where the round ends before the run's deadline.
+- **A run that waited for a round of an older state starts no round of its own.**
+  The wait spent part of its deadline, and a round started then could outlive the
+  shell call. Where its own state still needs a review once the older round ends,
+  it exits 4.
+- **A run that did not wait starts its round with what is left of its deadline.**
+  The gate and the threads listing come off the reviewer's time, as the parts of
+  the window below set out.
 - **A run whose deadline arrives while it waits exits 4.** It starts nothing,
   posts nothing, and writes nothing to the episode's state.
 
