@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.50 (draft)
+**Version:** 0.51 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1009,6 +1009,7 @@ nothing retries one.
 | The summary comment cannot be posted | Exit 0, and the close is a close still rather than a round the harness failed. stderr says the episode closed without its summary, and names what GitHub or the window answered. Nothing is retried: posting is a create, so a second attempt is a second comment. |
 | The episode closes with no summary composed at all | Exit 0, and stderr says the episode closed without one and how many rounds it ran. A bound lowered between firings closes an episode whose last round blocked, and that close runs no reviewer and lists no threads, so nothing composes the comment its rounds earned. |
 | The close cannot be written to the episode's state | Exit 0, the comment stands as posted, and stderr names the write that failed. The episode then reads as one still open: the next firing of that subagent reviews the pull request again and posts a second comment. Nothing else can be read from a state file that took no close, and a firing that guessed the episode was over would drop the only report of a review that did run. |
+| The round cannot write its marker | The round reviews, compares and posts as it would have. A round that exits 0 adds the marker's path and the error to its stderr line. A round that blocks says nothing of it, because its stderr is the coding agent's next instruction. The summary comment does not carry it: the comparison a missing marker costs is another episode's. |
 | The local state file cannot be read or written | The harness stops reviewing and surfaces the underlying error rather than the word "failed". The subagent still finishes. A read that fails ends the firing before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
 | The harness itself throws | Trapped at the top level, exit 0. |
 | The round cap is reached | Exit 0. Findings still unresolved stay open, and the summary comment reports them. |
