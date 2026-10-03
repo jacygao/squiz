@@ -1730,13 +1730,20 @@ src/
   reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first
   github/                    the pull request, threads, replies, resolve and re-open, summary
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
-docs/specs/                  this document
+muster/                      the session manager, a project of its own that lives here until it moves out
+docs/specs/                  this document, and the session interface squiz asks of muster
 docs/notes/                  durable facts learned by building
 ```
 
 `src/` is organised by what a thing is about rather than by which command
 reaches it. Several commands share `github/`, and `cli.ts` maps a subcommand to
 the directory that does the work.
+
+**`muster/` and `src/` never import each other.** Nothing under `muster/`
+imports a module under `src/`, and nothing under `src/` imports a module under
+`muster/`. Each reaches the other only as a command. A test will read every
+import in both trees and fail on any that crosses. Muster knows nothing about
+reviews, and its own specification is `muster/docs/specs/muster-spec.md`.
 
 A test sits beside the code it tests, named for it: `src/config/config.ts` is
 tested by `src/config/config.test.ts`. One `include` then covers the code and
