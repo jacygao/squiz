@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.49 (draft)
+**Version:** 0.50 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -393,11 +393,28 @@ instant before the reviewer exits is recorded like any other. The file lives in
 round ends. Nothing is recorded at `read`, where no shell is granted.
 
 **A recorded group is signalled only where the system says it is still the
-round's own.** The identifier is the shell's own, and it is free the moment that
-shell is reaped, so the round reads what is running in each recorded group and
-signals only a group whose every process began after the round did. A group
-nothing could be established about is left alone: a stranger's process killed
-over a reused identifier is worse than a tool left running.
+round's own.** The identifier is the shell's own and is free the moment that
+shell is reaped, and the space of identifiers turns over in well under one round,
+so a number left unheld comes to name something else. Each shell therefore leaves
+a process of the round's own in its group, under a name no other round uses, and
+the round signals a group where it holds one of those and where nothing in it
+predates the round.
+
+**The round reads each group again before it kills anything outright**, because a
+`SIGKILL` cannot be taken back. That reading asks something different. The group
+has been signalled by then, so the process that named it as the round's own may
+have answered and gone, and the processes the first reading found stand in its
+place. A number cannot be handed out while anything still holds it, so a group
+that still holds one of them never emptied and is the group that was signalled.
+
+A group whose every process began after the round signalled it is left alone, so
+a tool that answers `SIGTERM` by leaving a fresh process behind and exiting is not
+killed outright.
+
+A group nothing could be established about is left alone: a stranger's process
+killed over a reused identifier is worse than a tool left running. Both readings
+are bounded, and one cut short establishes nothing, so a system that will not
+answer about a process leaves a tool running rather than holding the round open.
 
 ### Adapters
 
@@ -447,6 +464,7 @@ The adapter that ships. It builds this command line:
 ```bash
 pi --print --mode json --no-session \
    --session-dir .squiz/<episode>/session \
+   --no-approve \
    --no-extensions --extension <reporting-extension> \
    --tools read,grep,find,ls,report_finding,report_verdict,finish_review \
    --thinking medium \
@@ -470,6 +488,34 @@ mutation from, and the refusal reaches the reviewer as that call's error.
 line is the only one loaded. An extension installed on the machine or sitting in
 the tree under review could otherwise register a tool under a reporting call's
 name and take the round's reports.
+
+**The line every shell runs before its command is a setting rather than a flag**,
+so the adapter writes `pi`'s settings itself. It makes a directory of its own
+under `.squiz/<episode>/` and points `PI_CODING_AGENT_DIR` at it. Every entry of
+the user's own configuration directory is linked into that one, and
+`settings.json` alone is written afresh: the user's, with the recording line
+added.
+
+The whole of `pi`'s configuration resolves against that variable, not the
+settings alone: its credential, its model catalogue, and the binaries it puts on
+the shell's path. A directory holding the settings alone would be a reviewer with
+no credential, reviewing on a model nobody chose. The links are followed rather
+than replaced, so a token `pi` refreshes through one lands in the user's own file.
+Nothing is written at `read`, where no shell is granted and there is nothing to
+record.
+
+`--no-approve` untrusts the tree under review, so none of its own `.pi/`
+configuration reaches `pi`. Without it `pi` merges a trusted project's
+`.pi/settings.json` over the user's global settings, and a trust decision saved
+against any directory above the worktree trusts the worktree. What a tree could
+set there is the model the review runs on and the prompt the charter is appended
+to. A shell command prefix of its own replaces the recording line outright, and
+then no shell records anything.
+
+A shell command prefix the project configured still runs. The adapter resolves it
+the way `pi` resolves it — the project's where the tree sets one, the user's own
+otherwise — and writes the recording line in front of it. Nothing else of the
+project's applies.
 
 The JSONL stream is large, and its length follows the round rather than the size
 of the diff: it grows with every tool call the reviewer makes and every token it
@@ -1054,9 +1100,11 @@ review in reports that and starts no reviewer, because a reviewer killed the
 moment it starts spends a round of the cap on a review nobody could have done.
 
 Stopping the reviewer runs after the moment the review had to be over by, and a
-reviewer that ignores the signal spends the grace and the kill there. That
-overrun comes out of the posting rather than out of the ceiling: a round whose
-window is gone by the time it has findings posts nothing and says so.
+reviewer that ignores the signal spends the grace and the kill there. The
+readings it takes of the groups its shells recorded are bounded as well, so
+nothing about stopping a round is unbounded. That overrun comes out of the
+posting rather than out of the ceiling: a round whose window is gone by the time
+it has findings posts nothing and says so.
 
 Reaching the ceiling is the harness's last resort rather than its plan. The
 runtime signals the hook and everything below it at once, so a round that
