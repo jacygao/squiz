@@ -196,7 +196,8 @@ reviewer.** It has looked up the pull request and listed its threads by then,
 because the state is read from them.
 
 - **Reviewing**, by a process that is still running: the run waits for that round
-  to end and returns its result. It starts no round of its own.
+  to end and returns its result, or exits 4 where its own deadline comes first
+  (§ 7). It starts no round of its own.
 - **Reviewing**, by a process that has gone: the round was killed. The run starts
   a round.
 - **Reviewed**: the run returns that result, and starts no round. The threads it
@@ -206,9 +207,10 @@ because the state is read from them.
 **Every trigger therefore gets one review per state.** A second trigger for a state
 already under review waits for the same round rather than running a second one, so
 two firings for one commit and the same replies post one set of threads and at
-most one summary. A run for a new state while a round of an older one is running
-waits for that round to end, then reviews its own state. One episode runs one round
-at a time.
+most one summary. One episode runs one round at a time. A run for a new state
+while a round of an older one is running waits for that round to end, and then
+exits 4 without reviewing its own state, because its deadline no longer holds a
+whole window (§ 7). The next run reviews it.
 
 **A reply is ruled on even where no commit follows it.** A coding agent that
 disputes a finding and pushes nothing runs the command again on a new state, and
@@ -373,6 +375,7 @@ under step 1 naming the branch and the directory.
 | Exits 2 | Exits 2. The open threads, as § 6 prints them, are the blocking reason, which the runtime hands the subagent as its next instruction. |
 | Exits 0 or 3 | Exits 0. It drops the outcome the review printed on stdout, and writes the review's stderr lines, where there are any. |
 | Could not run | Exits 0, and writes the review's stderr lines. |
+| Exits 4 | Exits 0, and writes nothing. Another round is running, and the run that started it reports it. |
 
 A stderr line is a failure the review could not put anywhere else, such as a
 summary comment GitHub refused, so the hook passes every one on whatever the
@@ -389,7 +392,7 @@ Because a run returns the result for a state already reviewed, a hook firing aft
 the coding agent has run the command itself starts no second round. The same holds
 for a subagent the session did not dispatch: its firing for a state under review
 waits for that round and posts nothing of its own. Such a firing holds that
-subagent until the round ends.
+subagent until the round ends or the hook's own deadline does.
 
 The hook's round runs inside the 600-second window § 7 gives the hook, which is
 also the timeout its registration declares. Its shell does not have the plugin's `bin/` on its `PATH`, so the registration names the
@@ -1214,27 +1217,29 @@ rest of it at the first space.
 checked out in. Where the pull request's state, its head commit and the replies on
 the reviewer's threads, was already reviewed, it prints that review's result and
 exits as it did, without starting a round. Where a review of that state is
-running, it waits for that review and does the same. The exit status says what
-the coding agent does next:
+running, it waits for that review and does the same, within one deadline for the
+whole invocation (§ 7). The exit status says what the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
 | 0 | Nothing of this review is open. The episode is closed. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
 | 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
+| 4 | Still reviewing. The run's deadline came before a review of this state was done, and it started nothing. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
 
-Exit 1 is the status for a review that could not run. Every other status outside
-the table reads the same way, so a command that could not be started, or that
+Exit 4 is neither an outcome nor a failure: nothing about the pull request was
+decided, and nothing went wrong. Exit 1 is the status for a review that could not
+run. Every status outside the table reads the same way as 1, so a command that could not be started, or that
 crashed past the harness's own trap, is never read as a result.
 
 **stdout carries the outcome and stderr carries what failed.** A run that exits 0,
-2 or 3 prints its outcome on stdout, and adds a line on stderr only for something
+2, 3 or 4 prints its outcome on stdout, and adds a line on stderr only for something
 that failed without changing the outcome, such as a summary comment that could not
 be posted. A run that exits 1 prints nothing on stdout.
 
-**The first line names a file holding the whole output.** A run that exits 0, 2
-or 3 writes everything it prints on stdout to `.squiz/<number>/review.txt`, and
+**The first line names a file holding the whole output.** A run that exits 0, 2,
+3 or 4 writes everything it prints on stdout to `.squiz/<number>/review.txt`, and
 prints that path first. Claude Code reads every status but 0 as a failure and
 cuts the output it hands the agent to about 10,000 characters, with no path to
 the rest, so several open threads can be lost from the middle of it. The file is
@@ -1305,6 +1310,21 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 
 Where the token bound closed the episode, the second paragraph begins "The token
 bound is reached" instead.
+
+Still reviewing, exit 4. A run whose deadline arrived while it waited on another
+round:
+
+```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz is still reviewing PR #41 at 3f9c2e0. Run `squiz review 41` again to wait for it.
+```
+
+A run that waited for an older round, and found its own state still to review:
+
+```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz has not reviewed PR #41 at 8d21a4f yet: this run spent its time waiting for the review of 3f9c2e0. Run `squiz review 41` again to review it.
+```
 
 A run on an episode that has already closed, exit 0 or 3 as the close was:
 
@@ -1555,9 +1575,22 @@ command is making progress, however long the command runs.
 Each window is stated once, in the code. A test holds the hook's window to the
 timeout its registration declares.
 
-A run that waits for another's round waits for that round's end, which that
-round's window bounds. The waiting counts against the waiting caller's own
-timeout, so a caller that arrived late in a round waits less than a window.
+**One deadline bounds the whole invocation.** It is the window of the path that
+started the run, 540 seconds for `squiz review` and 600 for the hook, counted from
+the moment the command starts. Everything the run does counts against it: the
+gate, the threads listing, and any time spent waiting on another round.
+
+- **A run that waits does so until the other round ends or its own deadline
+  arrives**, whichever is first. A command waiting on a hook's 600-second round
+  stops waiting at its own 540 seconds.
+- **A round starts only where the whole window still fits inside what is left of
+  the deadline.** A run that waited on another round has spent part of it, so it
+  starts no round of its own. Where its state still needs one, it exits 4.
+- **A run whose deadline arrives while it waits exits 4.** It starts nothing,
+  posts nothing, and writes nothing to the episode's state.
+
+No invocation therefore runs longer than its window, waiting included, and a
+command never outlives the shell call that runs it.
 
 **A round divides its window into three parts.** The window is one moment the
 whole round is measured against, and every part is bounded by what is left of it
@@ -1822,6 +1855,7 @@ anything else.
   commit.
 - **Exit 3:** the review closed with threads still open. Do not run it again. Say
   in your report which threads are open.
+- **Exit 4:** squiz is still reviewing. Run `squiz review <number>` again.
 - **Anything else:** the review could not run. Put the lines it printed in your
   report, and do not run it again.
 ```
@@ -1847,6 +1881,7 @@ wait for it to finish and read its output before you do anything else.
   commit.
 - **Exit 3:** the review closed with threads still open. Do not run it again. Say
   in your report which threads are open.
+- **Exit 4:** squiz is still reviewing. Run `squiz review <number>` again.
 - **Anything else:** the review could not run. Put the lines it printed in your
   report, and do not run it again.
 ```

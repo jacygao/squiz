@@ -210,8 +210,11 @@ what detects a write made through the shell it grants.
 - [ ] The specification's prerequisites for `squiz review` each have a finding in
       `docs/notes/`, and any that contradicts the specification is reconciled
       there before the command is built.
-- [ ] `squiz review` exits 0, 2, 3 and 1 in the cases the specification gives,
-      and prints each as it shows.
+- [ ] `squiz review` exits 0, 2, 3, 4 and 1 in the cases the specification
+      gives, and prints each as it shows.
+- [ ] One deadline bounds each invocation, waiting included. A run that waited
+      on another round starts none of its own and exits 4, and no invocation
+      outlives its window.
 - [ ] A run on a closed episode runs no round and prints the close. A run on a
       state under review waits for that review and returns its result, and a run
       on a state already reviewed returns that result without a round.
