@@ -1,5 +1,6 @@
 /**
- * The `SubagentStop` entry point: one round, and the exit code it decides.
+ * The hook's entry point, for `SubagentStop` and for the `PreToolUse` of a
+ * subagent's hand-back: one round, and the exit code it decides.
  *
  * Exit 2 is the only exit that blocks the coding agent, and a round that means
  * to block is the only thing that reaches it. Every other end of every other
@@ -27,7 +28,8 @@ import {
 } from "../loop/round.ts";
 import { pi } from "../reviewers/pi/adapter.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
-import { readPayloadFrom, type PayloadStream } from "./payload.ts";
+import { endedInHandback } from "./handback.ts";
+import { readPayloadFrom, type Payload, type PayloadStream } from "./payload.ts";
 import { reportFailure } from "./report.ts";
 import { writeToStderr } from "./stderr.ts";
 import type { HookExit } from "./trap.ts";
@@ -35,6 +37,9 @@ import type { HookExit } from "./trap.ts";
 // The charter ships beside the code, so it is found from this file rather than
 // from a working directory that belongs to the project under review.
 const charterFile = fileURLToPath(new URL("../../charter.md", import.meta.url));
+
+/** A stop after the subagent handed back, which runs nothing and says nothing. */
+type HandedBack = { readonly outcome: "handed-back" };
 
 /** One firing of the hook. */
 export type Firing = {
@@ -58,6 +63,7 @@ export type Firing = {
  */
 export async function runHook(firing: Firing): Promise<HookExit> {
   const conclusion = await concluded(firing);
+  if (conclusion.outcome === "handed-back") return 0;
 
   if (conclusion.outcome === "block") {
     writeToStderr(ending(conclusion.reason));
@@ -276,9 +282,10 @@ function unreportedBy(round: RoundAccount): string | null {
  * known, the episode least of all, and half an episode is not something to
  * review against.
  */
-async function concluded(firing: Firing): Promise<RoundConclusion> {
+async function concluded(firing: Firing): Promise<RoundConclusion | HandedBack> {
   const read = await readPayloadFrom(firing.stdin);
   if (read.outcome === "unreadable") return harness(`no review ran: ${read.reason}`);
+  if (stoppedAfterHandback(read.payload)) return { outcome: "handed-back" };
 
   const worktree = worktreeToplevel(firing.directory);
   if (worktree.outcome === "failed") {
@@ -306,6 +313,21 @@ async function concluded(firing: Firing): Promise<RoundConclusion> {
     // defect in the harness. It ends the round and not the coding agent's turn.
     return harness(`the round could not be run: ${reasonFor(cause)}`);
   }
+}
+
+/**
+ * Whether this is a stop whose subagent already handed its report back.
+ *
+ * Its run is over, so a block reaches nobody, and the round that could reach
+ * it ran when it called the hand-back. That firing is told apart by its event
+ * and never by the transcript, which can end in the same call.
+ */
+function stoppedAfterHandback(payload: Payload): boolean {
+  return (
+    payload.event === "SubagentStop" &&
+    payload.transcript !== null &&
+    endedInHandback(payload.transcript)
+  );
 }
 
 /**

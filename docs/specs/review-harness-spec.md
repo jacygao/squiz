@@ -47,7 +47,7 @@ each.
 | `pi` | 0.84.2 | `pi --version` |
 | Claude Code | 2.1.261 | `claude --version` |
 
-Two behaviours were established rather than assumed:
+Three behaviours were established rather than assumed:
 
 - **`gh pr comment` and `gh pr review` take a body only.** Neither accepts a
   path or a line, so every inline comment goes through `gh api`. Re-check with
@@ -57,6 +57,11 @@ Two behaviours were established rather than assumed:
   threshold is read from `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`. A hook's own
   declared `timeout` is honoured below that and never reached above it. The
   published documentation does not cover the Stop and SubagentStop events.
+- **A subagent in auto mode ends by calling `SubagentHandback`, and a
+  `SubagentStop` block after that call is dropped.** The subagent is marked
+  finished and never sees the reason. A `PreToolUse` hook that exits 2 on the
+  call refuses it instead, and the subagent keeps working. Measured against
+  2.1.288.
 
 ### GitHub access
 
@@ -159,7 +164,7 @@ second episode starting then would read the worktree as its own.
 
 ```mermaid
 flowchart TD
-    A[Coding agent finishes its turn] --> B[SubagentStop hook fires]
+    A[Coding agent finishes its turn] --> B[Hook fires: SubagentStop,<br/>or PreToolUse on the hand-back]
     B --> K{Episode already closed?}
     K -->|yes| D[Exit 0, nothing happens]
     K -->|no| C{Pull request for this branch?}
@@ -172,6 +177,26 @@ flowchart TD
     G -->|yes| H[Exit 2, reason fed back into<br/>the coding agent's open turn]
     H -->|next round| A
 ```
+
+### Where a round runs
+
+A round runs at the last moment a block can still reach the coding agent. Which
+moment that is depends on how the coding agent ends its turn.
+
+| The coding agent ends by | The hook fires on | What exit 2 does |
+|---|---|---|
+| A final message | `SubagentStop` | The reason arrives as a new message, and the agent's turn continues. |
+| Calling `SubagentHandback`, which Claude Code gives a subagent in auto mode | `PreToolUse`, matched to `SubagentHandback` | The call is refused and its result is the reason. The agent keeps working and hands back again. |
+
+Both registrations run `squiz hook`. Both firings carry the subagent's
+`agent_id`, so they belong to one episode.
+
+A `SubagentStop` that follows a hand-back runs no round, exits 0 and writes
+nothing. The subagent's run is over by then, so a block would reach nobody, and
+the round that could reach it ran at the hand-back. The hook reads how the run
+ended from the subagent's transcript, at the payload's `agent_transcript_path`:
+a run that handed back has the `SubagentHandback` call as its last assistant
+entry. A transcript that cannot be read runs the round.
 
 ### A round, step by step
 
@@ -1009,7 +1034,7 @@ no such `PATH`, so the `hooks.json` registration reaches the same file through
 
 | Command | Run by | What it does |
 |---|---|---|
-| `squiz hook` | Claude Code | The `SubagentStop` entry point, named in `hooks.json`. Runs one round. |
+| `squiz hook` | Claude Code | The entry point for `SubagentStop` and for the hand-back's `PreToolUse`, both named in `hooks.json`. Runs one round, or none for a stop after a hand-back. |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
 
@@ -1258,14 +1283,14 @@ plugin is the package, so there is no separate packaging step.
 
 ```
 .claude-plugin/plugin.json   manifest: name, version, description
-hooks/hooks.json             the SubagentStop registration
+hooks/hooks.json             the SubagentStop and hand-back registrations
 commands/                    slash commands; the setup check is the first
 bin/                         the CLI, on the Bash tool's PATH while enabled
 charter.md                   the standing review instructions, shipped as one file
 src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
-  hook/                      the SubagentStop entry point and its translation
+  hook/                      the hook's entry point and its translation
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution, shared-tree detection, removal
   reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first

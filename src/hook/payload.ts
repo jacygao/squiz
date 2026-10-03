@@ -1,9 +1,12 @@
 /**
- * The `SubagentStop` payload, as the runtime writes it to the hook's stdin.
+ * The hook's payload, as the runtime writes it to the hook's stdin when a
+ * subagent stops or calls the hand-back.
  *
- * One field is read from it. `agent_id` is the subagent's own: the same string
- * every time that subagent stops, and different for every subagent. It is the
- * episode's key.
+ * `agent_id` is the subagent's own: the same string every time that subagent
+ * stops, and different for every subagent. It is the episode's key.
+ * `hook_event_name` and `agent_transcript_path` are read beside it, because
+ * together they say whether a block from this firing can still reach the
+ * subagent.
  *
  * Three other fields look usable and are not. `prompt_id` is per user turn in
  * the parent session, so it is one string for every subagent running under that
@@ -23,6 +26,10 @@
 export type Payload = {
   /** The subagent's id, exactly as it arrived. */
   readonly agentId: string;
+  /** The event that fired the hook, or `null` where the payload names none. */
+  readonly event: string | null;
+  /** The path of the subagent's own transcript, or `null` where the payload names none. */
+  readonly transcript: string | null;
 };
 
 /** The payload read, or why nothing could be read from it. */
@@ -81,7 +88,19 @@ export function readPayload(text: string): PayloadRead {
   if (typeof agentId !== "string" || agentId === "") {
     return unreadable('the payload carries no "agent_id", which is the episode\'s key');
   }
-  return { outcome: "read", payload: { agentId } };
+  return {
+    outcome: "read",
+    payload: {
+      agentId,
+      event: stringAt(parsed, "hook_event_name"),
+      transcript: stringAt(parsed, "agent_transcript_path"),
+    },
+  };
+}
+
+function stringAt(object: object, field: string): string | null {
+  const value: unknown = (object as Readonly<Record<string, unknown>>)[field];
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 function unreadable(reason: string): PayloadRead {

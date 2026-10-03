@@ -827,6 +827,88 @@ test("stop_hook_active does not end a round", async () => {
   });
 });
 
+/**
+ * A subagent's transcript, as the runtime writes it: one JSON object per line,
+ * whose last assistant entry holds `last`.
+ */
+function transcriptEndingIn(last: Readonly<Record<string, unknown>>): string {
+  const entry = (type: string, content: unknown): string =>
+    JSON.stringify({ type, agentId: AGENT_ID, message: { role: type, content } });
+  return [
+    entry("user", "Open the pull request for the change."),
+    entry("assistant", [
+      { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "gh pr create" } },
+    ]),
+    entry("user", [{ type: "tool_result", tool_use_id: "toolu_1", content: "https://github.com/o/r/pull/142" }]),
+    entry("assistant", [last]),
+    entry("user", [{ type: "tool_result", tool_use_id: "toolu_2", content: "Report delivered to your caller." }]),
+    JSON.stringify({ type: "attachment", agentId: AGENT_ID, attachment: { type: "total_tokens_reminder" } }),
+    "",
+  ].join("\n");
+}
+
+const HANDED_BACK = {
+  type: "tool_use",
+  id: "toolu_2",
+  name: "SubagentHandback",
+  input: { message: "PR #142 is open." },
+};
+
+/** Run `body` with a transcript holding `text` on disk, given its path. */
+async function withTranscript<T>(text: string, body: (path: string) => Promise<T>): Promise<T> {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-transcript-"));
+  try {
+    const path = join(directory, `agent-${AGENT_ID}.jsonl`);
+    await writeFile(path, text, "utf8");
+    return await body(path);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("a stop after a hand-back runs no round and says nothing", async () => {
+  // The subagent has finished by the time this fires, so a block here reaches
+  // nobody. The round that could reach it ran when it called the hand-back.
+  await withRepository(async (worktree) => {
+    await withTranscript(transcriptEndingIn(HANDED_BACK), async (transcript) => {
+      const fired = await fire({
+        directory: worktree,
+        payload: payload({ agent_transcript_path: transcript, last_assistant_message: undefined }),
+        round: { returns: blockedRound(REASON) },
+      });
+
+      assert.equal(fired.handed, null, "a round ran for a subagent that had already handed back");
+      assert.equal(fired.code, 0);
+      assert.equal(fired.stderr, "");
+      assert.equal(fired.stdout, "");
+    });
+  });
+});
+
+test("a hand-back that a round blocks exits 2 with the blocking reason", async () => {
+  // The transcript here ends in the hand-back, as a stop after it does. Only
+  // the event says this firing can still refuse the call.
+  await withRepository(async (worktree) => {
+    await withTranscript(transcriptEndingIn(HANDED_BACK), async (transcript) => {
+      const fired = await fire({
+        directory: worktree,
+        payload: payload({
+          hook_event_name: "PreToolUse",
+          tool_name: "SubagentHandback",
+          tool_input: HANDED_BACK.input,
+          agent_transcript_path: transcript,
+          stop_hook_active: undefined,
+          last_assistant_message: undefined,
+        }),
+        round: { returns: blockedRound(REASON) },
+      });
+
+      assert.equal(fired.code, 2, "exit 2 is what refuses the hand-back and keeps the subagent working");
+      assert.equal(fired.stderr, REASON);
+    });
+  });
+});
+
 test("a closing round exits 0 and says nothing", async () => {
   await withRepository(async (worktree) => {
     const fired = await fire({

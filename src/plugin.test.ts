@@ -19,7 +19,7 @@ const manifest = readJson("../.claude-plugin/plugin.json") as {
 const registration = readJson("../hooks/hooks.json") as {
   hooks?: Record<
     string,
-    { hooks?: { type?: string; command?: string; timeout?: number }[] }[]
+    { matcher?: string; hooks?: { type?: string; command?: string; timeout?: number }[] }[]
   >;
 };
 
@@ -57,5 +57,27 @@ test("SubagentStop runs the binary through the plugin root", () => {
       },
     ],
     "the registration goes through the root the runtime gives it, never an install path",
+  );
+});
+
+test("the hand-back runs the same binary, before the hand-back is delivered", () => {
+  // A subagent that reports through SubagentHandback has finished once the call
+  // goes through, and a SubagentStop block after it reaches nobody. Refusing the
+  // call is what keeps that subagent working.
+  assert.deepEqual(
+    registration.hooks?.["PreToolUse"],
+    [
+      {
+        matcher: "SubagentHandback",
+        hooks: [
+          {
+            type: "command",
+            command: "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook",
+            timeout: HOOK_CEILING_MS / 1_000,
+          },
+        ],
+      },
+    ],
+    "the hand-back is not registered, or under a matcher other than the one measured",
   );
 });
