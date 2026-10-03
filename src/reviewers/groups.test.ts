@@ -478,10 +478,57 @@ test("a space that cannot be made says where and why", () => {
   }
 });
 
+/**
+ * The spaces the running test made, so that the keepers its shells left go with
+ * it.
+ *
+ * A keeper holds its group's number for a quarter of an hour, and a test that
+ * records a group without stopping it leaves one. Several of these tests do, and
+ * a file run back to back would otherwise leave a process for each of them
+ * sleeping on the machine the next run is timed on.
+ */
+let spacesMade: RoundSpace[] = [];
+
+/**
+ * The groups the running test's shells led, which is how a keeper is reached where
+ * the record never named its group.
+ */
+let groupsLed: number[] = [];
+
 function madeIn(directory: string): RoundSpace {
   const made = makeRoundSpace(directory);
   assert.equal(made.outcome, "made", "the round's own space must be there before anything records");
-  return made.outcome === "made" ? made.space : ({} as RoundSpace);
+  const space = made.outcome === "made" ? made.space : ({} as RoundSpace);
+  spacesMade.push(space);
+  return space;
+}
+
+/**
+ * Kill what the running test's own shells left holding their groups.
+ *
+ * Only a process whose `argv[0]` is one of this test's keeper names, which no other
+ * round and nothing else on the machine answers to. A group number alone would not
+ * do: by here it may name something the test never started.
+ */
+function discardKeepers(): void {
+  const names = new Set(spacesMade.map((space) => space.keeperName).filter(Boolean));
+  if (names.size === 0) return;
+  const groups = new Set(groupsLed);
+  for (const space of spacesMade) for (const group of recordedGroups(space)) groups.add(group);
+  for (const group of groups) {
+    const read = spawnSync("ps", ["-o", "pid=,command=", "-g", String(group)], {
+      encoding: "utf8",
+    });
+    for (const row of read.stdout.split("\n")) {
+      const [pid, ...rest] = row.trim().split(/\s+/u);
+      if (pid === undefined || rest[0] === undefined || !names.has(rest[0])) continue;
+      try {
+        process.kill(Number(pid), "SIGKILL");
+      } catch {
+        // The test stopped the group itself, which is most of them.
+      }
+    }
+  }
 }
 
 type ShellOutput = {
@@ -522,6 +569,7 @@ function runShell(
   child.stderr.on("data", (chunk: Buffer) => {
     stderr += chunk.toString();
   });
+  groupsLed.push(child.pid ?? 0);
   return new Promise((settle, fail) => {
     child.once("error", fail);
     child.once("exit", (status) => {
@@ -681,9 +729,14 @@ function pause(milliseconds: number): Promise<void> {
 /** A fresh directory, removed however the test ends. */
 async function inADirectory(run: (directory: string) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "squiz-groups-"));
+  spacesMade = [];
+  groupsLed = [];
   try {
     await run(directory);
   } finally {
+    discardKeepers();
+    spacesMade = [];
+    groupsLed = [];
     rmSync(directory, { recursive: true, force: true });
   }
 }
