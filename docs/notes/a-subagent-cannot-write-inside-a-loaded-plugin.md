@@ -22,9 +22,11 @@ recheck-when: Claude Code changes how auto mode judges a write inside a loaded p
   and every worktree under `.claude/worktrees/` is inside it. A subagent's write
   there is refused. The same write is allowed once the plugin is loaded from
   anywhere else.
-- **Refresh that checkout after each merge, then restart the session.** A merged
-  change reaches a session only through the checkout it loaded, so the refresh is
-  the step that delivers it.
+- **Refresh that checkout after each merge, and restart only when the merge
+  changed `hooks/hooks.json`.** A merged change reaches a session only through
+  the checkout it loaded. Each firing of the hook runs `bin/squiz` as a new
+  process, so a refreshed `src/` or `bin/` reaches the next round. The session
+  reads `hooks/hooks.json` when it starts (unverified).
 
 ## Needs your input
 
@@ -40,30 +42,15 @@ claude --plugin-dir ../squiz-plugin
 git fetch -q origin && git -C ../squiz-plugin checkout -q --detach origin/main   # after each merge
 ```
 
-### The refusal
+### What it rests on
 
-```
-The server-side auto mode classifier gave no verdict (it skipped this action), so auto mode cannot determine the safety of Write. This is a hard failure, not a transient one …
-```
-
-### The measurement
-
-Each row is one `claude -p --permission-mode auto` session in a worktree of this
-repository, where a `general-purpose` subagent `Write`s a file.
-
-| Plugin loaded | Target | Result |
-|---|---|---|
-| this repository | a 248-line note in the worktree, three runs | refused 3 of 3 |
-| none | the same note, three runs | written 3 of 3 |
-| this repository | a three-line plain note in the worktree | refused |
-| `plugin.json` alone, from the scratchpad | the 248-line note | written |
-| `hooks/hooks.json` alone, from the scratchpad | the 248-line note | written |
-| `bin/` alone, from the scratchpad | the 248-line note | written |
-| a copy of this repository, from the scratchpad | the three-line note in the worktree | written |
-| this repository | the three-line note in the scratchpad | written |
-
-Neither the content, the hook nor the binaries decides it. What decides it is a
-subagent writing inside the directory of a plugin the session has loaded.
+Auto mode refused a subagent's `Write` to the repository's worktree whenever this
+repository was the loaded plugin, and allowed it with no plugin, with a copy of
+the repository loaded from elsewhere, and to a target outside the repository.
+Loading `.claude-plugin/plugin.json`, `hooks/hooks.json` or `bin/` alone from
+elsewhere did not bring the refusal back, so neither the content, the hook nor
+the binaries decides it. What decides it is a subagent writing inside the
+directory of a plugin the session has loaded.
 
 A project that installs squiz from the marketplace never writes inside the
 plugin's directory, so only work on squiz itself is affected.
