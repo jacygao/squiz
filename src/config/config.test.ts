@@ -51,7 +51,7 @@ test("an absent .squiz.json is not an error, and yields the six defaults", () =>
     depth: "read",
     test: null,
     timeout: 480,
-    tokens: 1_500_000,
+    tokens: 10_000_000,
     thinking: "medium",
   });
 });
@@ -129,7 +129,7 @@ test("a count that is not whole is refused", () => {
 test("a token bound of 0 is refused rather than replaced by the default", () => {
   const error = rejection(`{"tokens": 0}`);
   assert.match(error.message, /"tokens" is 0/);
-  assert.doesNotMatch(error.message, /1500000/);
+  assert.doesNotMatch(error.message, /10000000/);
 });
 
 test("a timeout of 0 is refused rather than replaced by the default", () => {

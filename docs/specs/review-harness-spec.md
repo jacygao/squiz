@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.51 (draft)
+**Version:** 0.52 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1041,7 +1041,7 @@ The review budget bounds a review two ways. Both are configurable.
 | Bound | Default | When it is reached |
 |---|---|---|
 | **Time**, per round | 480 seconds | The reviewer process is killed and the round posts the findings reported before the kill. |
-| **Tokens**, per round | 1,500,000 | The episode closes without starting another round. |
+| **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
 finding arrives in the call that reports it rather than at the end of the run. A
@@ -1129,7 +1129,7 @@ guard on the one deadline the harness does not own.
 **The token bound is on one round rather than on the episode.** A round whose
 tokens reached it closes the episode. The episode's own ceiling follows from the
 round cap: a cap of R rounds with a bound of B tokens is an episode of R × B,
-which is 4,500,000 tokens at the default cap of 3 and 12,000,000 at the largest
+which is 30,000,000 tokens at the default cap of 3 and 80,000,000 at the largest
 cap the configuration accepts.
 
 The tokens an attempt spent count whether or not the attempt was a round. An
@@ -1231,7 +1231,7 @@ until something asks.
 | **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
-| **P1** | The token bound | 1,500,000 tokens a round, read before a round starts and again when one records what it spent |
+| **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
@@ -1324,7 +1324,7 @@ on its own branch. Squiz does not create them.
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 480 | Seconds one round's reviewer may run, settable 1 to 480 |
-| `tokens` | 1,500,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
+| `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 `timeout` defaults to the most it may be, so a project can lower the time bound
