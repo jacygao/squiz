@@ -11,9 +11,9 @@ import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 /** The tool a subagent in auto mode hands its report back through. */
 export const HANDBACK_TOOL = "SubagentHandback";
 
-// Enough for the last assistant entry, which holds the whole report the
-// subagent handed back, without reading a transcript of many megabytes whole.
-const TAIL_BYTES = 1024 * 1024;
+// The transcript is read backwards in steps of this size, so a long one is not
+// read whole. The last assistant entry holds the whole report and has no bound.
+const CHUNK_BYTES = 1024 * 1024;
 
 /**
  * True where the last assistant entry in the transcript at `path` calls the
@@ -23,16 +23,49 @@ const TAIL_BYTES = 1024 * 1024;
  * shape not seen before runs the round as it always has. Never throws.
  */
 export function endedInHandback(path: string): boolean {
-  const tail = tailOf(path);
-  if (tail === null) return false;
+  const last = lastAssistantEntry(path);
+  return last !== null && callsHandback(last);
+}
 
-  const lines = tail.split("\n");
-  for (let index = lines.length - 1; index >= 0; index--) {
-    const entry = parsed(lines[index] ?? "");
-    if (entry === null || entry["type"] !== "assistant") continue;
-    return callsHandback(entry);
+/**
+ * The last entry of type `assistant`, reading back from the end until one
+ * whole line holds it, or `null` where there is none or the file cannot be read.
+ */
+function lastAssistantEntry(path: string): Readonly<Record<string, unknown>> | null {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, "r");
+  } catch {
+    return null;
   }
-  return false;
+  try {
+    let position = fstatSync(descriptor).size;
+    // Bytes from `position` to the end of the file that are not yet a whole line.
+    let pending = Buffer.alloc(0);
+    while (position > 0) {
+      const length = Math.min(position, CHUNK_BYTES);
+      position -= length;
+      const chunk = Buffer.alloc(length);
+      readSync(descriptor, chunk, 0, length, position);
+      pending = Buffer.concat([chunk, pending]);
+
+      // Every line after the first newline is whole. Before it, the line may
+      // start in a chunk not read yet, unless the file starts here.
+      const firstBreak = position === 0 ? -1 : pending.indexOf(0x0a);
+      if (position > 0 && firstBreak === -1) continue;
+      const whole = pending.subarray(firstBreak + 1).toString("utf8").split("\n");
+      for (let index = whole.length - 1; index >= 0; index--) {
+        const entry = parsed(whole[index] ?? "");
+        if (entry !== null && entry["type"] === "assistant") return entry;
+      }
+      pending = pending.subarray(0, firstBreak + 1);
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function callsHandback(entry: Readonly<Record<string, unknown>>): boolean {
@@ -57,27 +90,6 @@ function parsed(line: string): Readonly<Record<string, unknown>> | null {
       ? (value as Readonly<Record<string, unknown>>)
       : null;
   } catch {
-    // The first line of a tail usually starts mid-entry.
     return null;
-  }
-}
-
-function tailOf(path: string): string | null {
-  let descriptor: number;
-  try {
-    descriptor = openSync(path, "r");
-  } catch {
-    return null;
-  }
-  try {
-    const size = fstatSync(descriptor).size;
-    const length = Math.min(size, TAIL_BYTES);
-    const buffer = Buffer.alloc(length);
-    readSync(descriptor, buffer, 0, length, size - length);
-    return buffer.toString("utf8");
-  } catch {
-    return null;
-  } finally {
-    closeSync(descriptor);
   }
 }
