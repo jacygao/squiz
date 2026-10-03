@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.53 (draft)
+**Version:** 0.54 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -355,8 +355,10 @@ the tools in the table. Depth decides how much the reviewer may read and run.
 Reporting is not a depth: a reviewer with no way to report returns nothing
 whatever it was allowed to look at. The three calls are named under Findings.
 
-`deep` depends on the tracked-file comparison described under Confinement, which
-is the only mechanism that catches a write made through the shell.
+**`bash` writes, so a reviewer at `deep` can change the tree it reviews.** The
+comparison of tracked files and `HEAD` under Confinement names any such change in
+the summary, except in a shared worktree. The refused calls stop the shell
+commands that would move `HEAD` before they run.
 
 ### Confinement
 
@@ -1361,7 +1363,7 @@ on its own branch. Squiz does not create them.
 | Setting | Default | |
 |---|---|---|
 | `rounds` | 3 | The round cap, settable 1 to 8 |
-| `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
+| `depth` | `read` | `read` or `deep`. `deep` adds the shell, which the reviewer runs the tests with |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 480 | Seconds one round's reviewer may run, settable 1 to 480 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |

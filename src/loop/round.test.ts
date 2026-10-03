@@ -13,13 +13,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { defaultConfig, type Config } from "../config/config.ts";
+import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import {
@@ -31,6 +31,8 @@ import {
   type RoundOutput,
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
+import { pi } from "../reviewers/pi/adapter.ts";
+import { extensionFile } from "../reviewers/pi/argv.ts";
 import { readState, writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
@@ -892,9 +894,6 @@ test("the first round of a first episode posts its finding, is handed no thread,
 /**
  * The configured command reaches the prompt, and only where the reviewer has a
  * shell to run it with.
- *
- * The configuration is built here rather than loaded, so a round at `deep` runs
- * before the loader accepts that depth.
  */
 test("the configured test command reaches a reviewer at `deep` and not one at `read`", async () => {
   const deep = await runInFixture({
@@ -917,6 +916,45 @@ test("the configured test command reaches a reviewer at `deep` and not one at `r
     read.invocations[0]?.prompt.includes("pnpm vitest run"),
     false,
     "a reviewer with no shell was named a command to run the tests with",
+  );
+});
+
+/**
+ * A `.squiz.json` asking for `deep` is read by the loader, run as a round, and
+ * turned into `pi`'s own command line. A loader that accepted `deep` and ran
+ * `read`, or a test command that stopped at the configuration, passes every
+ * test of one step and fails this one.
+ */
+test("a .squiz.json at `deep` gives pi the shell, the refusal and the project's test command", async () => {
+  const root = mkdtempSync(join(tmpdir(), "squiz-deep-config-"));
+  let config: Config;
+  try {
+    writeFileSync(
+      join(root, configFileName),
+      JSON.stringify({ depth: "deep", test: "pnpm vitest run", timeout: 5 }),
+    );
+    config = loadConfig(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const ran = await runInFixture({ answers: POSTING, reviewer: reviews({}), config });
+  const invocation = ran.invocations[0] ?? assert.fail("the round started no reviewer");
+  const { args } = pi.argv(invocation);
+
+  assert.ok(
+    args[args.indexOf("--tools") + 1]?.split(",").includes("bash"),
+    `the command line grants no shell: ${args.join(" ")}`,
+  );
+  assert.equal(
+    args[args.indexOf("--extension") + 1],
+    extensionFile,
+    "a shell without the extension is a reviewer whose git-moving calls nothing refuses",
+  );
+  assert.match(
+    args.at(-1) ?? "",
+    /^pnpm vitest run$/mu,
+    "the project's test command is in the configuration and not in what pi was handed",
   );
 });
 
