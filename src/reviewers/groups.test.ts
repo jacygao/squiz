@@ -654,11 +654,16 @@ async function detachedGroup(directory: string, name: string): Promise<Stranger>
 }
 
 /**
- * A script in `directory` that sets itself up, says so, and then holds.
+ * The command for a tool that sets itself up, says so, and then holds.
  *
  * The lines of `setup` run before the file the test waits on appears, so a test
  * that waits for it knows the handler is installed. Without that the round's
  * signal can arrive first, and a tool that died on it exercises nothing.
+ *
+ * The command hands the script to bash rather than executing the file. macOS
+ * checks a new executable the first time it runs, one at a time across the
+ * machine, and under other suites that check can outlast the wait for the tool
+ * to start.
  */
 function toolIn(
   directory: string,
@@ -667,9 +672,8 @@ function toolIn(
   hold: string,
 ): string {
   const path = join(directory, name);
-  writeFileSync(path, ["#!/bin/bash", ...setup, hold, ""].join("\n"), "utf8");
-  chmodSync(path, 0o755);
-  return path;
+  writeFileSync(path, [...setup, hold, ""].join("\n"), "utf8");
+  return `/bin/bash ${path}`;
 }
 
 /** Wait for the file to appear, failing the test rather than hanging if it does not. */
