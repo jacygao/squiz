@@ -290,6 +290,35 @@ test("a group holding nothing the round saw in it is not killed outright", async
 });
 
 /**
+ * A backgrounded job stays in the shell's job table, and a bare `wait` waits for
+ * every job there. A keeper left in that table makes `wait` sit out its whole
+ * sleep, so a command joining its own parallel work would spend the round's bound
+ * rather than return.
+ */
+test("a command that waits for its own background work is not held by the keeper", async () => {
+  await inADirectory(async (directory) => {
+    const space = madeIn(directory);
+    const started = Date.now();
+    const { status, stdout, pid: shell } = await runShell(
+      `sleep 0.05 & wait; printf 'done\n'`,
+      space,
+    );
+    const elapsedMs = Date.now() - started;
+
+    assert.equal(status, 0);
+    assert.equal(stdout.trim(), "done", "the command's own output is what the reviewer reads");
+    assert.ok(
+      elapsedMs < 5_000,
+      `the keeper was still a job of the shell's, so wait sat out its sleep: ${elapsedMs}ms`,
+    );
+    assert.ok(
+      heldBy(shell, space.keeperName),
+      "leaving the job table must not cost the keeper its group",
+    );
+  });
+});
+
+/**
  * A shell whose keeper never started leaves the group to empty, and an empty
  * group is neither this round's to signal nor a stranger's to refuse. This is
  * what a shell without `exec -a` comes to.

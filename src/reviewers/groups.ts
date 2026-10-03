@@ -98,7 +98,13 @@ const KEEPER_SECONDS = 900;
  * reports that refusal yet, so such a round is silent about what it did not
  * reach.
  *
- * Both lines exit 0 whatever happens and say nothing on either stream. A command
+ * **The keeper leaves the shell's job table.** A backgrounded job stays in it, and
+ * a bare `wait` in the command waits for every job there — so without `disown` a
+ * command that joins its own parallel work would wait out the keeper's whole sleep
+ * instead of returning. `disown` drops the job without touching its process group,
+ * so the number stays held.
+ *
+ * Each line exits 0 whatever happens and says nothing on either stream. A command
  * that is a comment or is empty leaves these as the last thing the shell ran, so
  * a non-zero status here would be reported as that command's, and a complaint
  * here would arrive in the reviewer's tool output as though the command had made
