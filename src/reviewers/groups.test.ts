@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { standIn } from "../testing/stand-in.ts";
 import { deadlineIn } from "./deadline.ts";
 import {
   discardRoundSpace,
@@ -706,9 +699,7 @@ function running(pid: number): boolean {
 function brokenPs(directory: string): string {
   const binaries = join(directory, "bin");
   mkdirSync(binaries, { recursive: true });
-  const ps = join(binaries, "ps");
-  writeFileSync(ps, '#!/bin/sh\necho "ps fell over" >&2\nexit 2\n', "utf8");
-  chmodSync(ps, 0o755);
+  standIn(binaries, "ps", '#!/bin/sh\necho "ps fell over" >&2\nexit 2\n');
   return `${binaries}:${process.env["PATH"] ?? ""}`;
 }
 
@@ -731,15 +722,9 @@ const HANGS_FOR_MS = 30_000;
 function hangingPs(directory: string, calls: string): string {
   const binaries = join(directory, "bin");
   mkdirSync(binaries, { recursive: true });
-  const ps = join(binaries, "ps");
   // One process after the `exec`, so the bound's own kill reaches what is hanging
   // rather than a shell holding a child that outlives it.
-  writeFileSync(
-    ps,
-    `#!/bin/sh\necho ran >> ${calls}\nexec sleep ${HANGS_FOR_MS / 1_000}\n`,
-    "utf8",
-  );
-  chmodSync(ps, 0o755);
+  standIn(binaries, "ps", `#!/bin/sh\necho ran >> ${calls}\nexec sleep ${HANGS_FOR_MS / 1_000}\n`);
   return `${binaries}:${process.env["PATH"] ?? ""}`;
 }
 

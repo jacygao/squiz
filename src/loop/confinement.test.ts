@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -18,6 +18,7 @@ import { test } from "node:test";
 import { renderSummary } from "../github/summary-body.ts";
 import { unspent } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { standIn } from "../testing/stand-in.ts";
 import { markRoundRunning } from "../worktree/shared-tree.ts";
 import {
   evidenceWith,
@@ -488,24 +489,11 @@ async function withGitThat<T>(preamble: string, body: () => T | Promise<T>): Pro
   const directory = await mkdtemp(join(tmpdir(), "squiz-git-"));
   const previous = process.env["PATH"];
   try {
-    const fake = join(directory, "git");
-    await writeFile(
-      fake,
-      [
-        "#!/bin/sh",
-        `[ -n "\${${WARMING}:-}" ] && exit 0`,
-        preamble,
-        `exec ${quote(realGit)} "$@"`,
-        "",
-      ].join("\n"),
-      "utf8",
+    standIn(
+      directory,
+      "git",
+      ["#!/bin/sh", preamble, `exec ${quote(realGit)} "$@"`, ""].join("\n"),
     );
-    await chmod(fake, 0o755);
-    // macOS checks a new executable the first time it runs, one at a time across
-    // the machine, and under other suites that check outlasts a phase's bound.
-    // Run once here, the fake pays for it before any bound is counting.
-    const warmed = spawnSync(fake, { env: { ...process.env, [WARMING]: "1" } });
-    assert.equal(warmed.status, 0, `the fake git would not run: ${warmed.error?.message ?? ""}`);
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     return await body();
   } finally {
@@ -514,9 +502,6 @@ async function withGitThat<T>(preamble: string, body: () => T | Promise<T>): Pro
     await rm(directory, { recursive: true, force: true });
   }
 }
-
-/** Set only for the fake's first run, which then does nothing but exit. */
-const WARMING = "SQUIZ_TEST_WARMING";
 
 async function readLines(path: string): Promise<readonly string[]> {
   const source = await readFile(path, "utf8");

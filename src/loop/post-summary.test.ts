@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -24,6 +24,7 @@ import { renderSummary } from "../github/summary-body.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { standIn } from "../testing/stand-in.ts";
 import { nothingEstablished, type ConfinementEvidence } from "./confinement.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type ClosingRound } from "./post-summary.ts";
@@ -73,8 +74,7 @@ async function withFakeGh<T>(fake: FakeGh, body: (gh: Fake) => Promise<T> | T): 
 
   const previous = process.env["PATH"];
   try {
-    await writeFile(join(directory, "gh"), script, "utf8");
-    await chmod(join(directory, "gh"), 0o755);
+    standIn(directory, "gh", script);
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     return await body({
       arguments: () => lines(argumentLog),

@@ -95,6 +95,13 @@ export type RoundSetup = {
    * It only lowers, like the posting margin, and for the same reason.
    */
   readonly windowMs?: number;
+  /**
+   * A share for the calls before the review below the round's own, so that a
+   * test can spend it without waiting a minute out.
+   *
+   * It only lowers, like the posting margin, and for the same reason.
+   */
+  readonly preReviewMs?: number;
 };
 
 /** Why a round reported a failure, and whose failure it was. */
@@ -238,7 +245,9 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   // advance, and a bound per call lets every page have the whole of one.
   const preReview: GhCall = {
     directory,
-    until: deadlineIn(Math.min(PRE_REVIEW_MARGIN_MS, beforePosting.remaining())),
+    until: deadlineIn(
+      Math.min(lowered(setup.preReviewMs, PRE_REVIEW_MARGIN_MS), beforePosting.remaining()),
+    ),
   };
 
   const stateRead = openState(episode);

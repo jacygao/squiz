@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
+import { standIn } from "../testing/stand-in.ts";
 import { applyVerdicts, type HandedOverThread } from "./verdicts.ts";
 
 /** One answer of the fake `gh`, given to any request whose body holds `when`. */
@@ -47,8 +48,7 @@ async function withFakeGh<T>(
 
   const previous = process.env["PATH"];
   try {
-    await writeFile(join(directory, "gh"), script, "utf8");
-    await chmod(join(directory, "gh"), 0o755);
+    standIn(directory, "gh", script);
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     return await body({ requests: () => lines(requestLog) });
   } finally {

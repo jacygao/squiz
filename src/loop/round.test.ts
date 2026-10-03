@@ -13,8 +13,8 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -31,6 +31,7 @@ import {
   type RoundOutput,
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
+import { standIn } from "../testing/stand-in.ts";
 import { readState, writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
@@ -431,7 +432,6 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         ? {}
         : { [setup.lockStateAfter]: episode.directory }),
     });
-    warm(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     if (setup.rounds !== undefined) {
@@ -552,24 +552,6 @@ function unlock(directory: string): void {
   }
 }
 
-/**
- * Run the fake once, and forget that it ran.
- *
- * The system looks a newly written executable over the first time it is run, and
- * that look costs the best part of a second. A test that times what the round
- * spends would be timing the look, so it is paid for here instead.
- */
-function warm(directory: string): void {
-  try {
-    execFileSync(join(directory, "gh"), ["--warm"], { stdio: "ignore" });
-  } catch {
-    // The fake has no answer for this, so it exits 1. Running it is the point.
-  }
-  for (const name of ["count", "kinds", "count-unknown", "stdin-1", "argv-1"]) {
-    rmSync(join(directory, name), { force: true });
-  }
-}
-
 /** The state file read back, or `null` where there is no state a test can read. */
 function stateIn(source: string | null): EpisodeState | null {
   if (source === null) return null;
@@ -598,58 +580,7 @@ async function writeFake(
   delays: Partial<Record<Kind, string>>,
   locks: Partial<Record<Kind, string>>,
 ): Promise<void> {
-  const script = [
-    "#!/bin/sh",
-    `dir=${quote(directory)}`,
-    'n=$(cat "$dir/count" 2>/dev/null || echo 0)',
-    "n=$((n + 1))",
-    'printf %s "$n" > "$dir/count"',
-    // Read stdin only where gh was told to, or a call that sends no body hangs.
-    'case " $* " in *" --input "*) cat > "$dir/stdin-$n" ;; *) : > "$dir/stdin-$n" ;; esac',
-    'request="$* $(cat "$dir/stdin-$n")"',
-    "kind=unknown",
-    'case "$request" in',
-    // Before the resolve: one spelling is inside the other.
-    "  *'unresolveReviewThread'*) kind=unresolve ;;",
-    "  *'resolveReviewThread'*) kind=resolve ;;",
-    // The read-back that follows a create reaches the threads from the comment.
-    "  *'PullRequestReviewComment'*) kind=lookup ;;",
-    "  *'reviewThreads(first:100'*) kind=threads ;;",
-    // Before the create, which is the other POST. The summary goes to the issues
-    // path and a finding's thread to the pulls path, and those two paths are the
-    // whole of the difference between a comment on the pull request and a comment
-    // on a line of its diff.
-    "  *'/issues/'*'/comments'*) kind=summary ;;",
-    "  *'--method POST'*) kind=create ;;",
-    "  *'pr list'*) kind=prlist ;;",
-    "  *'v3.diff'*) kind=diff ;;",
-    "esac",
-    'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
-    // The arguments of this one call, so a test can read the method and the path
-    // a comment was sent to and not only that a call was made.
-    'printf \'%s\\n\' "$*" > "$dir/argv-$n"',
-    // Which call of this kind it is, so that a paging read-back can answer
-    // differently each time.
-    'k=$(cat "$dir/count-$kind" 2>/dev/null || echo 0)',
-    "k=$((k + 1))",
-    'printf %s "$k" > "$dir/count-$kind"',
-    'if [ -f "$dir/delay-$kind" ]; then sleep "$(cat "$dir/delay-$kind")"; fi',
-    'answer="$dir/answer-$kind-$k"',
-    '[ -f "$answer" ] || answer="$dir/answer-$kind"',
-    'if [ ! -f "$answer" ]; then',
-    '  printf \'no answer fixtured for %s\\n\' "$kind" >&2',
-    "  exit 1",
-    "fi",
-    'cat "$answer"',
-    // After the answer, so the call itself succeeded and only what the round
-    // writes afterwards fails.
-    'if [ -f "$dir/lock-$kind" ]; then chmod 500 "$(cat "$dir/lock-$kind")"; fi',
-    "exit 0",
-    "",
-  ].join("\n");
-
-  await writeFile(join(directory, "gh"), script, "utf8");
-  await chmod(join(directory, "gh"), 0o755);
+  standIn(directory, "gh", GH_SCRIPT);
   for (const [kind, answer] of Object.entries(answers)) {
     await writeFile(join(directory, `answer-${kind}`), answer, "utf8");
   }
@@ -666,10 +597,56 @@ async function writeFake(
   }
 }
 
-/** `text` as one shell word, so a fixture can hold whatever it needs to. */
-function quote(text: string): string {
-  return `'${text.replaceAll("'", `'\\''`)}'`;
-}
+/** The fake `gh`, which keeps its answers and its records beside itself. */
+const GH_SCRIPT = [
+  "#!/bin/sh",
+  'dir="${0%/*}"',
+  'n=$(cat "$dir/count" 2>/dev/null || echo 0)',
+  "n=$((n + 1))",
+  'printf %s "$n" > "$dir/count"',
+  // Read stdin only where gh was told to, or a call that sends no body hangs.
+  'case " $* " in *" --input "*) cat > "$dir/stdin-$n" ;; *) : > "$dir/stdin-$n" ;; esac',
+  'request="$* $(cat "$dir/stdin-$n")"',
+  "kind=unknown",
+  'case "$request" in',
+  // Before the resolve: one spelling is inside the other.
+  "  *'unresolveReviewThread'*) kind=unresolve ;;",
+  "  *'resolveReviewThread'*) kind=resolve ;;",
+  // The read-back that follows a create reaches the threads from the comment.
+  "  *'PullRequestReviewComment'*) kind=lookup ;;",
+  "  *'reviewThreads(first:100'*) kind=threads ;;",
+  // Before the create, which is the other POST. The summary goes to the issues
+  // path and a finding's thread to the pulls path, and those two paths are the
+  // whole of the difference between a comment on the pull request and a comment
+  // on a line of its diff.
+  "  *'/issues/'*'/comments'*) kind=summary ;;",
+  "  *'--method POST'*) kind=create ;;",
+  "  *'pr list'*) kind=prlist ;;",
+  "  *'v3.diff'*) kind=diff ;;",
+  "esac",
+  'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
+  // The arguments of this one call, so a test can read the method and the path
+  // a comment was sent to and not only that a call was made.
+  'printf \'%s\\n\' "$*" > "$dir/argv-$n"',
+  // Which call of this kind it is, so that a paging read-back can answer
+  // differently each time.
+  'k=$(cat "$dir/count-$kind" 2>/dev/null || echo 0)',
+  "k=$((k + 1))",
+  'printf %s "$k" > "$dir/count-$kind"',
+  'if [ -f "$dir/delay-$kind" ]; then sleep "$(cat "$dir/delay-$kind")"; fi',
+  'answer="$dir/answer-$kind-$k"',
+  '[ -f "$answer" ] || answer="$dir/answer-$kind"',
+  'if [ ! -f "$answer" ]; then',
+  '  printf \'no answer fixtured for %s\\n\' "$kind" >&2',
+  "  exit 1",
+  "fi",
+  'cat "$answer"',
+  // After the answer, so the call itself succeeded and only what the round
+  // writes afterwards fails.
+  'if [ -f "$dir/lock-$kind" ]; then chmod 500 "$(cat "$dir/lock-$kind")"; fi',
+  "exit 0",
+  "",
+].join("\n");
 
 function lines(path: string): readonly string[] {
   if (!existsSync(path)) return [];

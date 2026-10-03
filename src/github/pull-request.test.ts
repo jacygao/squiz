@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { parseDiff } from "../findings/diff.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { standIn } from "../testing/stand-in.ts";
 import { fetchDiff, findPullRequestForBranch } from "./pull-request.ts";
 
 type FakeGh = {
@@ -55,8 +56,7 @@ async function withFakeGh<T>(fake: FakeGh, body: (gh: Fake) => Promise<T> | T): 
   try {
     await writeFile(outFile, fake.stdout ?? "", "utf8");
     await writeFile(errFile, fake.stderr ?? "", "utf8");
-    await writeFile(join(directory, "gh"), script, "utf8");
-    await chmod(join(directory, "gh"), 0o755);
+    standIn(directory, "gh", script);
     process.env["PATH"] = `${directory}:${previous ?? ""}`;
     return await body({
       arguments: () => lines(argumentLog),
