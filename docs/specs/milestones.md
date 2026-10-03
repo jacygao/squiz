@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.12 (draft)
+**Version:** 0.13 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -185,12 +185,31 @@ three-block comment, posted once and never edited.
 
 ## M7 — Confinement detection, shared trees, and depth `deep`
 
+`squiz review` replaces the `SubagentStop` hook: the coding agent runs it, and it
+runs one round, waits for it, and prints what is open. The hook registration and
+`squiz hook` are removed, and an episode is keyed on the pull request's number.
+It comes first in this milestone, because until it lands no finding squiz posts
+reaches a coding agent, and squiz cannot review this milestone's own pull
+requests.
+
 The tracked-file comparison, taken before the reviewer starts and again when it
 exits, and shared-tree detection comparing `git rev-parse --show-toplevel`
 against the live episodes. Depth `deep` ships here, because the comparison is
 what detects a write made through the shell it grants.
 
 ### Acceptance criteria
+
+- [ ] The specification's prerequisites for `squiz review` each have a finding in
+      `docs/notes/`, and any that contradicts the specification is reconciled
+      there before the command is built.
+- [ ] `squiz review` exits 0, 2, 3 and 1 in the cases the specification gives,
+      and prints each as it shows.
+- [ ] A run on a closed episode runs no round and prints the close. A run while
+      a round of the same episode is running starts none.
+- [ ] `hooks/hooks.json` is gone, and nothing in the plugin registers a hook.
+- [ ] Getting started's `AGENTS.md` text is in this repository's own
+      `AGENTS.md`, and a dispatched subagent given only that text works a real
+      pull request's threads to exit 0 or 3.
 
 - [ ] A file mutated during a run is named in the summary.
 - [ ] Two live episodes on one toplevel disable the comparison for that round.
@@ -201,15 +220,13 @@ what detects a write made through the shell it grants.
 ## M8 — Episode boundaries
 
 The token bound read before a round starts and again when one records what it
-spent, worktree removal at episode close, and an audit that every failure path
-reaches the stderr channel with a useful line.
+spent, and an audit that every failure path reaches the stderr channel with a
+useful line.
 
 ### Acceptance criteria
 
 - [ ] An episode whose round reached the token bound closes with the findings it
       has, and the summary says the bound was reached.
-- [ ] A clean, pushed worktree is removed at close. A dirty or unpushed one
-      stays and is named on stderr.
 - [ ] No failure path is silent.
 
 M7 and M8 do not depend on each other.
