@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { renderSummary } from "../github/summary-body.ts";
 import { unspent } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { markRoundRunning } from "../worktree/shared-tree.ts";
@@ -621,5 +622,94 @@ test("the reasons an episode keeps do not grow with its firings", () => {
     kept[0],
     "git exited 0",
     "the earliest round's answer is the one a later firing must not push out",
+  );
+});
+
+/** Sixty-four names under `prefix`, which is the whole of one list's cap. */
+function aCapsWorth(prefix: string): readonly string[] {
+  return Array.from({ length: 64 }, (_, index) => `${prefix}${String(index).padStart(2, "0")}`);
+}
+
+/**
+ * The summary comment for an episode that raised nothing and established `found`.
+ *
+ * What a list keeps is worth what the comment says and nothing else, and the
+ * comment is posted once and never edited.
+ */
+function commentOn(found: ConfinementEvidence | undefined): string {
+  return renderSummary({
+    rounds: [unspent],
+    threads: [],
+    findings: { outcomes: [] },
+    because: "nothing-open",
+    confinement: found ?? nothingEstablished,
+  });
+}
+
+/**
+ * A later round that fills the cap pushes nothing of an earlier round's out.
+ *
+ * Round 1 names one changed file and blocks, and round 2 names sixty-four that all
+ * sort before it. Choosing the sixty-four to keep from the sorted list drops the
+ * earlier round's file, which this comment is the only report of, while the file
+ * itself is still changed in the worktree.
+ */
+test("a file an earlier round found changed survives a later round that fills the cap", () => {
+  const crowd = aCapsWorth("a").map((name) => `${name}.txt`);
+  const evidence = after(
+    { trackedFiles: { outcome: "changed", paths: [TRACKED] } },
+    { trackedFiles: { outcome: "changed", paths: crowd } },
+  );
+  const comment = commentOn(evidence);
+
+  assert.deepEqual(
+    evidence?.changed,
+    [...crowd.slice(0, 63), TRACKED],
+    "the cap drops the entry that arrived last, and orders what it kept for display",
+  );
+  assert.ok(
+    comment.includes(`\`${TRACKED}\``),
+    `${TRACKED} changed in the worktree and the comment does not name it:\n${comment}`,
+  );
+});
+
+/**
+ * The same cap, over the episodes a round found in the worktree.
+ *
+ * An episode named by the round that blocked is the only account of who was in the
+ * tree while that reviewer ran, and a later round that found a crowd must not take
+ * its place.
+ */
+test("an episode an earlier round found here survives a later round that fills the cap", () => {
+  const crowd = aCapsWorth("a");
+  const evidence = after(
+    {
+      otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_AGENT_ID, pid: 4021 }] },
+      trackedFiles: {
+        outcome: "not-taken",
+        reason: `the worktree is shared with live episode ${OTHER_AGENT_ID}`,
+      },
+    },
+    {
+      otherEpisodes: {
+        outcome: "shared",
+        episodes: crowd.map((id, index) => ({ id, pid: 5000 + index })),
+      },
+      trackedFiles: {
+        outcome: "not-taken",
+        reason: "the worktree is shared with 64 live episodes",
+      },
+    },
+  );
+  const comment = commentOn(evidence);
+
+  assert.deepEqual(
+    evidence?.shared,
+    [...crowd.slice(0, 63), OTHER_AGENT_ID],
+    "the cap drops the episode that arrived last, and orders what it kept for display",
+  );
+  assert.ok(
+    comment.includes(OTHER_AGENT_ID),
+    `episode ${OTHER_AGENT_ID} was in the worktree and the comment does not name it:\n${comment}`,
   );
 });

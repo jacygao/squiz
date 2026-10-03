@@ -135,9 +135,14 @@ round could take no comparison, and why a round could not tell who else was ther
 The summary comment's Notes are composed from all four.
 
 Each list holds an entry once, however many rounds gave it, and stops at
-sixty-four entries. No episode of rounds alone reaches that. An attempt that is no
-round spends none of the round cap and fails the same way every firing, so nothing
-bounds how many times one episode adds to these lists.
+sixty-four entries. One round can reach that on its own, because one reading can
+name more than sixty-four changed paths. An attempt that is no round spends none of
+the round cap and fails the same way every firing, so nothing bounds how many times
+one episode adds to these lists either.
+
+**A full list keeps the entries recorded first.** A later round adds to a list with
+room left and adds nothing to a full one, so what an earlier round established is in
+the comment the closing round posts.
 
 While a round runs, the episode's directory also holds a marker naming that
 round's process and when that process started. A pid alone is reused, so the

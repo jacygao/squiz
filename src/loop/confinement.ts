@@ -162,11 +162,14 @@ export const nothingEstablished: ConfinementEvidence = {
 /**
  * The most entries one list keeps.
  *
- * The round cap bounds the rounds at eight, and nothing bounds the firings: an
- * attempt that was no round spends none of the cap and fails the same way every
- * time the hook fires. Identical evidence collapses, so a repeat adds nothing, and
- * this is what holds a reason that varies between firings. The entries kept are
- * the earliest, which are the ones a later firing must not push out.
+ * Nothing bounds how many times an episode adds to one of these lists: an attempt
+ * that was no round spends none of the round cap and fails the same way every time
+ * the hook fires. Identical evidence collapses, so a repeat adds nothing, and this
+ * is what holds a reason that varies between firings. One round's own answer can
+ * reach it too, where the reviewer changed more paths than this.
+ *
+ * The entries kept are the earliest, which are the ones a later round must not
+ * push out.
  */
 const MOST_KEPT = 64;
 
@@ -218,12 +221,23 @@ function whyUnestablished(episodes: OtherEpisodes): readonly string[] {
   return episodes.outcome === "unknown" ? [episodes.reason] : [];
 }
 
-/** `had` and `found` as one list, once each, ordered by the value itself. */
+/**
+ * `had` and `found` as one list, once each, ordered by the value itself.
+ *
+ * The cap chooses which entries survive, and the order here only arranges the ones
+ * that did. Sorting before the cap would let a later round's entry that sorts early
+ * push out an earlier round's, which is the loss these lists exist to carry.
+ */
 function byValue(had: readonly string[], found: readonly string[]): readonly string[] {
-  return [...new Set([...had, ...found])].sort().slice(0, MOST_KEPT);
+  return [...byRound(had, found)].sort();
 }
 
-/** `had` and `found` as one list, once each, the earlier round's entries first. */
+/**
+ * `had` and `found` as one list, once each, the earlier round's entries first.
+ *
+ * What the cap drops is what arrived last. An entry the episode had already kept
+ * stays kept.
+ */
 function byRound(had: readonly string[], found: readonly string[]): readonly string[] {
   return [...new Set([...had, ...found])].slice(0, MOST_KEPT);
 }
