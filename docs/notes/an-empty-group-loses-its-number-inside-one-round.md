@@ -35,13 +35,15 @@ recheck-when: macOS changes what ps -E withholds, Linux's pid_max default change
 ## Needs your input
 
 - **Whether to leave one process of the round's own alive in each recorded
-  group.** It costs a line in the shell prefix and one `sleep` per shell tool
-  for the rest of the round, and it answers the question outright: the number
-  cannot be taken while the group holds it, and the process that holds it
-  carries the round's name where every `ps` on both systems prints it.
-  Recommended: take it. The alternative is a round that sends `SIGTERM`, and
-  then `SIGKILL`, to a process of the user's own that it never started, which
-  this measurement reached in 106 seconds.
+  group.** It costs a line in the shell prefix and one process per shell tool for
+  the rest of the round, and it answers the question the age test cannot: the
+  number cannot be taken while the group holds it, and the holder carries the
+  round's name where every `ps` on both systems prints it. Recommended: take it.
+  The alternative is a round that sends `SIGTERM`, and then `SIGKILL`, to a
+  process of the user's own that it never started, which this measurement reached
+  in 106 seconds. **Which program holds it is unresolved**, and an ordinary
+  `/bin/sleep` is not the answer: it dies on the round's own `SIGTERM`, before the
+  reading that decides whether to escalate.
 
 - **What a shell with no `exec -a` should mean.** The line that leaves the
   process behind is bash's, and the prefix is silent about its own failures by
@@ -62,8 +64,10 @@ ps -o pid=,pgid=,etime= -g <the recorded numbers, comma separated>
 `ps -g 2503` returned pid 2503 of group 2503 and pid 2505 of group 2505, both of
 session 2503, and `ps -g 2505` returned nothing. A recorded number that is no
 session's gets no rows there, so such a group is neither signalled nor refused.
-macOS prints no session for any process: `ps -o sess=` gave `0` for every one,
-pid 1 included.
+
+macOS prints no session in `ps`: `ps -o sess=` gave `0` for every process, pid 1
+included. The session is still readable there through `getsid(2)`, reachable as
+`os.getsid()` in `/usr/bin/python3`.
 
 ### Reading a process's environment
 
@@ -108,6 +112,23 @@ exec -a "squiz-<the round>" /bin/sleep 900 >/dev/null 2>&1 &
 environment the same `ps` withholds. It survived a command that `exec`s.
 `exec -a` is bash's, and `/bin/sh -c "sleep 120" "squiz-0ddba11"` does not stand
 in for it: the shell execs its last command and the name goes with the shell.
+
+**A holder must outlive the `SIGTERM` the round sends first.** The shutdown
+signals the group, waits the grace, and establishes the group's identity a second
+time before it escalates, because a `SIGKILL` cannot be taken back. An ordinary
+`/bin/sleep` dies on that first signal, so a group holding a tool that ignores
+`SIGTERM` has lost its holder by the second reading:
+
+```
+before TERM   52506 52505 squiz-term01 900
+              52507 52505 /bin/bash -c trap "" TERM; sleep 300
+after TERM    52507 52505 /bin/bash -c trap "" TERM; sleep 300
+```
+
+A round that refuses a group with no holder of its own then refuses this one and
+leaves the tool running, which is the case the escalation exists for. A holder
+that ignores `SIGTERM` and dies at `SIGKILL` is what the two readings need, and
+which program should hold it that way was not measured.
 
 A process carrying the round's name is not a proof of the round's own group. One
 can be put into a group the round never created, where that group is in the
@@ -182,9 +203,12 @@ the wrap at 99,999 and the restart near 100.
 - **Whether root reads such an environment on macOS was not tested.** Nothing
   here ran as root, which is the case that matters.
 
-- **Whether the round's shells share a session with processes of the user's own
-  was not established.** That is what a forged witness needs, and macOS prints
-  no session for any process, so this machine cannot answer it.
+- **The `ps` probe did not establish whether the round's shells share a session
+  with processes of the user's own.** That is what a forged holder needs. macOS
+  prints no session in `ps -o sess=`, and that is the column rather than the
+  machine: `getsid(2)` is there, reachable as `os.getsid()` in
+  `/usr/bin/python3`, and it answers. The question is open because this probe used
+  the column, not because the system withholds it.
 
 - **The 200 processes left behind were measured against the pid space, not
   against `pi`.** Nothing says what `pi` makes of a shell tool whose group keeps
