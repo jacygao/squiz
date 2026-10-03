@@ -103,23 +103,43 @@ One worktree, one branch, one pull request, one issue. This is the shape Squiz
 itself requires: the harness resolves an episode by
 `git rev-parse --show-toplevel`, so two subagents working in one tree read as
 one shared tree, and the tracked-file comparison under Confinement is disabled
-for that round. Section 3 of the specification says the
-worktrees are created by whatever dispatches the subagents. That is this
-session.
+for that round.
+
+**Dispatch with `isolation: "worktree"` on the Agent call, never by path.** The
+hook runs in the directory the subagent was dispatched in, not the one its
+brief names. A subagent told to work in `.claude/worktrees/<name>` is reviewed
+against wherever this session stood when it was dispatched, which is usually
+`main`, so its pull request is never reviewed. Isolation puts the subagent, and
+its hook, in a worktree of its own at `.claude/worktrees/agent-<agent_id>`,
+created from `origin/main`.
+
+The brief's first instruction is the branch switch, before anything else:
 
 ```bash
-git worktree add -b <area>/<short-name> .claude/worktrees/i<issue> origin/main
+git fetch -q origin && git switch -c <area>/<short-name> origin/main
 ```
 
 - **The primary tree stays on `main` and never switches branches.** Every
   worktree and every dispatched agent reads it.
 - **Branches are named `<area>/<short-name>`**, matching those already in the
   repository: `spec/identity`, `templates/pr-and-issue`.
+- **The worktree's path is the Agent result's `worktreePath`.** Nothing else
+  names it before the subagent reports, so take it from there for verification
+  and removal.
 - `.claude/worktrees/` is already in `.gitignore`.
-- **Remove the worktree once its pull request merges**, with
-  `git worktree remove .claude/worktrees/i<issue>`. A stale worktree holds a
-  branch checked out, and the next agent that wants that branch fails for a
-  reason that reads like something else.
+- **Remove the worktree once its pull request merges**, unless the harness
+  already removed it when the episode closed, and the branch isolation left
+  behind with it:
+
+  ```bash
+  git worktree remove <worktreePath>
+  git branch -D worktree-agent-<agent_id>
+  ```
+
+  A stale worktree holds a branch checked out, and the next agent that wants
+  that branch fails for a reason that reads like something else. The
+  `worktree-agent-<agent_id>` branch is the one isolation created, and nothing
+  else removes it.
 
 **Take the baseline before dispatching, not before answering.** Run the checks
 `main` has and keep the result. Its one job is attribution: if `main` is already
@@ -172,7 +192,8 @@ Every brief carries:
   shipping something it could not verify
 - **The pull request body ends at its last real section.** No generated-with
   footer, no session link, no co-author trailer, in the body or in the commits
-- The worktree it was given, which it works in and never leaves
+- The branch switch above as its first step. It is started in its worktree, so
+  the brief names no path, and it works there and never leaves
 - Report back: the pull request number, the checks it ran with their output,
   each new test's failure as it first ran, what it filed, and **what it could
   not determine**
@@ -194,8 +215,9 @@ product, bringing it to the caller.
 
 ## 4. Verify what comes back. Do not take the report
 
-An agent's report is a claim. Check it in a worktree of its own, detached, so
-nothing you do disturbs the branch:
+An agent's report is a claim. Check it in a worktree of its own, detached, and
+never in the subagent's `worktreePath`, where its hook may still be running a
+round against the tree:
 
 ```bash
 git worktree add -q .claude/worktrees/verify-<n> origin/<branch> --detach

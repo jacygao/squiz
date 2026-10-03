@@ -13,7 +13,7 @@
 set -eu
 
 # The entry point is resolved from this file rather than from the working
-# directory. The hook is given the session's directory, which is not even the
+# directory. The hook is given the subagent's directory, which is not even the
 # worktree root, so a relative path here resolves against a directory that has
 # nothing to do with the plugin.
 # (docs/notes/the-worktree-toplevel-separates-concurrent-subagents.md)

@@ -12,9 +12,11 @@ Two subagents were run at once, each in its own git worktree on its own branch,
 and every hook firing resolved the worktree of the subagent that fired it. The
 hook's working directory was the worktree, not the repository root, so § 3's
 one worktree, one branch, one pull request, one episode holds. But the hook is
-given the session's directory, not the worktree root: a session started in a
+given the subagent's directory, not the worktree root: a session started in a
 subdirectory of a worktree produced a `cwd` inside that subdirectory while
-`git rev-parse --show-toplevel` still returned the worktree root.
+`git rev-parse --show-toplevel` still returned the worktree root. The subagent's
+directory is where its dispatcher stood, which
+`a-subagents-hook-runs-where-it-was-dispatched.md` records.
 
 ## Decisions
 
@@ -25,9 +27,9 @@ subdirectory of a worktree produced a `cwd` inside that subdirectory while
   every other per-episode thing hangs off.
 - **The harness must not use `cwd` from the payload, nor the hook process's own
   working directory, as the episode's directory or as a key.** Both are the
-  session's directory. They equal the worktree root only when the session was
-  started at the worktree root, which is the dispatcher's habit rather than a
-  guarantee. Two sessions started in two subdirectories of one shared worktree
+  subagent's directory. They equal the worktree root only when the subagent was
+  dispatched from the worktree root, which is the dispatcher's habit rather than
+  a guarantee. Two sessions started in two subdirectories of one shared worktree
   would carry two different `cwd` values and one toplevel, so keying on `cwd`
   would read a shared tree as two separate episodes — the exact failure § 3's
   shared-tree detection exists to catch.
@@ -51,8 +53,8 @@ Every `SubagentStop` firing offers three, and they are not interchangeable:
 
 | Answer | Where it comes from | What it is |
 |---|---|---|
-| `cwd` | the payload, given by the runtime | the session's directory |
-| `pwd` | the hook process itself | the session's directory |
+| `cwd` | the payload, given by the runtime | the subagent's directory |
+| `pwd` | the hook process itself | the subagent's directory |
 | `git rev-parse --show-toplevel` | computed by the hook | the worktree root |
 
 Across seven firings from the two concurrent subagents, all three agreed,

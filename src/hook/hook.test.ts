@@ -42,7 +42,7 @@ import type { ClosingReason } from "../loop/round-decision.ts";
 import type { RoundConclusion, RoundFailure } from "../loop/round.ts";
 import type { AppliedVerdict } from "../loop/verdicts.ts";
 import type { MarkWrite } from "../worktree/shared-tree.ts";
-import { failureIn } from "./hook.ts";
+import { failureIn, unreviewedIn } from "./hook.ts";
 import { failureLine } from "./report.ts";
 
 const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
@@ -283,10 +283,40 @@ test("the round cap and the token bound are not failures", () => {
   assert.equal(failureIn(closedRound("nothing-open")), null);
 });
 
-test("a branch with no pull request says nothing", () => {
-  assert.equal(failureIn({ outcome: "no-pull-request" }), null);
+test("a branch with no pull request is no failure", () => {
+  const conclusion = { outcome: "no-pull-request", branch: "main", directory: "/work" } as const;
+
+  assert.equal(failureIn(conclusion), null);
 });
 
+test("a branch with no pull request is named, with the directory the gate looked in", () => {
+  assert.equal(
+    unreviewedIn({ outcome: "no-pull-request", branch: "main", directory: "/work/tree" }),
+    'no review ran: no open pull request has "main" as its head, in "/work/tree"',
+  );
+});
+
+test("a detached HEAD is named as one, with the directory the gate looked in", () => {
+  assert.equal(
+    unreviewedIn({ outcome: "no-pull-request", branch: null, directory: "/work/tree" }),
+    'no review ran: HEAD is detached in "/work/tree", so no pull request has it as its head',
+  );
+});
+
+test("a line separator in the directory survives the pointer as an escape", () => {
+  // JSON quoting leaves these three raw, and the pointer flattens each to a space.
+  const separators = [0x85, 0x2028, 0x2029].map((code) => String.fromCharCode(code));
+  const directory = `/work/${separators.join("x")}`;
+
+  const line = failureLine(
+    unreviewedIn({ outcome: "no-pull-request", branch: null, directory }) ?? "",
+  );
+
+  assert.equal(
+    line,
+    String.raw`squiz: no review ran: HEAD is detached in "/work/\u0085x\u2028x\u2029", so no pull request has it as its head` + "\n",
+  );
+});
 test("a blocked round composes no pointer", () => {
   // Its stderr is the blocking reason and nothing beside it.
   assert.equal(failureIn(blockedRound("Squiz reviewed the change on this branch.")), null);
@@ -653,7 +683,7 @@ async function fire(setup: Firing): Promise<Fired> {
  */
 function fixture(setup: Firing, handedFile: string): string {
   const text = setup.payload ?? payload();
-  const round = setup.round ?? { returns: { outcome: "no-pull-request" } };
+  const round = setup.round ?? { returns: { outcome: "episode-over" } };
   const body =
     "throws" in round
       ? `throw new Error(${JSON.stringify(round.throws)});`
@@ -936,8 +966,8 @@ test("the episode the round is handed is keyed on the subagent's id", async () =
 });
 
 test("the worktree is resolved rather than read off the directory the hook fired in", async () => {
-  // The hook is given the session's directory, which is somewhere inside the
-  // worktree and not necessarily its root.
+  // The hook fires in the subagent's working directory, which is somewhere
+  // inside the worktree and not necessarily its root.
   await withRepository(async (worktree) => {
     const inside = join(worktree, "src", "deep");
     await mkdir(inside, { recursive: true });
@@ -1197,7 +1227,7 @@ test("a reviewer that is not installed ends the round at exit 0, saying so", asy
   });
 });
 
-test("a branch with no pull request posts nothing, runs nothing and says nothing", async () => {
+test("a branch with no pull request posts nothing, runs nothing, and says which branch and where", async () => {
   await withRepository(async (worktree) => {
     const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
 
@@ -1205,9 +1235,33 @@ test("a branch with no pull request posts nothing, runs nothing and says nothing
 
     assert.equal(result.code, 0, "only exit 2 blocks a turn, and no round ran");
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "", "silence is what a branch with no pull request looks like");
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(worktree)}\n`,
+      "a pass for want of a pull request must not read like a subagent reviewed against the wrong tree",
+    );
     assert.ok(tools.ghWasRun(), "the branch was never asked about");
   });
+});
+
+test("the directory a pass names keeps every space in its path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "squiz-hook-"));
+  try {
+    const worktree = join(realpathSync(root), "two  spaces");
+    mkdirSync(worktree);
+    commitOn(worktree, BRANCH);
+    const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
+
+    const result = squizHook(worktree, tools.path, payload());
+
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(worktree)}\n`,
+      "a path with its spaces collapsed names a directory that does not exist",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("a gh that failed says so, where a branch with no pull request would say nothing", async () => {
@@ -1245,7 +1299,7 @@ test("a gh that is not installed says so", async () => {
   });
 });
 
-test("a detached HEAD asks gh nothing and says nothing", async () => {
+test("a detached HEAD asks gh nothing, and says it was detached and where", async () => {
   await withRepository(async (worktree) => {
     git(worktree, "checkout", "--quiet", "--detach");
     const tools = await toolsIn(worktree, { pullRequests: LISTING });
@@ -1254,7 +1308,10 @@ test("a detached HEAD asks gh nothing and says nothing", async () => {
 
     assert.equal(result.code, 0);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "");
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: HEAD is detached in ${JSON.stringify(worktree)}, so no pull request has it as its head\n`,
+    );
     assert.equal(tools.ghWasRun(), false, "a detached HEAD is not a branch to ask GitHub about");
   });
 });
@@ -1308,7 +1365,10 @@ test("nothing in a branch name reaches a shell", async () => {
     assert.equal(result.code, 0);
     assert.deepEqual(tools.ghArguments().slice(-2), ["--head", branch]);
     assert.equal(existsSync(join(worktree, "pwned")), false, "the branch name reached a shell");
-    assert.equal(result.stderr, "");
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: no open pull request has ${JSON.stringify(branch)} as its head, in ${JSON.stringify(worktree)}\n`,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

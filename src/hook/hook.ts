@@ -10,7 +10,8 @@
  * composed and nothing else, because the runtime hands that text to the coding
  * agent as its next instruction. A round that exits 0 having failed writes one
  * line saying what failed, and `failureIn` is the only place that line is
- * composed.
+ * composed. A pass for want of a pull request writes one line of the same shape,
+ * composed by `unreviewedIn`.
  */
 
 import { fileURLToPath } from "node:url";
@@ -63,8 +64,8 @@ export async function runHook(firing: Firing): Promise<HookExit> {
     return 2;
   }
 
-  const failure = failureIn(conclusion);
-  if (failure !== null) reportFailure(failure);
+  const line = failureIn(conclusion) ?? unreviewedIn(conclusion);
+  if (line !== null) reportFailure(line);
   return 0;
 }
 
@@ -86,13 +87,45 @@ export function failureIn(conclusion: RoundConclusion): string | null {
       // could not put on the pull request is the only thing left to say.
       return closingFailure(conclusion);
     // A blocked round's stderr is its reason alone. A branch nobody opened a pull
-    // request for had nothing to run, and an episode that had already reported its
-    // close ran nothing either: what it came to was said when it closed.
+    // request for failed at nothing, and an episode that had already reported its
+    // close ran nothing: what it came to was said when it closed.
     case "block":
     case "no-pull-request":
     case "episode-over":
       return null;
   }
+}
+
+/**
+ * The one line a pass for want of a pull request is reported as, or `null` for
+ * every other conclusion.
+ *
+ * Not a failure, and still said. A branch with no pull request and a subagent
+ * whose hook fired in a tree it never worked in both reach the gate as a branch
+ * nobody opened a pull request for, so the branch and the directory are the only
+ * things that tell them apart.
+ */
+export function unreviewedIn(conclusion: RoundConclusion): string | null {
+  if (conclusion.outcome !== "no-pull-request") return null;
+  const directory = quoted(conclusion.directory);
+  if (conclusion.branch === null) {
+    return `no review ran: HEAD is detached in ${directory}, so no pull request has it as its head`;
+  }
+  const branch = quoted(conclusion.branch);
+  return `no review ran: no open pull request has ${branch} as its head, in ${directory}`;
+}
+
+/**
+ * `text` in double quotes, with every character the pointer would flatten
+ * escaped, so a path or a branch comes through the pointer unaltered.
+ *
+ * JSON escapes every control character but leaves U+0085, U+2028 and U+2029
+ * raw, and the pointer reads each of those as a line break.
+ */
+function quoted(text: string): string {
+  return JSON.stringify(text).replace(/[\u0085\u2028\u2029]/gu, (separator) =>
+    `\\u${separator.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 }
 
 /** A round that failed, which may have salvaged what the reviewer had reported. */

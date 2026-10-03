@@ -2,10 +2,10 @@
  * The branch the hook fired on, resolved by asking git from the working
  * directory the hook was given.
  *
- * The branch is resolved rather than read: the payload's `cwd` and the hook's
- * own working directory are the session's directory, which is somewhere inside
- * the worktree and not necessarily its root. A branch answers the same from any
- * subdirectory, so this is all the gate needs.
+ * The branch is resolved rather than read. The hook's working directory is the
+ * subagent's, fixed when it was dispatched, and may be any subdirectory of the
+ * worktree. A branch answers the same from any of them, so this is all the gate
+ * needs.
  */
 
 import { spawnSync } from "node:child_process";
