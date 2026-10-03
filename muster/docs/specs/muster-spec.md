@@ -1,6 +1,6 @@
 # Muster Specification: Triggers, Sessions That Outlive Them, and an Inbox
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -115,7 +115,7 @@ anything is the command's job.
 ### Starting one
 
 ```
-muster start --name <name> --cwd <dir> [--backend herdr|tmux|detached] [--kind <agent>] [--env KEY=VALUE]... -- <command> [args...]
+muster start --name <name> --cwd <dir> [--backend herdr|tmux|detached] [--kind <agent>] [--env KEY=VALUE]... [--keep-pane] -- <command> [args...]
 ```
 
 `--kind` names an agent Herdr knows, such as `pi` or `claude`. Without
@@ -143,24 +143,47 @@ start. That is not measured, and it is spike S1.
 
 `.muster/sessions/<name>.json` records the backend, the backend's identifier
 for the tab, pane or window, the session's pid and its start time, the command,
-and the log path where there is one. A pid with its start time is the
+the log path, and whether the session is alive, exited or stopped. Every
+backend has a log at `.muster/sessions/<name>.log`. A pid with its start time is the
 identity: a pid alone is reused.
 
 A name is unique within a root. Starting a session whose name has a live record
-fails, and names the live one.
+fails, and names the live one. A record marked exited or stopped under that name
+is replaced.
+
+### When its program exits
+
+**A session's pane closes when its program exits, and its record stays.** The
+record is marked exited, with the time and, where the backend reports it, the
+exit status. `muster status` and `muster read` answer for it from the record and
+the log until `muster prune` removes it. `muster start --keep-pane` leaves the
+pane open instead, for a person to read.
+
+Whether the pane closes is muster's to decide. What a program wants a person to
+see after its pane is gone, such as how to resume it, is the program's to write
+somewhere that outlasts the pane.
+
+| Backend | What happens on exit | What muster does |
+|---|---|---|
+| tmux | tmux closes the window when its command exits, unless `remain-on-exit` is set. | Muster sets `remain-on-exit on` on its own windows, and a `pane-died` hook that runs `muster closed <name>`. That command writes the pane's last screen to the session's log, records `#{pane_dead_status}` as the exit status, and kills the window. The tmux server runs the hook, so nothing of muster's has to be running. Whether the hook fires reliably is part of spike S4. |
+| Herdr | After `herdr agent start`, Herdr's documentation says the pane returns to its idle shell prompt once the agent exits, and clears the agent's name. The pane stays open. This is read from the documentation, not observed, and is part of spike S4. | Muster closes the pane once it sees the agent gone, in `muster wait` and in `muster status`. Before closing it, it writes `herdr pane read --source recent` to the session's log. No exit status is recorded, because Herdr reports none. |
+| Detached | There is no pane. | The log already holds the output. The exit is seen as the pid gone, and no exit status is recorded, because the session is not muster's child. |
+
+A program whose outcome matters writes the outcome itself, because two of the
+three backends cannot report an exit status.
 
 ### Watching one
 
 | Command | Herdr | tmux | Detached |
 |---|---|---|---|
-| `muster status` | Every record, with alive or exited, and for an agent Herdr's `agent_status` | Every record, alive or exited | Every record, alive or exited |
+| `muster status` | Every record: alive, exited or stopped, and for a live agent Herdr's `agent_status` | Every record: alive, exited or stopped | Every record: alive, exited or stopped |
 | `muster attach <name>` | Focuses the tab | Selects the window | Follows the log |
-| `muster wait <name>` | `herdr agent wait`, or until the pane's process exits | Until the window's process exits | Until the pid exits |
-| `muster read <name>` | `herdr pane read --source recent` | `tmux capture-pane -p` | The log's tail |
+| `muster wait <name>` | `herdr agent wait`, then until the agent is gone from the pane | Until the record is marked exited | Until the pid exits |
+| `muster read <name>` | `herdr pane read --source recent` while alive, and the log after | `tmux capture-pane -p` while alive, and the log after | The log's tail |
 
 ### Stopping one
 
-`muster stop <name>` stops the session and removes its record.
+`muster stop <name>` stops the session and marks its record stopped.
 
 | Backend | What it sends |
 |---|---|
@@ -172,9 +195,9 @@ fails, and names the live one.
 that starts its children in sessions of their own has to stop them itself.
 Muster says so rather than hunting for them.
 
-A record whose process has gone, by pid and start time, is an exited session.
-`muster status` shows it, and `muster prune` removes every such
-record.
+**A record goes only with `muster prune`**, which removes every record marked
+exited or stopped, and every record whose process has gone by pid and start
+time.
 
 ## 6. Messages
 
@@ -256,6 +279,7 @@ later turn exits 0 without taking anything. Only the newest takes a message.
 |---|---|
 | `muster hook` | The trigger entry point, for Claude Code's hooks and the `pi` extension. § 4. |
 | `muster start`, `status`, `attach`, `wait`, `read`, `stop`, `prune` | § 5. |
+| `muster closed` | Run by tmux's `pane-died` hook, never by a person. § 5. |
 | `muster send`, `muster inbox list`, `muster inbox take` | § 6. |
 
 Every command takes `--root <dir>`, which defaults to the git toplevel of the
@@ -290,7 +314,7 @@ Cheapest first. Each result is written as a finding.
 |---|---|---|
 | S1 | Does a tmux window, or a Herdr tab started with `herdr agent start`, created from inside a Claude Code shell call or hook outlive the runtime stopping that call? Does a detached session whose output goes to a log file escape as the measured one with `/dev/null` did? | Rerun the detach probe with each backend as the child. Minutes. |
 | S3 | Which wake reaches an idle interactive Claude Code session ten minutes after its turn ended: an `asyncRewake` exit 2, a post to `CLAUDE_CODE_MESSAGING_SOCKET`, or both? In auto mode and outside it? Is an `asyncRewake` hook's exit 2 dropped once it reaches its timeout? | A probe in an interactive session in tmux, since a `-p` session exits at turn end. An hour. |
-| S4 | Which processes do Herdr's pane close and tmux's `kill-window` reach? | A pane whose command starts children in its own group and in a session of their own, each logging the signals it gets. An hour. |
+| S4 | Which processes do Herdr's pane close and tmux's `kill-window` reach? After `herdr agent start`, does the pane return to its shell when the agent exits, as the documentation says? Does tmux's `pane-died` hook fire on every exit, with `remain-on-exit` on, and give the exit status? | A pane whose command starts children in its own group and in a session of their own, each logging the signals it gets, then exits with a known status. An hour. |
 | S6 | Does `herdr agent start --kind pi` track a `pi` that runs with `--no-extensions`, so that Herdr's own `pi` extension does not load? What status does Herdr show for it? | A Herdr tab. An hour. |
 
 Not established, and not designed around:

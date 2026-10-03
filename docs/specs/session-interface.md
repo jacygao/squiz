@@ -1,6 +1,6 @@
 # Session Interface: What Squiz Asks of Muster
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -74,7 +74,7 @@ muster start --root <worktree> --name squiz-41-r2 --cwd .squiz/41/review-tree --
   --env SQUIZ_REPORTS=.squiz/41/rounds/2/reports.jsonl \
   -- pi --no-extensions --extension <reporting-extension> --no-approve \
         --tools read,grep,find,ls,report_finding,report_verdict,finish_review \
-        --thinking medium --session-dir .squiz/41/session \
+        --thinking medium --session-dir .squiz/41/rounds/2/session \
         --append-system-prompt <charter-file> <task-prompt>
 ```
 
@@ -82,16 +82,38 @@ The command line is the harness spec's § 4 command line without `--print`,
 `--mode json`, `--no-session` and the `/dev/null` standard input. In Herdr and
 tmux, `pi` runs with its interface in the pane. Detached, it has no terminal on
 its standard input, and `pi` runs in print mode wherever that is so.
-Each round leaves a `pi` session file a person can reopen with `pi --session`.
 
-The extension appends every accepted report, and the usage of every assistant
-message, to `SQUIZ_REPORTS`. It writes a progress line for every tool call to
-`.squiz/<number>/progress.log`. After `finish_review` it calls `ctx.shutdown()`,
-which `pi` defers until it is idle.
+**The extension writes the round down and ends the reviewer.**
 
-**A round is over when the report file holds `finish_review` and the session's
-process has exited, or when the wall-clock guard stops it.** The round host reads
-the report file, not the reviewer's output.
+- It appends every accepted report, every refusal, and the usage of every
+  assistant message to `SQUIZ_REPORTS`.
+- It writes a progress line for every tool call to `.squiz/<number>/progress.log`.
+- After `finish_review` it records the finish and calls `ctx.shutdown()`, which
+  `pi` defers until it is idle. The reviewer writes its closing message first.
+- On `agent_settled` with no `finish_review` recorded, it records that the round
+  ended unfinished and calls `ctx.shutdown()`. Interactive `pi` otherwise waits
+  for input indefinitely once its agent settles.
+
+**A round is over when the reviewer's process has exited, or when the
+wall-clock guard stops it.** The round host then reads the report file, not the
+reviewer's output. The file says which ending it was: a finish, an unfinished
+end, or neither, which is a reviewer stopped from outside.
+
+**A reviewer's pane closes once its review ends, and its session stays
+resumable.** The pane is gone with the process, and so is anything `pi` printed
+there, its own resume line included. Each round's `--session-dir` is a
+directory of its own, so the one session file `pi` writes there,
+`<timestamp>_<uuid>.jsonl`, is the round's. The round host writes the command
+that resumes it to `.squiz/<number>/rounds/<k>/resume.txt`, and records it
+against the round in the state file:
+
+```
+pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
+```
+
+`squiz status` prints it as the last column of the round's line. A session
+resumed that way is a conversation with the reviewer after its round, and
+nothing said in it is part of the review.
 
 **Stopping a reviewer takes two steps.** The round host stops the session
 through muster, which reaches the processes in the reviewer's session. It
@@ -201,14 +223,14 @@ which appends to the report file and the progress log.
 | Path | Change |
 |---|---|
 | `src/cli.ts` | Adds `squiz host`, `squiz review --no-wait`, and exit 4. `squiz hook` becomes muster's trigger command. |
-| `src/review/` (#290) | `squiz review` sends a message and waits on the record. `squiz status` names each round's reviewer session. |
+| `src/review/` (#290) | `squiz review` sends a message and waits on the record. `squiz status` names each round's reviewer session, and ends the round's line with its resume command. |
 | `src/host/` | New. The round host. |
 | `src/hook/` | Resolves the pull request and sends `review-ready`. It no longer runs a round, and the exit-2 block goes. |
 | `hooks/hooks.json` | Registers muster's hooks in place of squiz's own. |
 | `src/loop/round.ts`, `src/loop/window.ts` | The round runs in the round host. The window and its three shares go. |
 | `src/reviewers/round.ts`, `adapter.ts` | The reviewer starts through muster. Reports are read from the report file. |
 | `src/reviewers/pi/argv.ts` | The command line in § 4. |
-| `src/reviewers/pi/extension.ts` | Writes the report file and the progress log, shuts `pi` down after `finish_review`, and stops at the token bound. |
+| `src/reviewers/pi/extension.ts` | Writes the report file and the progress log. Shuts `pi` down after `finish_review`, and on `agent_settled` without one after recording an unfinished end. Stops at the token bound. `execute` takes its fifth argument, the context `ctx.shutdown()` belongs to. |
 | `src/reviewers/pi/stream.ts`, `parse.ts`, `output.ts`, `cost.ts` | Read the report file rather than the JSON stream. |
 | `skills/squiz-review/SKILL.md` | Exit 4. A main session told it will be woken may end its turn. |
 
@@ -257,7 +279,7 @@ squiz's.
 
 | | Question | Spike | Decides |
 |---|---|---|---|
-| S2 | Does an interactive `pi`, started with the command line in § 4, run its prompt at once, register the three calls, apply the refusals, and exit after `finish_review`? On 0.85.1 and on 1.0.0. | A tmux window against a fixture pull request. An hour. | Whether the reviewer can run in a pane at all |
+| S2 | Does an interactive `pi`, started with the command line in § 4, run its prompt at once, register the three calls, apply the refusals, and exit after `finish_review`? On 0.85.1 and on 1.0.0. | Answered yes, in `docs/notes/an-interactive-pi-in-a-pane-reviews-like-the-headless-one.md`: one real round on 0.85.1 and a probe on 1.0.0. Still open: a pane round that reports findings on a real change, and on 1.0.0. | Whether the reviewer can run in a pane at all |
 | S5 | Can a `pi` extension stop a turn in flight, or only between messages? How far past the token bound does a round run? | Read `pi`'s extension API, then measure against a low bound. An hour. | D5 |
 | S7 | What does a snapshot worktree cost at `deep`, where tests need dependencies? | Time `git worktree add`, install and test on this repository and a larger one. Half a day. | D4 |
 | S8 | Do warm reviewers drift toward the coding agent on a three-round dispute, and what do they save? | Two episodes on one fixture, cold and warm. A day. | D3 |
