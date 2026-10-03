@@ -196,8 +196,8 @@ reviewer.** It has looked up the pull request and listed its threads by then,
 because the state is read from them.
 
 - **Reviewing**, by a process that is still running: the run waits for that round
-  to end and returns its result, or exits 4 where its own deadline comes first
-  (§ 7). It starts no round of its own.
+  to end and returns its result, exits 1 with its reason where it failed, or exits
+  4 where its own deadline comes first (§ 7). It starts no round of its own.
 - **Reviewing**, by a process that has gone: the round was killed. The run starts
   a round.
 - **Reviewed**: the run returns that result, and starts no round. The threads it
@@ -1585,6 +1585,10 @@ gate, the threads listing, and any time spent waiting on another round.
   stops waiting at its own 540 seconds.
 - **A run that waited for a round of its own state returns that round's result**,
   0, 2 or 3, where the round ends before the run's deadline.
+- **A run that waited for a round of its own state that failed exits 1**, with the
+  reason the round recorded, where the failure comes before the run's deadline. It
+  starts no round and posts no second failure comment. The failed state is
+  reviewed again by a later run, as a failed record says.
 - **A run that waited for a round of an older state starts no round of its own.**
   The wait spent part of its deadline, and a round started then could outlive the
   shell call. Where its own state still needs a review once the older round ends,
@@ -1862,8 +1866,8 @@ anything else.
 - **Exit 3:** the review closed with threads still open. Do not run it again. Say
   in your report which threads are open.
 - **Exit 4:** squiz is still reviewing. Run `squiz review <number>` again.
-- **Anything else:** the review could not run. Put the lines it printed in your
-  report, and do not run it again.
+- **Exit 1, or anything else:** the review could not run, or it failed. Put the
+  lines it printed in your report, and do not run it again.
 ```
 
 **Any other coding agent is told by a section of `AGENTS.md`**, which
@@ -1888,8 +1892,8 @@ wait for it to finish and read its output before you do anything else.
 - **Exit 3:** the review closed with threads still open. Do not run it again. Say
   in your report which threads are open.
 - **Exit 4:** squiz is still reviewing. Run `squiz review <number>` again.
-- **Anything else:** the review could not run. Put the lines it printed in your
-  report, and do not run it again.
+- **Exit 1, or anything else:** the review could not run, or it failed. Put the
+  lines it printed in your report, and do not run it again.
 ```
 
 `AGENTS.md` also carries the conventions a reviewer cannot derive from reading

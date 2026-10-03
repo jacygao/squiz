@@ -214,7 +214,8 @@ what detects a write made through the shell it grants.
       gives, and prints each as it shows.
 - [ ] One deadline bounds each invocation, waiting included, and no invocation
       outlives its window. A run that waited for its own state's round returns
-      that round's result. A run that waited for an older state's round, or whose
+      that round's result, or exits 1 with the recorded reason where it failed,
+      starting no round and posting no second failure comment. A run that waited for an older state's round, or whose
       deadline arrived mid-wait, starts no round and exits 4. A run that did not
       wait reviews with what is left of its deadline.
 - [ ] A run on a closed episode runs no round and prints the close. A run on a
