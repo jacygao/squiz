@@ -575,9 +575,10 @@ test("a listing the deadline cut short fails, and the pages that arrived go with
     (gh) => {
       // The clock stands still until the first page has been served and then
       // jumps past the deadline, so the listing is cut at a page boundary
-      // whatever the machine is doing. A wall-clock budget here passes alone and
-      // fails under a suite running its files at once.
-      const until = deadlineIn(1_000, () => (gh.calls() === 0 ? 0 : 10_000));
+      // whatever the machine is doing. What is left of it is also the first gh's
+      // real timeout, so the budget has to outlast the first start of a new
+      // executable, which macOS can stretch to seconds while other suites run.
+      const until = deadlineIn(60_000, () => (gh.calls() === 0 ? 0 : 120_000));
       const result = listReviewThreads(pullRequestId, { directory: tmpdir(), until });
 
       assert.equal(result.outcome, "unreachable", "one page of a pull request is never a listing");
