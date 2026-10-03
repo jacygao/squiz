@@ -10,7 +10,7 @@ import { test } from "node:test";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
-import type { RoundConfinement } from "../loop/confinement.ts";
+import { nothingEstablished, type ConfinementEvidence } from "../loop/confinement.ts";
 import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSummary, type ClosedEpisode } from "./summary-body.ts";
@@ -55,15 +55,8 @@ function posted(...outcomes: readonly FindingOutcome[]): PostedFindings {
   return { outcomes };
 }
 
-/**
- * A worktree the round had to itself, with nothing changed in it and the round
- * named to whoever came next. Nothing here is a note.
- */
-const undisturbed: RoundConfinement = {
-  trackedFiles: { outcome: "unchanged" },
-  otherEpisodes: { outcome: "alone" },
-  marked: { outcome: "written" },
-};
+/** A worktree every round had to itself and left alone. Nothing here is a note. */
+const undisturbed: ConfinementEvidence = nothingEstablished;
 
 /** An episode that raised nothing and closed with nothing open. */
 const quiet: ClosedEpisode = {
@@ -96,7 +89,7 @@ const quietOpens = [
 ];
 
 /** The comment for an episode that raised nothing and whose round found `found`. */
-function aboutTheWorktree(found: Partial<RoundConfinement>): string {
+function aboutTheWorktree(found: Partial<ConfinementEvidence>): string {
   return renderSummary({ ...quiet, confinement: { ...undisturbed, ...found } });
 }
 
@@ -128,10 +121,7 @@ test("the episode renders as the specification shows", () => {
       ),
     ),
     because: "nothing-open",
-    confinement: {
-      ...undisturbed,
-      trackedFiles: { outcome: "changed", paths: ["packages/sync/src/queue.test.ts"] },
-    },
+    confinement: { ...undisturbed, changed: ["packages/sync/src/queue.test.ts"] },
   };
 
   assert.equal(
@@ -440,9 +430,7 @@ test("an episode that ran no round reports no spend", () => {
 // comparison is the only thing that catches a write it made through its shell.
 test("every file that changed while the reviewer ran is named in Notes", () => {
   assert.equal(
-    aboutTheWorktree({
-      trackedFiles: { outcome: "changed", paths: ["src/queue.ts", "src/retry.ts"] },
-    }),
+    aboutTheWorktree({ changed: ["src/queue.ts", "src/retry.ts"] }),
     [
       ...quietOpens,
       "- Files changed in the worktree while the reviewer ran: `src/queue.ts`, `src/retry.ts`",
@@ -456,17 +444,14 @@ test("every file that changed while the reviewer ran is named in Notes", () => {
  */
 test("a comparison the round never took does not read as a worktree nothing changed", () => {
   const comment = aboutTheWorktree({
-    trackedFiles: {
-      outcome: "not-taken",
-      reason: "the worktree is shared with live episode 91bc",
-    },
+    uncompared: ["the worktree is shared with live episode 91bc"],
   });
 
   assert.equal(
     comment,
     [
       ...quietOpens,
-      "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
         " the worktree is shared with live episode 91bc",
     ].join("\n"),
   );
@@ -481,17 +466,14 @@ test("a comparison the round never took does not read as a worktree nothing chan
 // it could not read: each is a comparison that establishes nothing.
 test("a comparison that was taken and could not be had says so", () => {
   const comment = aboutTheWorktree({
-    trackedFiles: {
-      outcome: "unknown",
-      reason: "the reading before could not be taken: git exited 128",
-    },
+    uncompared: ["the reading before could not be taken: git exited 128"],
   });
 
   assert.equal(
     comment,
     [
       ...quietOpens,
-      "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
         " the reading before could not be taken: git exited 128",
     ].join("\n"),
   );
@@ -505,21 +487,12 @@ test("a comparison that was taken and could not be had says so", () => {
 test("the other episodes in the worktree are named where the tree was shared", () => {
   assert.equal(
     aboutTheWorktree({
-      otherEpisodes: {
-        outcome: "shared",
-        episodes: [
-          { id: "2f3a", pid: 4021 },
-          { id: "91bc", pid: null },
-        ],
-      },
-      trackedFiles: {
-        outcome: "not-taken",
-        reason: "the worktree is shared with live episodes 2f3a, 91bc",
-      },
+      shared: ["2f3a", "91bc"],
+      uncompared: ["the worktree is shared with live episodes 2f3a, 91bc"],
     }),
     [
       ...quietOpens,
-      "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
         " the worktree is shared with live episodes 2f3a, 91bc",
       "- Other episodes were in the worktree while the reviewer ran: 2f3a, 91bc",
     ].join("\n"),
@@ -529,15 +502,12 @@ test("the other episodes in the worktree are named where the tree was shared", (
 test("one other episode in the worktree reads as one", () => {
   assert.equal(
     aboutTheWorktree({
-      otherEpisodes: { outcome: "shared", episodes: [{ id: "2f3a", pid: 4021 }] },
-      trackedFiles: {
-        outcome: "not-taken",
-        reason: "the worktree is shared with live episode 2f3a",
-      },
+      shared: ["2f3a"],
+      uncompared: ["the worktree is shared with live episode 2f3a"],
     }),
     [
       ...quietOpens,
-      "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
         " the worktree is shared with live episode 2f3a",
       "- Another episode was in the worktree while the reviewer ran: 2f3a",
     ].join("\n"),
@@ -548,21 +518,20 @@ test("one other episode in the worktree reads as one", () => {
 // itself, and the comparison above the line is only worth what this answer is.
 test("a round that could not tell who else was in the worktree says so", () => {
   const comment = aboutTheWorktree({
-    otherEpisodes: { outcome: "unknown", reason: "ps was killed by SIGKILL" },
-    trackedFiles: {
-      outcome: "not-taken",
-      reason: "the live episodes of the worktree could not be established: ps was killed by SIGKILL",
-    },
+    unestablished: ["ps was killed by SIGKILL"],
+    uncompared: [
+      "the live episodes of the worktree could not be established: ps was killed by SIGKILL",
+    ],
   });
 
   assert.equal(
     comment,
     [
       ...quietOpens,
-      "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
         " the live episodes of the worktree could not be established: ps was killed by SIGKILL",
-      "- Nothing says whether another episode was in the worktree while the reviewer ran:" +
-        " ps was killed by SIGKILL",
+      "- A round could not tell whether another episode was in the worktree" +
+        " while the reviewer ran: ps was killed by SIGKILL",
     ].join("\n"),
   );
   assert.notEqual(
@@ -579,10 +548,7 @@ test("a round that could not tell who else was in the worktree says so", () => {
  */
 test("a shared worktree and a changed file are both carried", () => {
   assert.equal(
-    aboutTheWorktree({
-      trackedFiles: { outcome: "changed", paths: ["src/queue.ts"] },
-      otherEpisodes: { outcome: "shared", episodes: [{ id: "2f3a", pid: 4021 }] },
-    }),
+    aboutTheWorktree({ changed: ["src/queue.ts"], shared: ["2f3a"] }),
     [
       ...quietOpens,
       "- A file changed in the worktree while the reviewer ran: `src/queue.ts`",
@@ -598,17 +564,14 @@ test("a shared worktree and a changed file are both carried", () => {
  */
 test("a reason carrying newlines is one line of Notes", () => {
   const comment = aboutTheWorktree({
-    trackedFiles: {
-      outcome: "unknown",
-      reason: "the reading before could not be taken:\ngit exited 128\n\nfatal: not a repository",
-    },
+    uncompared: ["the reading before could not be taken:\ngit exited 128\n\nfatal: not a repository"],
   });
 
   assert.equal(
     comment,
     [
       ...quietOpens,
-      "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
         " the reading before could not be taken: git exited 128 fatal: not a repository",
     ].join("\n"),
   );
@@ -616,19 +579,5 @@ test("a reason carrying newlines is one line of Notes", () => {
     comment.split("\n").filter((line) => line.startsWith("- ")).length,
     1,
     `a reason opened a second bullet:\n${comment}`,
-  );
-});
-
-/**
- * A marker that was not written costs a later round its comparison rather than
- * this one, and nobody reading this pull request can do anything about it.
- */
-test("a marker that was not written is not a note", () => {
-  assert.equal(
-    renderSummary({
-      ...quiet,
-      confinement: { ...undisturbed, marked: { outcome: "failed", reason: "EACCES" } },
-    }),
-    renderSummary(quiet),
   );
 });

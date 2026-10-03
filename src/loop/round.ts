@@ -37,7 +37,13 @@ import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
-import { readAfterReviewer, readBeforeReviewer, type RoundConfinement } from "./confinement.ts";
+import {
+  evidenceWith,
+  nothingEstablished,
+  readAfterReviewer,
+  readBeforeReviewer,
+  type RoundConfinement,
+} from "./confinement.ts";
 import {
   readState,
   recordRound,
@@ -527,7 +533,7 @@ function keepCost(
   review: Review,
   confinement: RoundConfinement,
 ): Step<EpisodeState> {
-  const recorded = withSpend(state, review);
+  const recorded = withSpend(state, review, confinement);
   // Nothing was spent and no round ran, so there is nothing to keep. Writing
   // anyway would put a write that could fail in front of the reason the reviewer
   // gave, and report the wrong failure.
@@ -562,11 +568,35 @@ function keepCost(
  * attempt can complete a paid response and still end as a setup problem, and an
  * episode that forgot those tokens would hand another reviewer a bound it had
  * already reached.
+ *
+ * An attempt that spent nothing and was no round writes nothing at all, what its
+ * readings found about the worktree included.
  */
-function withSpend(state: EpisodeState, review: Review): EpisodeState | null {
-  if (isRound(review)) return recordRound(state, review.cost);
+function withSpend(
+  state: EpisodeState,
+  review: Review,
+  confinement: RoundConfinement,
+): EpisodeState | null {
+  const kept = withConfinement(state, confinement);
+  if (isRound(review)) return recordRound(kept, review.cost);
   if (nothingSpent(review.cost)) return null;
-  return recordSpendOutsideRounds(state, review.cost);
+  return recordSpendOutsideRounds(kept, review.cost);
+}
+
+/**
+ * The state with what this round's readings established added to what the
+ * episode's earlier rounds did.
+ *
+ * Written down because a round that blocks posts no comment. The summary is
+ * composed when the episode closes, and what every round before the last one found
+ * is in the state file or nowhere.
+ *
+ * Unchanged where the episode has still established nothing, so one whose
+ * reviewers left the worktree alone writes no field for it.
+ */
+function withConfinement(state: EpisodeState, confinement: RoundConfinement): EpisodeState {
+  const evidence = evidenceWith(state.confinement, confinement);
+  return evidence === undefined ? state : { ...state, confinement: evidence };
 }
 
 function nothingSpent(cost: RoundCost): boolean {
@@ -684,7 +714,10 @@ function closeAfterReview(
       verdicts: account.verdicts,
       findings: account.findings,
       because,
-      confinement,
+      // What every round established, and not this round's own readings. A round
+      // that blocked posted no comment, so a file it found changed is named here
+      // or nowhere.
+      confinement: state.confinement ?? nothingEstablished,
     },
     { directory: on.directory, until: on.margin },
   );

@@ -110,6 +110,16 @@ const unreadableContents: readonly string[] = [
   // as yes, it closes the episode in silence.
   `{"rounds": [], "closeReported": "true"}`,
   `{"rounds": [], "closeReported": 1}`,
+  // What the rounds established about the worktree, read as nothing established,
+  // would say a worktree nothing looked at is one nothing touched. That is the
+  // reading this field is kept for.
+  `{"rounds": [], "confinement": []}`,
+  `{"rounds": [], "confinement": "src/card.ts"}`,
+  `{"rounds": [], "confinement": {"changed": "src/card.ts"}}`,
+  `{"rounds": [], "confinement": {"changed": [3]}}`,
+  `{"rounds": [], "confinement": {"shared": {}}}`,
+  `{"rounds": [], "confinement": {"uncompared": [null]}}`,
+  `{"rounds": [], "confinement": {"unestablished": 1}}`,
 ];
 
 for (const contents of unreadableContents) {
@@ -217,4 +227,61 @@ test("a reported close is written and comes back, and one never written is absen
   writeFileSync(episode.stateFile, `{"rounds": []}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
+});
+
+/**
+ * What the rounds established about the worktree outlives the rounds, because a
+ * round that blocks posts no comment. The closing round composes the summary from
+ * this.
+ */
+test("what the rounds established about the worktree is written and comes back", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    confinement: {
+      changed: ["src/card.ts"],
+      uncompared: ["the worktree is shared with live episode ef56ab78"],
+      shared: ["ef56ab78"],
+      unestablished: ["ps was killed by SIGKILL"],
+    },
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
+/**
+ * A file written before the field existed, which must read as an episode that has
+ * established nothing.
+ *
+ * Read as unreadable, it would end every round of that episode before the reviewer
+ * ran, because the round count is what bounds the loop and a count that will not
+ * read stops the round.
+ */
+test("a state file naming nothing about the worktree has established nothing", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(episode.stateFile, `{"rounds": [], "spentOutsideRounds": {"dollars": 0, "tokens": 0, "messages": 0}}`);
+
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: { rounds: [], spentOutsideRounds: unspent },
+  });
+});
+
+// A list this reader does not have a name for is nobody's answer, and a file a
+// later version wrote is still the episode's own.
+test("a state file naming some of the worktree lists reads the ones it names", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(episode.stateFile, `{"rounds": [], "confinement": {"changed": ["src/card.ts"]}}`);
+
+  const read = readState(episode);
+  assert.deepEqual(read.outcome === "read" ? read.state.confinement : undefined, {
+    changed: ["src/card.ts"],
+    uncompared: [],
+    shared: [],
+    unestablished: [],
+  });
 });

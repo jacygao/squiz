@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.48 (draft)
+**Version:** 0.49 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -126,7 +126,18 @@ An episode is keyed by the subagent's id from the hook payload, which is the
 same every time that subagent stops. Its state lives in `.squiz/<episode>/`
 inside the worktree, and holds the round count, the cost of each round, what the
 episode spent on attempts that were no round, whether the episode has reported
-its close, the reviewer's session directory, and its scratch space.
+its close, what its rounds established about the worktree, the reviewer's session
+directory, and its scratch space.
+
+What the rounds established about the worktree is four lists: the tracked paths
+any round found changed, the other episodes any round found in the worktree, why a
+round could take no comparison, and why a round could not tell who else was there.
+The summary comment's Notes are composed from all four.
+
+Each list holds an entry once, however many rounds gave it, and stops at
+sixty-four entries. No episode of rounds alone reaches that. An attempt that is no
+round spends none of the round cap and fails the same way every firing, so nothing
+bounds how many times one episode adds to these lists.
 
 While a round runs, the episode's directory also holds a marker naming that
 round's process and when that process started. A pid alone is reused, so the
@@ -354,7 +365,7 @@ follows. None is configurable, and each applies where the third column says.
 | **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell. | Except in a shared worktree, where nothing detects such a write |
 
 The first three prevent, and the fourth detects. A tracked file that changed
-during a round is named in the summary comment.
+during any round of the episode is named in the summary comment.
 
 **A refused call never reaches a shell**, and the reviewer reads the refusal as
 that call's own error while it is still there to choose something else.
@@ -797,6 +808,13 @@ gives have three values and not two: the worktree was shared, was not, or could
 not be established; and a tracked file changed, none did, or no comparison could
 be taken. A comment that renders "none" and "could not tell" alike reports a
 review nothing checked as a review that found nothing wrong.
+
+**The Notes items about the worktree cover every round of the episode, not the
+round that closed it.** A round that blocks posts no comment, so a file it found
+changed is named in the closing round's comment or nowhere. Each round adds what
+its readings found to the episode's state, and the closing round composes Notes
+from all of it. The closing round finding nothing changed is not the episode
+finding nothing changed, and an earlier round's answer stands in Notes beside it.
 
 A round whose review did not run closes no episode, so no comment reports one.
 The round's failure is announced on the hook's stderr instead.

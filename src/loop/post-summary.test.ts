@@ -24,7 +24,7 @@ import { renderSummary } from "../github/summary-body.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
-import type { RoundConfinement } from "./confinement.ts";
+import { nothingEstablished, type ConfinementEvidence } from "./confinement.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type ClosingRound } from "./post-summary.ts";
 
@@ -165,12 +165,8 @@ const findings: PostedFindings = {
   ],
 };
 
-/** A worktree the round had to itself, with nothing changed in it. No note at all. */
-const undisturbed: RoundConfinement = {
-  trackedFiles: { outcome: "unchanged" },
-  otherEpisodes: { outcome: "alone" },
-  marked: { outcome: "written" },
-};
+/** A worktree every round had to itself and left alone. No note at all. */
+const undisturbed: ConfinementEvidence = nothingEstablished;
 
 /** An episode of two rounds, closing at its cap with one thread still open. */
 const closing: ClosingRound = {
@@ -244,7 +240,7 @@ test("the composed body carries the counts, the spend, what needs a person and t
 });
 
 /**
- * What the round established about its worktree reaches the body that is posted.
+ * What the episode established about its worktree reaches the body that is posted.
  *
  * The whole comment, because the failure worth catching is a summary that reads
  * as a round that compared the tree and found nothing changed in it. That is the
@@ -257,12 +253,9 @@ test("a round that could not compare its worktree says so in the comment it post
       {
         ...closing,
         confinement: {
-          marked: { outcome: "written" },
-          otherEpisodes: { outcome: "shared", episodes: [{ id: "2f3a", pid: 4021 }] },
-          trackedFiles: {
-            outcome: "not-taken",
-            reason: "the worktree is shared with live episode 2f3a",
-          },
+          ...nothingEstablished,
+          shared: ["2f3a"],
+          uncompared: ["the worktree is shared with live episode 2f3a"],
         },
       },
       margin(),
@@ -283,7 +276,7 @@ test("a round that could not compare its worktree says so in the comment it post
         "**Notes**",
         "",
         "- About the change as a whole: The queue duplicates the scheduler",
-        "- Nothing says whether a file changed in the worktree while the reviewer ran:" +
+        "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
           " the worktree is shared with live episode 2f3a",
         "- Another episode was in the worktree while the reviewer ran: 2f3a",
         "- The episode ended at its round cap rather than with nothing left open",

@@ -22,7 +22,7 @@ import { postSummary, type SummaryPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { classifyAtClose } from "./classify.ts";
-import type { RoundConfinement } from "./confinement.ts";
+import type { ConfinementEvidence } from "./confinement.ts";
 import type { EpisodeState } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
@@ -73,13 +73,15 @@ export type ClosingRound = {
    */
   readonly because: ClosingReason;
   /**
-   * What this round established about the worktree its reviewer ran in.
+   * What every round of the episode established about the worktree its reviewer
+   * ran in, read from the episode's state file.
    *
-   * Taken on every path the reviewer can end on, so a round that closes the
-   * episode always has one. A close that composed a comment without it would
-   * report a worktree nothing looked at as one nothing touched.
+   * The episode's and not this round's. A round that blocks posts no comment, so
+   * what its readings found reaches a person through this or not at all, and a
+   * close composed from the closing round's own readings would report the
+   * worktree of one round as the worktree of the whole episode.
    */
-  readonly confinement: RoundConfinement;
+  readonly confinement: ConfinementEvidence;
 };
 
 /**

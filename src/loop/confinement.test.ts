@@ -18,7 +18,14 @@ import { test } from "node:test";
 import { unspent } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { markRoundRunning } from "../worktree/shared-tree.ts";
-import { readAfterReviewer, readBeforeReviewer, type RoundConfinement } from "./confinement.ts";
+import {
+  evidenceWith,
+  nothingEstablished,
+  readAfterReviewer,
+  readBeforeReviewer,
+  type ConfinementEvidence,
+  type RoundConfinement,
+} from "./confinement.ts";
 import { writeState } from "./episode-state.ts";
 import { episodeAt, type Episode } from "./episode.ts";
 
@@ -500,3 +507,119 @@ async function readLines(path: string): Promise<readonly string[]> {
 function quote(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`;
 }
+
+/** One round's readings, with everything it established given. */
+function established(found: Partial<RoundConfinement>): RoundConfinement {
+  return {
+    trackedFiles: { outcome: "unchanged" },
+    otherEpisodes: { outcome: "alone" },
+    marked: { outcome: "written" },
+    ...found,
+  };
+}
+
+/** What the episode has established after its rounds found `rounds`, in order. */
+function after(...rounds: readonly Partial<RoundConfinement>[]): ConfinementEvidence | undefined {
+  let evidence: ConfinementEvidence | undefined;
+  for (const round of rounds) evidence = evidenceWith(evidence, established(round));
+  return evidence;
+}
+
+/**
+ * What an earlier round found is what the closing round's comment carries.
+ *
+ * A round that blocks posts no comment, so a file it named as changed reaches a
+ * person through the closing round's comment or not at all. The closing round here
+ * compared and found nothing, which is the answer that would overwrite it.
+ */
+test("a file an earlier round found changed survives a round that found nothing", () => {
+  assert.deepEqual(
+    after({ trackedFiles: { outcome: "changed", paths: [TRACKED] } }, {}),
+    { ...nothingEstablished, changed: [TRACKED] },
+  );
+});
+
+test("an earlier round that could not compare survives a closing round that could", () => {
+  const shared = `the worktree is shared with live episode ${OTHER_AGENT_ID}`;
+  assert.deepEqual(
+    after(
+      {
+        otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_AGENT_ID, pid: 4021 }] },
+        trackedFiles: { outcome: "not-taken", reason: shared },
+      },
+      {},
+    ),
+    { changed: [], uncompared: [shared], shared: [OTHER_AGENT_ID], unestablished: [] },
+  );
+});
+
+test("an earlier round that could not tell who else was here survives a round that was alone", () => {
+  const killed = "ps was killed by SIGKILL";
+  assert.deepEqual(
+    after(
+      {
+        otherEpisodes: { outcome: "unknown", reason: killed },
+        trackedFiles: {
+          outcome: "not-taken",
+          reason: `the live episodes of the worktree could not be established: ${killed}`,
+        },
+      },
+      {},
+    )?.unestablished,
+    [killed],
+  );
+});
+
+test("an episode whose rounds left the worktree alone establishes nothing at all", () => {
+  assert.equal(after({}, {}, {}), undefined);
+});
+
+/**
+ * A marker that was not written costs a later round its comparison rather than this
+ * episode's, and nobody reading this pull request can act on it.
+ */
+test("a marker that was not written is nothing the episode establishes", () => {
+  assert.equal(after({ marked: { outcome: "failed", reason: "EACCES" } }), undefined);
+});
+
+// One entry per path however many rounds changed it, which is what keeps the list
+// bounded by the worktree rather than by the rounds.
+test("a file two rounds changed is named once", () => {
+  assert.deepEqual(
+    after(
+      { trackedFiles: { outcome: "changed", paths: [TRACKED] } },
+      { trackedFiles: { outcome: "changed", paths: ["src/queue.ts", TRACKED] } },
+    )?.changed,
+    ["src/card.ts", "src/queue.ts"],
+  );
+});
+
+/**
+ * The lists stop growing, and what they keep is the earliest answer rather than the
+ * latest.
+ *
+ * An attempt that is no round spends none of the round cap and fails the same way
+ * every time the hook fires, so nothing bounds the firings of one episode. A list
+ * that grew with them would grow without end, and an episode's earliest evidence is
+ * the evidence a later firing must not push out.
+ */
+test("the reasons an episode keeps do not grow with its firings", () => {
+  const firings = (howMany: number): readonly string[] => {
+    let evidence: ConfinementEvidence | undefined;
+    for (let firing = 0; firing < howMany; firing += 1) {
+      evidence = evidenceWith(
+        evidence,
+        established({ trackedFiles: { outcome: "unknown", reason: `git exited ${firing}` } }),
+      );
+    }
+    return evidence?.uncompared ?? [];
+  };
+
+  const kept = firings(100);
+  assert.deepEqual(firings(400), kept, "the list grew with the firings, so nothing bounds it");
+  assert.equal(
+    kept[0],
+    "git exited 0",
+    "the earliest round's answer is the one a later firing must not push out",
+  );
+});
