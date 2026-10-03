@@ -72,8 +72,10 @@ Identical in shape on every invocation:
 - **`agent_type`** is present, which is what a `matcher` in the registration
   would narrow on.
 - `cwd`, the hook process's own working directory and `git rev-parse
-  --show-toplevel` from the hook all resolved to the session's directory. One
-  subagent, one directory, so this says nothing yet about two at once.
+  --show-toplevel` from the hook all resolved to the session's directory. In
+  this run that was also the subagent's directory, because the subagent was
+  dispatched from it. One subagent, one directory, so this says nothing yet
+  about two at once.
 - `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PROJECT_DIR` were both set in the hook's
   environment.
 

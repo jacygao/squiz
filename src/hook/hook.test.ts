@@ -302,6 +302,21 @@ test("a detached HEAD is named as one, with the directory the gate looked in", (
     'no review ran: HEAD is detached in "/work/tree", so no pull request has it as its head',
   );
 });
+
+test("a line separator in the directory survives the pointer as an escape", () => {
+  // JSON quoting leaves these three raw, and the pointer flattens each to a space.
+  const separators = [0x85, 0x2028, 0x2029].map((code) => String.fromCharCode(code));
+  const directory = `/work/${separators.join("x")}`;
+
+  const line = failureLine(
+    unreviewedIn({ outcome: "no-pull-request", branch: null, directory }) ?? "",
+  );
+
+  assert.equal(
+    line,
+    String.raw`squiz: no review ran: HEAD is detached in "/work/\u0085x\u2028x\u2029", so no pull request has it as its head` + "\n",
+  );
+});
 test("a blocked round composes no pointer", () => {
   // Its stderr is the blocking reason and nothing beside it.
   assert.equal(failureIn(blockedRound("Squiz reviewed the change on this branch.")), null);

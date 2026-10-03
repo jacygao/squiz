@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.53 (draft)
+**Version:** 0.54 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1307,7 +1307,7 @@ until something asks.
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
-| **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the summary names it |
+| **P1** | Worktree removal at episode close | Requires a clean tree and a pushed branch; otherwise the worktree stays and the hook's stderr names it |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |

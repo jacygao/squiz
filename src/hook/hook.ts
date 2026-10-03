@@ -107,13 +107,25 @@ export function failureIn(conclusion: RoundConclusion): string | null {
  */
 export function unreviewedIn(conclusion: RoundConclusion): string | null {
   if (conclusion.outcome !== "no-pull-request") return null;
-  // Quoted, so a path's spaces and any line break in it come through unaltered.
-  const directory = JSON.stringify(conclusion.directory);
+  const directory = quoted(conclusion.directory);
   if (conclusion.branch === null) {
     return `no review ran: HEAD is detached in ${directory}, so no pull request has it as its head`;
   }
-  const branch = JSON.stringify(conclusion.branch);
+  const branch = quoted(conclusion.branch);
   return `no review ran: no open pull request has ${branch} as its head, in ${directory}`;
+}
+
+/**
+ * `text` in double quotes, with every character the pointer would flatten
+ * escaped, so a path or a branch comes through the pointer unaltered.
+ *
+ * JSON escapes every control character but leaves U+0085, U+2028 and U+2029
+ * raw, and the pointer reads each of those as a line break.
+ */
+function quoted(text: string): string {
+  return JSON.stringify(text).replace(/[\u0085\u2028\u2029]/gu, (separator) =>
+    `\\u${separator.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 }
 
 /** A round that failed, which may have salvaged what the reviewer had reported. */
