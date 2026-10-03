@@ -42,7 +42,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { deadlineIn } from "./deadline.ts";
+import { deadlineIn, type Deadline } from "./deadline.ts";
 
 /**
  * The variable naming the record, read by the prefix inside the shell.
@@ -257,21 +257,30 @@ export type GroupsStopped = {
  * A group nothing could be established about is refused rather than signalled,
  * so a machine with no `ps` leaves a detached tool running instead of risking a
  * stranger.
+ *
+ * **`until` bounds every reading, both of them and each batch within them.** The
+ * grace bounds the signals and nothing else, so a `ps` that will not answer would
+ * otherwise hold the round open with no bound at all — past the ceiling the
+ * runtime kills the hook at, with the review's own spend unrecorded and nothing
+ * posted. A reading cut short at it establishes nothing, which refuses every
+ * group it covered rather than signalling any, and the round goes on to its
+ * accounting and its posting.
  */
 export async function stopRecordedGroups(
   space: RoundSpace,
   graceMs: number,
+  until: Deadline,
 ): Promise<GroupsStopped> {
   const recorded = recordedGroups(space);
   if (recorded.length === 0) return { signalled: [], refused: [] };
 
-  const judged = judge(recorded, space.startedAt, { by: "keeper", named: space.keeperName });
+  const judged = judge(recorded, space.startedAt, { by: "keeper", named: space.keeperName }, until);
   for (const group of judged.mine) signal(group, "SIGTERM");
   const left = await remaining(judged.mine, graceMs);
   if (left.length > 0) {
     // The grace has passed, so a group that has gone may have taken its number
     // with it. What is killed outright is only what still answers for itself.
-    const again = judge(left, space.startedAt, { by: "continuity", pids: judged.pids });
+    const again = judge(left, space.startedAt, { by: "continuity", pids: judged.pids }, until);
     for (const group of again.mine) signal(group, "SIGKILL");
     await remaining(again.mine, graceMs);
     return { signalled: judged.mine, refused: [...judged.refused, ...again.refused] };
@@ -298,8 +307,13 @@ type Judged = {
  * A group with nothing left in it is neither signalled nor refused: there is
  * nothing to send to and nothing was mistaken for anything.
  */
-function judge(groups: readonly number[], startedAt: number, identity: Identity): Judged {
-  const reading = membersOf(groups);
+function judge(
+  groups: readonly number[],
+  startedAt: number,
+  identity: Identity,
+  until: Deadline,
+): Judged {
+  const reading = membersOf(groups, until);
   if ("problem" in reading) {
     return {
       mine: [],
@@ -396,12 +410,12 @@ const BATCH = 128;
  * group is another process of the same session and is not what `kill` to the
  * group would reach.
  */
-function membersOf(groups: readonly number[]): Membership {
+function membersOf(groups: readonly number[], until: Deadline): Membership {
   const members = new Map<number, Member[]>();
   const wanted = new Set(groups);
   for (let at = 0; at < groups.length; at += BATCH) {
     const batch = groups.slice(at, at + BATCH);
-    const read = ask(batch);
+    const read = ask(batch, until);
     if ("problem" in read) return read;
     for (const row of read.rows.split("\n")) {
       // The pid, the group and the elapsed time hold no space between them, and
@@ -422,14 +436,18 @@ function membersOf(groups: readonly number[]): Membership {
 
 type Rows = { readonly rows: string } | { readonly problem: string };
 
-function ask(groups: readonly number[]): Rows {
+function ask(groups: readonly number[], until: Deadline): Rows {
   const result = spawnSync("ps", ["-o", "pid=,pgid=,etime=,command=", "-g", groups.join(",")], {
     encoding: "utf8",
     // The elapsed time is parsed, so nothing about it may be worded by a locale.
     env: { ...process.env, LC_ALL: "C" },
+    // Never zero, which `spawnSync` reads as no timeout at all, so a bound with
+    // nothing left on it still cuts the call off rather than letting it run.
+    timeout: Math.max(1, until.remaining()),
   });
 
   if (result.error !== undefined) {
+    if (ranOut(result.error)) return { problem: PS_RAN_OUT };
     return { problem: `ps could not be run: ${result.error.message}` };
   }
   if (result.status === null) {
@@ -443,6 +461,19 @@ function ask(groups: readonly number[]): Rows {
     return { problem: `ps exited ${result.status}: ${complaint === "" ? said : complaint}` };
   }
   return { rows: said };
+}
+
+/**
+ * What a `ps` the shutdown's bound cut short says, which is never a group that
+ * could be signalled.
+ *
+ * A reading that was interrupted establishes nothing, and a round that read it as
+ * an empty group would signal a number it knows nothing about.
+ */
+const PS_RAN_OUT = "ps ran out of the time the shutdown was given";
+
+function ranOut(error: Error): boolean {
+  return "code" in error && error.code === "ETIMEDOUT";
 }
 
 /**

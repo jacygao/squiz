@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { deadlineIn } from "./deadline.ts";
 import {
   discardRoundSpace,
   KEEPER_VARIABLE,
@@ -21,11 +22,25 @@ import {
   recordedGroups,
   shellPrefix,
   stopRecordedGroups,
+  type GroupsStopped,
   type RoundSpace,
 } from "./groups.ts";
 
 /** The grace each stop is given, short enough that the tests are not the grace. */
 const GRACE_MS = 1_500;
+
+/**
+ * The reading bound every test but the two about it is given.
+ *
+ * Generous, so that a slow machine is never what a test is measuring. The two
+ * tests of the bound itself pass their own.
+ */
+const INSPECTION_MS = 20_000;
+
+/** Stop the round's groups, on a reading bound nothing here is waiting on. */
+function stopGroups(space: RoundSpace): Promise<GroupsStopped> {
+  return stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
+}
 
 /**
  * A prefix that never reached the CLI leaves an empty record, and so does a
@@ -103,7 +118,7 @@ test("everything the shell started is stopped, after the shell itself has gone",
     assert.ok(running(child), "nothing was left running for the stop to be worth anything");
     assert.equal(running(shell), false, "the shell exits first, which is the case this is for");
 
-    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    const stopped = await stopGroups(space);
     assert.deepEqual(stopped.signalled, [shell]);
     assert.equal(running(child), false, "a tool the shell left running outlived the round");
   });
@@ -130,7 +145,7 @@ test("a group older than the round is left alone", async () => {
       // machine slow between the two does not make the round look the older.
       const space = { ...made, startedAt: Date.now() };
 
-      const stopped = await stopRecordedGroups(space, GRACE_MS);
+      const stopped = await stopGroups(space);
       assert.deepEqual(stopped.signalled, []);
       assert.equal(stopped.refused.length, 1);
       assert.match(stopped.refused[0]?.reason ?? "", /longer than the round/u);
@@ -157,7 +172,7 @@ test("a record naming no process group is read as naming nothing", async () => {
     writeFileSync(space.shellRecord, junk, "utf8");
     assert.deepEqual(recordedGroups(space), []);
 
-    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    const stopped = await stopGroups(space);
     assert.deepEqual(stopped, { signalled: [], refused: [] });
   });
 });
@@ -173,7 +188,7 @@ test("a shell that started nothing still has its group held, and the round signa
     const shell = await shellRan("true", space);
     assert.equal(running(shell), false, "the shell exits first, which is the case this is for");
 
-    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    const stopped = await stopGroups(space);
     assert.deepEqual(stopped.signalled, [shell]);
     assert.deepEqual(stopped.refused, []);
     assert.equal(
@@ -212,7 +227,7 @@ test("a tool that ignores SIGTERM is still killed, because the round saw it in t
     await untilThere(ready);
     assert.ok(running(child), "nothing was left running for the escalation to reach");
 
-    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    const stopped = await stopGroups(space);
 
     assert.deepEqual(stopped.signalled, [shell]);
     assert.deepEqual(stopped.refused, [], "the group was refused at the second reading");
@@ -252,7 +267,7 @@ test("a group holding nothing the round saw in it is not killed outright", async
     const shell = await shellRan(`${tool} &`, space);
     await untilThere(ready);
 
-    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    const stopped = await stopGroups(space);
 
     await untilThere(afterFile);
     const after = Number(readFileSync(afterFile, "utf8").trim());
@@ -285,7 +300,7 @@ test("a group nothing holds is neither signalled nor refused", async () => {
     const { pid: shell } = await runShell("true", space, "no keeper");
     assert.equal(running(shell), false);
 
-    const stopped = await stopRecordedGroups(space, GRACE_MS);
+    const stopped = await stopGroups(space);
     assert.deepEqual(stopped, { signalled: [], refused: [] });
   });
 });
@@ -303,7 +318,7 @@ test("a group younger than the round but holding no keeper of it is left alone",
       const space = madeIn(directory);
       writeFileSync(space.shellRecord, `${stranger.group}\n`, "utf8");
 
-      const stopped = await stopRecordedGroups(space, GRACE_MS);
+      const stopped = await stopGroups(space);
 
       assert.deepEqual(stopped.signalled, []);
       assert.equal(stopped.refused.length, 1);
@@ -332,9 +347,84 @@ test("a group the system would not answer about is left alone", async () => {
       writeFileSync(space.shellRecord, `${group.group}\n`, "utf8");
       process.env["PATH"] = brokenPs(directory);
 
-      const stopped = await stopRecordedGroups(space, GRACE_MS);
+      const stopped = await stopGroups(space);
       assert.deepEqual(stopped.signalled, []);
       assert.match(stopped.refused[0]?.reason ?? "", /ps exited 2: ps fell over/u);
+      assert.ok(running(group.child), "a group nothing could be established about was signalled");
+    } finally {
+      if (previous === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = previous;
+      group.stop();
+    }
+  });
+});
+
+/**
+ * `ps` is a subprocess with no bound of its own, and the grace bounds the signals
+ * rather than the readings between them. A reading that cannot be bounded holds
+ * the round in its cleanup until the runtime kills the hook, with the review paid
+ * for, its spend unrecorded and nothing posted.
+ *
+ * The shim hangs for longer than any grace here, and is asked about more groups
+ * than one `ps` covers, so a reading that worked through its batches would take
+ * several times what it is given.
+ */
+test("a ps that will not answer is cut off, and the groups it covered are left alone", async () => {
+  await inADirectory(async (directory) => {
+    const group = await detachedGroup(directory, "tool");
+    const previous = process.env["PATH"];
+    const calls = join(directory, "ps-calls");
+    try {
+      const space = madeIn(directory);
+      const many = [group.group, ...Array.from({ length: 300 }, (_, at) => 100_000 + at)];
+      writeFileSync(space.shellRecord, `${many.join("\n")}\n`, "utf8");
+      process.env["PATH"] = hangingPs(directory, calls);
+
+      const started = Date.now();
+      const stopped = await stopRecordedGroups(space, GRACE_MS, deadlineIn(1_000));
+      const took = Date.now() - started;
+
+      assert.ok(took < HANGS_FOR_MS, `the shutdown took ${took}ms, so the reading was not bounded`);
+      assert.deepEqual(stopped.signalled, []);
+      assert.match(stopped.refused[0]?.reason ?? "", /ps ran out of the time/u);
+      assert.ok(
+        asked(calls) < 2,
+        "the reading carried on to a second batch after the time it was given had gone",
+      );
+      assert.ok(running(group.child), "a group nothing could be established about was signalled");
+    } finally {
+      if (previous === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = previous;
+      group.stop();
+    }
+  });
+});
+
+/**
+ * A bound with nothing left on it still has to cut the call off. `spawnSync` reads
+ * a timeout of zero as no timeout at all, so this is the one bound under which the
+ * call that went out would be the call nothing could stop.
+ */
+test("a shutdown with nothing left of its reading bound still cuts the reading off", async () => {
+  await inADirectory(async (directory) => {
+    const group = await detachedGroup(directory, "tool");
+    const previous = process.env["PATH"];
+    const calls = join(directory, "ps-calls");
+    try {
+      const space = madeIn(directory);
+      writeFileSync(space.shellRecord, `${group.group}\n`, "utf8");
+      process.env["PATH"] = hangingPs(directory, calls);
+
+      const started = Date.now();
+      const stopped = await stopRecordedGroups(space, GRACE_MS, deadlineIn(0));
+      const took = Date.now() - started;
+
+      assert.ok(
+        took < HANGS_FOR_MS,
+        `the shutdown took ${took}ms on a bound with nothing left of it`,
+      );
+      assert.deepEqual(stopped.signalled, []);
+      assert.match(stopped.refused[0]?.reason ?? "", /ps ran out of the time/u);
       assert.ok(running(group.child), "a group nothing could be established about was signalled");
     } finally {
       if (previous === undefined) delete process.env["PATH"];
@@ -539,6 +629,49 @@ function brokenPs(directory: string): string {
   writeFileSync(ps, '#!/bin/sh\necho "ps fell over" >&2\nexit 2\n', "utf8");
   chmodSync(ps, 0o755);
   return `${binaries}:${process.env["PATH"] ?? ""}`;
+}
+
+/**
+ * How long the shim hangs, which every bound in these two tests is measured
+ * against.
+ *
+ * Longer than any grace here, so a shutdown that waited on the shim would be
+ * waiting on the shim rather than on anything it signalled, and an elapsed time
+ * below this is the bound having done its work.
+ */
+const HANGS_FOR_MS = 30_000;
+
+/**
+ * A directory holding a `ps` that never answers, ahead of the real one on the path.
+ *
+ * It records each time it was run, so that a reading which carried on past the
+ * time it was given is told from one that stopped.
+ */
+function hangingPs(directory: string, calls: string): string {
+  const binaries = join(directory, "bin");
+  mkdirSync(binaries, { recursive: true });
+  const ps = join(binaries, "ps");
+  // One process after the `exec`, so the bound's own kill reaches what is hanging
+  // rather than a shell holding a child that outlives it.
+  writeFileSync(
+    ps,
+    `#!/bin/sh\necho ran >> ${calls}\nexec sleep ${HANGS_FOR_MS / 1_000}\n`,
+    "utf8",
+  );
+  chmodSync(ps, 0o755);
+  return `${binaries}:${process.env["PATH"] ?? ""}`;
+}
+
+/**
+ * How many times the shim got as far as saying it had run.
+ *
+ * None where the bound killed it before its first line, which is the same answer
+ * as one for what the test asks: either way the reading was taken once and cut
+ * off.
+ */
+function asked(calls: string): number {
+  if (!existsSync(calls)) return 0;
+  return readFileSync(calls, "utf8").trim().split("\n").length;
 }
 
 function pause(milliseconds: number): Promise<void> {

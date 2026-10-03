@@ -50,11 +50,27 @@ import {
  * again before the round stops waiting for it.
  *
  * The reviewer's own group is stopped first and the groups its shells recorded
- * after it, each on its own escalation, so a round that reaches its time bound
- * returns within four times this of reaching it. That is what the margin left
- * for posting has to cover.
+ * after it, each on its own escalation, so the signals a round sends after
+ * reaching its time bound take four times this at most. What the readings between
+ * them take is bounded separately, below.
  */
 const GRACE_MS = 2_000;
+
+/**
+ * The longest one round's shutdown spends asking the system what is in the groups
+ * its shells recorded.
+ *
+ * Its own bound, and not part of the round's. It covers the readings rather than
+ * the signals, which keep the grace above: a `ps` that will not answer has no
+ * bound of its own, and the round would sit in its cleanup until the runtime
+ * killed the hook — with the review already paid for, its spend unrecorded and
+ * nothing posted. A reading cut short at this leaves the groups it covered alone,
+ * which is the same answer a machine without `ps` gets.
+ *
+ * This and four times the grace together are what the margin left for posting has
+ * to cover.
+ */
+const INSPECTION_MS = 5_000;
 
 /**
  * What one round of review came to, and how many of the reviewer's calls it
@@ -539,7 +555,9 @@ type Owned = {
 async function stop(owned: Owned): Promise<void> {
   await stopReviewer(owned);
   const { space } = owned;
-  if (space !== undefined) await stopRecordedGroups(space, GRACE_MS);
+  // One deadline for the whole of the inspection, so that a record naming many
+  // groups is bounded as well as a single `ps` that will not answer.
+  if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
 }
 
 /**
