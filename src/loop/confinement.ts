@@ -46,7 +46,9 @@
  * that finished and the posting after it.
  *
  * Nothing here reports. What the readings establish is carried to the round's
- * close, and the summary comment is what names it.
+ * close, and the summary comment is what names it. A move of `HEAD` is named
+ * by the round that blocks as well, because the next firing gates on the branch
+ * `HEAD` names then and may find no pull request to close the episode on.
  *
  * **What a round established outlives the round.** A round that blocks posts no
  * comment, so each round's readings are added to what the episode has established
@@ -197,7 +199,7 @@ export function evidenceWith(
   const had = before ?? nothingEstablished;
   const evidence: ConfinementEvidence = {
     changed: byValue(had.changed, pathsChanged(round.trackedFiles)),
-    moved: byRound(had.moved, headMoved(round.trackedFiles)),
+    moved: byRound(had.moved, listed(headMovedIn(round))),
     uncompared: byRound(had.uncompared, whyUncompared(round.trackedFiles)),
     shared: byValue(had.shared, whoSharedIt(round.otherEpisodes)),
     unestablished: byRound(had.unestablished, whyUnestablished(round.otherEpisodes)),
@@ -209,9 +211,18 @@ function pathsChanged(answer: TrackedFilesAnswer): readonly string[] {
   return answer.outcome === "changed" ? answer.paths : [];
 }
 
-function headMoved(answer: TrackedFilesAnswer): readonly string[] {
-  if (answer.outcome !== "changed" || answer.head === undefined) return [];
-  return [`from ${answer.head.before} to ${answer.head.after}`];
+/**
+ * The move of `HEAD` one round found, as one line naming both ends, or
+ * `undefined` where it found none.
+ */
+export function headMovedIn(round: RoundConfinement): string | undefined {
+  const answer = round.trackedFiles;
+  if (answer.outcome !== "changed" || answer.head === undefined) return undefined;
+  return `from ${answer.head.before} to ${answer.head.after}`;
+}
+
+function listed(entry: string | undefined): readonly string[] {
+  return entry === undefined ? [] : [entry];
 }
 
 function whyUncompared(answer: TrackedFilesAnswer): readonly string[] {

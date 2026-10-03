@@ -219,6 +219,19 @@ flowchart TD
 
    Address what applies, reply on anything you disagree with, then finish.
    ```
+
+   Where the round's comparison found that `HEAD` moved while the reviewer ran,
+   the reason ends with a paragraph naming both ends of the move, as Notes does
+   under § 5:
+
+   ```
+   `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90. Squiz did not move it back. The next round reviews the branch `HEAD` is on when it starts, and only where that branch has a pull request.
+   ```
+
+   A move to a detached `HEAD`, or to a branch with no pull request, ends the
+   next firing at the gate, before it reads anything the episode recorded.
+   Unless `HEAD` returns to the pull request's branch, no later round runs and
+   no summary comment is posted, so this paragraph is the move's one report.
 6. **Close the episode.** Otherwise the harness posts one summary comment on the
    pull request, records the close in the episode's state, and exits 0. This
    happens whether or not threads are still open, and what remains open is what
@@ -372,7 +385,9 @@ follows. None is configurable, and each applies where the third column says.
 
 The first three prevent, the fourth detects, and the fifth reaches what the
 round's own signal does not. A tracked file that changed, and a `HEAD` that
-moved, during any round of the episode are named in the summary comment.
+moved, during any round of the episode are named in the summary comment. A round
+that blocks also names its own move of `HEAD` in the blocking reason, as § 3
+shows.
 
 **A refused call never reaches a shell**, and the reviewer reads the refusal as
 that call's own error while it is still there to choose something else.
@@ -1045,9 +1060,9 @@ nothing retries one.
 Claude Code surfaces the hook's stderr, and two different things are written
 there. They stay apart.
 
-**The blocking reason**, written when a round exits 2. It names the open threads
-and the commands that work them, and the coding agent reads it as its next
-instruction.
+**The blocking reason**, written when a round exits 2. It names the open threads,
+the commands that work them, and a move of `HEAD` the round found, and the coding
+agent reads it as its next instruction.
 
 **The failure pointer**, written when a round exits 0 having failed. One line,
 naming what failed:

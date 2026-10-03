@@ -40,6 +40,7 @@ import { runRound as runReview, type Round as Review } from "../reviewers/round.
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
 import {
   evidenceWith,
+  headMovedIn,
   nothingEstablished,
   readAfterReviewer,
   readBeforeReviewer,
@@ -131,9 +132,10 @@ export type AroundTheReviewer = {
    * it. Absent where no reviewer ran, which is every conclusion reached before
    * the review.
    *
-   * Nothing here is reported by the round. The summary comment names what the
-   * readings found and the hook names a marker that was not written. Neither
-   * changes what the round concluded or what it posted.
+   * The round reports none of this itself, except that a blocking reason names
+   * a move of `HEAD`. The summary comment names what the readings found and the
+   * hook names a marker that was not written. None of them changes what the
+   * round concluded or what it posted.
    */
   readonly confinement?: RoundConfinement;
 };
@@ -367,7 +369,12 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   }
   return {
     outcome: "block",
-    reason: blockingReason({ pullRequest: pullRequest.number, posted: account.posted, threads }),
+    reason: blockingReason({
+      pullRequest: pullRequest.number,
+      posted: account.posted,
+      threads,
+      moved: headMovedIn(confinement),
+    }),
     confinement,
     ...account,
   };

@@ -34,6 +34,15 @@ export type BlockedRound = {
    * thread the agent is told is open is one the command it checks with prints.
    */
   readonly threads: readonly ReviewThread[];
+  /**
+   * The move of `HEAD` this round's comparison found, naming both ends, and
+   * absent where it found none.
+   *
+   * Told to the coding agent here because the next firing gates on the branch
+   * `HEAD` names then. Where that branch has no pull request, nothing reports the
+   * move afterwards.
+   */
+  readonly moved?: string | undefined;
 };
 
 /**
@@ -72,6 +81,8 @@ export function blockingReason(round: BlockedRound): string {
   } else {
     blocks.push(openThreads(open), COMMANDS, ASK);
   }
+  // Last, so that "on it" above still follows the line naming the pull request.
+  if (round.moved !== undefined) blocks.push(movedHead(round.moved));
 
   return `${blocks.join("\n\n")}\n`;
 }
@@ -82,6 +93,15 @@ function reviewed(pullRequest: number, posted: number): string {
   // be open beside it.
   const left = posted === 0 ? "left no new comments" : `left ${counted(posted, "comment")}`;
   return `Squiz reviewed the change on this branch and ${left} on PR #${pullRequest}.`;
+}
+
+/** What became of `HEAD` while the reviewer ran, and what the next round does with it. */
+function movedHead(moved: string): string {
+  return [
+    `\`HEAD\` moved while the reviewer ran: ${moved}.`,
+    "Squiz did not move it back.",
+    "The next round reviews the branch `HEAD` is on when it starts, and only where that branch has a pull request.",
+  ].join(" ");
 }
 
 /**
