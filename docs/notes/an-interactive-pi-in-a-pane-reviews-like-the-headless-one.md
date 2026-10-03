@@ -29,10 +29,14 @@ after `finish_review`.
 ## Decisions
 
 - **Host the reviewer as interactive `pi`, on the command line `argv.ts` builds
-  today minus `--print` and `--mode json`.** Everything the round depends on
-  behaved as it does headless: `ctx.mode` was `"tui"`, the active tools were
-  exactly the grant, `git commit --amend` was refused with squiz's reason, and a
-  malformed finding was refused with the extension's own error.
+  today minus `--print`, `--mode json` and `--no-session`.** Everything the
+  round depends on behaved as it does headless: `ctx.mode` was `"tui"`, the
+  active tools were exactly the grant, `git commit --amend` was refused with
+  squiz's reason, and a malformed finding was refused with the extension's own
+  error. Dropping `--no-session` keeps `--session-dir`, so `pi` writes the
+  round's session file there, as `<timestamp>_<uuid>.jsonl`. The runs here
+  pointed it at a scratch directory; the round host would point it at
+  `.squiz/<number>/`. With `--no-session` kept there is no session to resume.
 
 - **Hand it the prompt as the positional argument.** It ran at once, with no
   keystroke. For a round host that starts `pi` before the prompt exists,
@@ -72,7 +76,8 @@ after `finish_review`.
   down on `agent_settled` ends the session the moment the reviewer stops. That
   is the bound on a reviewer that never calls `finish_review`, and it also
   closes the pane before a person can ask the reviewer anything. Recommended:
-  shut down. The session file stays under `--session-dir`, and the pane prints
+  shut down. Without `--no-session` the session file stays under
+  `--session-dir`, and the pane prints
   the `pi --session-dir … --session <id>` line that resumes it. Questions put
   after the round would not be part of the review, which is what D3 already
   says.
