@@ -26,10 +26,8 @@ seems to need a new H2, say so in the reply and ask before adding it.
 
 An agent builds from this document. A person decides from it.
 
-Those two needs are not opposed. The agent needs every fact present, or it
-invents one. The person needs each fact stated once, or they stop reading. A fact
-stated once and concretely serves both; leaving one out fails the agent, and
-saying one three ways fails the person.
+The agent needs every fact present, or it invents one. The person needs each fact
+stated once, or they stop reading. A fact stated once and concretely serves both.
 
 ## Principles
 
