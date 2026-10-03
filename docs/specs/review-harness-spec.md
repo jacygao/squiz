@@ -356,21 +356,17 @@ follows. None is configurable, and each applies where the third column says.
 The first three prevent, and the fourth detects. A tracked file that changed
 during a round is named in the summary comment.
 
-**A refused call never reaches a shell, and the reviewer reads the refusal as
-that call's own error** while it is still there to choose something else. A
-command is read the way the shell splits it, and a refused name counts where a
-command runs rather than wherever the name appears: a listed command written
-inside another command's argument is an argument. A word the shell would build
-out of quoting or substitution is left alone, so what the refusals hold is a
-reviewer acting in good faith rather than one working around them.
+**A refused call never reaches a shell**, and the reviewer reads the refusal as
+that call's own error while it is still there to choose something else.
+
+A name counts where a command runs: `grep 'git commit' file` searches and is not
+refused. A word the shell builds out of quoting is left alone: `git "com"mit`
+runs. So the refusals hold a reviewer acting in good faith, not one working
+around them.
 
 **A command that moves `HEAD` and is not refused is neither prevented nor
-detected.** The comparison reads the worktree rather than where `HEAD` points, so
-a commit leaves `git status` and every tracked file exactly as they were and the
-comparison reports that nothing changed. `git "com"mit` is such a command: the
-quoting puts it outside what the refusals match, and the commit it makes is
-outside what the comparison sees. The two mechanisms overlap on a write to a
-file, and neither one covers this.
+detected.** The comparison reads the worktree, not where `HEAD` points, and a
+commit leaves every tracked file identical. `git "com"mit` is such a command.
 
 ### Adapters
 
