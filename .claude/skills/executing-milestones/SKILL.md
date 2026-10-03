@@ -298,9 +298,28 @@ artefact downloaded by hand.
 
 ## 8. Standing rules
 
-- **Merged is not loaded.** A Claude Code session reads the plugin once, when it
-  starts. A merged change reaches a running session only when that session is
-  restarted against it with `claude --plugin-dir ./`.
+- **Load squiz from a checkout outside the repository.** With
+  `--plugin-dir ./` every worktree is inside the loaded plugin, and auto mode
+  refuses a subagent's `Write` there. Make the checkout once, and start every
+  session from it:
+
+  ```bash
+  git worktree add --detach ../squiz-plugin origin/main     # once
+  claude --plugin-dir ../squiz-plugin
+  ```
+
+- **Merged is not loaded until the checkout is refreshed.** A merged change
+  reaches a session only through `../squiz-plugin`, so refresh it after each
+  merge:
+
+  ```bash
+  git fetch -q origin && git -C ../squiz-plugin checkout -q --detach origin/main
+  ```
+
+  Each firing of the hook runs `bin/squiz` as a new process, which reads `src/`
+  from the checkout, so a refreshed `src/` or `bin/` reaches the next round without a
+  restart. `hooks/hooks.json` is read when the session starts, so a change to it
+  waits for a restart (unverified).
 - **A number comes with the command that reproduces it.** Label a prediction as
   a prediction. When a measurement disagrees with one, say so plainly.
 - **Read the specification before judging.** It governs reviews as well as
