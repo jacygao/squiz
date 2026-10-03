@@ -58,19 +58,15 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
   spent its window being refused returns the findings of one that had nothing to
   say.
 
+- **Render the count nowhere until a round is seen to make it non-zero.** Nothing
+  has yet observed a reviewer reaching for a listed command, so the summary would
+  carry a line that is always absent. What the count costs while it goes unread is
+  that an episode whose reviewer was refused still reads as one that found nothing,
+  and dogfooding settles whether that case arrives.
+
 ## Needs your input
 
-- **Whether § 4's Confinement should name this as a fourth mechanism.** It lists
-  three — scratch space, a non-mutating test invocation, and the comparison of
-  tracked files — and says the third is the only thing that catches a write made
-  through the shell. That is now wrong for the commands on the list above, which
-  are prevented rather than detected. Recommended: add a row, and keep the
-  comparison, which still covers everything the list does not.
-- **Whether the count should reach the summary comment.** The round reports it
-  and nothing above the round reads it yet, so a person reading the pull request
-  cannot tell a reviewer that spent its window being refused from one that had
-  nothing to say. Recommended: one Notes line, alongside the mutated file and the
-  shared worktree that the summary is already due to carry.
+Nothing.
 
 ## Reference
 
