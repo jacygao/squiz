@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.52 (draft)
+**Version:** 0.53 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -366,13 +366,13 @@ follows. None is configurable, and each applies where the third column says.
 |---|---|---|
 | **Scratch space.** `TMPDIR` points at `.squiz/<episode>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
-| **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref`, `git push` — which the comparison cannot see, because every file is left exactly as it was. | At `deep`, where a shell is granted |
-| **A comparison of `git status` and the hashes of tracked files**, taken before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell. | Except in a shared worktree, where nothing detects such a write |
+| **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref` — or pushes with `git push`. The comparison names a moved `HEAD` once the reviewer has exited, and a refused call never moves it. | At `deep`, where a shell is granted |
+| **A comparison of `git status`, the hashes of tracked files, and `HEAD`**, taken before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell, and a `HEAD` that names another branch or another commit. | Except in a shared worktree, where nothing detects such a write |
 | **The process group each shell records for itself**, signalled when the round ends. | A tool the reviewer started outliving the round, where the signal to the reviewer's own group does not reach it. | Where the reviewer CLI starts a shell in a group of its own |
 
 The first three prevent, the fourth detects, and the fifth reaches what the
-round's own signal does not. A tracked file that changed during any round of the
-episode is named in the summary comment.
+round's own signal does not. A tracked file that changed, and a `HEAD` that
+moved, during any round of the episode are named in the summary comment.
 
 **A refused call never reaches a shell**, and the reviewer reads the refusal as
 that call's own error while it is still there to choose something else.
@@ -382,9 +382,24 @@ refused. A word the shell builds out of quoting is left alone: `git "com"mit`
 runs. So the refusals hold a reviewer acting in good faith, not one working
 around them.
 
-**A command that moves `HEAD` and is not refused is neither prevented nor
-detected.** The comparison reads the worktree, not where `HEAD` points, and a
-commit leaves every tracked file identical. `git "com"mit` is such a command.
+**A command that moves `HEAD` and is not refused is detected, and not
+prevented.** `git "com"mit` is such a command. The comparison reads `HEAD` as the
+branch it names and the commit that branch is at, or as the commit a detached
+`HEAD` is at. A commit, an amend, a reset and a switch to another branch are each
+named, though every tracked file is left exactly as it was. The round reports the
+move and does not undo it.
+
+| `HEAD` | Read as |
+|---|---|
+| On a branch | The branch's full ref name and its commit |
+| On a branch with no commit yet | The branch's full ref name, with no commit |
+| Detached | The commit |
+
+A `HEAD` that cannot be read makes the comparison one that could not be taken,
+as a tracked file that cannot be read does.
+
+`git push` changes the remote and leaves `HEAD` where it was, so the comparison
+does not see it.
 
 Every shell the reviewer starts writes the group it leads into a file the round
 names, before it runs the command it was given, so a tool started in the last
@@ -868,7 +883,8 @@ Three blocks, in this order.
    findings about the change as a whole, each with its headline; a finding the
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
-   finding carries; a tracked file that changed while the reviewer ran; other
+   finding carries; a tracked file that changed while the reviewer ran; a `HEAD`
+   that moved while the reviewer ran, with what it was and what it became; other
    episodes that shared the worktree; a round that could not tell whether the
    worktree was shared or what changed in it; and a cap or bound that ended the
    episode early.
@@ -879,16 +895,25 @@ a comment that left it out would read as a review that found nothing there.
 
 A round that could not tell says so, rather than saying nothing. Both answers it
 gives have three values and not two: the worktree was shared, was not, or could
-not be established; and a tracked file changed, none did, or no comparison could
-be taken. A comment that renders "none" and "could not tell" alike reports a
-review nothing checked as a review that found nothing wrong.
+not be established; and a tracked file changed or `HEAD` moved, neither
+happened, or no comparison could be taken. A comment that renders "none" and
+"could not tell" alike reports a review nothing checked as a review that found
+nothing wrong.
 
 **The Notes items about the worktree cover every round of the episode, not the
 round that closed it.** A round that blocks posts no comment, so a file it found
-changed is named in the closing round's comment or nowhere. Each round adds what
-its readings found to the episode's state, and the closing round composes Notes
-from all of it. The closing round finding nothing changed is not the episode
-finding nothing changed, and an earlier round's answer stands in Notes beside it.
+changed, or a `HEAD` it found moved, is named in the closing round's comment or
+nowhere. Each round adds what its readings found to the episode's state, and the
+closing round composes Notes from all of it. The closing round finding nothing
+changed is not the episode finding nothing changed, and an earlier round's answer
+stands in Notes beside it.
+
+Each move of `HEAD` a round found is a line of its own, naming both ends as the
+comparison read them:
+
+```markdown
+- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to refs/heads/feature-a at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
+```
 
 A round whose review did not run closes no episode, so no comment reports one.
 The round's failure is announced on the hook's stderr instead.
@@ -1228,7 +1253,7 @@ until something asks.
 | **P0** | The hook's stderr channel | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub exits silently |
 | **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the subagent's id and living in the worktree |
 | **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison, and with the record each shell writes of the group it leads, or not at all |
-| **P1** | The tracked-file comparison | `git status` and the hashes of tracked files, taken before the reviewer starts and again when it exits. What `deep` depends on |
+| **P1** | The tracked-file comparison | `git status`, the hashes of tracked files, and `HEAD`, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |

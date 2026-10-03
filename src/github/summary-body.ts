@@ -183,6 +183,7 @@ function notes(episode: ClosedEpisode): readonly string[] {
   const lines = [
     ...unthreaded(episode.findings).map(noteLine),
     ...whatChanged(found.changed),
+    ...whereHeadMoved(found.moved),
     ...whatWasNotCompared(found.uncompared),
     ...whoElseWasHere(found.shared),
     ...whoWasNotEstablished(found.unestablished),
@@ -202,6 +203,11 @@ function whatChanged(paths: readonly string[]): readonly string[] {
   return [`- ${many} changed in the worktree while the reviewer ran: ${which}`];
 }
 
+/** One line per move of `HEAD` a round found, each naming both ends. */
+function whereHeadMoved(moves: readonly string[]): readonly string[] {
+  return moves.map((move) => `- \`HEAD\` moved while the reviewer ran: ${oneLine(move)}`);
+}
+
 /**
  * One line per round that could not say what changed in the worktree.
  *
@@ -217,7 +223,7 @@ function whatChanged(paths: readonly string[]): readonly string[] {
 function whatWasNotCompared(reasons: readonly string[]): readonly string[] {
   return reasons.map(
     (reason) =>
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
       ` ${oneLine(reason)}`,
   );
 }

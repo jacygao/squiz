@@ -11,7 +11,8 @@
  * Two kinds are refused. The tools a review has no use for go by name, which
  * needs no reading of what they were given. The commands go by what they would
  * do: the ones that move `HEAD` while leaving the worktree byte for byte as it
- * was, which is the change nothing downstream can see.
+ * was. The comparison taken after the reviewer names such a move and cannot undo
+ * it.
  *
  * **A command line is split into words, and the split is not a shell.** The
  * splitting reads the quoting, so a separator inside an argument stays inside it

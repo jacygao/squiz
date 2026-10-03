@@ -550,7 +550,7 @@ test("an earlier round that could not compare survives a closing round that coul
       },
       {},
     ),
-    { changed: [], uncompared: [shared], shared: [OTHER_AGENT_ID], unestablished: [] },
+    { changed: [], moved: [], uncompared: [shared], shared: [OTHER_AGENT_ID], unestablished: [] },
   );
 });
 
@@ -712,4 +712,61 @@ test("an episode an earlier round found here survives a later round that fills t
     comment.includes(OTHER_AGENT_ID),
     `episode ${OTHER_AGENT_ID} was in the worktree and the comment does not name it:\n${comment}`,
   );
+});
+
+function headOf(worktree: string): string {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" });
+  assert.equal(result.status, 0, `git rev-parse: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
+/**
+ * A reviewer that amended the commit under review through its shell, which leaves
+ * every file as it was and changes what the coding agent would commit.
+ */
+function amendedTheCommit(episode: Episode): void {
+  git(episode.worktree, "commit", "--quiet", "--amend", "--message", "the reviewer's amend");
+}
+
+test("a reviewer that amended the commit is named from a clean tree, and so is the comment", async () => {
+  await withWorktree(async (episode) => {
+    const was = headOf(episode.worktree);
+    const confinement = await around(episode, () => amendedTheCommit(episode));
+    const move = `from refs/heads/review-me at ${was} to refs/heads/review-me at ${headOf(episode.worktree)}`;
+
+    assert.deepEqual(confinement.trackedFiles, {
+      outcome: "changed",
+      paths: [],
+      head: {
+        before: `refs/heads/review-me at ${was}`,
+        after: `refs/heads/review-me at ${headOf(episode.worktree)}`,
+      },
+    });
+    const comment = commentOn(evidenceWith(undefined, confinement));
+    assert.ok(
+      comment.includes(`- \`HEAD\` moved while the reviewer ran: ${move}`),
+      `the reviewer moved HEAD and the comment does not say so:\n${comment}`,
+    );
+  });
+});
+
+// Another episode's commit in a shared tree is not this reviewer's, so HEAD is
+// read with the files or not at all.
+test("a HEAD moved in a shared worktree is not named as this reviewer's", async () => {
+  await withWorktree(async (episode) => {
+    liveEpisode(episode.worktree, OTHER_AGENT_ID);
+
+    const confinement = await around(episode, () => amendedTheCommit(episode));
+
+    assert.equal(confinement.trackedFiles.outcome, "not-taken");
+    assert.deepEqual(evidenceWith(undefined, confinement)?.moved, []);
+  });
+});
+
+test("a HEAD an earlier round found moved survives a round that found nothing", () => {
+  const head = { before: "refs/heads/review-me at 1111", after: "refs/heads/review-me at 2222" };
+  assert.deepEqual(after({ trackedFiles: { outcome: "changed", paths: [], head } }, {}), {
+    ...nothingEstablished,
+    moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
+  });
 });

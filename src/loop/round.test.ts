@@ -2621,7 +2621,7 @@ test("a worktree the first round shared is named in the comment the closing roun
       "",
       "**Notes**",
       "",
-      "- A round could not tell whether a file changed in the worktree while the reviewer ran:" +
+      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
         ` the worktree is shared with live episode ${OTHER_AGENT_ID}`,
       `- Another episode was in the worktree while the reviewer ran: ${OTHER_AGENT_ID}`,
     ].join("\n"),

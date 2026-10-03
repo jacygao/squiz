@@ -241,6 +241,7 @@ test("what the rounds established about the worktree is written and comes back",
     spentOutsideRounds: unspent,
     confinement: {
       changed: ["src/card.ts"],
+      moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
       uncompared: ["the worktree is shared with live episode ef56ab78"],
       shared: ["ef56ab78"],
       unestablished: ["ps was killed by SIGKILL"],
@@ -280,8 +281,54 @@ test("a state file naming some of the worktree lists reads the ones it names", (
   const read = readState(episode);
   assert.deepEqual(read.outcome === "read" ? read.state.confinement : undefined, {
     changed: ["src/card.ts"],
+    moved: [],
     uncompared: [],
     shared: [],
     unestablished: [],
   });
+});
+
+// A file written before HEAD was compared carries the four lists it had, and the
+// episode it belongs to has run rounds the bound counts.
+test("a state file written before HEAD was compared reads with no move", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(
+    episode.stateFile,
+    JSON.stringify({
+      rounds: [firstRound],
+      spentOutsideRounds: unspent,
+      confinement: {
+        changed: ["src/card.ts"],
+        uncompared: [],
+        shared: ["ef56ab78"],
+        unestablished: [],
+      },
+    }),
+  );
+
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: {
+      rounds: [firstRound],
+      spentOutsideRounds: unspent,
+      confinement: {
+        changed: ["src/card.ts"],
+        moved: [],
+        uncompared: [],
+        shared: ["ef56ab78"],
+        unestablished: [],
+      },
+    },
+  });
+});
+
+test("a move of HEAD that is not a list of strings is unreadable", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(episode.stateFile, `{"rounds": [], "confinement": {"moved": "HEAD"}}`);
+
+  const read = readState(episode);
+  assert.equal(read.outcome, "unreadable");
+  assert.match(read.outcome === "unreadable" ? read.reason : "", /"confinement\.moved" is "HEAD"/u);
 });

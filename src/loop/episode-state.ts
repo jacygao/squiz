@@ -247,6 +247,8 @@ function confinementIn(parsed: Record<string, unknown>): ReadEvidence {
 
   const changed = linesIn(found, "changed");
   if ("problem" in changed) return changed;
+  const moved = linesIn(found, "moved");
+  if ("problem" in moved) return moved;
   const uncompared = linesIn(found, "uncompared");
   if ("problem" in uncompared) return uncompared;
   const shared = linesIn(found, "shared");
@@ -257,6 +259,7 @@ function confinementIn(parsed: Record<string, unknown>): ReadEvidence {
   return {
     evidence: {
       changed: changed.lines,
+      moved: moved.lines,
       uncompared: uncompared.lines,
       shared: shared.lines,
       unestablished: unestablished.lines,
