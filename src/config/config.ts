@@ -49,7 +49,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   timeout: 480,
   // Well above the widest round a legitimate review has been measured spending,
   // so a reviewer that reads widely does not reach it.
-  tokens: 1_500_000,
+  tokens: 10_000_000,
   thinking: "medium",
 });
 
