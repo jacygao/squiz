@@ -1,6 +1,6 @@
 # Multi-Agent Design: Reviewer Sessions, an Agent-Lifecycle Module, and an Agent-to-Agent Protocol
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -97,8 +97,12 @@ Everything the harness spec puts in a round stays in the core: the gate on the
 pull request, the state file and its record per pull request state, the round
 cap and the token bound, posting findings and applying verdicts, the summary
 comment, the failure comment, and the exit statuses. The core owns
-`.squiz/<number>/`. The one other writer there is the reviewer's extension,
-which appends to the round's report file and the progress log.
+`.squiz/<number>/`. Two extensions write there as well:
+
+- **The reviewer's extension** appends to the round's report file and the
+  progress log.
+- **The coding-side `pi` extension** moves the coder's inbox messages into
+  `handled/` once it has acted on them.
 
 The core gains one command, `squiz host <number>`, which is the round host
 below. It runs core code and is part of the core. The lifecycle module starts
@@ -194,14 +198,17 @@ state has no record, so a turn that pushed nothing starts nothing.
 `squiz review <number>` gates on the pull request, as the harness spec § 3
 step 1 does. It then reads the record for the state:
 
-- **No record, or failed:** it ensures the reviewer session, writes
-  `review-ready`, and waits.
+- **No record:** it ensures the reviewer session, writes `review-ready`, and
+  waits.
+- **Failed:** it ensures the reviewer session, writes `re-review`, and waits.
 - **Reviewing:** it waits.
 - **Reviewed:** it prints the result and exits as the harness spec § 6 says.
 
 It waits on the state file's record, not on a process. The wait is bounded by
 the caller's shell timeout, and the review is not. Where the wait runs out
-before the record is reviewed or failed, the command prints one line and exits 4:
+before the record is reviewed or failed, the command exits 4. It writes what it
+prints to `.squiz/<number>/review.txt` and names that file first, as the harness
+spec § 6 has every run that prints an outcome do:
 
 ```
 Full output: /work/squiz/.squiz/41/review.txt
@@ -210,11 +217,13 @@ Squiz is still reviewing PR #41 at 3f9c2e0, in session squiz-41. Run `squiz revi
 
 The wait defaults to 540 seconds, under Claude Code's longest shell timeout, so
 the command ends on its own before the shell moves it. The exit status is D6.
-The harness spec's exit table reads every status outside 0, 2 and 3 as "could
-not run", so the skill and the `AGENTS.md` text gain a line for 4.
+The harness spec's exit table gives 0, 2 and 3 an outcome and reads every
+other status, 1 among them, as "could not run". 4 would fall into that reading,
+so the skill and the `AGENTS.md` text gain a line for it.
 
-`squiz review --no-wait <number>` writes `review-ready` and exits 4 at once. A
-coordinator uses it, and so do the hooks below.
+`squiz review --no-wait <number>` writes its message as above and exits 4 at
+once. A coordinator uses it. The hooks below trigger through `squiz hook`, which
+writes the same message.
 
 ### Claude Code `Stop`
 
@@ -317,6 +326,11 @@ activity=IC_kwDOL7tYbc6OmQx7a
 round=2
 threads=PRRT_kwDOL7tYbc5abcd1 PRRT_kwDOL7tYbc5abcd2
 ```
+
+`head` and `activity` together are the state, as the harness spec § 3 defines
+one. `head` is the pull request's head commit. `activity` is the GitHub
+identifier of the newest reply, from anyone other than the reviewer, on a thread
+the reviewer opened, and is `none` where there is no such reply.
 
 The round host watches its inbox with a file watch, and reads it again every
 few seconds as well, because a watch can miss an event.
@@ -518,7 +532,7 @@ Paths are the harness spec's § 8 layout, which #290 adds `src/review/` and
 | Path | Change |
 |---|---|
 | `src/cli.ts` | Adds `squiz host`, the `squiz session` group, `squiz review --no-wait`, and exit 4. |
-| `src/review/` (#290) | `squiz review` writes `review-ready` and waits on the state file's record, not on a child. The wait is bounded; the review is not. The reviewing record names the round host. `squiz status` gains the session column. |
+| `src/review/` (#290) | `squiz review` writes `review-ready`, or `re-review` for a failed state, and waits on the state file's record, not on a child. The wait is bounded; the review is not. The reviewing record names the round host. `squiz status` gains the session column. |
 | `src/hook/payload.ts` | Reads `hook_event_name`, so that one entry point serves `Stop` and `SubagentStop`. |
 | `src/hook/hook.ts` | The `Stop` path: trigger, wait for the coder's message about the state, exit 2 with the pointer or 0. A waiter for a superseded state exits 0. `SubagentStop` stays as the harness spec specifies it. |
 | `hooks/hooks.json` | Adds the `Stop` registration with `asyncRewake`. |
@@ -589,7 +603,7 @@ which is `"child"` until step 6.
    the JSON stream as today. The adapter reads the file. A test holds the two
    readings equal on the recorded run. Nothing a user sees changes.
 3. **The round host, detached.** `squiz host` and the inbox ship. With
-   `"reviewer": "session"`, `squiz review` writes `review-ready`, a detached
+   `"reviewer": "session"`, `squiz review` writes its message, a detached
    round host runs the round, and the command waits on the record and exits 4
    when its wait runs out. The window and its shares go for this setting only.
    `"child"` behaves exactly as in step 1.
