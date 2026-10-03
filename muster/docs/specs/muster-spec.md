@@ -1,6 +1,6 @@
 # Muster Specification: Triggers, Sessions That Outlive Them, and an Inbox
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -16,8 +16,10 @@ in the squiz repository says what squiz asks of it.
 
 It does three jobs:
 
-- **Triggers.** When a Claude Code session or subagent ends its turn, or a `pi`
-  session settles, muster runs the command a project configured.
+- **Triggers.** When a coding agent ends its turn, or a subagent ends its work,
+  muster runs the command a project configured. It works with any agent, through
+  a thin adapter where the agent has hooks and through a pull fallback where it
+  has only a shell.
 - **Sessions.** It starts a command or an agent as a session in a Herdr tab, a
   tmux window, or a detached process. The session outlives the trigger that
   started it. Muster lists, watches and stops it.
@@ -26,7 +28,7 @@ It does three jobs:
 
 Muster lives in squiz's repository for now, in the top-level directory
 `muster/`, and moves to a repository of its own later. Nothing here is built.
-§ 9 lists what is not established and the spike that settles each.
+§ 10 lists what is not established and the spike that settles each.
 
 ## 2. Decisions for the owner
 
@@ -46,71 +48,123 @@ Muster carries no word of squiz's vocabulary. A message's kind and pointer
 are strings it stores and delivers without reading. An address is a name it
 does not interpret. A trigger's command is a command line it runs.
 
-## 4. Triggers
+## 4. Agents
 
-### What fires one
+Muster works with any coding agent, in three layers. Only the second knows which
+agent it is talking to.
 
-| Event | Source | Fires when |
+| Layer | What it is | Who sees it |
 |---|---|---|
-| `stop` | Claude Code `Stop` hook | A main session's turn ends |
-| `subagent-stop` | Claude Code `SubagentStop` hook | A subagent's turn ends |
-| `pi-settled` | Muster's `pi` extension, on `agent_settled` | A `pi` session settles, and will not continue on its own |
-| `herdr-done` | Muster's Herdr plugin, on `pane.agent_status_changed` | Herdr reports an agent in one of its panes as `done` |
+| **The contract** | Events in and wakes out, in muster's own formats | Muster's core, and every program muster runs, squiz included |
+| **Adapters** | One per agent, translating that agent's hooks or extensions into the contract | Muster alone |
+| **The pull fallback** | The agent runs a command and reads the answer | Any agent with a shell |
 
-Every source runs `muster hook`, which reads the event and its payload and runs
-the commands configured for it.
+**Agent-specific code lives in adapters and nowhere else.** No two agents offer
+the same way to be told something while idle, so there is no generic wake to
+write against. Muster's core, its triggers, its sessions and its inbox name no
+agent.
 
-**The Herdr plugin is an extra source, never the only one.** Herdr runs a
-plugin's command on `[[events]] on = "pane.agent_status_changed"`, from its own
-server. The event names a pane and a status, not a task. A subagent finishing
-changes nothing on screen, so it never fires for `SubagentStop`'s case, and for
-Claude Code Herdr reads the status from the screen. Herdr's `done` means idle
-and not yet seen, which a turn that ended on a question also is. It fires only
-inside Herdr. The Claude Code registration:
+### The contract
 
-```json
-"Stop": [
-  { "hooks": [ { "type": "command", "command": "<muster>/bin/muster hook", "asyncRewake": true, "timeout": 86400 } ] }
-],
-"SubagentStop": [
-  { "hooks": [ { "type": "command", "command": "<muster>/bin/muster hook" } ] }
-]
+**An event in** says that an agent stopped working. An adapter hands it to
+`muster hook` as these fields, and muster passes them to the trigger's command
+in its environment:
+
+| Field | Value |
+|---|---|
+| `MUSTER_EVENT` | `settled`: the agent ended its turn and is waiting for input. `finished`: a subagent ended its work and takes no further input. |
+| `MUSTER_AGENT` | The adapter's name, such as `claude-code` or `pi` |
+| `MUSTER_SESSION` | The agent's own identifier for the session or subagent |
+| `MUSTER_CWD` | The working directory the agent was in |
+| `MUSTER_ROOT` | The root, as every muster command takes it |
+| `MUSTER_WAKE` | How this adapter can wake the session: `push`, `waiter` or `none`, as below |
+
+The agent's own payload goes no further than its adapter.
+
+**A wake out** delivers one message, in the envelope under § 7, to the agent an
+address belongs to. The text the agent is shown is the same for every adapter:
+
 ```
+squiz-reviewer-41 sent threads-open: pr=41 head=3f9c2e0 round=2 threads=PRRT_kwDOL7tYbc5abcd1,PRRT_kwDOL7tYbc5abcd2 next=squiz review 41
+```
+
+### Adapters
+
+An adapter lives in `muster/adapters/<name>/`, and provides four things:
+
+| | |
+|---|---|
+| **Registration** | The files that make the agent call muster: a hooks file, an extension, or a plugin manifest. `muster install <name>` puts them in place for a project. |
+| **Events** | Which of the agent's own events become `settled` and `finished`, and how its payload becomes the contract's fields. |
+| **Wake** | One of three kinds, declared up front. **push:** something of the agent's own, such as an extension or a socket, takes a message from outside while the agent is idle. **waiter:** a hook the agent runs after its turn may wait, and hand a message back as the agent's next instruction. **none:** the agent is reached only by the pull fallback. |
+| **Limits** | What its wake cannot do, such as reach a subagent that has already handed back. Each adapter's row below states them. |
+
+**Adding an agent is adding a directory under `adapters/`, and a row to the
+table below.** Nothing in muster's core changes, and nothing in a program that
+uses muster changes, because both see only the contract.
+
+**Typing into an agent's terminal is never a wake.** Typed text arrives as
+keystrokes in an interface written for a person. The agent's own editor can
+split or reorder it, and nothing tells it apart from what a person typed. No
+adapter uses it.
+
+### The pull fallback
+
+**Any agent that can run a shell command takes part without an adapter.** Its
+instructions tell it to run the command that does the work, and to read what
+that prints. For squiz that is `squiz review <n>`, which starts the review and
+waits for it. For anything else built on muster it is
+`muster wait --inbox <address> [--timeout <seconds>]`, which waits for the next
+message on an address, takes it, and prints the text above.
+
+This is the baseline every agent gets. An adapter only makes it faster. It
+fires the trigger without the agent having to remember, and it wakes an agent
+that is idle rather than one that is waiting. Nothing a program built on muster
+relies on may need more than the fallback.
+
+### What each agent offers
+
+| Agent | Events in | Wake out | Established |
+|---|---|---|---|
+| **Claude Code** (`claude-code`) | `Stop` becomes `settled`. `SubagentStop` becomes `finished`. | **waiter:** `muster hook`, registered on `Stop` with `asyncRewake: true`, waits on the addresses its trigger named, then writes the text to stderr and exits 2. **push:** `muster hook` records the session's `CLAUDE_CODE_MESSAGING_SOCKET` against those addresses, and `muster send` posts to it. A subagent gets no wake: in auto mode it has handed back before `SubagentStop` runs. | Both wakes are documented. Neither is measured by this project. Spike S3. |
+| **`pi`** (`pi`) | Muster's extension turns `agent_settled` into `settled`. | **push:** the extension watches the addresses its trigger named, takes a message, and calls `pi.sendUserMessage(text, { deliverAs: "followUp" })`. | Yes. firstmate's `pi` watcher wakes its first mate this way. |
+| **GitHub Copilot CLI** (`copilot`) | Its `agentStop` and `subagentStop` hooks, configured in `.github/hooks/`, would become `settled` and `finished`. | **Unknown.** `agentStop` can answer `decision: "block"` with a `reason` that becomes the next turn, so a waiter is possible in shape. But a hook times out after `timeoutSec`, 30 seconds by default with no documented maximum, a timeout lets the agent stop, and the CLI ends the turn after eight consecutive blocks. The documentation read names no way to reach an idle session from outside. Until spike S9 settles it, Copilot's wake is **none**, and it takes part through the pull fallback. | Events: documented, not tried. Wake: unknown. |
+| **Herdr** (`herdr`) | A Herdr plugin's `[[events]] on = "pane.agent_status_changed"` becomes `settled` when the status is `done`. It is an extra source for an agent in a Herdr pane, never the only one. It sees panes rather than tasks, so a subagent finishing never fires it, and for Claude Code Herdr reads the status from the screen. Its `done` means idle and not yet seen, which a turn that ended on a question also is. | **none.** Herdr's own `agent prompt` types into the pane. | Documented, not tried. |
+| **Any other agent with a shell** | None. | **none.** | The pull fallback. |
+
+## 5. Triggers
 
 ### What it runs
 
-`.muster.json`, at the root, names a command for each event:
+`.muster.json`, at the root, names a command for each event in the contract:
 
 ```json
 {
   "triggers": [
-    { "on": ["stop", "subagent-stop", "pi-settled"], "run": ["squiz", "hook"] }
+    { "on": ["settled", "finished"], "run": ["squiz", "hook"] }
   ]
 }
 ```
 
-The command runs in the working directory the event fired in. It gets the event
-in `MUSTER_EVENT`, the root in `MUSTER_ROOT`, and the runtime's own payload on
-its standard input, unchanged.
+The command runs in `MUSTER_CWD`, with the contract's fields in its environment
+and nothing on its standard input.
 
 **A trigger's command may name the addresses its session should be woken
 from.** Each line of its standard output of the form `watch <address>` adds one.
-For a `stop` or a `pi-settled` event, `muster hook` then waits on those
-addresses and wakes the session when a message arrives, as § 6 sets out. A
-command that prints no `watch` line asks for no wake. For `subagent-stop`
-nothing waits: a subagent in Claude Code's auto mode has already handed back by
-the time its stop hook runs, and nothing reaches it.
+Where the adapter's wake is `push` or `waiter`, muster wakes the session when a
+message arrives on one of them. A command that prints no `watch` line asks for
+no wake, and so does every `finished` event.
 
 A command's exit status is reported on `muster hook`'s stderr where it is not 0,
 and never changes the hook's own exit status.
 
 ### A turn ending is not work being done
 
-Claude Code fires `Stop` whenever a turn ends, including a turn that ended on a
-question. Muster fires on every one. Deciding whether a turn finished
-anything is the command's job.
+An agent settles whenever a turn ends, including a turn that ended on a
+question. Muster fires on every one. Deciding whether a turn finished anything
+is the command's job.
 
-## 5. Sessions
+## 6. Sessions
 
 ### Starting one
 
@@ -199,7 +253,7 @@ Muster says so rather than hunting for them.
 exited or stopped, and every record whose process has gone by pid and start
 time.
 
-## 6. Messages
+## 7. Messages
 
 ### The envelope
 
@@ -253,49 +307,40 @@ firstmate's code.
 
 ### Waking a session
 
-Muster delivers a message into the agent the address belongs to through
-that agent's runtime. It never types into a terminal.
+A message on an address its trigger named reaches the session through that
+session's adapter, as § 4 sets out, or waits for the agent to pull it.
 
-| Runtime | How it is woken | Established |
-|---|---|---|
-| `pi` | Muster's `pi` extension watches the addresses its trigger named. On a message it takes it, and calls `pi.sendUserMessage(text, { deliverAs: "followUp" })`. | Yes. firstmate's `pi` watcher wakes its first mate this way. |
-| Claude Code, by `asyncRewake` | `muster hook`, registered on `Stop` with `asyncRewake: true`, waits on the addresses after the trigger's command returns. On a message it takes it, writes the text to stderr, and exits 2. Claude Code documents this as waking the session and showing it the stderr. | Documented. Not measured by this project. Spike S3. |
-| Claude Code, by its messaging socket | `muster hook` records the session's `CLAUDE_CODE_MESSAGING_SOCKET` against the addresses it was asked to watch. `muster send` to one of them posts to that socket. An idle session starts a turn with the message. | Documented since Claude Code 2.1.224. Whether a post from a detached process is accepted as the session's own is not established. Spike S3. |
+**One waiter per session delivers.** An agent may run its hooks once per turn
+without deduplicating them, so a session that ends three turns has three
+waiters. Each records the turn it was started for, and a waiter whose session
+has ended a later turn exits 0 without taking anything. Only the newest takes a
+message.
 
-The text a session is shown:
-
-```
-squiz-reviewer-41 sent threads-open: pr=41 head=3f9c2e0 round=2 threads=PRRT_kwDOL7tYbc5abcd1,PRRT_kwDOL7tYbc5abcd2 next=squiz review 41
-```
-
-**One waiter per session delivers.** Claude Code does not deduplicate
-background hooks, so a session that ends three turns has three waiters. Each
-records the turn it was started for, and a waiter whose session has ended a
-later turn exits 0 without taking anything. Only the newest takes a message.
-
-## 7. Commands
+## 8. Commands
 
 | Command | What it does |
 |---|---|
-| `muster hook` | The trigger entry point, for Claude Code's hooks and the `pi` extension. § 4. |
-| `muster start`, `status`, `attach`, `wait`, `read`, `stop`, `prune` | § 5. |
-| `muster closed` | Run by tmux's `pane-died` hook, never by a person. § 5. |
-| `muster send`, `muster inbox list`, `muster inbox take` | § 6. |
+| `muster hook` | The trigger entry point every adapter calls. § 4 and § 5. |
+| `muster install <adapter>` | Puts an adapter's registration in place for a project. § 4. |
+| `muster start`, `status`, `attach`, `wait`, `read`, `stop`, `prune` | § 6. `muster wait --inbox` is the pull fallback, § 4. |
+| `muster closed` | Run by tmux's `pane-died` hook, never by a person. § 6. |
+| `muster send`, `muster inbox list`, `muster inbox take` | § 7. |
 
 Every command takes `--root <dir>`, which defaults to the git toplevel of the
 working directory. Every command prints JSON with `--json`.
 
-## 8. The project
+## 9. The project
 
 ```
 muster/
   bin/muster                  a shell shim that execs src/cli.ts
-  hooks/hooks.json            the Stop and SubagentStop registrations
-  herdr-plugin/               the Herdr plugin manifest and its command, for herdr-done
-  extensions/pi.ts            the pi extension: the pi-settled trigger and the pi wake
+  adapters/                   one directory per agent, and the only code that names one
+    claude-code/              the Stop and SubagentStop registrations, the waiter, the socket post
+    pi/                       the extension: agent_settled, and the push wake
+    herdr/                    the plugin manifest and its command
   src/
     cli.ts                    one subcommand each
-    triggers/                 reading an event, running the configured commands, the waiter
+    triggers/                 the contract, running the configured commands, the waiter
     sessions/                 the record, and one backend each for Herdr, tmux and detached
     inbox/                    the envelope, send, take, and the watch with a poll behind it
   docs/specs/                 this document
@@ -303,10 +348,10 @@ muster/
 
 It is TypeScript run by Node with its types stripped, with no runtime
 dependencies, as squiz is. While it lives in squiz's repository, squiz's plugin
-manifest registers its hooks. That is packaging and not an import, so the
-boundary under § 3 holds.
+manifest registers the Claude Code adapter's hooks. That is packaging and not an
+import, so the boundary under § 3 holds.
 
-## 9. Open questions and spikes
+## 10. Open questions and spikes
 
 Cheapest first. Each result is written as a finding.
 
@@ -315,6 +360,7 @@ Cheapest first. Each result is written as a finding.
 | S1 | Does a tmux window, or a Herdr tab started with `herdr agent start`, created from inside a Claude Code shell call or hook outlive the runtime stopping that call? Does a detached session whose output goes to a log file escape as the measured one with `/dev/null` did? | Rerun the detach probe with each backend as the child. Minutes. |
 | S3 | Which wake reaches an idle interactive Claude Code session ten minutes after its turn ended: an `asyncRewake` exit 2, a post to `CLAUDE_CODE_MESSAGING_SOCKET`, or both? In auto mode and outside it? Is an `asyncRewake` hook's exit 2 dropped once it reaches its timeout? | A probe in an interactive session in tmux, since a `-p` session exits at turn end. An hour. |
 | S4 | Which processes do Herdr's pane close and tmux's `kill-window` reach? After `herdr agent start`, does the pane return to its shell when the agent exits, as the documentation says? Does tmux's `pane-died` hook fire on every exit, with `remain-on-exit` on, and give the exit status? | A pane whose command starts children in its own group and in a session of their own, each logging the signals it gets, then exits with a known status. An hour. |
+| S9 | What does GitHub Copilot CLI offer an adapter? Do its `agentStop` and `subagentStop` hooks fire as documented? What is the largest `timeoutSec` it honours, and does an `agentStop` hook that waits that long and then answers `block` wake the session with its `reason`? Is there any way to reach an idle session from outside, such as its asynchronous `notification` hook, which the documentation lists for the CLI without saying what fires it? Which layer does it land in? | Read the hooks reference against an installed CLI, then a probe hook in an interactive session. An hour. |
 | S6 | Does `herdr agent start --kind pi` track a `pi` that runs with `--no-extensions`, so that Herdr's own `pi` extension does not load? What status does Herdr show for it? | A Herdr tab. An hour. |
 
 Not established, and not designed around:
@@ -323,16 +369,17 @@ Not established, and not designed around:
 - **A Herdr server that is not running.** The Herdr backend is chosen only from
   inside Herdr, where its server is running. What `herdr tab create` does
   otherwise was not read.
-- **Whether a `herdr-done` event and a `stop` event for one turn can be told
-  apart.** Both fire for a Claude Code session in a Herdr pane. The command they
+- **Whether a Herdr `settled` event and a Claude Code `settled` event for one
+  turn can be told apart.** Both fire for a Claude Code session in a Herdr pane. The command they
   run must treat a second firing for the same state as nothing, which squiz's
   one review per state already does.
 
-## 10. What it rests on
+## 11. What it rests on
 
 | Source | Version read | What this document uses |
 |---|---|---|
 | Claude Code | 2.1.288, and the docs at code.claude.com/docs/en/hooks and /cross-session-messaging | `Stop`, `SubagentStop`, `asyncRewake`, `CLAUDE_CODE_MESSAGING_SOCKET`. The kill of a command's tree and group, measured on 2.1.288. |
 | `pi` | `earendil-works/pi` at `a276dab` (1.0.0), and 0.85.1 | `agent_settled`, `sendUserMessage` with `deliverAs`. Extensions load in every mode. |
 | Herdr | `herdrdev/herdr` at `5da0a01` (0.9.3) | Plugin events on `pane.agent_status_changed`. `tab create`, `agent start`, `agent wait`, `pane run`, `pane read`, `pane close`, and what a pane close signals. Pre-1.0, with breaking changes in minor and patch releases. |
+| GitHub Copilot CLI | docs.github.com/en/copilot/reference/hooks-configuration and /how-tos/copilot-cli/customize-copilot/use-hooks, read 2026-10-04. Not installed or run | `agentStop`, `subagentStop`, their `decision` and `reason`, `timeoutSec` defaulting to 30, timeouts failing open, the guard of eight consecutive blocks, and hooks in `.github/hooks/`. |
 | firstmate | `kunchenguid/firstmate` at `1f3e769` | The inbox format, and the move into `handled/` as the acknowledgement. |

@@ -1,6 +1,6 @@
 # Session Interface: What Squiz Asks of Muster
 
-**Version:** 0.3 (draft)
+**Version:** 0.4 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -154,16 +154,17 @@ its message and exits 4 at once.
 `squiz hook` is the command muster's trigger runs. It resolves the pull
 request whose head is the branch checked out where the event fired. Where that
 state has no record, it ensures the round host and sends `review-ready`. On a
-`stop` or `pi-settled` event it prints `watch squiz-coder-<number>` wherever a
-pull request exists, so muster wakes the coding agent with whatever squiz sends
-next.
+`settled` event it prints `watch squiz-coder-<number>` wherever a pull request
+exists, so muster wakes the coding agent with whatever squiz sends next, where
+the agent's adapter can wake it.
 
-**The inbox and the wake reach full sessions only.** A Claude Code subagent has
-ended by the time its `SubagentStop` fires, and in auto mode it has handed back,
-so no `threads-open` reaches it. For a subagent coder the loop closes only
-because the subagent runs `squiz review` itself and waits for it, which is
-#290's route. `squiz hook` on `subagent-stop` still starts the review, and
-prints no `watch` line.
+**The wake reaches full sessions whose adapter can wake them, and nothing
+else.** A Claude Code subagent has ended by the time its `SubagentStop` fires,
+and in auto mode it has handed back, so no `threads-open` reaches it. An agent
+whose adapter has no wake, or that has no adapter, is not reached either. For
+every such coder the loop closes only because it runs `squiz review` itself and
+waits for it, which is #290's route and muster's pull fallback. `squiz hook` on
+a `finished` event still starts the review, and prints no `watch` line.
 
 ## 5. The message kinds
 
