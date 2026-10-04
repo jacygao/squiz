@@ -150,7 +150,15 @@ function handedOver(id: string, headline: string): ReviewThread {
     isOutdated: false,
     path: "src/ui/card.ts",
     anchor: { at: "line", line: 88 },
-    comments: [{ databaseId: 51, author: "squiz", body: renderComment(finding(headline)) }],
+    comments: [
+      {
+        id: "PRRC_fixture",
+        createdAt: "2026-09-06T07:13:05Z",
+        databaseId: 51,
+        author: "squiz",
+        body: renderComment(finding(headline)),
+      },
+    ],
   };
 }
 

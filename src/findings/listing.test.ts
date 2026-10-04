@@ -33,7 +33,13 @@ function thread(overrides: Partial<ReviewThread>): ReviewThread {
  * wrote it.
  */
 function comment(body: string): ThreadComment {
-  return { databaseId: null, author: "squiz", body };
+  return {
+    id: "PRRC_fixture",
+    createdAt: "2026-09-06T07:13:05Z",
+    databaseId: null,
+    author: "squiz",
+    body,
+  };
 }
 
 // Two findings on one file and different lines, so a listing that carries one

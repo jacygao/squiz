@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -64,7 +64,7 @@ test("a review comes back with its findings, its verdicts and what it spent", as
 /**
  * The kill is the ordinary path rather than the exceptional one. Two runs of an
  * identical command over the same 450-line change took 408 seconds and 2,269,
- * against a default bound of 480.
+ * against the 480-second bound they ran under.
  */
 test("a reviewer that floods and does not stop is killed at the bound", async () => {
   await inATree(async (tree) => {
@@ -340,6 +340,7 @@ test("a process that ran and said nothing and a spawn that failed are both setup
         command: join(tree, "no-such-reviewer"),
         args: [],
         directory: invocation.directory,
+        stdin: "/dev/null",
       }),
       parse,
       confine: handsNothingOver,
@@ -353,6 +354,29 @@ test("a process that ran and said nothing and a spawn that failed are both setup
       /could not be started/u,
       "the reason is the only thing that says which of the two failed",
     );
+  });
+});
+
+// The round has no terminal to give. A line built for a pane would get
+// `/dev/null` instead, and an interactive CLI there is a run nobody can see.
+test("a command line that needs a terminal is not started without one", async () => {
+  await inATree(async (tree) => {
+    const marker = join(tree, "started");
+    const panes: Adapter = {
+      argv: (invocation) => ({
+        command: process.execPath,
+        args: ["-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "")`],
+        directory: invocation.directory,
+        stdin: "terminal",
+      }),
+      parse,
+      confine: handsNothingOver,
+      grants,
+    };
+    const round = await runRound(panes, at(tree), 10);
+    assert.equal(round.outcome, "setup");
+    assert.match(round.outcome === "setup" ? round.reason : "", /terminal/u);
+    assert.ok(!existsSync(marker), "the round started a line built for a pane");
   });
 });
 
@@ -405,7 +429,12 @@ test("an attempt that ended past the bound is not tried again", async () => {
     const starving: Adapter = {
       argv: (invocation) => {
         starts += 1;
-        return { command: process.execPath, args: ["-e", ""], directory: invocation.directory };
+        return {
+          command: process.execPath,
+          args: ["-e", ""],
+          directory: invocation.directory,
+          stdin: "/dev/null",
+        };
       },
       parse: async () => {
         // Microtasks only: the loop never reaches the phase a timer runs on.
@@ -430,6 +459,7 @@ test("a reviewer that is not installed is a setup problem, named as one", async 
         command: join(tree, "no-such-reviewer"),
         args: [],
         directory: invocation.directory,
+        stdin: "/dev/null",
       }),
       parse,
       confine: handsNothingOver,
@@ -463,6 +493,7 @@ test("an adapter that throws reading the output is output that could not be read
           command: process.execPath,
           args: ["-e", reviewing],
           directory: invocation.directory,
+          stdin: "/dev/null",
         };
       },
       parse: () => Promise.reject(new Error("the adapter fell over")),
@@ -555,6 +586,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
           command: process.execPath,
           args: ["-e", `/* ${marker} */ setInterval(() => {}, 1000);`],
           directory: invocation.directory,
+          stdin: "/dev/null",
         };
       },
       // Not an async function: the throw happens before any promise exists.
@@ -859,7 +891,12 @@ function reviewer(...scripts: readonly string[]): Running {
     argv: (invocation) => {
       const script = scripts[Math.min(starts, scripts.length - 1)] ?? "";
       starts += 1;
-      return { command: process.execPath, args: ["-e", script], directory: invocation.directory };
+      return {
+        command: process.execPath,
+        args: ["-e", script],
+        directory: invocation.directory,
+        stdin: "/dev/null",
+      };
     },
     confine: handsNothingOver,
     parse,
@@ -878,6 +915,7 @@ function at(tree: string): Invocation {
     depth: "read",
     thinking: "medium",
     roundSpace: undefined,
+    terminal: "none",
   };
 }
 

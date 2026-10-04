@@ -39,7 +39,13 @@ function threadOf(...bodies: readonly string[]): ReviewThread {
     isOutdated: false,
     path: offScreen.file,
     anchor: { at: "line", line: offScreen.line },
-    comments: bodies.map((body) => ({ databaseId: null, author: "jacygao", body })),
+    comments: bodies.map((body) => ({
+      id: "PRRC_fixture",
+      createdAt: "2026-09-06T07:13:05Z",
+      databaseId: null,
+      author: "jacygao",
+      body,
+    })),
   };
 }
 

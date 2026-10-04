@@ -18,7 +18,7 @@
 
 import type { GhCall } from "../github/gh.ts";
 import { renderSummary } from "../github/summary-body.ts";
-import { postSummary, type SummaryPosting } from "../github/summary.ts";
+import { postSummary, type CommentPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
 import type { ConfinementEvidence } from "./confinement.ts";
@@ -35,7 +35,7 @@ import type { AppliedVerdicts } from "./verdicts.ts";
  * then reads as a review that ended clean.
  */
 export type EpisodeSummary =
-  | SummaryPosting
+  | CommentPosting
   /**
    * Nothing was composed and nothing ever will be, so the episode ends with no
    * summary on the pull request at all. `reason` is the one line that says so.
@@ -91,7 +91,7 @@ export type ClosingRound = {
  * runtime kills the hook during, and the round would then end having said nothing
  * at all. The summary is lost in that case, which is what the caller reports.
  */
-export function postEpisodeSummary(closing: ClosingRound, call: GhCall): SummaryPosting {
+export function postEpisodeSummary(closing: ClosingRound, call: GhCall): CommentPosting {
   const body = renderSummary({
     rounds: closing.rounds,
     threads: classifyAtClose(closing),

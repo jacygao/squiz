@@ -25,7 +25,13 @@ function thread(overrides: Partial<ReviewThread>): ReviewThread {
 }
 
 function comment(body: string): ThreadComment {
-  return { databaseId: null, author: "squiz", body };
+  return {
+    id: "PRRC_fixture",
+    createdAt: "2026-09-06T07:13:05Z",
+    databaseId: null,
+    author: "squiz",
+    body,
+  };
 }
 
 function raised(id: string, finding: LineFinding, ...replies: string[]): ReviewThread {

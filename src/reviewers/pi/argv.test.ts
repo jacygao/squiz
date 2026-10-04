@@ -21,6 +21,7 @@ const invocation: Invocation = {
   depth: "read",
   thinking: "medium",
   roundSpace: undefined,
+  terminal: "none",
 };
 
 const depths: readonly Depth[] = ["read", "deep"];
@@ -68,11 +69,11 @@ test("the command line is the one the specification gives", () => {
   assert.deepEqual(argv(invocation), {
     command: "pi",
     directory: "/tmp/squiz/worktree",
+    stdin: "/dev/null",
     args: [
       "--print",
       "--mode",
       "json",
-      "--no-session",
       "--session-dir",
       ".squiz/agent-7/session",
       "--no-approve",
@@ -88,6 +89,55 @@ test("the command line is the one the specification gives", () => {
       "Review pull request 142.",
     ],
   });
+});
+
+/**
+ * With stdin inherited, `pi --print` blocks forever and emits nothing: no output,
+ * no error and no exit. A reviewer with no terminal is the one that runs in print
+ * mode, so it is the one whose stdin has to be `/dev/null`.
+ */
+test("a reviewer with no terminal runs in print mode, with stdin from /dev/null", () => {
+  for (const depth of depths) {
+    const line = argv({ ...invocation, depth, terminal: "none" });
+    assert.ok(line.args.includes("--print"), `depth ${depth} with no terminal runs interactively`);
+    assert.equal(line.stdin, "/dev/null", `depth ${depth} runs pi --print with stdin inherited`);
+  }
+});
+
+// A pane line that kept print mode would run headless in the pane and look as
+// if it worked, with nothing for a person to watch or type into.
+test("a reviewer in a pane runs interactively, with the pane as its terminal", () => {
+  for (const depth of depths) {
+    const line = argv({ ...invocation, depth, terminal: "pane" });
+    assert.ok(!line.args.includes("--print"), `depth ${depth} in a pane runs in print mode`);
+    assert.ok(!line.args.includes("--mode"), `depth ${depth} in a pane sets an output mode`);
+    assert.equal(line.stdin, "terminal", `depth ${depth} in a pane reads stdin from elsewhere`);
+  }
+});
+
+test("the pane and the detached command lines differ in print mode and nothing else", () => {
+  for (const depth of depths) {
+    const detached = argv({ ...invocation, depth, terminal: "none" });
+    const pane = argv({ ...invocation, depth, terminal: "pane" });
+    assert.deepEqual(detached.args.slice(0, 3), ["--print", "--mode", "json"]);
+    assert.deepEqual(pane.args, detached.args.slice(3), `depth ${depth} differs beyond the mode`);
+    assert.equal(pane.command, detached.command);
+    assert.equal(pane.directory, detached.directory);
+  }
+});
+
+/**
+ * `--no-session` keeps the session in memory, and then there is nothing to
+ * resume. `--session-dir` is where it goes instead of the user's own history.
+ */
+test("the session is kept, in the directory handed over, wherever the reviewer runs", () => {
+  for (const terminal of ["pane", "none"] as const) {
+    for (const depth of depths) {
+      const { args } = argv({ ...invocation, depth, terminal });
+      assert.ok(!args.includes("--no-session"), `${terminal}, ${depth}: the session is not kept`);
+      assert.equal(args[args.indexOf("--session-dir") + 1], invocation.sessionDirectory);
+    }
+  }
 });
 
 test("depth arrives as a parameter, and each value produces its own grant", () => {

@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.21 (draft)
+**Version:** 0.22 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -390,8 +390,7 @@ The bounds:
 - [ ] The plugin ships the review skill. A dispatched subagent whose brief does
       not mention squiz loads it, runs `squiz review`, and works a real pull
       request's threads to exit 0 or 3.
-- [ ] `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor`
-      reports whether the skill or the section is there.
+- [ ] `squiz init` adds the `AGENTS.md` section once.
 
 The hooks and the report:
 
@@ -532,7 +531,9 @@ The marketplace manifest, a README carrying the getting-started steps,
 - [ ] `/squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
       Code, and the Node version, naming whatever is missing. *Changed by
       detached sessions: it also reports whether tmux or Herdr is present.
-      Neither is required.*
+      Neither is required.* It reports whether the plugin's skill or the
+      `AGENTS.md` section tells a coding agent to run `squiz review`, and
+      says so where neither does.
 - [ ] A subagent there produces a reviewed pull request end to end. *Changed by
       detached sessions: a main session does too, woken by a note.*
 - [ ] Squiz reviews its own pull requests in this repository.

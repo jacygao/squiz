@@ -47,7 +47,13 @@ function onTheChange(headline: string): ChangeFinding {
 // spelled out here. A fixture that spelled the marker itself would keep passing
 // after the marker changed, which is the one thing that says who wrote a comment.
 function comment(body: string): ThreadComment {
-  return { databaseId: 1, author: "octocat", body };
+  return {
+    id: "PRRC_fixture",
+    createdAt: "2026-09-06T07:13:05Z",
+    databaseId: 1,
+    author: "octocat",
+    body,
+  };
 }
 
 /** The thread a finding's comment opened, as a later round is handed it. */
