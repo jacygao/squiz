@@ -201,6 +201,14 @@ test("a ps that complains could not tell, whatever it exits with", () => {
     withPsThat("echo 'ps: something went wrong' >&2; exit 1", () => identityOf(process.pid, BOUND_MS)),
     /ps exited 1: ps: something went wrong/u,
   );
+
+  // A row that would otherwise be read, with a complaint beside it.
+  const complaining = "printf 'S    Sun Oct  4 10:50:51 2026\\n'; echo 'ps: something went wrong' >&2; exit 0";
+  withPsThat(complaining, () => {
+    assertUnknown(identityOf(4242, BOUND_MS), /ps exited 0: ps: something went wrong/u);
+    // A start time other than the row's, which read past the complaint would be gone.
+    assertUnknown(stillRunning({ pid: 4242, startedAt: 0 }, BOUND_MS), /ps exited 0: ps: something went wrong/u);
+  });
 });
 
 test("a ps that prints what is not a state and a start time could not tell", () => {

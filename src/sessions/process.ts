@@ -9,8 +9,9 @@
  * **"Gone" is said only where `ps` said it.** `ps` exits non-zero both for a pid
  * no process holds and for a failure of its own, so the exit status alone cannot
  * tell them apart. Gone is the one ending with nothing on either stream. A `ps`
- * that could not be run, ran past its bound, was killed, complained, or printed
- * something that is not a state and a start time could not tell. A caller that
+ * that could not be run, ran past its bound, was killed, said anything on stderr
+ * whatever it exited with, or printed something that is not one row of a state
+ * and a start time could not tell. A caller that
  * read any of those as gone would kill what holds the pid now, or remove what a
  * live process is using.
  *
@@ -95,8 +96,9 @@ function list(pid: number, boundMs: number): Listing {
 
   const said = result.stdout.trim();
   const complaint = result.stderr.trim().split("\n", 1)[0] ?? "";
-  if (result.status !== 0) {
-    if (said === "" && complaint === "") return { outcome: "gone" };
+  if (result.status !== 0 && said === "" && complaint === "") return { outcome: "gone" };
+  // A complaint casts doubt on the row beside it, whatever the exit status.
+  if (result.status !== 0 || complaint !== "") {
     return { outcome: "unknown", reason: `ps exited ${result.status}: ${complaint === "" ? said : complaint}` };
   }
 
