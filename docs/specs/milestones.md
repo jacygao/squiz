@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.19 (draft)
+**Version:** 0.20 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -32,17 +32,15 @@ subagent's hook or shell call.** The review itself stays as it is: findings as
 threads on the pull request, verdicts on replies, rounds, a cap, and a summary.
 So do the commands the coding agent runs to read and answer it.
 
-**The trigger, session and wake code lives in a folder of its own under `src/`,
-and knows nothing about reviews.** Nothing in it imports the review's code, so it
-can be lifted out if a second tool needs it.
+**`docs/specs/review-harness-spec.md` specifies the design**, from version
+0.57. The session, trigger and wake code lives in `src/sessions/`, which knows
+nothing about reviews and imports nothing from the rest of `src/`, so it can be
+lifted out if a second tool needs it.
 
 **The first version leaves three things out:** delivering a note when a session
 starts, rules for acknowledging a note and retrying one, and messages in both
 directions. Hooks for agents other than Claude Code, GitHub Copilot's among them,
 come after M9.
-
-**The harness specification does not yet describe the reviewer as a session.**
-It is revised before the rest of M7 is planned.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
@@ -241,22 +239,25 @@ three-block comment, posted once and never edited.
 
 ## M7 — The reviewer as a detached session
 
-A round runs in a round host: one detached process per episode, outside the
-process tree of whatever started it. Each round's reviewer is a fresh `pi`, run
-as a session of its own, which reads a worktree of its own at the head commit.
-It runs in a tmux or Herdr pane where one exists, and detached otherwise.
+A trigger queues the pull request's state, and a round host runs the round. The
+round host is `squiz host <number>`: one detached process per episode, outside
+the process tree of whatever started it. Each round's reviewer is a fresh `pi`,
+run as a session of its own. It reads a snapshot of the head commit, in a tmux
+or Herdr pane where one exists, and detached otherwise.
 
-The coding agent reaches a review two ways:
+There are two kinds of trigger:
 
-- **`squiz review`**, which starts the round host and waits for the outcome
-- **Squiz's hooks**, on Claude Code's `Stop` for a main session as well as on
-  `SubagentStop`, which start the review and return at once
+- **`squiz review <number>`** queues the state and waits for the round, within
+  one deadline of 540 seconds.
+- **Squiz's hooks**, on Claude Code's `Stop` as well as `SubagentStop`, queue
+  the state and return at once. They never run a round and never block.
 
-So no stall watchdog, hook timeout or hand-back bounds the review. The outcome
-goes to the session that owns the work: the session itself for a main session's
-work, and the subagent's parent for a subagent's work. It arrives as a short
-note in `.squiz/<number>/`, addressed to that session's id, and a wake, by an
-`asyncRewake` waiter or a post to the messaging socket.
+So no stall threshold, hook timeout or hand-back bounds the review. When a round
+records its result, the session that owns the work gets a note in
+`.squiz/<number>/notes/<session id>/` and a wake. The owner is the session
+itself for a main session's work, and the subagent's parent for a subagent's
+work. The wake is a post to the messaging socket or the `Stop` hook's
+`asyncRewake` waiter.
 
 ### Done
 
@@ -273,7 +274,7 @@ all under the hook. That work is done and stays:
   round stops every group it recorded, the ones `pi` detached included.
 - **Shared-tree detection.** Two live episodes on one toplevel disable the
   comparison for that round, and the summary names the other episodes. The
-  snapshot worktree makes it redundant, and M10 removes it.
+  snapshot makes it redundant, and M10 removes it.
 - **The test command in the prompt.** The configured test command is written
   into the reviewer's prompt at depth `deep`. The configuration still refuses
   `deep`, so no round reaches it yet. M11 grants it.
@@ -286,14 +287,9 @@ Its criteria that were met:
 - [x] Two live episodes on one toplevel disable the comparison for that round.
       The round still runs, and the summary names the other episodes in flight.
 
-Its criteria that detached sessions make moot, which M10 removes:
-
-- One deadline bounds each invocation, waiting included. `squiz review` now only
-  waits, and its wait is its bound.
-- A round runs inside a 540-second window from `squiz review` and a 600-second
-  one from the hook, with a 30-second cap on pre-review calls, a 60-second
-  posting reserve, and a `timeout` default per path.
-- Each round's state records `postingSeconds`.
+Its criteria about the 600-second window a hook's round ran in, and the
+`timeout` default that differed by path, are moot: no round runs inside a hook
+or a shell call. M10 removes what they bound.
 
 ### Spikes
 
@@ -310,88 +306,115 @@ Three it rests on are answered:
 
 ### Acceptance criteria
 
-The findings:
+The findings, each in `docs/notes/` before the part that rests on it is built:
 
-- [ ] **S4 has a finding in `docs/notes/`.** It says which processes Herdr's
-      pane close and tmux's `kill-window` reach. It also says whether a pane
-      returns to its shell when an agent started by `herdr agent start` exits,
-      and whether tmux's `pane-died` hook fires on every exit and gives the exit
-      status.
-- [ ] Whether a wake started from a `SubagentStop` hook reaches the subagent's
-      parent, and by which of the two routes, has a finding in `docs/notes/`.
-- [ ] The harness specification's remaining prerequisite for `squiz review`,
-      whether a subagent handed a long exit-2 output works every thread, has a
-      finding in `docs/notes/`.
+- [ ] **What closing a pane reaches.** Which processes Herdr's pane close and
+      tmux's window close signal, whether a shell `pi` started in a session of
+      its own escapes them, and whether Herdr returns a pane to its shell when
+      the agent exits.
+- [ ] **Whether the socket wake can reach a subagent's parent**, that is,
+      whether a `SubagentStop` hook's environment carries the parent's
+      `CLAUDE_CODE_MESSAGING_SOCKET`.
+- [ ] **What a snapshot costs**: how long `git worktree add` and its removal
+      take on a large repository.
+- [ ] **Whether a subagent handed a long exit-2 output works every thread.**
 
-The session and its reviewer:
+The round host and the reviewer:
 
-- [ ] The trigger, session and wake code lives in its own folder under `src/`
-      and imports nothing of the review's. A test holds this.
-- [ ] The round host outlives the call that started it. It runs a round for each
-      state it is asked to review, records each outcome, and ends when the
-      episode closes or its worktree is gone.
-- [ ] A state records whether it is being reviewed, reviewed, or failed.
+- [ ] `src/sessions/` starts and finds sessions, closes panes, reads a hook's
+      payload, and writes and delivers notes. It imports nothing from the rest
+      of `src/`, and a test fails on any import that reaches out of it.
+- [ ] A trigger that queues a state starts a round host where none is running.
+      The host outlives the call that started it, holds `host.lock`, takes
+      queued states oldest first, and exits when nothing is left queued or its
+      worktree is gone. Two triggers that each start one leave one running.
+- [ ] Each state's record is queued, reviewing, reviewed, failed or not
+      reviewed, as the harness specification's state file sets out.
 - [ ] Every reviewer, at every depth, reads a worktree of its own, detached at
-      the state's head commit. Nothing else writes to it, and the round removes
-      it afterwards.
-- [ ] The tracked-file comparison, the `HEAD` comparison and the refused calls
-      apply to that snapshot. An edit the coding agent makes to its own
-      worktree while the reviewer runs appears in no round's comparison.
+      the state's head commit, in `.squiz/<number>/rounds/<k>/tree/`. The round
+      host removes it when the round ends, whatever the round became.
+- [ ] The tracked-file comparison, the `HEAD` comparison, the refused calls and
+      the shell-group record apply to that snapshot. An edit the coding agent
+      makes to its own worktree while the reviewer runs appears in no round's
+      comparison.
 - [ ] Each round's reviewer runs in a tmux pane inside tmux, in a Herdr pane
-      inside Herdr, and detached otherwise.
+      inside Herdr, and detached otherwise, and detached where no pane can be
+      opened.
 - [ ] Its pane closes when its review ends. The command that resumes its session
       is in `.squiz/<number>/rounds/<k>/resume.txt` and on its line in
       `squiz status`.
 - [ ] The reviewer's extension writes every accepted report, every refusal and
-      the usage of every assistant message to a report file. The round reads
-      that file, and a test holds it equal to the JSON stream on a recorded run.
+      the usage of every assistant message to the round's report file, and the
+      round reads that file.
 - [ ] The extension ends the reviewer after `finish_review`. After
       `agent_settled` with no `finish_review`, it records an unfinished end and
       ends the reviewer.
-- [ ] A reviewer stopped from outside has its session stopped and every shell
-      group it recorded signalled.
+- [ ] A round host that died is found by its pid and start time. The recovery
+      that finds its round stops the orphaned reviewer and its recorded shell
+      groups, confirms they are gone, removes the snapshot, and records the
+      round failed, with no failure comment.
+
+The bounds:
+
+- [ ] A round has at most 30 seconds before the review, the time bound for the
+      review, and a posting reserve of 60 seconds, each bounded on its own. No
+      call to GitHub takes more than 30 seconds.
+- [ ] `timeout` defaults to 900 seconds and accepts 60 to 3,600.
+- [ ] Each round's state records `postingSeconds`.
 
 `squiz review`, `squiz status` and the failure comment:
 
-- [ ] `squiz review` exits 0, 2, 3 and 1 in the cases the harness specification
-      gives, and 4 when its wait runs out. A rerun attaches to the same round.
+- [ ] `squiz review` waits within one deadline of 540 seconds for the whole
+      invocation. It exits 0, 2, 3 and 1 in the cases the harness specification
+      gives, and 4 where its deadline arrives first. The next run returns the
+      round's result.
 - [ ] A run on a closed episode runs no round and prints the close. A run on a
-      state under review waits for that review, and a run on a state already
-      reviewed returns its result without a round.
-- [ ] A new commit, or a new reply on one of the reviewer's threads, starts a
-      round. A disputed finding with no commit after it is ruled `withdrawn` or
-      `open`, and the round counts against the cap.
-- [ ] A failed review, or one whose round host has died, is retried by the next
-      `squiz review` or trigger. A reviewed state is never reviewed again.
+      state queued or under review waits for it, and a run on a state already
+      reviewed returns its result without queueing anything.
+- [ ] A new commit, or a new reply on one of the reviewer's threads, is a new
+      state and starts a round. A disputed finding with no commit after it is
+      ruled `withdrawn` or `open`, and the round counts against the cap.
+- [ ] A failed state is retried only on a fresh request: a new commit, a new
+      reply, or a run of `squiz review`. A hook firing on a failed state queues
+      nothing, and a failed state gets one note however many times it fails.
 - [ ] One review runs per state, whatever number of triggers fire for it. Two
       firings for one state post one set of threads.
+- [ ] A state queued behind a round is never dropped. It is reviewed, or
+      recorded as not reviewed with the reason.
 - [ ] `squiz status` lists running, finished and failed reviews across
       worktrees, and names each round's reviewer session.
 - [ ] A round that fails posts a failure comment naming what failed and what
-      else it established. Where GitHub cannot be reached, stderr carries it
-      instead.
+      else it established, and the command prints the same reason on stderr.
+      Where GitHub cannot be reached, or the posting reserve is spent, stderr is
+      the only channel.
 - [ ] The plugin ships the review skill. A dispatched subagent whose brief does
       not mention squiz loads it, runs `squiz review`, and works a real pull
       request's threads to exit 0 or 3.
 - [ ] `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor`
       reports whether the skill or the section is there.
 
-The triggers and the report:
+The hooks and the report:
 
-- [ ] A main session's turn ending on a branch with a pull request starts a
-      review of its state, and so does a subagent's.
-- [ ] A turn on a branch with no pull request starts nothing. A turn on a state
-      already reviewed or under review starts no second review.
-- [ ] The hook returns without waiting for the round, and no longer runs a round
-      as its child.
-- [ ] When a round ends, the round host writes the note to the session that owns
-      the work. It names the pull request, the head commit, the outcome, the
-      open threads, and the command that reads them.
-- [ ] An idle main session is woken with the note. It works the threads to exit
-      0 or 3 without running `squiz review` itself.
-- [ ] For a subagent's work, the parent session is woken with the note.
-- [ ] A note whose session was never woken loses nothing: `squiz review` reads
-      the same outcome from the pull request and the recorded state.
+- [ ] `hooks/hooks.json` registers `squiz hook` on `Stop`, in the background
+      with `asyncRewake`, and on `SubagentStop`. A turn ending on a branch with
+      a pull request queues its state, from a main session and from a subagent.
+- [ ] The hook exits 0 whatever it found. It never runs a round and never
+      blocks. A turn that pushed nothing, or a firing for a state already
+      queued, reviewed or failed, queues nothing.
+- [ ] The hook records the session that owns the work: the session itself on
+      `Stop`, with its messaging socket where it has one, and on `SubagentStop`
+      the dispatching session and the subagent.
+- [ ] When a round records its result, the round host writes one note for that
+      owner, under a temporary name and renamed into place. It names the pull
+      request, the head commit and, for a subagent's work, the subagent, and
+      its text points to `squiz review`. It carries no finding.
+- [ ] An idle main session starts a turn with the note's text, by the messaging
+      socket or by its newest `Stop` waiter. Whichever delivers moves the note
+      into `delivered/`, so the other does not deliver it again.
+- [ ] For a subagent's work, the note reaches the parent session, by the socket
+      where the hook carries it, and otherwise by the parent's `Stop` waiter.
+- [ ] A note no wake reached stays where it was written, and the owner learns
+      the result from `squiz review` or `squiz status`.
 
 CI:
 
@@ -401,59 +424,63 @@ CI:
 
 ## M10 — The subagent-era workarounds removed
 
-What was there only because the reviewer ran inside a hook or a shell call goes,
-and nothing of it stays as dead code. Every issue held while squiz was paused is
-built or closed.
+The cleanup that follows M7: what reviewer sessions make redundant goes, from
+the harness specification and from the code, and nothing of it stays as dead
+code. Every issue held while squiz was paused gets a disposition.
+
+The 540-second deadline of `squiz review`, the 30-second and 60-second bounds,
+`postingSeconds`, and the 900-second time bound with its 60 to 3,600 range all
+stay.
 
 ### Acceptance criteria
 
 - [ ] **`src/` and the tests are audited against M7's design.** Every
-      implementation the detached sessions make redundant is removed, and the
+      implementation the reviewer sessions make redundant is removed, and the
       pull request lists each removed piece. Nothing redundant is left behind.
-      The candidates found so far:
-  - the round's windows and their shares, `src/loop/window.ts`, and the test
-    that holds the hook's registered timeout to its window
-  - the hook-path timing that differs from the command path's, including the
-    480-second ceiling on the time bound, which becomes a wall-clock guard on a
-    runaway round, with no ceiling
-  - the bounds that exist to stay under the stall watchdog, wherever
-    `src/reviewers/deadline.ts` serves only them
-  - the blocking reason, `src/loop/reason.ts`, the hook's exit 2, and every
-    assumption that a block reaches the agent a subagent handed back to
-  - the reviewer run as a child of the hook, in `src/hook/hook.ts`
-  - the episode keyed on the subagent's `agent_id`, in `src/hook/payload.ts`,
-    and the handling of a duplicate episode for a firing the session never
-    dispatched
-  - shared-tree detection and the round-in-flight marker,
-    `src/worktree/shared-tree.ts` and `unmarkedBy` in `src/hook/hook.ts`, which
-    the snapshot worktree makes redundant
-  - every test that exists only for one of the above
-- [ ] The harness specification no longer describes anything removed.
-- [ ] Every issue below is built or closed, with the reason on the issue.
+      The harness specification names these:
+  - **The hook-path timing and windows.** The 600-second window a hook's round
+    ran in, its 540-second reviewer cap and the per-path `timeout` cap, in
+    `src/loop/window.ts`, and the hook's registration test.
+  - **The hand-back assumptions.** The hook's exit-2 block and its blocking
+    reason in `src/loop/reason.ts`, the table mapping a review's exit to the
+    hook's, and the reading that auto mode drops a block after the hand-back.
+  - **Duplicate-episode handling.** Shared-tree detection in
+    `src/worktree/shared-tree.ts`, the other-episodes and could-not-tell lists
+    the state file keeps for it, the Notes items built from them, and the
+    comparison switched off in a shared tree.
+  - **The reviewer as a child of the hook.** The round started from
+    `squiz hook` in `src/hook/hook.ts`, and the reliance on the runtime
+    signalling the hook's process tree to stop a reviewer.
+  - **The watchdog-driven bounds.** Sizing any bound against the subagent stall
+    threshold, and the test holding the hook's window to its declared timeout.
+  - **Every test that exists only for one of the above.**
+- [ ] The harness specification describes none of what was removed.
+- [ ] **Every issue below has its disposition recorded on the issue:**
+      implemented, closed with the reason, reassigned to a later milestone, or
+      explicitly held with the reason.
 
 ### Issues to re-judge
 
-| Issue | What it is | Expected here |
+| Issue | What it is | Expected disposition |
 |---|---|---|
-| #278 | A block reaches no coding agent | Closed by M7's wake for a main session and a subagent's parent, and by `squiz review` for a subagent |
+| #278 | A block reaches no coding agent | Closed: M7's note and wake reach a main session and a subagent's parent, and `squiz review` reaches a subagent |
 | #273 | A round that fails leaves no trace on the pull request | Closed by M7's failure comment |
-| #265 | A subagent the session never dispatched starts a round of its own | Moot once one review runs per state and the episode keys on the pull request |
-| #297 | A reviewer cut short kept running for nine minutes, and the watchdog cancelled the hook | The watchdog half is moot. Whether a stopped reviewer is gone within the grace is re-judged against stopping its session and its recorded shell groups |
-| #280 | Reviews run to within seconds of the time bound | Re-judged once the ceiling goes. Measuring #281's effect on time may remain |
-| #281 | Rewrite the review charter around a defined method | Not caused by the subagent model. Built here or after, by the owner's call |
-| #260 | Report a marker a blocked round could not write | Moot once no round blocks and the marker is gone |
-| #113 | Accept depth `deep` | Built in M11 |
-| #244 | Name the reviewer's refused calls in the summary's Notes | Still held until dogfooding shows a refused call |
+| #265 | A subagent the session never dispatched starts a round of its own | Closed: one review runs per state, and the episode keys on the pull request |
+| #297 | A reviewer cut short kept running for nine minutes, and the watchdog cancelled the hook | The watchdog half is moot. Whether a stopped reviewer is gone within the grace is judged against stopping its session and its recorded shell groups |
+| #280 | Reviews run to within seconds of the time bound | Judged against the 900-second default. Measuring #281's effect on time may remain |
+| #281 | Rewrite the review charter around a defined method | Not caused by the subagent model. Implemented here, or reassigned, by the owner's call |
+| #260 | Report a marker a blocked round could not write | Closed: no round blocks |
+| #113 | Accept depth `deep` | Reassigned to M11 |
+| #244 | Name the reviewer's refused calls in the summary's Notes | Held until M9's dogfooding shows a refused call |
 | #293 | Check the DeepSeek balance the reviewer runs on | Needs a person, and depends on nothing here |
 
 ## M11 — Depth `deep`
 
-The `bash` grant, behind the tracked-file comparison that M7 takes on the
-reviewer's own worktree.
+The `bash` grant, on the snapshot M7 gives every reviewer.
 
-A snapshot worktree has no installed dependencies. What it costs to install them
-before the tests run, on this repository and a larger one, is measured before
-M11 is planned.
+The snapshot holds no installed dependencies, so the configured test command
+installs or builds what it needs before the tests run. What that adds to a round
+is measured before M11 is planned.
 
 ### Acceptance criteria
 
@@ -461,24 +488,27 @@ M11 is planned.
       command reaches the reviewer.
 - [ ] A write the reviewer makes through the shell is detected on its snapshot
       and named in the summary.
+- [ ] A configured test command that works in a fresh checkout runs to
+      completion in the snapshot.
 
 ## M8 — Episode boundaries
 
-The token bound, enforced while a round runs, and an audit that every failure
-reaches somewhere a person reads. It needs M7's round host and extension.
+The token bound, and an audit that every failure reaches somewhere a person
+reads.
+
+The token bound is 10,000,000 tokens a round. It is read before a round starts
+and again when a round records what it spent. A running round is never killed
+for its tokens: the bound stops the next round, and the time bound is what caps
+a round that runs away.
 
 ### Acceptance criteria
 
 - [ ] An episode whose round reached the token bound closes with the findings it
-      has, and the summary says the bound was reached. *Kept.*
-- [ ] The reviewer's extension stops a round once it reaches the token bound.
-      *Added, because from M10 no window bounds a round. Whether an extension
-      can stop a turn in flight, or only between messages, is recorded as a
-      finding first. Where it is only between messages, the finding says how
-      far past the bound a round runs, and this criterion is held to that.*
+      has, and the summary says the bound was reached.
+- [ ] The tokens an attempt that was no round spent count against the bound.
 - [ ] No failure path is silent. *Changed by detached sessions: the round host
       has no caller's stderr. The audit names, for each failure path, which of
-      the failure comment, `squiz status`, the round host's log and
+      the failure comment, `squiz status`, `.squiz/<number>/host.log` and
       `squiz review`'s stderr carries it.*
 
 ## M9 — Install and dogfood
@@ -495,8 +525,7 @@ The marketplace manifest, a README carrying the getting-started steps,
       detached sessions: it also reports whether tmux or Herdr is present.
       Neither is required.*
 - [ ] A subagent there produces a reviewed pull request end to end. *Changed by
-      detached sessions: a main session does too, woken rather than running
-      `squiz review` itself.*
+      detached sessions: a main session does too, woken by a note.*
 - [ ] Squiz reviews its own pull requests in this repository.
 
 ### Issues
