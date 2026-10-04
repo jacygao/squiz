@@ -753,10 +753,29 @@ of the review.
 review, and nothing records it.
 
 **The round host stops a reviewer in a pane the way it stops one it started
-itself.** At the time bound it signals the reviewer's process group, found from
-the pid the backend reports for the pane, and the groups the reviewer's shells
-recorded, as Confinement sets out. Then it closes the pane. Which processes a pane
-close reaches on its own is not established (§ 8 Prerequisites).
+itself.** At the time bound it signals the reviewer's process group, then the
+groups the reviewer's shells recorded, as Confinement sets out, and then it closes
+the pane. It reads the reviewer's group from the backend while `pi` runs:
+
+| Backend | Where the reviewer's group comes from |
+|---|---|
+| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is `pi`, so this is `pi`'s own pid and leads its group. |
+| Herdr | `foreground_process_group_id` from `herdr pane process-info`. Its `shell_pid` is the pane's shell, whose group does not hold `pi`. |
+
+A pane close is not relied on to stop anything. tmux's `kill-window` sends one
+`SIGHUP` to the window's command and nothing more, so a command that ignores it
+runs on with the window gone. Herdr's `pane close` sends `SIGHUP`, then `SIGTERM`,
+then `SIGKILL`, to every process in the pane's shell session. Neither reaches a
+process in a session of its own.
+
+**`pi` stops its own shells when it is closed or exits**, by sending `SIGKILL` to
+the group of each shell it started. A process one of those shells moved into a
+session of its own is reached by nothing: not the pane close, not `pi`, and not
+the recorded groups, which name the shells' groups and not that session. It runs
+on after the round. Nothing in this version detects it.
+
+**When `pi` exits, Herdr returns the pane to its shell** and no longer tracks the
+agent, so the round host closes the pane itself.
 
 ### The snapshot
 
@@ -2145,13 +2164,12 @@ This is settled by measurement on one machine:
 
 - A snapshot of 63,424 tracked files adds in 4.6 to 6.1 seconds and removes in
   2.9, as § 4 The snapshot tabulates.
+- What a tmux window close and a Herdr pane close reach, and where each backend
+  reports the reviewer's group, as § 4 The reviewer session sets out. Measured
+  with stand-ins and `pi` 0.85.1, with no model call.
 
 These remain open:
 
-- **What closing a pane reaches.** Which processes Herdr's pane close and tmux's
-  window close signal, whether a shell `pi` started in a session of its own
-  escapes them, and whether Herdr returns a pane to its shell when the agent
-  exits, as its documentation says.
 - **What installing dependencies before tests at `deep` adds to a round.**
 - **What a snapshot costs on a repository of several hundred thousand files.**
 - **Linux.** The detach and pane probes ran on macOS alone.
