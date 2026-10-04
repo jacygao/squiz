@@ -121,6 +121,7 @@ function invocationIn(tree: string): Invocation {
     charterFile,
     prompt: "# Review pull request #1\n\nReach for the calls.",
     sessionDirectory: ".squiz/agent-1/session",
+    reportsFile: ".squiz/1/rounds/1/reports.jsonl",
     scratchDirectory: ".squiz/agent-1/scratch",
     depth: "deep",
     thinking: "medium",
@@ -194,7 +195,8 @@ function piIn(under: string): string {
 /**
  * The stand-in for `pi`: it loads the extension named on the command line,
  * offers each call it makes to the handler the extension subscribed, and runs
- * only what the handler let through.
+ * only what the handler let through. Its message and its reports go through the
+ * extension too, which is what writes them to the report file the round reads.
  *
  * The dispatch is `pi`'s own: the first handler that blocks wins, a handler that
  * throws blocks as well, and a blocked call is answered with an error result
@@ -238,11 +240,13 @@ async function review() {
 
   const tools = new Map();
   const handlers = [];
+  const ended = [];
   const loaded = await import(extension);
   loaded.default({
     registerTool: (tool) => tools.set(tool.name, tool),
     on: (event, handler) => {
       if (event === "tool_call") handlers.push(handler);
+      if (event === "message_end") ended.push(handler);
     },
   });
   if (handlers.length === 0) {
@@ -310,7 +314,7 @@ async function review() {
     reference: refused[0] || "the reviewer was refused nothing",
   };
 
-  say({
+  const message = {
     type: "message_end",
     message: {
       role: "assistant",
@@ -326,18 +330,12 @@ async function review() {
         cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
       },
     },
-  });
-
-  const answer = (id, toolName, details) =>
-    say({
-      type: "tool_execution_end",
-      toolCallId: id,
-      toolName,
-      isError: false,
-      result: { content: [{ type: "text", text: "Reported" }], details },
-    });
-  answer("f1", "report_finding", finding);
-  answer("f2", "finish_review", {});
+  };
+  for (const handler of ended) handler(message);
+  await tools.get("report_finding").execute("f1", finding);
+  await tools.get("finish_review").execute("f2", {});
+  // The message the reviewer closes its run with, after the finish.
+  for (const handler of ended) handler(message);
 }
 
 review().catch((cause) => give(cause instanceof Error ? cause.message : String(cause)));

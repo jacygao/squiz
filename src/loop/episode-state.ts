@@ -179,20 +179,22 @@ export function recordRound(state: EpisodeState, round: RoundRecord): EpisodeSta
  * The state with `cost` added to what the episode spent outside its rounds.
  *
  * The round count does not move. This is where an attempt that was not a round
- * puts what it spent, so that the token bound sees it and the cap does not.
+ * puts what it spent, so that the token bound sees it and the cap does not. A
+ * floor added to anything is a floor.
  */
 export function recordSpendOutsideRounds(
   state: EpisodeState,
   cost: RoundCost,
 ): EpisodeState {
   const spent = state.spentOutsideRounds;
+  const sum = {
+    dollars: spent.dollars + cost.dollars,
+    tokens: spent.tokens + cost.tokens,
+    messages: spent.messages + cost.messages,
+  };
   return {
     ...state,
-    spentOutsideRounds: {
-      dollars: spent.dollars + cost.dollars,
-      tokens: spent.tokens + cost.tokens,
-      messages: spent.messages + cost.messages,
-    },
+    spentOutsideRounds: spent.floor === true || cost.floor === true ? { ...sum, floor: true } : sum,
   };
 }
 
@@ -407,7 +409,10 @@ function costFrom(entry: unknown): ReadCost {
   const messages = entry["messages"];
   if (!isTally(messages)) return { problem: `has "messages" as ${render(messages)}` };
 
-  return { cost: { dollars, tokens, messages } };
+  const floor = entry["floor"];
+  if (floor === undefined) return { cost: { dollars, tokens, messages } };
+  if (floor !== true) return { problem: `has "floor" as ${render(floor)}` };
+  return { cost: { dollars, tokens, messages, floor } };
 }
 
 function unreadable(reason: string): StateRead {

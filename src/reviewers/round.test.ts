@@ -1,19 +1,23 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { type Adapter, type Confinement, type Invocation, unspent } from "./adapter.ts";
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { grants } from "./pi/argv.ts";
-import { parse } from "./pi/parse.ts";
+import { readReports as parse } from "./pi/reports.ts";
+import { REPORTS_VARIABLE } from "./pi/report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
 import { type Round, runRound } from "./round.ts";
 
 /** The scratch space, named relative to the work tree as the harness names it. */
 const scratchDirectory = ".squiz/agent-1/scratch";
+
+/** The report file, named relative to the work tree as the harness names it. */
+const reportsFile = ".squiz/1/rounds/1/reports.jsonl";
 
 /**
  * A short bound, in seconds.
@@ -57,7 +61,7 @@ test("a review comes back with its findings, its verdicts and what it spent", as
     assert.equal(round.outcome, "reviewed");
     assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], review.findings);
     assert.deepEqual(round.outcome === "reviewed" ? round.verdicts : [], review.verdicts);
-    assert.deepEqual(round.cost, { dollars: 0.002, tokens: 100, messages: 1 });
+    assert.deepEqual(round.cost, { dollars: 0.003, tokens: 200, messages: 2 });
   });
 });
 
@@ -72,7 +76,7 @@ test("a reviewer that floods and does not stop is killed at the bound", async ()
     const round = await runRound(reviewer(flooding).adapter, at(tree), BOUND);
     assert.deepEqual(round, {
       outcome: "timed-out",
-      cost: spentOnce,
+      cost: { ...spentOnce, floor: true },
       seconds: BOUND,
       refusals: 0,
       findings: review.findings,
@@ -91,7 +95,7 @@ test("a reviewer that says nothing and does not stop is killed at the bound", as
     const round = await runRound(reviewer(silent).adapter, at(tree), BOUND);
     assert.deepEqual(round, {
       outcome: "timed-out",
-      cost: unspent,
+      cost: { ...unspent, floor: true },
       seconds: BOUND,
       refusals: 0,
       findings: [],
@@ -341,6 +345,7 @@ test("a process that ran and said nothing and a spawn that failed are both setup
         args: [],
         directory: invocation.directory,
         stdin: "/dev/null",
+        environment: {},
       }),
       parse,
       confine: handsNothingOver,
@@ -368,6 +373,7 @@ test("a command line that needs a terminal is not started without one", async ()
         args: ["-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "")`],
         directory: invocation.directory,
         stdin: "terminal",
+        environment: {},
       }),
       parse,
       confine: handsNothingOver,
@@ -394,7 +400,7 @@ test("a round that errored and recovered is a review", async () => {
 test("both attempts are paid for, and the round's cost is the two together", async () => {
   await inATree(async (tree) => {
     const round = await runRound(reviewer(prose, reviewing).adapter, at(tree), 10);
-    assert.deepEqual(round.cost, { dollars: 0.005, tokens: 200, messages: 2 });
+    assert.deepEqual(round.cost, { dollars: 0.006, tokens: 300, messages: 3 });
   });
 });
 
@@ -434,6 +440,7 @@ test("an attempt that ended past the bound is not tried again", async () => {
           args: ["-e", ""],
           directory: invocation.directory,
           stdin: "/dev/null",
+          environment: {},
         };
       },
       parse: async () => {
@@ -460,6 +467,7 @@ test("a reviewer that is not installed is a setup problem, named as one", async 
         args: [],
         directory: invocation.directory,
         stdin: "/dev/null",
+        environment: {},
       }),
       parse,
       confine: handsNothingOver,
@@ -494,6 +502,7 @@ test("an adapter that throws reading the output is output that could not be read
           args: ["-e", reviewing],
           directory: invocation.directory,
           stdin: "/dev/null",
+          environment: {},
         };
       },
       parse: () => Promise.reject(new Error("the adapter fell over")),
@@ -509,8 +518,8 @@ test("an adapter that throws reading the output is output that could not be read
 
 /**
  * A startup failure takes a different path from a provider that was reached and
- * failed. It never gets as far as the stream: the process exits non-zero with
- * an empty stdout, and its only account of itself is on stderr. Discarding that
+ * failed. It never gets as far as the report file: the process exits non-zero
+ * having written nothing, and its only account of itself is on stderr. Discarding that
  * leaves a typo in a model name reported as a generic bad round, every round,
  * forever.
  */
@@ -587,10 +596,11 @@ test("an adapter that throws before it returns still stops the reviewer", async 
           args: ["-e", `/* ${marker} */ setInterval(() => {}, 1000);`],
           directory: invocation.directory,
           stdin: "/dev/null",
+          environment: {},
         };
       },
       // Not an async function: the throw happens before any promise exists.
-      parse: (_stdout, soFar) => {
+      parse: (_reports, soFar) => {
         soFar?.({
           cost: { dollars: 0.004, tokens: 100, messages: 1 },
           findings: [],
@@ -704,6 +714,146 @@ test("a confinement that could not be put in place is a setup problem, and nothi
   });
 });
 
+/** A missing report file is a reviewer that reported nothing, never a clean review. */
+test("a reviewer that exits cleanly leaving no report file is not a review", async () => {
+  await inATree(async (tree) => {
+    const removing = `require("node:fs").rmSync(process.env.${REPORTS_VARIABLE}); process.exit(0);`;
+    const round = await runRound(reviewer(removing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.match(round.outcome === "setup" ? round.reason : "", /completed no message/u);
+  });
+});
+
+test("a report file an earlier run left is not read as this run's", async () => {
+  await inATree(async (tree) => {
+    const left = join(tree, reportsFile);
+    mkdirSync(dirname(left), { recursive: true });
+    writeFileSync(left, reportingMessage + reported + closing);
+    const round = await runRound(reviewer(sayingNothing).adapter, at(tree), 10);
+    assert.equal(round.outcome, "setup", accountOf(round));
+  });
+});
+
+test("what the command line puts on the environment reaches the reviewer", async () => {
+  await inATree(async (tree) => {
+    const running = reviewer(reporting("process.env.SQUIZ_PROBE"));
+    const adapter: Adapter = {
+      ...running.adapter,
+      argv: (invocation) => {
+        const line = running.adapter.argv(invocation);
+        return { ...line, environment: { ...line.environment, SQUIZ_PROBE: "from the line" } };
+      },
+    };
+    assert.equal(headlineOf(await runRound(adapter, at(tree), 10)), "from the line");
+  });
+});
+
+/** The file is read while it grows, so a read can land partway through a line. */
+test("a line still being written when the file is read is read once it is whole", async () => {
+  await inATree(async (tree) => {
+    const line = called(REPORT_FINDING, review.findings[0]);
+    const half = Math.floor(line.length / 2);
+    const script = [
+      writing(reportingMessage + line.slice(0, half)),
+      `setTimeout(() => { ${writing(line.slice(half) + called(FINISH_REVIEW, {}) + closing)} }, 300);`,
+    ].join("\n");
+    const round = await runRound(reviewer(script).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], review.findings);
+  });
+});
+
+/** Once the process is gone nothing more of the line is coming. */
+test("a last line with no newline when the reviewer exits fails the round", async () => {
+  await inATree(async (tree) => {
+    const cut = writing(reportingMessage + called(REPORT_FINDING, review.findings[0]) + '{"type":"finish"}');
+    const round = await runRound(reviewer(cut).adapter, at(tree), 10);
+    assert.equal(round.outcome, "unavailable", accountOf(round));
+    assert.match(round.outcome === "unavailable" ? round.reason : "", /partway through a line/u);
+    assert.deepEqual(round.outcome === "unavailable" ? round.findings : [], review.findings);
+  });
+});
+
+/** The same file comes to the same thing whether the run stopped or hung. */
+test("a line that cannot be read fails a round the bound ended with no finish", async () => {
+  await inATree(async (tree) => {
+    const output = reportingMessage + called(REPORT_FINDING, review.findings[0]) + "{not json\n";
+    const round = await runRound(reviewer(hanging(tree, output)).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "unavailable", accountOf(round));
+    assert.match(round.outcome === "unavailable" ? round.reason : "", /could not be read/u);
+    assert.deepEqual(round.outcome === "unavailable" ? round.findings : [], review.findings);
+  });
+});
+
+test("a killed round's findings and its cost come from the same point in the file", async () => {
+  await inATree(async (tree) => {
+    const second = { ...finding, line: 43 };
+    const output =
+      reportingMessage +
+      called(REPORT_FINDING, review.findings[0]) +
+      reportingMessage +
+      called(REPORT_FINDING, second);
+    const round = await runRound(reviewer(hanging(tree, output)).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "timed-out", accountOf(round));
+    assert.deepEqual(round.outcome === "timed-out" ? round.findings : [], [finding, second]);
+    assert.deepEqual(round.cost, { dollars: 0.004, tokens: 200, messages: 2, floor: true });
+  });
+});
+
+/**
+ * What the reviewer wrote after the last read and before it was stopped is part
+ * of the round. This reviewer writes its finish only once it is told to stop,
+ * behind more lines than one read takes, and exits straight after, so only a
+ * read that goes on after the stop reaches it.
+ */
+test("what the reviewer wrote after the last read of its file is read once it is stopped", async () => {
+  await inATree(async (tree) => {
+    const line = JSON.stringify(`${JSON.stringify({ type: "usage", stopReason: "toolUse" })}\n`);
+    const finish = JSON.stringify(called(FINISH_REVIEW, {}));
+    const late = [
+      `const tail = ${line}.repeat(100000) + ${finish};`,
+      `process.on("SIGTERM", () => { require("node:fs").appendFileSync(process.env.${REPORTS_VARIABLE}, tail); process.exit(0); });`,
+      "setInterval(() => {}, 1000);",
+      writing(reportingMessage + called(REPORT_FINDING, review.findings[0])),
+    ].join("\n");
+    const round = await runRound(reviewer(late).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+  });
+});
+
+/**
+ * The closing message comes after the finish, and the file can refuse its usage
+ * with nothing written to say so. A finish is no proof that the cost is whole.
+ */
+test("a review whose closing message left no usage in the file has a cost that is a floor", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(writing(reportingMessage + reported)).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0.002, tokens: 100, messages: 1, floor: true });
+  });
+});
+
+/**
+ * A request in flight when the reviewer was stopped was spent and is never
+ * reported, so a file ending on a message's usage proves nothing at the bound.
+ */
+test("a review the bound ended after its finish has a cost that is a floor", async () => {
+  await inATree(async (tree) => {
+    const output = reportingMessage + reported + closing;
+    const round = await runRound(reviewer(hanging(tree, output)).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(round.cost.floor, true);
+  });
+});
+
+test("a round whose retry's cost is a floor has a cost that is a floor", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(reviewer(prose, writing(reportingMessage + reported)).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0.005, tokens: 200, messages: 2, floor: true });
+  });
+});
+
 /** The identifier of the reviewer itself, as the reviewer recorded it. */
 function reviewerIn(tree: string): number {
   const reviewer = Number(readFileSync(join(tree, "pids"), "utf8").split(" ")[0]);
@@ -787,8 +937,8 @@ function deaf(tree: string): string {
 
 /** A reviewer that reviews and leaves while its tool is still running. */
 function leavingEarly(tree: string): string {
-  const answer = JSON.stringify(reportingMessage + reported);
-  return withTool(tree, `process.stdout.write(${answer}, () => process.exit(0));`);
+  const answer = reportingMessage + reported + closing;
+  return withTool(tree, `${appending(answer)}\nprocess.exit(0);`);
 }
 
 /** A reviewer that answers the signal, while the tool it started does not. */
@@ -831,8 +981,8 @@ function detaching(tree: string, andThen: string): string {
 
 /** A reviewer that detaches a tool, reviews, and leaves while the tool is running. */
 function detachingAndLeaving(tree: string): string {
-  const answer = JSON.stringify(reportingMessage + reported);
-  return detaching(tree, `process.stdout.write(${answer}, () => process.exit(0));`);
+  const answer = reportingMessage + reported + closing;
+  return detaching(tree, `${appending(answer)}\nprocess.exit(0);`);
 }
 
 /** A reviewer that never reached the model, which says so on stderr and exits. */
@@ -896,6 +1046,7 @@ function reviewer(...scripts: readonly string[]): Running {
         args: ["-e", script],
         directory: invocation.directory,
         stdin: "/dev/null",
+        environment: { [REPORTS_VARIABLE]: invocation.reportsFile },
       };
     },
     confine: handsNothingOver,
@@ -911,6 +1062,7 @@ function at(tree: string): Invocation {
     charterFile: join(tree, "charter.md"),
     prompt: "Review pull request 142.",
     sessionDirectory: ".squiz/agent-1/session",
+    reportsFile,
     scratchDirectory,
     depth: "read",
     thinking: "medium",
@@ -957,47 +1109,49 @@ function headlineOf(round: Round): string {
   return finding.headline;
 }
 
-/** One `message_end` line, as `pi` writes it. */
+/** One assistant message's line of the report file, priced at `spend` against 100 tokens. */
 function said(text: string, stopReason: string, spend: number, errorMessage?: string): string {
+  void text;
   return `${JSON.stringify({
-    type: "message_end",
-    message: {
-      role: "assistant",
-      content: [{ type: "text", text }],
-      stopReason,
-      ...(errorMessage === undefined ? {} : { errorMessage }),
-      usage: {
-        input: spend === 0 ? 0 : 100,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: spend === 0 ? 0 : 100,
-        cost: { input: spend, output: 0, cacheRead: 0, cacheWrite: 0, total: spend },
-      },
+    type: "usage",
+    stopReason,
+    ...(errorMessage === undefined ? {} : { errorMessage }),
+    model: "stand-in",
+    usage: {
+      input: spend === 0 ? 0 : 100,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: spend === 0 ? 0 : 100,
+      cost: { input: spend, output: 0, cacheRead: 0, cacheWrite: 0, total: spend },
     },
   })}\n`;
 }
 
-/** A script writing the text given to stdout and exiting. */
-function writing(text: string): string {
-  return `process.stdout.write(${JSON.stringify(text)});`;
+/** A statement appending the text given to the report file the round named. */
+function appending(text: string): string {
+  return `require("node:fs").appendFileSync(process.env.${REPORTS_VARIABLE}, ${JSON.stringify(text)});`;
 }
 
-/** One reporting call answered, as `pi` writes the line it arrives on. */
+/** A script appending the text given to the report file and exiting. */
+function writing(text: string): string {
+  return appending(text);
+}
+
+/** One reporting call's line, as the extension writes it once the call accepted it. */
 function called(toolName: string, details: unknown, id = "call_1"): string {
-  return `${JSON.stringify({
-    type: "tool_execution_end",
-    toolCallId: id,
-    toolName,
-    isError: false,
-    result: { content: [{ type: "text", text: "Reported" }], details },
-  })}\n`;
+  void id;
+  if (toolName === FINISH_REVIEW) return `${JSON.stringify({ type: "finish" })}\n`;
+  return `${JSON.stringify({ type: "report", call: toolName, value: details })}\n`;
 }
 
 /** The assistant message the reporting calls hang off, priced at a round. */
 const reportingMessage = said("reporting", "toolUse", 0.002);
 
-/** The whole review reported, as the calls it arrives in. */
+/** The message a reviewer closes its run with, after the finish. */
+const closing = said("that is everything", "stop", 0.001);
+
+/** The whole review reported, as the lines it arrives in. */
 const reported =
   review.findings.map((finding) => called(REPORT_FINDING, finding)).join("") +
   review.verdicts.map((verdict) => called(REPORT_VERDICT, verdict)).join("") +
@@ -1010,15 +1164,15 @@ function reporting(expression: string): string {
   return [
     'const fs = require("node:fs");',
     `const headline = String(${expression});`,
-    `process.stdout.write(${JSON.stringify(reportingMessage)});`,
-    `const call = { type: "tool_execution_end", toolCallId: "call_1", toolName: ${JSON.stringify(REPORT_FINDING)}, isError: false, result: { content: [], details: ${finding} } };`,
-    'process.stdout.write(JSON.stringify(call) + "\\n");',
-    `process.stdout.write(${JSON.stringify(called(FINISH_REVIEW, {}))});`,
+    appending(reportingMessage),
+    `const line = { type: "report", call: ${JSON.stringify(REPORT_FINDING)}, value: ${finding} };`,
+    `fs.appendFileSync(process.env.${REPORTS_VARIABLE}, JSON.stringify(line) + "\\n");`,
+    appending(called(FINISH_REVIEW, {}) + closing),
   ].join("\n");
 }
 
-/** A reviewer that reports its review through the calls, and finishes it. */
-const reviewing = writing(reportingMessage + reported);
+/** A reviewer that reports its review through the calls, finishes it, and closes. */
+const reviewing = writing(reportingMessage + reported + closing);
 
 /** A reviewer whose request failed every time, and that completed no message. */
 const refusing = writing(said("", "error", 0, "no credential for the provider"));
@@ -1028,7 +1182,7 @@ const sayingNothing = "process.exit(0);";
 
 /** A reviewer whose request failed and was retried, and which then reviewed. */
 const recovering = writing(
-  said("", "error", 0, "503 from the provider").repeat(22) + reportingMessage + reported,
+  said("", "error", 0, "503 from the provider").repeat(22) + reportingMessage + reported + closing,
 );
 
 /** A reviewer that stopped without finishing its review, having reported nothing. */
@@ -1043,7 +1197,7 @@ const halfway = writing(
 
 /**
  * A reviewer that answers the call finishing its review first, writes the reports
- * of the same message a moment later, and closes its output on a message of its
+ * of the same message a moment later, and closes its run on a message of its
  * own.
  *
  * It is what a run left to end itself writes after the declaration: the calls of
@@ -1052,7 +1206,6 @@ const halfway = writing(
  */
 function finishingThenClosing(reports: readonly unknown[]): string {
   const rest = reports.map((report, at) => called(REPORT_FINDING, report, `r${at}`)).join("");
-  const closing = said("that is everything", "stop", 0.001);
   return [
     writing(reportingMessage + called(FINISH_REVIEW, {}, "f")),
     `setTimeout(() => { ${writing(rest + closing)} }, 300);`,
@@ -1060,8 +1213,7 @@ function finishingThenClosing(reports: readonly unknown[]): string {
 }
 
 /**
- * A reviewer that writes what it is given, answers no signal and never closes its
- * output.
+ * A reviewer that writes what it is given, answers no signal and never exits.
  *
  * It goes deaf before it writes anything, so that a round can never end it by
  * signalling a reviewer that had not installed its handler yet. It records its
@@ -1105,8 +1257,8 @@ function brokenThenHanging(tree: string): string {
   return hanging(tree, brokenReview);
 }
 
-/** A reviewer whose review is that one, and which closes its own output. */
-const brokenThenClosing = writing(brokenReview + said("that is everything", "stop", 0.001));
+/** A reviewer whose review is that one, and which then exits. */
+const brokenThenClosing = writing(brokenReview + closing);
 
 /** A reviewer that reports a finding and whose provider then gives out. */
 const reportingThenFailing = writing(
@@ -1115,10 +1267,15 @@ const reportingThenFailing = writing(
     said("", "error", 0, "no credential for the provider"),
 );
 
-/** A reviewer that reports one finding, then floods and never stops. */
+/**
+ * A reviewer that reports one finding, then writes to its report file as fast
+ * as it can and never stops. The lines it floods with carry no usage, so the
+ * cost is still the one message's.
+ */
 const flooding = `${writing(reportingMessage + called(REPORT_FINDING, review.findings[0]))}
-const padding = ${JSON.stringify(`${JSON.stringify({ type: "message_update", delta: "x".repeat(400) })}\n`)};
-setInterval(() => { for (let at = 0; at < 200; at += 1) process.stdout.write(padding); }, 1);`;
+const fs = require("node:fs");
+const padding = ${JSON.stringify(`${JSON.stringify({ type: "usage", stopReason: "toolUse" })}\n`.repeat(200))};
+setInterval(() => { fs.appendFileSync(process.env.${REPORTS_VARIABLE}, padding); }, 1);`;
 
 /** A reviewer that writes nothing and never stops, which is the silent hang. */
 const silent = "setInterval(() => {}, 1000);";

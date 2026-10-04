@@ -18,7 +18,6 @@ import {
   type RefusedCommand,
   refusedCommands,
   refusedTools,
-  wasRefused,
 } from "./refusals.ts";
 
 /** One tool call, in the shape `pi` emits it: the fields the handler never reads included. */
@@ -319,29 +318,6 @@ test("splitting into words refuses a reviewer not trying to get around it, and n
 test("the reason tells the reviewer what to do instead", () => {
   assert.match(reasonFor(shell("git commit -m x")), /Report what is wrong with the change/u);
   assert.match(reasonFor(called("write", {})), /Report what is wrong with the change/u);
-});
-
-/**
- * The round counts a refusal off the stream, and `pi` answers a blocked call
- * with the reason as the result's only text.
- */
-test("a refusal is recognised in the result pi answers the blocked call with", () => {
-  const reason = reasonFor(shell("git commit -m x"));
-  assert.equal(wasRefused({ content: [{ type: "text", text: reason }], details: {} }), true);
-});
-
-/** A tool that ran and failed is an error too, and it is not a refusal. */
-test("a tool that failed on its own is not counted as a refusal", () => {
-  const results: readonly unknown[] = [
-    { content: [{ type: "text", text: "src/threads.ts: No such file or directory" }] },
-    { content: [{ type: "text", text: "the finding is scoped to a line and carries no file" }] },
-    { content: [] },
-    { content: "not a list of blocks" },
-    undefined,
-  ];
-  for (const result of results) {
-    assert.equal(wasRefused(result), false, `${JSON.stringify(result)} was counted as a refusal`);
-  }
 });
 
 /**

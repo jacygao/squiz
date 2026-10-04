@@ -261,17 +261,28 @@ const nothingReported: RoundOutput = { findings: [], verdicts: [] };
  * A reviewer that answers inside its bound and then holds on through the round's
  * cleanup.
  *
- * Its output closes at once, so the review is read and the round is left with
- * findings to post. It then ignores the signal that would stop it, so the round
- * spends the grace and the kill after the moment the review had to be over by.
+ * It finishes its review at once, so the round holding the declaration is left
+ * with findings to post. It then ignores the signal that would stop it, so the
+ * round spends the grace and the kill after the moment the review had to be
+ * over by.
  */
 function answersThenHolds(findings: readonly Finding[]): Reviewer {
   return {
     command: "/bin/sh",
     // The wait is short and repeated, because a shell blocked in one long sleep
     // reaches its trap only once that sleep is over.
-    args: ["-c", "trap '' TERM; exec 1>&-; while :; do sleep 0.2; done"],
-    parse: reviews({ findings }).parse,
+    args: ["-c", "trap '' TERM; while :; do sleep 0.2; done"],
+    parse: async (reports, progressSoFar): Promise<ParsedRun> => {
+      progressSoFar?.({
+        cost: ANSWER_COST,
+        findings,
+        verdicts: [],
+        refusals: 0,
+        finished: true,
+        broken: undefined,
+      });
+      return reviews({ findings }).parse(reports, progressSoFar);
+    },
   };
 }
 
@@ -501,6 +512,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
           args: [...(current().args ?? ["-c", "exit 0"])],
           directory: invocation.directory,
           stdin: "/dev/null",
+          environment: {},
         };
       },
       parse: (stdout, progressSoFar) => current().parse(stdout, progressSoFar),

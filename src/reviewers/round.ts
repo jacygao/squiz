@@ -3,9 +3,9 @@
  * return what it found, what it cost, or why it failed.
  *
  * Nothing here knows which CLI is running. The adapter builds the command line
- * and reads the output back, and everything else — the current directory, the
- * scratch space, stdin, the time bound and the one retry — is the same whatever
- * reviewer a project configured.
+ * and reads the report file back, and everything else — the current directory,
+ * the scratch space, stdin, following the report file, the time bound and the
+ * one retry — is the same whatever reviewer a project configured.
  *
  * Nothing throws. Every outcome is a value the caller reads, because the round
  * runs inside a hook that may fail in any way except by preventing the coding
@@ -22,8 +22,8 @@ import {
   type StdioNull,
   type StdioPipe,
 } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 
 import {
@@ -38,6 +38,7 @@ import {
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
+import { follow } from "./follow.ts";
 import {
   KEEPER_VARIABLE,
   RECORD_VARIABLE,
@@ -131,10 +132,13 @@ export type Round = { readonly refusals: number } & (
  */
 export async function runRound(
   adapter: Adapter,
-  invocation: Invocation,
+  handed: Invocation,
   seconds: number,
 ): Promise<Round> {
   const bound = deadlineIn(seconds * 1_000);
+  // Absolute, so that the reviewer and the round name the same file whatever
+  // directory either of them is in.
+  const invocation = { ...handed, reportsFile: resolve(handed.directory, handed.reportsFile) };
   // Absolute, so that TMPDIR still names the scratch space for a reviewer that
   // changes directory, and so the directory is made wherever the harness runs.
   const scratch = resolve(invocation.directory, invocation.scratchDirectory);
@@ -272,8 +276,12 @@ type Attempt = {
  */
 const COMPLAINT_LIMIT = 2_000;
 
+/** How often the report file is read while the reviewer runs. */
+const FOLLOW_MS = 50;
+
 /**
- * One process, read to the end or stopped at the bound.
+ * One process, its report file read to the end or the process stopped at the
+ * bound.
  *
  * Three things confine it, and none is conditional. It runs in the work tree
  * holding the change. `TMPDIR` is the scratch space, which exists before it
@@ -281,10 +289,8 @@ const COMPLAINT_LIMIT = 2_000;
  * forever and emits nothing, and a silent hang looks exactly like a reviewer
  * thinking.
  *
- * Two things watch the bound, because a reviewer fails the round in two
- * opposite ways. One that has gone quiet is caught by the timer. One that
- * floods is caught by the clock read as its output arrives, which is the only
- * reading that happens at all while the loop is busy passing chunks on.
+ * Its output is not read. What it reported is in the report file, which is
+ * emptied before it starts and read as it grows until the process is gone.
  */
 async function attempt(
   adapter: Adapter,
@@ -302,18 +308,28 @@ async function attempt(
       reason: `${line.command} was built to run in a terminal, and the round has none to give it`,
     };
   }
-  const options: SpawnOptionsWithStdioTuple<StdioNull, StdioPipe, StdioPipe> = {
+  const unprepared = emptied(invocation.reportsFile);
+  if (unprepared !== null) {
+    return {
+      cost: unspent,
+      refusals: 0,
+      reported: nothingReported,
+      kind: "unstartable",
+      reason: unprepared,
+    };
+  }
+  const options: SpawnOptionsWithStdioTuple<StdioNull, StdioNull, StdioPipe> = {
     cwd: line.directory,
-    env: environment,
+    env: { ...environment, ...line.environment },
     // The reviewer leads its own process group, so that stopping it stops the
     // tools it started. At depth `read` the grant is the only thing keeping the
     // reviewer off the code under review, and a tool outliving the round that
     // launched it is outside the grant as much as outside the bound.
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "pipe"],
   };
 
-  let child: ChildProcessByStdio<null, Readable, Readable>;
+  let child: ChildProcessByStdio<null, null, Readable>;
   try {
     child = spawn(line.command, [...line.args], options);
   } catch (cause) {
@@ -326,16 +342,23 @@ async function attempt(
     };
   }
 
-  // A startup failure never reaches the stream: the process exits non-zero with
-  // an empty stdout, and its only account of itself is here. Read as it
+  // A startup failure never reaches the report file: the process exits non-zero
+  // having written nothing, and its only account of itself is here. Read as it
   // arrives, because a pipe nobody drains fills and stops the process it was
   // meant to be reading.
   const complaint = drain(child.stderr);
   const closing = ending(child);
+  // The process has written everything it will once it has exited, so the file
+  // is read once more then and that read is the last.
+  const exited = new Promise<void>((settle) => {
+    child.once("exit", () => settle());
+    child.once("error", () => settle());
+  });
+  const abandoned = new AbortController();
 
-  // The last the parse reported before the process is stopped is the whole of
-  // what a killed round has, so it is tracked here rather than taken from the
-  // parse's return, which a killed attempt never reaches.
+  // The last the parse reported is the whole of what a killed round has, so it
+  // is tracked here rather than taken from the parse's return, which a killed
+  // attempt may not reach.
   let progress: RoundProgress = {
     cost: unspent,
     refusals: 0,
@@ -364,20 +387,12 @@ async function attempt(
     space: invocation.roundSpace,
   };
 
-  // Read as the chunks arrive, so that a reviewer flooding its output is
-  // stopped by the bound even where the loop never reaches a timer.
-  let overran = false;
-  const bounded = async function* (): AsyncGenerator<Uint8Array> {
-    for await (const chunk of child.stdout) {
-      if (bound.passed()) {
-        overran = true;
-        return;
-      }
-      yield chunk;
-    }
-  };
-
-  const parsing = read(adapter, bounded(), (reached) => {
+  const reports = follow(invocation.reportsFile, {
+    ended: exited,
+    pollMs: FOLLOW_MS,
+    abandoned: abandoned.signal,
+  });
+  const parsing = read(adapter, reports, (reached) => {
     progress = reached;
   }).then(
     (run): Attempt => ({
@@ -403,13 +418,15 @@ async function attempt(
   const ended = await Promise.race([parsing, expiry]);
   cancel();
 
-  if (ended === "expired" || overran) {
+  if (ended === "expired") {
     over = true;
     await stop(owned);
-    // The parse is left mid-stream, so the streams are closed under it rather
-    // than waiting on a process that has been told to go.
-    child.stdout.destroy();
     child.stderr.destroy();
+    // What the reviewer wrote between the last read and the stop is part of
+    // what it reported, a finish included. A file that takes longer than the
+    // grace to read is left where the read had got to.
+    await within(parsing.then(() => {}), GRACE_MS);
+    abandoned.abort();
     return atTheBound(progress);
   }
 
@@ -435,8 +452,8 @@ async function attempt(
   }
   if (ended.kind !== "unparsed" && ended.kind !== "incomplete") return ended;
 
-  // A run that completed a message explained itself in the stream, and stderr
-  // would only say the same thing a second way.
+  // A run that completed a message explained itself in the report file, and
+  // stderr would only say the same thing a second way.
   const said = complaint();
   if (ended.cost.messages > 0 || said === "") return ended;
   return {
@@ -446,7 +463,7 @@ async function attempt(
 }
 
 /**
- * The adapter's read of the output, as a promise however it fails.
+ * The adapter's read of the report file, as a promise however it fails.
  *
  * An adapter need not be written as an async function, and one that throws
  * before it returns its promise would otherwise throw past the bound and the
@@ -454,10 +471,26 @@ async function attempt(
  */
 async function read(
   adapter: Adapter,
-  stdout: AsyncIterable<Uint8Array>,
+  reports: AsyncIterable<Uint8Array>,
   soFar: ProgressSoFar,
 ): Promise<ParsedRun> {
-  return adapter.parse(stdout, soFar);
+  return adapter.parse(reports, soFar);
+}
+
+/**
+ * The report file made empty, or why it could not be.
+ *
+ * A file left by an earlier run would be read as this one's reports, a finish
+ * included.
+ */
+function emptied(file: string): string | null {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "");
+    return null;
+  } catch (cause) {
+    return `the report file ${file} could not be emptied: ${reasonFor(cause)}`;
+  }
 }
 
 /** What the reviewer had reported, taken off everything else the round tracks. */
@@ -475,19 +508,21 @@ function reportedIn(progress: RoundProgress): RoundOutput {
  * message past it has reviewed, and an attempt that read the stop instead would
  * keep the findings and throw the review away.
  *
- * A declaration does not stand in for a report the attempt could not read back.
- * That is the two ends of one report disagreeing, and it fails the attempt on
- * this path exactly as it fails one whose output closed: the same bytes must not
- * come to one thing when the process stopped and another when it hung. Either
- * way the reports that were readable are kept.
+ * A line that could not be read comes first, declaration or not, and fails the
+ * attempt on this path exactly as it fails one whose process exited: the same
+ * file must not come to one thing when the process stopped and another when it
+ * hung. Either way the reports that were readable are kept.
+ *
+ * The cost is a floor whatever the attempt came to. A request in flight when the
+ * process was stopped was spent and is never reported.
  */
 function atTheBound(progress: RoundProgress): Attempt {
-  const cost = progress.cost;
+  const cost: RoundCost = { ...progress.cost, floor: true };
   const refusals = progress.refusals;
   const reported = reportedIn(progress);
-  if (!progress.finished) return { cost, refusals, reported, kind: "killed" };
   const { broken } = progress;
   if (broken !== undefined) return { cost, refusals, reported, kind: "unparsed", reason: broken };
+  if (!progress.finished) return { cost, refusals, reported, kind: "killed" };
   return { cost, refusals, reported, kind: "reviewed", ...reported };
 }
 
@@ -684,13 +719,17 @@ function makeScratch(directory: string): string | null {
   }
 }
 
-/** Two attempts' costs added: a retry spends a second process on the same round. */
+/**
+ * Two attempts' costs added: a retry spends a second process on the same round.
+ * A floor added to anything is a floor.
+ */
 function plus(total: RoundCost, more: RoundCost): RoundCost {
-  return {
+  const sum = {
     dollars: total.dollars + more.dollars,
     tokens: total.tokens + more.tokens,
     messages: total.messages + more.messages,
   };
+  return total.floor === true || more.floor === true ? { ...sum, floor: true } : sum;
 }
 
 function startFailed(command: string, cause: unknown): string {
