@@ -1,56 +1,53 @@
 # Milestones
 
-**Version:** 0.17 (draft)
+**Version:** 0.18 (draft)
 **Status:** For review
 **Owner:** TBD
 
 ---
 
-Fifteen milestones for building squiz and muster, in the order they are done.
-Each ends in something that can be run or seen, never in a module written.
+Fourteen milestones for building squiz, in the order they are done. Each ends in
+something that can be run or seen, never in a module written.
 
-| Order | Milestone | Project | State |
-|---|---|---|---|
-| 1 | M0 — Prerequisites spike | squiz | Done |
-| 2 | M1 — Plugin skeleton, configuration, and the gate | squiz | Done |
-| 3 | M2 — The finding contract and the comment format | squiz | Done |
-| 4 | M3 — The GitHub client and the coding agent's commands | squiz | Done |
-| 5 | M4 — The reviewer | squiz | Done |
-| 6 | M5 — The round | squiz | Done |
-| 7 | M6 — The summary comment | squiz | Done |
-| 8 | M7 — Confinement detection, shared trees, and depth `deep` | squiz | Done in part. Its unmet criteria are M14's |
-| 9 | M10 — Muster's spikes | muster | |
-| 10 | M11 — Muster's sessions and their backends | muster | |
-| 11 | M12 — Muster's triggers, through an adapter per agent | muster | |
-| 12 | M13 — Muster's inbox | muster | |
-| 13 | M14 — Squiz on muster | squiz | |
-| 14 | M8 — Episode boundaries | squiz | |
-| 15 | M9 — Install and dogfood | squiz | |
+| Order | Milestone | State |
+|---|---|---|
+| 1 | M0 — Prerequisites spike | Done |
+| 2 | M1 — Plugin skeleton, configuration, and the gate | Done |
+| 3 | M2 — The finding contract and the comment format | Done |
+| 4 | M3 — The GitHub client and the coding agent's commands | Done |
+| 5 | M4 — The reviewer | Done |
+| 6 | M5 — The round | Done |
+| 7 | M6 — The summary comment | Done |
+| 8 | M7 — Confinement detection, shared trees, and depth `deep` | Done in part. Its unmet criteria are in M10 and M13 |
+| 9 | M10 — The reviewer as a detached session | |
+| 10 | M11 — Triggers that report to the owner of the work | |
+| 11 | M12 — The subagent-era workarounds removed | |
+| 12 | M13 — Depth `deep` | |
+| 13 | M8 — Episode boundaries | |
+| 14 | M9 — Install and dogfood | |
 
-**A milestone's number names it, and the table places it.** M10 to M14 come
+**A milestone's number names it, and the table places it.** M10 to M13 come
 before M8 and M9 in the order.
 
-**Squiz gains no feature between M7 and M14.** Its issues held in that time are
-listed under M14, and each is built or closed there.
+**Squiz gains no feature between M7 and M10.** Its issues held in that time are
+listed under M12, and each is built or closed there.
 
-**Muster is a session manager that knows nothing about code review.** It runs a
-command when a coding agent finishes, starts agent sessions that outlive
-whatever started them, and carries short messages between sessions.
-`muster/docs/specs/muster-spec.md` specifies it, and
-`docs/specs/session-interface.md` says what squiz asks of it. Both arrive with
-pull request #294, and until it merges they exist only there.
+**From M10, squiz runs its reviewer as a session of its own, instead of inside a
+subagent's hook or shell call.** The review itself stays as it is: findings as
+threads on the pull request, verdicts on replies, rounds, a cap, and a summary.
+So do the commands the coding agent runs to read and answer it.
 
-**Muster is written in Go**, as the module `github.com/jacygao/muster`. It is
-built in `muster/` in this repository, with a CI job of its own that runs
-`go build`, `go test` and `go vet`. Squiz's TypeScript checks ignore `muster/`.
+**The trigger, session and wake code lives in a folder of its own under `src/`,
+and knows nothing about reviews.** Nothing in it imports the review's code, so it
+can be lifted out if a second tool needs it.
 
-**The boundary between them is hard.** Nothing under `muster/` imports anything
-under squiz's `src/`, and nothing under `src/` imports anything under `muster/`.
-Each calls the other only as a command. M11 builds the test that holds this.
+**The first version leaves three things out:** delivering a note when a session
+starts, rules for acknowledging a note and retrying one, and messages in both
+directions. Hooks for agents other than Claude Code, GitHub Copilot's among them,
+come after M9.
 
-**Muster moves to a repository of its own, with its history, as the first step
-of M14.** From then on squiz uses muster as an external tool, installed the way
-a user installs it.
+**The harness specification does not yet describe the reviewer as a session.**
+It is revised before M10 is planned.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
@@ -72,7 +69,7 @@ A written finding in `docs/notes/` for each of:
       open turn, and the subagent resumes.
 - [x] **The hook payload's fields, named exactly.** M1 to M6 keyed an episode
       on the subagent's id from that payload, so confirm the field exists and is
-      the same every time that subagent stops. M14 rekeys the episode on the
+      the same every time that subagent stops. M10 rekeys the episode on the
       pull request's number, which no payload field decides.
 - [x] Whether `stop_hook_active` is set on re-entry. The loop re-blocks
       deliberately and must not be confused with the runtime's own loop guard.
@@ -94,7 +91,7 @@ not worked around.
 The repository becomes a loadable plugin with a `squiz` binary and a
 `SubagentStop` hook that does the one thing needing no dependencies: gate on the
 pull request and exit 0. `squiz review`, which exits 1 at the gate, arrives in
-M14.
+M10.
 
 Covers the plugin manifest, the hook registration, `bin/` and `src/`,
 `tsconfig.json`, `tsc --noEmit` and tests in CI, `.squiz/` in `.gitignore`,
@@ -174,7 +171,7 @@ harness: working directory, `TMPDIR` at the episode's `scratch/` directory,
 `< /dev/null`, the time bound, one parse retry, cost extraction, and the prompt
 carrying the pull request and the existing threads. Depth `read` only. The
 comparison that detects what `bash` can do is M7's, and the `bash` grant is
-M14's.
+M13's.
 
 ### Acceptance criteria
 
@@ -201,10 +198,10 @@ before it becomes a path component, and the round itself: gate, review, post new
 findings as threads, apply each verdict to the thread it names, then exit 2 with
 a blocking reason or exit 0 at the cap.
 
-Everything here was built as the hook. M14 moves the round into a round host
-that `squiz review <number>` and muster's triggers reach, keys the episode on the
-pull request's number, and replaces the hook's exit 2 with a message to the
-coding agent.
+Everything here was built as the hook. M10 moves the round into a round host
+that `squiz review <number>` reaches, and keys the episode on the pull request's
+number. M11 points the hook at the round host too, and replaces the hook's exit 2
+with a note and a wake to the session that owns the work.
 
 ### Acceptance criteria
 
@@ -249,8 +246,8 @@ three-block comment, posted once and never edited.
 
 ## M7 — Confinement detection, shared trees, and depth `deep`
 
-**Done in part.** What it delivered stays. Its unmet criteria moved to M14, and
-M14 lists its open issues.
+**Done in part.** What it delivered stays. Its unmet criteria moved to M10 and
+M13, and M12 lists its open issues.
 
 It delivered, all under the hook:
 
@@ -276,363 +273,235 @@ It delivered, all under the hook:
 - [x] Two live episodes on one toplevel disable the comparison for that round.
       The round still runs, and the summary names the other episodes in flight.
 
-### Acceptance criteria moved to M14
+### Acceptance criteria moved
 
-Each is restated there, against the round host.
+Each is restated where it moved to.
 
-- The specification's prerequisites for `squiz review` each have a finding in
-  `docs/notes/`. Five do. The sixth, whether a subagent handed a long exit-2
-  output works every thread, has none.
-- `squiz review` exits 0, 2, 3, 4 and 1 in the cases the specification gives.
-  M14 changes what exit 4 means: the wait ran out, and a rerun attaches.
-- A run on a closed episode, on a state under review, and on a state already
-  reviewed.
-- A new commit, or a new reply on one of the reviewer's threads, starts a round,
-  and a dispute counts against the cap.
-- Two firings for one state post one set of threads.
-- `squiz status` lists running, finished and failed reviews across worktrees.
-- A round that fails posts a failure comment.
-- The plugin ships the review skill, and a dispatched subagent loads it.
-- `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor` reports it.
-- Depth `deep` produces a command line with `bash`, and the configured test
-  command reaches the reviewer.
+- **To M10:**
+  - The specification's prerequisites for `squiz review` each have a finding in
+    `docs/notes/`. Five do. The sixth, whether a subagent handed a long exit-2
+    output works every thread, has none.
+  - `squiz review` exits 0, 2, 3, 4 and 1 in the cases the specification gives.
+    M10 changes what exit 4 means: the wait ran out, and a rerun attaches.
+  - A run on a closed episode, on a state under review, and on a state already
+    reviewed.
+  - A new commit, or a new reply on one of the reviewer's threads, starts a
+    round, and a dispute counts against the cap.
+  - Two firings for one state post one set of threads.
+  - `squiz status` lists running, finished and failed reviews across worktrees.
+  - A round that fails posts a failure comment.
+  - The plugin ships the review skill, and a dispatched subagent loads it.
+  - `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor` reports
+    it.
+- **To M13:** depth `deep` produces a command line with `bash`, and the
+  configured test command reaches the reviewer.
 
-### Acceptance criteria muster makes moot
+### Acceptance criteria detached sessions make moot
 
-M14 removes what these bound, and checks that each is gone.
+M12 removes what these bound, and checks that each is gone.
 
-- One deadline bounds each invocation, waiting included. Under M14 `squiz review`
-  only waits, and its wait is its bound.
+- One deadline bounds each invocation, waiting included. From M10
+  `squiz review` only waits, and its wait is its bound.
 - A round runs inside a 540-second window from `squiz review` and a 600-second
   one from the hook, with a 30-second cap on pre-review calls, a 60-second
   posting reserve, and a `timeout` default per path.
 - Each round's state records `postingSeconds`.
 
-## M10 — Muster's spikes
+## M10 — The reviewer as a detached session
 
-The five questions muster's specification leaves open, cheapest first, each run
-against throwaway scaffolding. No production code survives this milestone. The
-findings do, in `muster/docs/notes/`.
+A round runs in a round host: one detached process per episode, outside the
+process tree of whatever started it. Each round's reviewer is a fresh `pi`, run
+as a session of its own. It runs in a tmux or Herdr pane where one exists, and
+detached otherwise. `squiz review` becomes the coding agent's entry point: it
+starts the round host and waits for the outcome. The `SubagentStop` hook keeps
+running its round as a child until M11.
 
-### Acceptance criteria
+Three spikes this rests on are answered:
 
-A written finding for each of:
-
-- [ ] **S1.** Whether a tmux window, and a Herdr tab started with
-      `herdr agent start`, created from inside a Claude Code shell call or hook,
-      outlives the runtime stopping that call. Whether a detached session whose
-      output goes to a log file escapes as the measured one with `/dev/null` did.
-- [ ] **S3.** Which wake reaches an idle interactive Claude Code session ten
-      minutes after its turn ended: an `asyncRewake` exit 2, a post to
-      `CLAUDE_CODE_MESSAGING_SOCKET`, or both. In auto mode and outside it.
-      Whether an `asyncRewake` hook's exit 2 is dropped once it reaches its
-      timeout.
-- [ ] **S4.** Which processes Herdr's pane close and tmux's `kill-window` reach.
-      Whether a pane returns to its shell once an agent started by
-      `herdr agent start` exits. Whether tmux's `pane-died` hook fires on every
-      exit with `remain-on-exit` on, and gives the exit status.
-- [ ] **S9.** What GitHub Copilot CLI offers an adapter. Whether its
-      `agentStop` and `subagentStop` hooks fire as documented. The largest
-      `timeoutSec` it honours, and whether an `agentStop` hook that waits that
-      long and then answers `block` wakes the session with its `reason`. Whether
-      anything reaches an idle session from outside, such as its asynchronous
-      `notification` hook. Which of muster's three layers Copilot lands in.
-- [ ] **S6.** Whether `herdr agent start --kind pi` tracks a `pi` that runs with
-      `--no-extensions`, and what status Herdr shows for it.
-
-The owner decides where muster's state lives, the one decision muster's
-specification leaves open, before M11 starts.
-
-A result that contradicts muster's specification is reconciled in that
-specification, not worked around.
-
-## M11 — Muster's sessions and their backends
-
-Muster becomes a Go module in `muster/` with a `muster` binary that starts,
-watches and stops sessions in a Herdr tab, a tmux window, or a detached process.
-It is usable on its own: a person can start a session with `muster start` and
-manage it, with no trigger and no message.
-
-It starts from the Go skeleton and muster's CI job. It also covers the
-import-boundary test, the state directory, the session record, the three
-backends, and `start`, `status`, `attach`, `wait`, `read`, `stop`, `prune` and
-`closed`.
+- **S1**, in #296. A tmux window, a Herdr pane and a detached process each
+  outlive every way Claude Code stops the call that made them.
+- **S3**, in #296. An `asyncRewake` exit 2 and a post to the messaging socket
+  each start a turn in an idle interactive session, ten minutes after its turn
+  ended as well as one.
+- **S2**, in #295. An interactive `pi` in a pane runs its prompt at once,
+  registers the reporting calls, applies the refusals, and exits after
+  `finish_review`.
 
 ### Acceptance criteria
 
-- [ ] `muster/go.mod` declares `github.com/jacygao/muster`, and `go build`
-      produces the `muster` binary.
-- [ ] A CI job of muster's own runs `go build`, `go test` and `go vet` green.
-      Squiz's type check and tests ignore `muster/`.
-- [ ] The import-boundary test fails on anything under `muster/` that imports
-      from squiz's `src/`, and on anything under `src/` that imports from
-      `muster/`. It runs in CI.
-- [ ] Every command takes `--root`, which defaults to the git toplevel of the
-      working directory, and prints JSON with `--json`.
-- [ ] Without `--backend`, `muster start` picks Herdr inside Herdr, tmux inside
-      tmux, and detached otherwise.
-- [ ] A session started from inside a Claude Code shell call outlives the
-      runtime stopping that call, on every backend S1 found it does.
-- [ ] A session's record carries the backend and its identifier for the tab,
-      pane or window, the pid and its start time, the command, the log path,
-      and whether it is alive, exited or stopped.
-- [ ] Starting a session under the name of a live one fails and names the live
-      one. Starting one under the name of an exited or stopped one replaces it.
-- [ ] A session's pane closes when its program exits, and its record is marked
-      exited, with the exit status where the backend reports one.
-      `--keep-pane` leaves the pane open.
-- [ ] `muster status` and `muster read` answer for an exited session from its
-      record and its log until `muster prune` removes it.
-- [ ] `muster status`, `attach`, `wait` and `read` behave on each backend as
-      muster's specification tabulates.
-- [ ] `muster stop` stops a session on each backend as muster's specification
-      tabulates, and marks its record stopped. A detached stop signals the
-      process group only while the pid and its start time still match the
-      record.
-- [ ] `muster prune` removes every record marked exited or stopped, and every
-      record whose process is gone by pid and start time.
-
-CI installs tmux, and tests the tmux and detached backends there. It does not
-install Herdr, which is before 1.0. The Herdr backend is tested where Herdr is
-installed by hand.
-
-## M12 — Muster's triggers, through an adapter per agent
-
-When an agent stops working, muster runs the command `.muster.json` configures
-for the event. Muster's core sees only its contract: a `settled` event, when an
-agent ended its turn and waits for input, and a `finished` event, when a
-subagent ended its work. Each agent reaches the contract through an adapter of
-its own, in `muster/adapters/<name>/`:
-
-- **`claude-code`**: `Stop` becomes `settled`, and `SubagentStop` becomes
-  `finished`.
-- **`pi`**: muster's extension turns `agent_settled` into `settled`.
-- **`herdr`**: a plugin turns `pane.agent_status_changed` to `done` into
-  `settled`. It is an extra source beside the adapters above, never the only one.
-
-An agent no adapter covers takes part through the pull fallback. It runs the
-command that does the work and reads what that prints, so nothing fires for it.
-The fallback's own muster command, `muster wait --inbox`, reads messages and is
-M13's.
-
-GitHub Copilot CLI is an adapter to come, and is not built here. S9 says what it
-can offer. Until it is built, a Copilot session takes part through the pull
-fallback.
-
-A trigger command's `watch` lines, and the wake they ask for, are M13's.
-
-### Acceptance criteria
-
-- [ ] `muster hook` runs every command `.muster.json` configures for the event,
-      in `MUSTER_CWD`, with the contract's fields in its environment and
-      nothing on its standard input.
-- [ ] Each event carries `MUSTER_EVENT`, `MUSTER_AGENT`, `MUSTER_SESSION`,
-      `MUSTER_CWD`, `MUSTER_ROOT` and `MUSTER_WAKE`. An agent's own payload goes
-      no further than its adapter.
-- [ ] No code outside `muster/adapters/` names an agent.
-- [ ] `muster install <name>` puts an adapter's registration in place for a
-      project.
-- [ ] With the `claude-code` adapter installed, a main session's turn ending
-      fires `settled`, and a subagent's fires `finished`.
-- [ ] A `pi` session with the `pi` adapter fires `settled` once each time it
-      settles.
-- [ ] Inside Herdr, an agent whose status becomes `done` fires `settled` through
-      the `herdr` adapter.
-- [ ] A turn that ended on a question fires as any other turn does.
-- [ ] A configured command's exit status, where it is not 0, is reported on
-      `muster hook`'s stderr and never changes the hook's own exit status.
-
-## M13 — Muster's inbox
-
-Messages between sessions, and the wake that delivers one into the agent an
-address belongs to. Covers the envelope, `muster send`, `muster inbox list` and
-`muster inbox take`, `muster wait --inbox`, the `watch` lines, and each
-adapter's wake: `push` for `pi`, and for Claude Code the `waiter`, the `push`, or
-both, as S3 found.
-
-### Acceptance criteria
-
-- [ ] `muster send` writes an envelope with its four fields and muster's two,
-      and refuses an address outside `[A-Za-z0-9._-]` or longer than 64
-      characters, and a pointer longer than 1,024 bytes or than one line.
-- [ ] A message is written whole or not at all.
-- [ ] `muster inbox take` prints the oldest message and moves it into
-      `handled/` in one rename. Two readers taking at once never both take one
-      message.
-- [ ] A message nobody has taken is delivered first by the next wait on its
-      address.
-- [ ] Muster reads neither `kind` nor `pointer`: any of each a sender gives
-      comes back byte for byte.
-- [ ] `muster wait --inbox <address>` waits for the next message on the address,
-      takes it, and prints the same text a wake shows. With `--timeout`, it
-      gives up after that many seconds and takes nothing.
-- [ ] A trigger command's `watch <address>` lines ask for a wake on those
-      addresses, where the adapter's wake is `push` or `waiter`. A `finished`
-      event asks for none.
-- [ ] A message sent to an address a settled `pi` session watches starts a turn
-      in that session, with the text muster's specification shows.
-- [ ] A message sent to an address an idle interactive Claude Code session
-      watches starts a turn in it ten minutes after its last turn ended, by the
-      wake S3 chose.
-- [ ] A session that ended three turns has a message taken once, by the waiter
-      for its newest turn.
-- [ ] An agent no wake reaches, a Claude Code subagent among them, loses no
-      message sent to it, and reads each with `muster wait --inbox` or
-      `muster inbox take`.
-
-## M14 — Squiz on muster
-
-Squiz runs its reviewer as a muster session, `squiz review` becomes its one
-entry point, and the limits that came from running the reviewer inside a coding
-agent's hook or shell call go. `docs/specs/session-interface.md` governs, and
-this milestone is steps 2 to 5 of its migration, after one step of its own:
-
-- muster moved to its own repository, with its history, and installed into
-  squiz's development the way a user installs it
-- the report file the reviewer's extension writes
-- the round host, `squiz host <number>`, run as a detached muster session per
-  episode
-- each round's reviewer as a muster session of its own, in a pane where Herdr or
-  tmux is present
-- `squiz review` as the harness specification sets it out, changed as the
-  session interface changes it: it sends a message to the round host and waits
-  on the record
-- `squiz hook` as the command muster's triggers run, with muster's adapters,
-  installed by `muster install`, in place of squiz's own hook
-- `"reviewer": "session"` as the default
-
-### Acceptance criteria
-
-- [ ] Muster is in its own repository, `github.com/jacygao/muster`, with the
-      history it had in `muster/`, and `muster/` is gone from this repository.
-      Squiz is developed and tested against a `muster` installed the way a user
-      installs it. This is done before anything else in the milestone.
-- [ ] Squiz's spikes S5, S7 and S8, S2's open remainder, and the harness
-      specification's remaining prerequisite for `squiz review`, whether a
-      subagent handed a long exit-2 output works every thread, each have a
-      finding in `docs/notes/`, and the owner has decided D2 to D11 before what each
-      decides is built. D10 waits for S6.
+- [ ] **S4 has a finding in `docs/notes/`.** It says which processes Herdr's
+      pane close and tmux's `kill-window` reach. It also says whether a pane
+      returns to its shell when an agent started by `herdr agent start` exits,
+      and whether tmux's `pane-died` hook fires on every exit and gives the exit
+      status.
+- [ ] The harness specification's remaining prerequisite for `squiz review`,
+      whether a subagent handed a long exit-2 output works every thread, has a
+      finding in `docs/notes/`.
+- [ ] The session code lives in its own folder under `src/` and imports nothing
+      of the review's. A test holds this.
 - [ ] The reviewer's extension writes every accepted report, every refusal and
-      the usage of every assistant message to the report file. A test holds the
-      file equal to the JSON stream on a recorded run.
-- [ ] `squiz host <number>` takes requests from `squiz-reviewer-<number>`, runs a
-      round for each, records the outcome, and sends the coding agent
-      `threads-open`, `closed` or `failed`. It ends when the episode closes, when
-      a `stop` message arrives, or when its worktree is gone.
-- [ ] Each round's reviewer runs as the muster session `squiz-<number>-r<k>`,
-      with the command line the session interface gives. Its pane closes when
-      its review ends, and the command that resumes it is in
-      `.squiz/<number>/rounds/<k>/resume.txt` and on its line in
+      the usage of every assistant message to a report file. The round reads
+      that file, and a test holds it equal to the JSON stream on a recorded run.
+- [ ] The round host outlives the call that started it. It runs a round for each
+      state it is asked to review, records each outcome, and ends when the
+      episode closes or its worktree is gone.
+- [ ] A state records whether it is being reviewed, reviewed, or failed.
+- [ ] Each round's reviewer runs in a tmux pane inside tmux, in a Herdr pane
+      inside Herdr, and detached otherwise.
+- [ ] Its pane closes when its review ends. The command that resumes its session
+      is in `.squiz/<number>/rounds/<k>/resume.txt` and on its line in
       `squiz status`.
-- [ ] The extension ends the reviewer after `finish_review`, and after
-      `agent_settled` with no `finish_review`, recording an unfinished end.
+- [ ] The extension ends the reviewer after `finish_review`. After
+      `agent_settled` with no `finish_review`, it records an unfinished end and
+      ends the reviewer.
+- [ ] A reviewer stopped from outside has its session stopped and every shell
+      group it recorded signalled.
 - [ ] `squiz review` exits 0, 2, 3 and 1 in the cases the harness specification
-      gives, and 4 when its wait runs out. A rerun attaches to the same round,
-      and `--no-wait` exits 4 at once.
+      gives, and 4 when its wait runs out. A rerun attaches to the same round.
 - [ ] A run on a closed episode runs no round and prints the close. A run on a
       state under review waits for that review, and a run on a state already
       reviewed returns its result without a round.
 - [ ] A new commit, or a new reply on one of the reviewer's threads, starts a
       round. A disputed finding with no commit after it is ruled `withdrawn` or
       `open`, and the round counts against the cap.
-- [ ] One review runs per state, whatever number of triggers fire for it, and
-      two firings for one state post one set of threads.
+- [ ] A failed review, or one whose round host has died, is retried by the next
+      `squiz review` or trigger. A reviewed state is never reviewed again.
+- [ ] One review runs per state, whatever number of triggers fire for it. Two
+      firings for one state post one set of threads.
 - [ ] `squiz status` lists running, finished and failed reviews across
       worktrees, and names each round's reviewer session.
 - [ ] A round that fails posts a failure comment naming what failed and what
-      else it established. Where GitHub cannot be reached, stderr and the round
-      host's log carry it instead.
-- [ ] A main Claude Code session or a `pi` coding agent that ends its turn on a
-      pull request is woken with the outcome, and works the threads to exit 0
-      or 3 without running `squiz review` itself.
-- [ ] The plugin ships the review skill, and a dispatched subagent whose brief
-      does not mention squiz loads it, runs `squiz review`, and works a real
-      pull request's threads to exit 0 or 3.
+      else it established. Where GitHub cannot be reached, stderr carries it
+      instead.
+- [ ] The plugin ships the review skill. A dispatched subagent whose brief does
+      not mention squiz loads it, runs `squiz review`, and works a real pull
+      request's threads to exit 0 or 3.
 - [ ] `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor`
       reports whether the skill or the section is there.
-- [ ] Depth `deep` produces a command line with `bash`, the configured test
-      command reaches the reviewer, and the reviewer runs
-      in the snapshot worktree D4 gives, so the tracked-file comparison reads
-      only the reviewer.
-- [ ] The subagent-era workarounds are gone from the code and from the harness
-      specification:
+- [ ] CI installs tmux and tests the tmux and detached sessions there. It does
+      not install Herdr, which is before 1.0. Herdr panes are tested where
+      Herdr is installed by hand.
+
+## M11 — Triggers that report to the owner of the work
+
+Squiz's hooks fire on Claude Code's `Stop`, for a main session, as well as on
+`SubagentStop`. A hook starts the review and returns at once, so no stall
+watchdog, hook timeout or hand-back bounds the review.
+
+The outcome goes to the session that owns the work. That is the session itself
+for a main session's work, and the subagent's parent for a subagent's work. It
+is delivered two ways:
+
+- a short note in `.squiz/<number>/`, addressed to that session's id
+- a wake, by an `asyncRewake` waiter or a post to the messaging socket
+
+### Acceptance criteria
+
+- [ ] Whether a wake started from a `SubagentStop` hook reaches the subagent's
+      parent, and by which of the two routes, has a finding in `docs/notes/`.
+- [ ] The hook code lives in the same folder as M10's session code, and knows
+      nothing about reviews.
+- [ ] A main session's turn ending on a branch with a pull request starts a
+      review of its state, and so does a subagent's.
+- [ ] A turn on a branch with no pull request starts nothing. A turn on a state
+      already reviewed or under review starts no second review.
+- [ ] The hook returns without waiting for the round.
+- [ ] When a round ends, the round host writes the note to the session that owns
+      the work. It names the pull request, the head commit, the outcome, the
+      open threads, and the command that reads them.
+- [ ] An idle main session is woken with the note. It works the threads to exit
+      0 or 3 without running `squiz review` itself.
+- [ ] For a subagent's work, the parent session is woken with the note.
+- [ ] A note whose session was never woken loses nothing: `squiz review` reads
+      the same outcome from the pull request and the recorded state.
+- [ ] The `SubagentStop` hook no longer runs a round as its child.
+
+## M12 — The subagent-era workarounds removed
+
+What was there only because the reviewer ran inside a hook or a shell call goes.
+Every issue held while squiz was paused is built or closed.
+
+### Acceptance criteria
+
+- [ ] These are gone from the code and from the harness specification:
   - the 540- and 600-second round windows, their three shares, and the timing
     that differs between the hook path and the command path
-  - the 480-second ceiling on the time bound, which becomes the wall-clock guard
-    D5 gives
+  - the 480-second ceiling on the time bound, which becomes a wall-clock guard
+    on a runaway round, with no ceiling
   - the hook's exit-2 blocking reason, and every assumption that a block reaches
     the agent a subagent handed back to
-  - duplicate-episode handling for a firing the session never dispatched, where
-    keying the episode on the pull request's number makes it moot
+  - handling a duplicate episode for a firing the session never dispatched,
+    which keying the episode on the pull request's number makes moot
+  - the reviewer run as a child of a hook or a shell call
 - [ ] Every issue below is built or closed, with the reason on the issue.
-
-### A decision for the owner
-
-Once muster is in its own repository, the owner decides how to run work on the
-two projects in parallel:
-
-- **Try firstmate as the owner's own workflow tool**, on a small piece of work,
-  and judge whether it is worth its weight. It is about 114,000 lines of shell
-  with no releases, it needs tmux or Herdr, and its crewmates are full
-  sessions.
-- **Run both projects through muster itself**, as dogfooding.
-
-Either way this is how the owner works, and neither squiz nor muster depends on
-it. Muster builds its own sessions, triggers and inbox, and uses firstmate's
-inbox format but not its code.
 
 ### Issues to re-judge
 
-Each was held while muster was built.
-
 | Issue | What it is | Expected here |
 |---|---|---|
-| #278 | A block reaches no coding agent | Closed by the wake for full sessions, and by `squiz review` for subagents |
-| #273 | A round that fails leaves no trace on the pull request | Built, as the failure comment |
+| #278 | A block reaches no coding agent | Closed by M11's wake for a main session and a subagent's parent, and by `squiz review` for a subagent |
+| #273 | A round that fails leaves no trace on the pull request | Closed by M10's failure comment |
 | #265 | A subagent the session never dispatched starts a round of its own | Moot once one review runs per state and the episode keys on the pull request |
-| #297 | A reviewer cut short kept running for nine minutes, and the watchdog cancelled the hook | The watchdog half is moot. That a stopped reviewer is gone within the grace is re-judged against muster's stop and the recorded shell groups |
-| #280 | Reviews run to within seconds of the time bound | Re-judged once D5 removes the ceiling. Measuring #281's effect on time may remain |
+| #297 | A reviewer cut short kept running for nine minutes, and the watchdog cancelled the hook | The watchdog half is moot. Whether a stopped reviewer is gone within the grace is re-judged against stopping its session and its recorded shell groups |
+| #280 | Reviews run to within seconds of the time bound | Re-judged once the ceiling goes. Measuring #281's effect on time may remain |
 | #281 | Rewrite the review charter around a defined method | Not caused by the subagent model. Built here or after, by the owner's call |
 | #260 | Report a marker a blocked round could not write | Moot once no round blocks |
-| #113 | Accept depth `deep` | Built on D4's snapshot worktree, after S7 |
+| #113 | Accept depth `deep` | Built in M13 |
 | #244 | Name the reviewer's refused calls in the summary's Notes | Still held until dogfooding shows a refused call |
 | #293 | Check the DeepSeek balance the reviewer runs on | Needs a person, and depends on nothing here |
+
+## M13 — Depth `deep`
+
+The `bash` grant, behind the tracked-file comparison that detects a write made
+through it.
+
+From M11, a hook returns at once, and the coding agent can keep working in its
+worktree while the reviewer runs. The comparison then cannot tell the reviewer's
+writes from the coding agent's. Whether a `deep` reviewer reviews the coding
+agent's worktree or a worktree of its own at the head commit is not decided. It
+is decided before M13 is planned.
+
+### Acceptance criteria
+
+- [ ] Depth `deep` produces a command line with `bash`, and the configured test
+      command reaches the reviewer.
+- [ ] A write the reviewer makes through the shell is detected and named in the
+      summary, and no write by the coding agent is taken for one.
 
 ## M8 — Episode boundaries
 
 The token bound, enforced while a round runs, and an audit that every failure
-reaches somewhere a person reads. It needs M14's round host and extension.
+reaches somewhere a person reads. It needs M10's round host and extension.
 
 ### Acceptance criteria
 
 - [ ] An episode whose round reached the token bound closes with the findings it
       has, and the summary says the bound was reached. *Kept.*
 - [ ] The reviewer's extension stops a round once it reaches the token bound.
-      *Added by muster's design, under D5. Where S5 finds that an extension can
-      stop a round only between messages, the finding says how far past the
-      bound a round runs, and this criterion is held to that.*
-- [ ] No failure path is silent. *Changed by muster: the round host has no
-      caller's stderr. The audit names, for each failure path, which of the
-      failure comment, `squiz status`, the round host's log and `squiz review`'s
-      stderr carries it.*
+      *Added, because from M12 no window bounds a round. Whether an extension
+      can stop a turn in flight, or only between messages, is recorded as a
+      finding first. Where it is only between messages, the finding says how
+      far past the bound a round runs, and this criterion is held to that.*
+- [ ] No failure path is silent. *Changed by detached sessions: the round host
+      has no caller's stderr. The audit names, for each failure path, which of
+      the failure comment, `squiz status`, the round host's log and
+      `squiz review`'s stderr carries it.*
 
 ## M9 — Install and dogfood
 
 The marketplace manifest, a README carrying the getting-started steps,
-`/squiz doctor`, and `docs/notes/` consolidated. Muster is installed on its own,
-from its own repository.
+`/squiz doctor`, and `docs/notes/` consolidated.
 
 ### Acceptance criteria
 
 - [ ] `/plugin marketplace add` followed by `/plugin install` works into a fresh
-      host project. *Changed by muster: the getting-started steps also install
-      `muster` and its adapters, and say how.*
+      host project.
 - [ ] `/squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
       Code, and the Node version, naming whatever is missing. *Changed by
-      muster: it also reports `muster`, and whether Herdr or tmux is present,
-      neither of which is required.*
+      detached sessions: it also reports whether tmux or Herdr is present.
+      Neither is required.*
 - [ ] A subagent there produces a reviewed pull request end to end. *Changed by
-      muster: a main session does too, woken rather than running
+      detached sessions: a main session does too, woken rather than running
       `squiz review` itself.*
 - [ ] Squiz reviews its own pull requests in this repository.
 
@@ -644,5 +513,5 @@ from its own repository.
 - #274, look once at whether an interactive session shows a hook's stderr when
   it exits 0
 - #276, find out what it would take to show the reviewer as a session a person
-  can watch. M14's reviewer sessions are expected to answer it.
+  can watch. M10's reviewer sessions are expected to answer it.
 - #285, check stale docs and missing tests as pipeline steps of their own
