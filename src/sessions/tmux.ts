@@ -5,9 +5,10 @@
  * at all, since tmux would fall back to the owner's default server.
  *
  * **The window's command line is one command, `exec` and the quoted arguments.**
- * tmux hands it to its shell as one string. With nothing else on the line, the
- * shell becomes the command, so the pane's pid is the command's own. A second
- * command on the line would leave that pid naming the shell.
+ * tmux hands it to its default shell, the owner's, as one string. With nothing
+ * else on the line, the shell becomes the command, so the pane's pid is the
+ * command's own. A second command on the line would leave that pid naming the
+ * shell.
  *
  * Nothing here throws. Every answer is a value the caller reads.
  */
@@ -118,9 +119,20 @@ function insideTmux(environment: Environment): boolean {
   return (environment["TMUX"] ?? "") !== "";
 }
 
-/** `argument` as one word to a POSIX shell, whatever it holds. */
+/**
+ * `argument` as one word to the POSIX shells and to fish, whatever it holds.
+ *
+ * Everything but a quote or a backslash goes inside single quotes, which all of
+ * them read literally. fish reads a backslash there as an escape, so each quote
+ * and backslash goes in double quotes on its own, which all of them read alike.
+ */
 function quoted(argument: string): string {
-  return `'${argument.replaceAll("'", `'\\''`)}'`;
+  if (argument === "") return "''";
+  return argument
+    .split(/(['\\])/u)
+    .filter((part) => part !== "")
+    .map((part) => (part === "'" ? `"'"` : part === "\\" ? `"\\\\"` : `'${part}'`))
+    .join("");
 }
 
 type Run =
