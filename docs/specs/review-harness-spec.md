@@ -772,7 +772,8 @@ process in a session of its own.
 the group of each shell it started. A process one of those shells moved into a
 session of its own is reached by nothing: not the pane close, not `pi`, and not
 the recorded groups, which name the shells' groups and not that session. It runs
-on after the round. Nothing in this version detects it.
+on after the round. Nothing in this version detects it. Only `deep` grants a
+shell, so only a round at `deep` can leave one.
 
 **When `pi` exits, Herdr returns the pane to its shell** and no longer tracks the
 agent, so the round host closes the pane itself.
