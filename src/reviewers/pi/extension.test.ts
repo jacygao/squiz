@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -462,6 +462,32 @@ test("usage that could not be recorded is written before a later finish", async 
     "the finish was recorded and the usage lost before it was not",
   );
 });
+
+/**
+ * `pi` defers its exit until the reviewer has written its closing message, so
+ * that message's usage arrives after the finish, with no later line to carry
+ * it. The end of the run is its last chance.
+ */
+for (const event of ["agent_settled", "session_shutdown"]) {
+  test(`usage lost after the finish is written on ${event}`, async (t) => {
+    const reports = reportsFile(t);
+    const extension = loaded(reports);
+    await toolOf(extension, FINISH_REVIEW).execute("call_1", {});
+
+    chmodSync(reports, 0o444);
+    const message = onlyHandler(extension, "message_end") as MessageHandler;
+    const closing = { ...assistantMessage, stopReason: "stop" };
+    assert.throws(() => message({ type: "message_end", message: closing }), /EACCES/u);
+    chmodSync(reports, 0o644);
+
+    for (const handler of extension.handlers.get(event) ?? []) (handler as () => void)();
+    assert.deepEqual(
+      linesIn(reports).map((line) => (line as { type: string }).type),
+      ["finish", "usage"],
+      "the closing message's usage was never written",
+    );
+  });
+}
 
 /** Restore the variable, whatever the test set it to. */
 function keepVariable(t: { after: (fn: () => void) => void }): void {

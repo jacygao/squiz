@@ -27,7 +27,10 @@
  *   extension's error and carries on. The line is kept and written ahead of
  *   the next line that can be written, so a finish never lands in a file still
  *   missing usage, which would read as a complete review that cost less than
- *   it did.
+ *   it did. The run's end is the last attempt. Usage that still cannot be
+ *   written then is lost, and the file cannot say so: it is the file that
+ *   refused the write. So a finish in the file does not prove the usage after
+ *   it is complete.
  *
  * Where no file is named, nothing is written and every call answers as it would
  * with one.
@@ -87,6 +90,7 @@ export type Registrar = {
   readonly on: {
     (event: "tool_call", handler: (call: ToolCall) => Refusal | undefined): void;
     (event: "message_end", handler: (event: MessageEnd) => void): void;
+    (event: "agent_settled" | "session_shutdown", handler: () => void): void;
   };
 };
 
@@ -188,6 +192,11 @@ export function reportInto(pi: Registrar, reports: string | undefined): void {
     if (usage !== undefined) file.record(usage);
   });
 
+  // The closing message arrives after the finish, so its usage has no later
+  // line to be written ahead of. A throw here is shown like any other.
+  pi.on("agent_settled", file.flush);
+  pi.on("session_shutdown", file.flush);
+
   pi.registerTool({
     name: REPORT_FINDING,
     label: "Report finding",
@@ -272,21 +281,25 @@ export function reportInto(pi: Registrar, reports: string | undefined): void {
  * A later line is not written until the usage before it is, so every line
  * after a lost one fails with it, the finish included.
  */
-function keepingLostUsage(file: ReportFile): ReportFile {
+function keepingLostUsage(file: ReportFile): ReportFile & { readonly flush: () => void } {
   const lost: Line[] = [];
+  const flush = (): void => {
+    while (lost[0] !== undefined) {
+      file.record(lost[0]);
+      lost.shift();
+    }
+  };
   return {
     record: (line) => {
       try {
-        while (lost[0] !== undefined) {
-          file.record(lost[0]);
-          lost.shift();
-        }
+        flush();
         file.record(line);
       } catch (cause) {
         if (line.type === "usage") lost.push(line);
         throw cause;
       }
     },
+    flush,
   };
 }
 
