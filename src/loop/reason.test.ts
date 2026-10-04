@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { threadListing } from "../cli.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { FileFinding, Finding, LineFinding } from "../findings/finding.ts";
+import { threadListing } from "../findings/listing.ts";
 import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 import { blockingReason, type BlockedRound } from "./reason.ts";
 
