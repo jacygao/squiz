@@ -1,6 +1,6 @@
 # Session Interface: What Squiz Asks of Muster
 
-**Version:** 0.5 (draft)
+**Version:** 0.6 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -11,7 +11,9 @@
 **Squiz runs its reviewer as a session that a person can watch and that
 outlives whatever asked for the review.** Muster, a session manager that knows
 nothing about reviews, starts those sessions, fires squiz when a coding agent
-finishes, and carries squiz's messages. Muster is specified in `muster/docs/specs/muster-spec.md`. This document
+finishes, and carries squiz's messages. Muster is specified in `muster/docs/specs/muster-spec.md`. It is written in Go,
+and squiz stays TypeScript. Squiz meets muster only through muster's commands
+and the files each writes, never through an import. This document
 is squiz's side: what it needs from muster, what it runs there, the message
 kinds it defines, and what it guarantees.
 

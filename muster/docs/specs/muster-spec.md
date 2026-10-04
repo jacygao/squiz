@@ -1,6 +1,6 @@
 # Muster Specification: Triggers, Sessions That Outlive Them, and an Inbox
 
-**Version:** 0.3 (draft)
+**Version:** 0.4 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -38,11 +38,13 @@ Muster lives in squiz's repository for now, in the top-level directory
 
 ## 3. The boundary
 
-**Muster imports nothing from squiz, and squiz imports nothing from
-muster.** Nothing under `muster/` imports a module under squiz's `src/`, and
-nothing under `src/` imports a module under `muster/`. Each calls the other
-only as a command. A test in the repository will read every import in both
-trees and fail on any that crosses.
+**Muster and squiz are separate modules, and neither imports the other.**
+Muster is a Go module and squiz is a TypeScript package, so the boundary is a
+module boundary. Each reaches the other only as a command, or through a file
+the other writes. The one place the two languages meet is `pi`'s adapter,
+`adapters/pi/extension.ts`, which is TypeScript. A test will read its imports,
+and every import under squiz's `src/`, and fail on any that crosses into the
+other's tree.
 
 Muster carries no word of squiz's vocabulary. A message's kind and pointer
 are strings it stores and delivers without reading. An address is a name it
@@ -90,7 +92,7 @@ squiz-reviewer-41 sent threads-open: pr=41 head=3f9c2e0 round=2 threads=PRRT_kwD
 
 ### Adapters
 
-An adapter lives in `muster/adapters/<name>/`, and provides four things:
+An adapter lives in `adapters/<name>/` and `internal/adapters/<name>/`, as § 9 lays out, and provides four things:
 
 | | |
 |---|---|
@@ -99,8 +101,8 @@ An adapter lives in `muster/adapters/<name>/`, and provides four things:
 | **Wake** | One of three kinds, declared up front. **push:** something of the agent's own, such as an extension or a socket, takes a message from outside while the agent is idle. **waiter:** a hook the agent runs after its turn may wait, and hand a message back as the agent's next instruction. **none:** the agent is reached only by the pull fallback. |
 | **Limits** | What its wake cannot do, such as reach a subagent that has already handed back. Each adapter's row below states them. |
 
-**Adding an agent is adding a directory under `adapters/`, and a row to the
-table below.** Nothing in muster's core changes, and nothing in a program that
+**Adding an agent is adding its two directories, and a row to the table
+below.** Nothing in muster's core changes, and nothing in a program that
 uses muster changes, because both see only the contract.
 
 **Typing into an agent's terminal is never a wake.** Typed text arrives as
@@ -331,25 +333,72 @@ working directory. Every command prints JSON with `--json`.
 
 ## 9. The project
 
+### Language
+
+**Muster's core is Go.** It builds to one static binary per platform.
+
+- **Nothing to install first.** Muster runs beside agents whose users may not
+  have Node: Claude Code ships as a native binary, and Codex is written in Rust.
+- **Millisecond startup.** Muster runs on every stop of every agent it serves.
+- **Direct process control.** `Setsid`, process groups and the double fork that
+  lets a session outlive its trigger are calls Go makes directly.
+- **Goroutines for waiters.** A waiter that watches several addresses, with a
+  poll behind each watch, is a few goroutines.
+- **Tools of its kind are Go or Rust.** claude-squad and agent-deck are Go, and
+  Herdr is Rust.
+
+### Alternatives considered
+
+| Language | Why not |
+|---|---|
+| Rust | Slower to build with, and nothing this job needs that Go lacks. |
+| TypeScript | It needs Node on every machine muster runs on, and Node has no `fork()`, which the detached backend's double fork needs. |
+
+### Layout
+
 ```
 muster/
-  bin/muster                  a shell shim that execs src/cli.ts
-  adapters/                   one directory per agent, and the only code that names one
-    claude-code/              the Stop and SubagentStop registrations, the waiter, the socket post
-    pi/                       the extension: agent_settled, and the push wake
-    herdr/                    the plugin manifest and its command
-  src/
-    cli.ts                    one subcommand each
-    triggers/                 the contract, running the configured commands, the waiter
+  go.mod                      module github.com/jacygao/muster
+  cmd/muster/main.go          the binary, one subcommand each
+  internal/
+    contract/                 the event fields, the wake kinds, and the text an agent is shown
+    triggers/                 .muster.json, running the configured commands, the waiter
     sessions/                 the record, and one backend each for Herdr, tmux and detached
     inbox/                    the envelope, send, take, and the watch with a poll behind it
+    adapters/                 one package per agent: reading its payload into the contract, and its wake
+  adapters/                   each agent's registration, in that agent's own form
+    claude-code/hooks.json    the Stop and SubagentStop hooks, which call muster hook --agent claude-code
+    copilot/hooks.json        the agentStop and subagentStop hooks, once spike S9 says they work
+    pi/extension.ts           a small TypeScript extension: agent_settled calls muster hook --agent pi, and the push wake
+    herdr/                    the plugin manifest, whose command calls muster hook --agent herdr
   docs/specs/                 this document
 ```
 
-It is TypeScript run by Node with its types stripped, with no runtime
-dependencies, as squiz is. While it lives in squiz's repository, squiz's plugin
-manifest registers the Claude Code adapter's hooks. That is packaging and not an
-import, so the boundary under § 3 holds.
+**An adapter has two halves, and both are its own.** The registration under
+`adapters/<name>/` is written in whatever form the agent loads: a hooks file for
+Claude Code and Copilot, a TypeScript extension for `pi`, a plugin manifest for
+Herdr. Each one calls the `muster` binary. The Go package under
+`internal/adapters/<name>/` reads that agent's payload into the contract, and
+carries its wake. No other package names an agent.
+
+The module path is `github.com/jacygao/muster` from the first commit, so the
+move out of squiz's repository renames nothing.
+
+### Living inside squiz, then moving out
+
+**Muster is built inside squiz's repository, and moves out before squiz runs on
+it.** The move keeps muster's history, with
+`git filter-repo --subdirectory-filter muster` or `git subtree split --prefix muster`.
+From then on squiz uses muster as an external tool, installed like `gh` or `pi`.
+
+While it is inside:
+
+- **It has its own CI job**, which runs `go build ./...`, `go test ./...` and
+  `go vet ./...` in `muster/`.
+- **Squiz's TypeScript checks leave `muster/` out.** `tsc` and squiz's tests do
+  not read it.
+- **Squiz's plugin manifest registers the Claude Code adapter's hooks.** That is
+  packaging, not an import.
 
 ## 10. Open questions and spikes
 
