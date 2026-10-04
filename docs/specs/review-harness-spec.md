@@ -216,7 +216,7 @@ Each record is in one of five states:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. |
 | Not reviewed | The episode closed before a round took this state, and why. |
 
@@ -272,7 +272,7 @@ commit, is queued behind it:
 | A's round ends with | What happens to B |
 |---|---|
 | Threads open, rounds remaining | B is reviewed next, as usual. |
-| Nothing open, rounds remaining | The episode does not close. A is recorded as reviewed with nothing open, and posts no summary. B is reviewed next, and the episode closes from the last round with nothing queued behind it. |
+| Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
 | The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
 
 ```
@@ -1497,10 +1497,10 @@ invocation (§ 7). The exit status says what the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
-| 0 | Nothing of this review is open. The episode is closed. | Finishes. |
+| 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
 | 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
-| 4 | Still reviewing. The run's deadline came before the review of this state was done. The round goes on in the round host. | Runs the command again. |
+| 4 | Still reviewing. The run's deadline came before the review of this state was done, or before the review of a state queued behind a clean one. The round goes on in the round host. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
 
 Exit 4 is neither an outcome nor a failure: nothing about the pull request was
@@ -1599,6 +1599,15 @@ A run whose state is queued behind the round of an older one:
 ```
 Full output: /work/squiz/.squiz/41/review.txt
 Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run `squiz review 41` again to wait for it.
+```
+
+A run whose own state was reviewed clean while a later one was queued, and whose
+wait ran out before the episode closed. Exit 0 and the line about the summary
+come only with the close itself:
+
+```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.
 ```
 
 A run on an episode that has already closed, exit 0 or 3 as the close was:
