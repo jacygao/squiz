@@ -193,7 +193,13 @@ test("a tab create whose answer cannot be read failed, and is not read as a pane
     json({ id: "cli:tab:create", error: { code: "odd" }, result: { root_pane: { pane_id: "w1:p1" } } }),
     json([]),
   ]) {
-    withFakeHerdr({ "tab-create": [answer] }, ({ options, calls }) => {
+    // Every later call is answered as if pane w1:p1 had opened, so a start that
+    // made a pane up from this answer would come back started.
+    const later = {
+      "agent-start": [agentStarted("squiz-test", "w1:p1")],
+      "pane-process-info": [processInfo("w1:p1", process.pid, 1)],
+    };
+    withFakeHerdr({ "tab-create": [answer], ...later }, ({ options, calls }) => {
       const started = startInHerdrPane(command, options);
       assert.equal(started.outcome, "failed", `${JSON.stringify(answer)} read as ${JSON.stringify(started)}`);
       assert.equal(calls().length, 1, `more was asked after ${JSON.stringify(answer)}: ${calls().join("; ")}`);
