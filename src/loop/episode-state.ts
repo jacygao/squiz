@@ -1,6 +1,7 @@
 /**
  * The episode's state file: what each round spent, whether the close has been
- * reported, and what the rounds established about the worktree they ran in.
+ * reported, what the rounds established about the worktree they ran in, and the
+ * record of each state of the pull request.
  *
  * Absent and unreadable are different answers, and keeping them apart is most of
  * what this module is for. A file that is not there is a first round. A file
@@ -21,6 +22,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "
 import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import type { ConfinementEvidence } from "./confinement.ts";
 import type { Episode } from "./episode.ts";
+import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 
 /**
  * One round as the state file keeps it: what it spent, how long its reviewer ran,
@@ -83,6 +85,13 @@ export type EpisodeState = {
    * existed says and what an episode every reviewer left alone writes.
    */
   readonly confinement?: ConfinementEvidence;
+  /**
+   * One record for each state of the pull request a trigger has queued, oldest
+   * first. No two are for the same state.
+   *
+   * Absent is none, which is what a file written before records were kept holds.
+   */
+  readonly records?: readonly StateRecord[];
 };
 
 /**
@@ -228,6 +237,9 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   const found = confinementIn(parsed);
   if ("problem" in found) return unreadable(`${path}: ${found.problem}`);
 
+  const kept = recordsIn(parsed);
+  if ("problem" in kept) return unreadable(`${path}: ${kept.problem}`);
+
   return {
     outcome: "read",
     state: {
@@ -235,8 +247,37 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       spentOutsideRounds: outside.cost,
       ...(reported === undefined ? {} : { closeReported: reported }),
       ...(found.evidence === undefined ? {} : { confinement: found.evidence }),
+      ...(kept.records === undefined ? {} : { records: kept.records }),
     },
   };
+}
+
+type ReadRecords =
+  | { readonly records: readonly StateRecord[] | undefined }
+  | { readonly problem: string };
+
+/**
+ * The record of each state the file holds.
+ *
+ * Every record has to read, and no two may be for one state. Either failure makes
+ * the whole file unreadable, because the record a reader would be left with
+ * could be the wrong one, and a trigger decides from it whether to queue a review.
+ */
+function recordsIn(parsed: Record<string, unknown>): ReadRecords {
+  const found = parsed["records"];
+  if (found === undefined) return { records: undefined };
+  if (!Array.isArray(found)) return { problem: `"records" is ${render(found)} rather than an array` };
+
+  const records: StateRecord[] = [];
+  for (const [index, entry] of found.entries()) {
+    const read = recordFrom(entry);
+    if ("problem" in read) return { problem: `record ${index + 1} ${read.problem}` };
+    if (recordFor(records, read.record) !== undefined) {
+      return { problem: `record ${index + 1} is a second record for the state of ${read.record.head}` };
+    }
+    records.push(read.record);
+  }
+  return { records };
 }
 
 type ReadEvidence =
