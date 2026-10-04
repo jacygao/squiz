@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.57 (draft)
+**Version:** 0.58 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -78,10 +78,15 @@ These behaviours were established rather than assumed:
   subagent waiting on a shell command is making progress.** A hook that holds a
   subagent is not. The threshold is read from
   `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`. Measured against 2.1.270 and 2.1.288.
-- **A failing command's output reaches the agent truncated to about 10,000
-  characters.** Claude Code reads every exit status but 0 as a failure for
-  `squiz`, and keeps a head-and-tail excerpt of a failing command's output, with
-  no path to the rest. Documented, in the tools reference's output limits.
+- **A long command output reaches the agent shortened, in a way that depends on
+  the shell call's exit status.** Measured against 2.1.289:
+  - A call that exits non-zero is cut to a head-and-tail excerpt of about 10,000
+    characters, with no path to the rest. Over about 30,000 characters it is
+    first cut to 30,000, so its real end is lost as well as its middle.
+  - A call that exits 0 with a long output is saved to a file, and the agent is
+    shown a preview of about 2 KB that names the file.
+  - A coding agent that runs `squiz review 41; echo "EXIT=$?"` makes the call
+    exit 0, so its output is never cut. Most subagents ran it that way.
 - **A process outlives Claude Code stopping a command or a hook only if it leaves
   both the command's process tree and its process group.** A double fork with
   `setsid` between the forks does. A plain `&`, `setsid` alone,
@@ -275,9 +280,16 @@ commit, is queued behind it:
 | Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
 | The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
 
+The line comes right after the heading of the close the run is handed:
+
 ```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz reviewed PR #41 at 3f9c2e0: round 3 of 3, no new findings.
 Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.
 ```
+
+Where the token bound closed the episode, its reason reads "the episode closed at
+the token bound, after reviewing 3f9c2e0".
 
 **A reply is ruled on even where no commit follows it.** A coding agent that
 disputes a finding and pushes nothing asks for a review again on a new state, and
@@ -506,7 +518,10 @@ request it writes the line under step 1 naming the branch and the directory.
 | Event | The owner of the work it records |
 |---|---|
 | `Stop` | The session itself, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one |
-| `SubagentStop` | The session that dispatched the subagent, from the payload's `session_id`, and the subagent, from its `agent_id` |
+| `SubagentStop` | The session that dispatched the subagent, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one; and the subagent, from its `agent_id` |
+
+A subagent runs inside its parent's process and has no socket of its own, so the
+socket in a `SubagentStop` hook's environment is the parent's.
 
 The `Stop` registration runs in the background, so the session does not wait on
 it. After it has queued, it stays to deliver a note, as The report sets out. The
@@ -520,6 +535,11 @@ A turn ending is not work being done. The hook fires on every turn, including on
 that ended on a question, and queues only a state that needs a review, so a turn
 that pushed nothing starts nothing. A firing for a subagent the session did not
 dispatch, for a state already queued or reviewed, queues nothing.
+
+**A `SubagentStop` firing whose `agent_type` is empty is no subagent's work.** In
+an interactive session, Claude Code fires two or three of them after a turn ends,
+each with a new `agent_id`, the parent's `session_id`, and no transcript. The hook
+does nothing for one: it resolves nothing, records no owner and queues nothing.
 
 The hook's shell does not have the plugin's `bin/` on its `PATH`, so the
 registration names the binary through `${CLAUDE_PLUGIN_ROOT}`.
@@ -716,8 +736,18 @@ round host writes the command that resumes it to `rounds/<k>/resume.txt`:
 pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
 ```
 
-`squiz status` prints it on the round's line. A conversation resumed after the
-round is not part of the review.
+`squiz status` prints it on the round's line. A person runs it from the coding
+agent's worktree, which the paths are relative to. The session ran in the
+snapshot, which is gone once the round ends, so `pi` does not resume it in place.
+It asks to fork the session into the current directory:
+
+```
+Fork this session into current directory? [y/N]
+```
+
+Answering yes opens the reviewer's conversation in the worktree, with everything
+the reviewer read and said. A conversation resumed after the round is not part
+of the review.
 
 **What a person types into a reviewer's pane reaches `pi`.** It can steer the
 review, and nothing records it.
@@ -741,18 +771,23 @@ git worktree add --detach .squiz/41/rounds/2/tree 3f9c2e07b1d4a8c6e5f0923b7a1d6c
 
 The commit is the one GitHub reports as the pull request's head. Where the
 repository does not have it yet, because it was pushed from elsewhere, the round
-host fetches it first. The snapshot shares the repository's object store, and
-`.squiz/` is gitignored, so it shows in neither the coding agent's `git status`
-nor its commits.
+host fetches it first. The fetch and the add run in the part of the round before
+the review, under its 30 seconds (§ 7 The review budget). The snapshot shares the
+repository's object store, and `.squiz/` is gitignored, so it shows in neither the
+coding agent's `git status` nor its commits.
 
 **The snapshot holds the commit and nothing else.** It carries none of the coding
 agent's uncommitted changes, which no state names, and none of its untracked
 files, build output or installed dependencies.
 
-**The round host removes the snapshot when the round ends**, with
-`git worktree remove --force` and then `git worktree prune`, whatever the round
-became. A snapshot a killed round left behind is removed by the recovery that
-finds it, once its reviewer is confirmed gone.
+**The round host removes the snapshot once the round has recorded its result**,
+with `git worktree remove --force` and then `git worktree prune`, whatever the
+round became. Removal grows with every file in the snapshot, the ones the
+reviewer left behind included, so it runs after the result rather than before it,
+and delays nothing a waiting `squiz review` returns. It takes no part of the
+round's deadline. The round host takes the next queued state once it is done. A
+snapshot a killed round left behind is removed by the recovery that finds it, once
+its reviewer is confirmed gone.
 
 **Confinement applies to the snapshot.** The tracked-file comparison is taken in
 it before the reviewer starts and again when the reviewer exits. The refused
@@ -763,8 +798,20 @@ change the comparison finds is the reviewer's.
 **What it costs:**
 
 - **Time and disk on every round.** Checking out every tracked file grows with
-  the size of the repository, not the size of the change. How long it takes on a
-  large repository is not measured (§ 8 Prerequisites).
+  the size of the repository, not the size of the change. Measured on Apple
+  silicon with an internal SSD:
+
+  | Repository | Tracked files | Disk | Add | Remove, clean | Remove, 50,000 files left behind |
+  |---|---|---|---|---|---|
+  | squiz | 166 | 2.1 MB | 0.06 s | 0.03 s | — |
+  | `rust-lang/rust` | 63,424 | 408 MB | 4.6 to 6.1 s | 2.9 s | 7.9 to 11.9 s |
+
+- **A limit on very large repositories.** The disk held at once is the
+  checkout's size times the reviews running at once, so ten parallel reviews of a
+  repository the size of `rust-lang/rust` hold about 4 GB. Extrapolating the add
+  linearly, it would spend the whole 30 seconds before the review at 300,000 to
+  400,000 tracked files, which is unmeasured. A snapshot per round does not
+  scale to such repositories, and the first version accepts that.
 - **A build before tests at `deep`.** The snapshot has no installed
   dependencies, so the configured test command has to install or build what it
   needs before it runs the tests. A project that names a test command at `deep`
@@ -1515,10 +1562,17 @@ be posted. A run that exits 1 prints nothing on stdout.
 
 **The first line names a file holding the whole output.** A run that exits 0, 2,
 3 or 4 writes everything it prints on stdout to `.squiz/<number>/review.txt`, and
-prints that path first. Claude Code reads every status but 0 as a failure and
-cuts the output it hands the agent to about 10,000 characters, with no path to
-the rest, so several open threads can be lost from the middle of it. The file is
-replaced on every run.
+prints that path first. The file is replaced on every run. Claude Code can hand
+the agent less than the command printed, as § 2 sets out, so several open threads
+can be missing from what the agent sees. A subagent shown a shortened output reads
+the file.
+
+A file that cannot be written leaves the outcome and its status as they are. The
+path line still names it, and stderr adds one line:
+
+```
+squiz: the output could not be written to /work/squiz/.squiz/41/review.txt: EACCES: permission denied
+```
 
 Each open thread is printed as its `squiz threads` line, followed by the thread's
 comments indented by two spaces. The first comment is given without its first
@@ -1615,6 +1669,17 @@ A run on an episode that has already closed, exit 0 or 3 as the close was:
 ```
 Full output: /work/squiz/.squiz/41/review.txt
 Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
+```
+
+Where it closed with threads open, exit 3, the line counts them and the threads
+follow, each as exit 3 prints it:
+
+```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz's review of PR #41 closed after 3 rounds, with 2 threads open. No round runs again in this worktree.
+
+PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
+  …
 ```
 
 The review could not run, exit 1, on stderr. A round that failed prints the
@@ -1729,7 +1794,7 @@ nothing retries one.
 | No wake reaches the owner of the work | The note stays in `.squiz/<number>/notes/`. The owner learns the result from `squiz review` or `squiz status`, and the pull request holds it. |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. stderr is the channel. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
-| The calls before the review run out of time | Exit 1, and no review runs. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
+| The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch and the add could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. |
@@ -1835,7 +1900,7 @@ three parts, each bounded on its own:
 
 | Part | How long | What runs in it |
 |---|---|---|
-| Before the review | At most 30 seconds | The pull request lookup, the threads listing and the diff |
+| Before the review | At most 30 seconds | The pull request lookup, the threads listing, the diff, and the fetch and add that make the snapshot |
 | The review | The time bound | The reviewer |
 | Posting | A reserve of 60 seconds | The findings, the verdicts, the summary comment and the failure comment |
 
@@ -2069,24 +2134,26 @@ These are settled, each measured in nested `claude` sessions:
   interactive session.
 - An interactive `pi` in a pane, with squiz's grant and extension, reviews as the
   headless one does, and exits when the extension shuts it down.
+- A subagent shown a shortened `squiz review` output reads the file its first
+  line names, and works every thread.
+- A `SubagentStop` hook's environment carries the parent's
+  `CLAUDE_CODE_MESSAGING_SOCKET`, and a post to it from a process outside the
+  hook's tree wakes the idle parent, with or without
+  `CLAUDE_CODE_MESSAGING_TOKEN`.
+
+This is settled by measurement on one machine:
+
+- A snapshot of 63,424 tracked files adds in 4.6 to 6.1 seconds and removes in
+  2.9, as § 4 The snapshot tabulates.
 
 These remain open:
 
-- **Whether a subagent handed a long exit-2 output works every thread.** The
-  output is cut to about 10,000 characters (§ 2). Measure that a subagent reads
-  the file named on its first line, or fetches each thread, when several threads
-  overflow it.
 - **What closing a pane reaches.** Which processes Herdr's pane close and tmux's
   window close signal, whether a shell `pi` started in a session of its own
   escapes them, and whether Herdr returns a pane to its shell when the agent
   exits, as its documentation says.
-- **Whether the socket wake can reach a subagent's parent.** Whether a
-  `SubagentStop` hook's environment carries the parent's
-  `CLAUDE_CODE_MESSAGING_SOCKET`. Where it does not, a subagent's result reaches
-  its parent through the parent's `Stop` waiter, or by pull.
-- **What a snapshot costs.** How long `git worktree add` and removal take on a
-  large repository, and what installing dependencies before tests at `deep` adds
-  to a round.
+- **What installing dependencies before tests at `deep` adds to a round.**
+- **What a snapshot costs on a repository of several hundred thousand files.**
 - **Linux.** The detach and pane probes ran on macOS alone.
 - **GitHub Copilot CLI, as a later agent.** Its documentation lists `agentStop`
   and `subagentStop` hooks. Whether they fire, whether `subagentStop` names the
