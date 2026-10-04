@@ -484,6 +484,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
           command: current().command ?? "/bin/sh",
           args: [...(current().args ?? ["-c", "exit 0"])],
           directory: invocation.directory,
+          stdin: "/dev/null",
         };
       },
       parse: (stdout, progressSoFar) => current().parse(stdout, progressSoFar),

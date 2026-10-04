@@ -234,6 +234,7 @@ function at(roundSpace: RoundSpace | undefined, directory = "/tmp/squiz/worktree
     depth: roundSpace === undefined ? "read" : "deep",
     thinking: "medium",
     roundSpace,
+    terminal: "none",
   };
 }
 

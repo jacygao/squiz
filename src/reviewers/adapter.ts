@@ -54,6 +54,12 @@ export type Invocation = {
    * would have the reviewer writing to a record nothing reads.
    */
   readonly roundSpace: RoundSpace | undefined;
+  /**
+   * Where the reviewer runs: in a pane a person can watch and type into, or
+   * with no terminal at all. The round host decides it, and the adapter builds
+   * the command line for it.
+   */
+  readonly terminal: "pane" | "none";
 };
 
 /** A process to start: what to run, what to pass it, and where it runs. */
@@ -61,6 +67,11 @@ export type CommandLine = {
   readonly command: string;
   readonly args: readonly string[];
   readonly directory: string;
+  /**
+   * What the process must read its stdin from. Whoever starts it owes it this,
+   * because a CLI handed the wrong stdin can hang with nothing to show for it.
+   */
+  readonly stdin: "/dev/null" | "terminal";
 };
 
 /** What a round spent: the dollars the CLI priced it at, and the tokens behind them. */

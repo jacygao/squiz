@@ -63,22 +63,25 @@ export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze(
 export const extensionFile = fileURLToPath(new URL("extension.ts", import.meta.url));
 
 /**
- * Build the command line for one round at the depth given.
+ * Build the command line for one round at the depth given, for a reviewer in a
+ * pane or one with no terminal.
  *
- * The caller starts the process, and owes it stdin from `/dev/null`: with stdin
- * inherited `pi` blocks forever, emitting no output, no error and no exit.
+ * In a pane `pi` runs interactively, with the pane as its terminal. With no
+ * terminal it runs in print mode, and its stdin must be `/dev/null`: with stdin
+ * inherited, `pi --print` blocks forever, emitting no output, no error and no
+ * exit. Nothing else differs between the two.
  */
 export function argv(invocation: Invocation): CommandLine {
+  const detached = invocation.terminal === "none";
   return {
     command: "pi",
     directory: invocation.directory,
+    stdin: detached ? "/dev/null" : "terminal",
     args: [
-      "--print",
-      "--mode",
-      "json",
-      // Each round is a fresh process holding no state.
-      "--no-session",
-      // What pi writes lands under .squiz/ rather than in interactive history.
+      ...(detached ? ["--print", "--mode", "json"] : []),
+      // The session is kept so a person can resume it, under .squiz/ rather
+      // than in the user's own history. Nothing of it reaches the next round,
+      // which starts a fresh process.
       "--session-dir",
       invocation.sessionDirectory,
       // The tree under review is not trusted to configure the reviewer. A

@@ -299,6 +299,7 @@ function invocationIn(tree: string): Invocation {
     depth: "read",
     thinking: "medium",
     roundSpace: undefined,
+    terminal: "none",
   };
 }
 
@@ -499,9 +500,10 @@ const answer = (id, toolName, details) =>
   });
 
 function review() {
-  for (const required of ["--print", "--no-session", "--no-extensions"]) {
+  for (const required of ["--print", "--no-extensions"]) {
     if (!args.includes(required)) refuse("the command line carries no " + required);
   }
+  if (args.includes("--no-session")) refuse("the session is not kept for a person to resume");
   if (after("--mode") !== "json") refuse("the output mode is not json");
 
   const tools = after("--tools");

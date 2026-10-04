@@ -17,6 +17,7 @@ const invocation: Invocation = {
   depth: "read",
   thinking: "medium",
   roundSpace: undefined,
+  terminal: "none",
 };
 
 /**

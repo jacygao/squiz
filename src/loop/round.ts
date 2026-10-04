@@ -325,6 +325,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
         thinking: config.thinking,
         depth: config.depth,
         roundSpace,
+        terminal: "none",
       },
       seconds,
     );

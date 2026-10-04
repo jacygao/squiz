@@ -293,6 +293,15 @@ async function attempt(
   bound: Deadline,
 ): Promise<Attempt> {
   const line = adapter.argv(invocation);
+  if (line.stdin !== "/dev/null") {
+    return {
+      cost: unspent,
+      refusals: 0,
+      reported: nothingReported,
+      kind: "unstartable",
+      reason: `${line.command} was built to run in a terminal, and the round has none to give it`,
+    };
+  }
   const options: SpawnOptionsWithStdioTuple<StdioNull, StdioPipe, StdioPipe> = {
     cwd: line.directory,
     env: environment,
