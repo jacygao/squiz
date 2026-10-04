@@ -170,8 +170,8 @@ An episode is **live** from its first round until it closes, and its reviewer is
 reviewing or its coding agent is working on what the review said. It closes for
 one of three reasons: nothing is left open for another round to work, the round
 cap is spent, or a round reached the token bound. A round that failed closes
-nothing — it posts a failure comment under § 7, the episode stays live, and the
-next trigger on that state queues another round.
+nothing — it posts a failure comment under § 7, and the episode stays live. A new
+commit or reply, or a run of `squiz review`, retries it.
 
 A live episode is one whose close has not been recorded. Nothing else makes an
 episode live or over: not whether a round is running at this instant, because
@@ -210,14 +210,15 @@ episode has reviewed.** A state is two things, read when a trigger starts:
 A new commit or a new reply is a new state. Either one means the review on record
 no longer covers what the pull request now says.
 
-Each record is in one of four states:
+Each record is in one of five states:
 
 | State | What it records |
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
-| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. |
+| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
 | Reviewed | The result the round reached: its exit status, and the threads it left open. |
-| Failed | The reason the round failed. |
+| Failed | The reason the round failed, and whether its owner has been sent a note about it. |
+| Not reviewed | The episode closed before a round took this state, and why. |
 
 A record also names the session that owns the work, where a trigger knew it:
 the session's identifier, the subagent that did the work where one did, and the
@@ -228,23 +229,55 @@ record it, and `squiz review` records none.
 anything.** It has looked up the pull request and listed its threads by then,
 because the state is read from them.
 
-- **No record, or failed:** the trigger queues the state, and starts a round host
-  where none is running.
-- **Reviewing**, by a round host that has gone: the round was killed. The trigger
-  queues the state again, and starts a round host.
+- **No record:** the trigger queues the state, and starts a round host where
+  none is running.
+- **Failed:** a hook queues nothing. `squiz review` queues the state again,
+  because running the command is the request to retry it.
+- **Reviewing**, by a round host that has gone: the trigger recovers the round, as
+  The round host sets out, which records it failed. It then does what it does for
+  a failed state.
 - **Queued:** the trigger queues nothing, and starts a round host where none is
   running.
 - **Reviewing**, by a round host that is running: the trigger queues nothing.
-- **Reviewed**: the trigger queues nothing. `squiz review` returns that result,
-  with the threads read from the pull request as they stand now.
+- **Reviewed, or not reviewed:** the trigger queues nothing. `squiz review`
+  returns that result, with the threads read from the pull request as they stand
+  now.
 
 `squiz review` then waits, as § 7 sets out, and the hooks return at once.
+
+**A failed state is retried only on a fresh request.** A new commit or a new
+reply is a new state, with no record, and is queued like any other. The same
+state is retried only by someone running `squiz review`. A hook firing on a
+state that failed queues nothing, so a turn the coding agent spent reading a
+failure note does not bring the failure back. Failures that spend no round, such
+as a reviewer that will not start or a `gh` that cannot run, follow the same
+rule.
+
+**No failure starts a cycle.** A failed state gets one note, however many times
+it fails (The report). A retry by `squiz review` that fails again posts its
+failure comment, returns exit 1 to the run that asked for it, and writes no
+second note. So every attempt after the first needs someone to run the command,
+and a run that gets exit 1 is told not to run it again (§ 9).
 
 **Every trigger therefore gets one review per state.** A second trigger for a state
 already queued or under review finds it and queues nothing, so two firings for one
 commit and the same replies post one set of threads and at most one summary. One
 episode runs one round at a time. A state queued while a round of an older one runs
 is reviewed next.
+
+**A state accepted into the queue is never dropped.** It is reviewed, or it is
+given a result of its own. Say state A is under review and state B, a later
+commit, is queued behind it:
+
+| A's round ends with | What happens to B |
+|---|---|
+| Threads open, rounds remaining | B is reviewed next, as usual. |
+| Nothing open, rounds remaining | The episode does not close. A is recorded as reviewed with nothing open, and posts no summary. B is reviewed next, and the episode closes from the last round with nothing queued behind it. |
+| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
+
+```
+Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.
+```
 
 **A reply is ruled on even where no commit follows it.** A coding agent that
 disputes a finding and pushes nothing asks for a review again on a new state, and
@@ -351,8 +384,10 @@ flowchart TD
    snapshot while the reviewer ran, the output ends with a paragraph naming both
    ends of the move, and Notes names it under § 5. A round that failed reports its
    move in its failure comment, under § 7.
-6. **Close the episode.** Otherwise the round posts one summary comment on the
-   pull request and records the close in the episode's state. A run of
+6. **Close the episode.** Otherwise, and where nothing is queued behind this
+   round or the cap or the token bound is reached, the round posts one summary
+   comment on the pull request and records the close in the episode's state. A
+   state still queued is handled as the table above sets out. A run of
    `squiz review` exits 0 where nothing of this review is open, and 3 where the
    round cap or the token bound closed it with threads still open, which it
    prints. What remains open is what
@@ -420,10 +455,34 @@ and when the worktree it serves is gone.
 names its pid and start time. A host that finds the lock held by a live process
 exits at once, so two triggers that each start one leave one running.
 
-**A host that died is found by its pid and start time.** A reviewing record whose
-host has gone is a killed round, and a queued state with no live host is one no
-host will take. Either way the next trigger, or the next run of `squiz review`,
-queues the state and starts a host. Nothing else watches for a dead host.
+**A host that died is found by its pid and start time.** A queued state with no
+live host is one no host will take, and the next trigger starts a host for it. A
+reviewing record whose host has gone is a killed round, and its reviewer may
+still be running: the host and the reviewer are separate processes, and a
+reviewer in a pane is not the host's child.
+
+**Recovery stops the orphaned reviewer before anything replaces it.** Every
+trigger, and every round host as it starts, recovers each killed round it finds:
+
+1. It reads the reviewer's session from the reviewing record: its backend, its
+   pane or window, its pid and start time.
+2. Where that reviewer is still running, it stops it as a round host stops a
+   reviewer at its bound: the reviewer's process group, then the groups its shells
+   recorded, then the pane. It does so whether or not the reviewer's time bound
+   has passed, so an orphan past its bound is always stopped by the first
+   recovery to find it.
+3. It confirms that the reviewer and every recorded group are gone, by pid and
+   start time and by asking the backend for the pane.
+4. Only then does it remove the snapshot and record the round as failed, with
+   the reason "the round host died". No failure comment is posted.
+
+A recovery that cannot confirm the reviewer is gone leaves the snapshot and the
+record as they are, and starts nothing for that state. `squiz review` exits 1
+naming the process it could not stop, and the next recovery tries again.
+
+**Nothing stops an orphan before a recovery runs.** While no host is alive, the
+reviewer's time bound is enforced when the next trigger or `squiz review` runs,
+and not before.
 
 ### The Claude Code hooks
 
@@ -485,9 +544,11 @@ text=Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2
 ```
 
 The note points, and carries no finding. `subagent` is there only where a
-subagent did the work. For a round that failed, the text names `squiz status`
-rather than `squiz review`, because `squiz review` on a failed state queues it
-again. A state no hook recorded an owner for gets no note.
+subagent did the work. For a round that failed, the text gives the reason, names
+`squiz status`, and says that a new commit, or running `squiz review` once,
+retries it. A failed state gets one note, however many times it fails, and a
+state not reviewed gets one saying why. A state no hook recorded an owner for gets
+no note.
 
 **Then it wakes the owner, one of two ways.** Whichever delivers a note moves it
 into `delivered/` beside it, so the other does not deliver it again.
@@ -690,8 +751,8 @@ files, build output or installed dependencies.
 
 **The round host removes the snapshot when the round ends**, with
 `git worktree remove --force` and then `git worktree prune`, whatever the round
-became. A round host that finds a snapshot a killed round left behind removes it
-before it starts its own round.
+became. A snapshot a killed round left behind is removed by the recovery that
+finds it, once its reviewer is confirmed gone.
 
 **Confinement applies to the snapshot.** The tracked-file comparison is taken in
 it before the reviewer starts and again when the reviewer exits. The refused
@@ -1320,7 +1381,7 @@ The round is a failed one and closes no episode, so the line is written by the
 round that closes the episode later, from the episode's state:
 
 ```markdown
-- The review was cut short by the 480-second time bound in round 2, and the round kept only the findings it had reported by then
+- The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
 ```
 
 A review that finished on its own has no such line, however close to the bound
@@ -1357,7 +1418,7 @@ Each round is written to the episode's local state file as the review finishes,
 before anything is posted, and its posting time is added once posting ends:
 
 ```json
-{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 481.2, "cutShortAtSeconds": 480, "postingSeconds": 4.3 }
+{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3 }
 ```
 
 - `dollars` and `tokens` are what the round spent, the dollars being zero where
@@ -1552,7 +1613,7 @@ reason its failure comment gives, then each thing the comment lists, then where
 the comment went:
 
 ```
-squiz: review failed: the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings
+squiz: review failed: the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings
 squiz: `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 squiz: the failure is posted on PR #41
 ```
@@ -1595,7 +1656,7 @@ PR    Commit   Replies  State      Started   Elapsed  Result                    
 
 Elapsed is the time so far for a review that is running, and the time it took for
 one that finished. A reviewing record whose round host has gone is listed as
-`killed`. The result of a review that failed is the reason its failure comment
+`killed` until a recovery records it failed. A state the episode closed before reviewing is listed as `not reviewed`. The result of a review that failed is the reason its failure comment
 gives.
 
 ### `squiz init`
@@ -1654,7 +1715,7 @@ nothing retries one.
 | The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. |
 | The reviewer exceeds the review budget | Exit 1, unless the round holds the reviewer's declaration, as the end of this row says. The reviewer process is killed, what it reported before the kill is posted, and the failure comment and stderr say how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. That round posts no failure comment, and exits 0, 2 or 3 as its outcome says. |
 | The command is stopped from outside | The coding agent's tool or a person ends `squiz review` while it waits. The round runs in the round host, outside the command's process tree and group, and goes on. The next run returns its result. |
-| The round host dies | The reviewing record names a host that has gone, so the round reads as killed. A reviewer it started in a pane runs to its own end, and what it reported is not posted. The next trigger, or the next run of `squiz review`, queues the state again and starts a host. No failure comment is posted, because nothing of the round is left to post it. |
+| The round host dies | The reviewing record names a host that has gone, so the round reads as killed. The next trigger or round host to find it stops the orphaned reviewer and its recorded shell groups, confirms they are gone, removes the snapshot, and records the round failed, as The round host under § 3 sets out. What the reviewer reported is not posted, and no failure comment is posted. The state is retried by a new commit or reply, or by `squiz review`. |
 | No pane can be opened | Where tmux or Herdr refuses to open a pane, the round host starts the reviewer detached, and the round goes on. |
 | No wake reaches the owner of the work | The note stays in `.squiz/<number>/notes/`. The owner learns the result from `squiz review` or `squiz status`, and the pull request holds it. |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. stderr is the channel. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
@@ -1681,9 +1742,9 @@ worktree, and a comparison that could not be taken. A round that salvaged findin
 says how many it posted as threads.
 
 ```markdown
-**Squiz review failed — the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings**
+**Squiz review failed — the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings**
 
-Both findings are posted as threads. The review is still open, and the next run of `squiz review` reviews again.
+Both findings are posted as threads. The review is still open. A new commit or reply, or running `squiz review` again, retries it.
 
 - `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 ```
@@ -1727,7 +1788,7 @@ The review budget bounds a review two ways. Both are configurable.
 
 | Bound | Default | When it is reached |
 |---|---|---|
-| **Time**, per round | 480 seconds | The reviewer is stopped, the round records that the bound cut it short, and it posts the findings reported before the stop. |
+| **Time**, per round | 900 seconds | The reviewer is stopped, the round records that the bound cut it short, and it posts the findings reported before the stop. |
 | **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
 Killing the reviewer yields the findings it had reported by then, because a
@@ -2131,12 +2192,14 @@ its own branch. Squiz does not create them, and does not remove them.
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
-| `timeout` | 480 | Seconds one round's reviewer may run, settable 1 to 540 |
+| `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 `timeout` is the time bound on the review part of a round, which runs in the
-round host. The review budget names the parts of a round.
+round host. No caller's timeout limits it, so it is a guard against a reviewer
+that runs away rather than a fit to a window. A review that reaches it is cut
+short and says so. The review budget names the parts of a round.
 
 `tokens` is the review budget's other bound. The review budget says what it
 counts, when it is read, and what an episode's ceiling comes to under a given
