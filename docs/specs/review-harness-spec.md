@@ -197,7 +197,19 @@ what its rounds established about the worktree. The directory also holds:
   runs.
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
+- `state.lock`, held while the state file is changed.
 - The reviewer's scratch space.
+
+**Every change to the state file is made under `state.lock`.** A writer takes the
+lock, reads the file, changes it, writes it, and releases the lock. A trigger
+queueing a state and a round host writing its reviewing record therefore cannot
+drop each other's record. The lock is held for one update and never across a
+review, and it is a different file from `host.lock`. It names its holder's pid
+and start time. A lock whose holder has gone is taken over. A writer that finds
+the lock held by a live process, or by one that cannot be told running or gone,
+waits up to a deadline of its own and never breaks the lock. A wait that runs out
+is a state file that cannot be written (§ 7). Readers take no lock, because every
+write replaces the file whole.
 
 **The state file also holds one record for each state of the pull request the
 episode has reviewed.** A state is two things, read when a trigger starts:
