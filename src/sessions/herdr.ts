@@ -42,6 +42,8 @@ export type PaneCommand = {
   readonly arguments: readonly string[];
   /** How long Herdr waits for the command to be ready, on top of the bound. */
   readonly readyWithinMs: number;
+  /** The workspace the tab opens in. Absent, it opens in the focused one. */
+  readonly workspace?: string;
 };
 
 export type PaneStart =
@@ -55,13 +57,34 @@ export function insideHerdr(environment: HerdrEnvironment): boolean {
   return (environment["HERDR_SOCKET_PATH"] ?? "") !== "";
 }
 
-/** Open a tab in `command.directory`, and start the command in its pane. */
+/** Whether `id` has the shape of a Herdr workspace id, such as `w2`. */
+export function isHerdrWorkspace(id: string): boolean {
+  return /^w[1-9][0-9]{0,8}$/u.test(id);
+}
+
+/**
+ * Open a tab in `command.directory`, and start the command in its pane.
+ *
+ * A workspace Herdr no longer has opens the tab in the focused workspace, as if
+ * none were given. Herdr refused, so nothing opened and nothing runs twice, and
+ * the person still sees the command. Herdr does not reuse a workspace id, so the
+ * refusal cannot mean some other workspace.
+ */
 export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): PaneStart {
-  const created = herdr(
-    ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus"],
-    options.environment,
-    options.boundMs,
-  );
+  const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus"];
+  let created: Answer;
+  if (command.workspace === undefined) {
+    created = herdr(tab, options.environment, options.boundMs);
+  } else {
+    // A malformed id is a bug upstream, and one like `--focus` would be read as a flag.
+    if (!isHerdrWorkspace(command.workspace)) {
+      return { outcome: "refused", reason: `${JSON.stringify(command.workspace)} is not a Herdr workspace id` };
+    }
+    created = herdr([...tab, "--workspace", command.workspace], options.environment, options.boundMs);
+    if (created.outcome === "refused" && created.code === "workspace_not_found") {
+      created = herdr(tab, options.environment, options.boundMs);
+    }
+  }
   if (created.outcome === "absent") return { outcome: "refused", reason: created.reason };
   if (created.outcome === "refused") {
     return { outcome: "refused", reason: `herdr tab create refused: ${created.code}: ${created.message}` };
