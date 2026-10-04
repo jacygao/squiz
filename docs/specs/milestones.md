@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.14 (draft)
+**Version:** 0.15 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -40,10 +40,17 @@ whatever started them, and carries short messages between sessions.
 `docs/specs/session-interface.md` says what squiz asks of it. Both arrive with
 pull request #294, and until it merges they exist only there.
 
-**Muster lives in `muster/` in this repository** until it moves to a repository
-of its own. Nothing under `muster/` imports a module under squiz's `src/`, and
-nothing under `src/` imports a module under `muster/`. Each calls the other only
-as a command. M11 builds the test that holds this.
+**Muster is written in Go**, as the module `github.com/jacygao/muster`. It is
+built in `muster/` in this repository, with a CI job of its own that runs
+`go build`, `go test` and `go vet`. Squiz's TypeScript checks ignore `muster/`.
+
+**The boundary between them is hard.** Nothing under `muster/` imports anything
+under squiz's `src/`, and nothing under `src/` imports anything under `muster/`.
+Each calls the other only as a command. M11 builds the test that holds this.
+
+**Muster moves to a repository of its own, with its history, as the first step
+of M14.** From then on squiz uses muster as an external tool, installed the way
+a user installs it.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
@@ -301,7 +308,7 @@ M14 removes what these bound, and checks that each is gone.
 
 ## M10 — Muster's spikes
 
-The four questions muster's specification leaves open, cheapest first, each run
+The five questions muster's specification leaves open, cheapest first, each run
 against throwaway scaffolding. No production code survives this milestone. The
 findings do, in `muster/docs/notes/`.
 
@@ -322,6 +329,12 @@ A written finding for each of:
       Whether a pane returns to its shell once an agent started by
       `herdr agent start` exits. Whether tmux's `pane-died` hook fires on every
       exit with `remain-on-exit` on, and gives the exit status.
+- [ ] **S9.** What GitHub Copilot CLI offers an adapter. Whether its
+      `agentStop` and `subagentStop` hooks fire as documented. The largest
+      `timeoutSec` it honours, and whether an `agentStop` hook that waits that
+      long and then answers `block` wakes the session with its `reason`. Whether
+      anything reaches an idle session from outside, such as its asynchronous
+      `notification` hook. Which of muster's three layers Copilot lands in.
 - [ ] **S6.** Whether `herdr agent start --kind pi` tracks a `pi` that runs with
       `--no-extensions`, and what status Herdr shows for it.
 
@@ -333,25 +346,27 @@ specification, not worked around.
 
 ## M11 — Muster's sessions and their backends
 
-Muster becomes a project in `muster/` with a `muster` binary that starts,
+Muster becomes a Go module in `muster/` with a `muster` binary that starts,
 watches and stops sessions in a Herdr tab, a tmux window, or a detached process.
 It is usable on its own: a person can start a session with `muster start` and
 manage it, with no trigger and no message.
 
-Covers `muster/bin/muster` and `muster/src/cli.ts`, the import-boundary test,
-`tsc --noEmit` and muster's tests in CI, the state directory, the session
-record, the three backends, and `start`, `status`, `attach`, `wait`, `read`,
-`stop`, `prune` and `closed`.
+It starts from the Go skeleton and muster's CI job. It also covers the
+import-boundary test, the state directory, the session record, the three
+backends, and `start`, `status`, `attach`, `wait`, `read`, `stop`, `prune` and
+`closed`.
 
 ### Acceptance criteria
 
-- [ ] `muster` resolves, every command takes `--root`, which defaults to the git
-      toplevel of the working directory, and every command prints JSON with
-      `--json`.
-- [ ] The import-boundary test reads every import under `muster/` and `src/` and
-      fails on one that crosses. It runs in CI.
-- [ ] CI runs `tsc --noEmit` and muster's tests green, with no runtime
-      dependencies.
+- [ ] `muster/go.mod` declares `github.com/jacygao/muster`, and `go build`
+      produces the `muster` binary.
+- [ ] A CI job of muster's own runs `go build`, `go test` and `go vet` green.
+      Squiz's type check and tests ignore `muster/`.
+- [ ] The import-boundary test fails on anything under `muster/` that imports
+      from squiz's `src/`, and on anything under `src/` that imports from
+      `muster/`. It runs in CI.
+- [ ] Every command takes `--root`, which defaults to the git toplevel of the
+      working directory, and prints JSON with `--json`.
 - [ ] Without `--backend`, `muster start` picks Herdr inside Herdr, tmux inside
       tmux, and detached otherwise.
 - [ ] A session started from inside a Claude Code shell call outlives the
@@ -375,43 +390,52 @@ record, the three backends, and `start`, `status`, `attach`, `wait`, `read`,
 - [ ] `muster prune` removes every record marked exited or stopped, and every
       record whose process is gone by pid and start time.
 
-The Herdr and tmux backends need their multiplexer installed to test against.
-Whether CI installs either is not decided.
+CI installs tmux, and tests the tmux and detached backends there. It does not
+install Herdr, which is before 1.0. The Herdr backend is tested where Herdr is
+installed by hand.
 
 ## M12 — Muster's triggers, through an adapter per agent
 
-When an agent finishes, muster runs the command `.muster.json` configures for
-the event. Each agent reaches muster through an adapter of its own:
+When an agent stops working, muster runs the command `.muster.json` configures
+for the event. Muster's core sees only its contract: a `settled` event, when an
+agent ended its turn and waits for input, and a `finished` event, when a
+subagent ended its work. Each agent reaches the contract through an adapter of
+its own, in `muster/adapters/<name>/`:
 
-- **Claude Code**, through `Stop` and `SubagentStop` hooks registered in
-  `muster/hooks/hooks.json`.
-- **`pi`**, through muster's `pi` extension on `agent_settled`.
-- **Herdr**, through a plugin on `pane.agent_status_changed`, as an extra source
-  beside the two above and never in place of one.
+- **`claude-code`**: `Stop` becomes `settled`, and `SubagentStop` becomes
+  `finished`.
+- **`pi`**: muster's extension turns `agent_settled` into `settled`.
+- **`herdr`**: a plugin turns `pane.agent_status_changed` to `done` into
+  `settled`. It is an extra source beside the adapters above, never the only one.
 
-An agent no adapter covers uses the pull fallback: it runs a muster command
-itself when it finishes, and that fires the same configured commands an
-adapter's event does. Muster's specification does not yet name that command,
-and names it before this milestone builds it.
+An agent no adapter covers takes part through the pull fallback. It runs the
+command that does the work and reads what that prints, so nothing fires for it.
+The fallback's own muster command, `muster wait --inbox`, reads messages and is
+M13's.
 
-GitHub Copilot is an adapter to come, and is not built here. Until it is, a
-Copilot session uses the pull fallback.
+GitHub Copilot CLI is an adapter to come, and is not built here. S9 says what it
+can offer. Until it is built, a Copilot session takes part through the pull
+fallback.
 
 A trigger command's `watch` lines, and the wake they ask for, are M13's.
 
 ### Acceptance criteria
 
 - [ ] `muster hook` runs every command `.muster.json` configures for the event,
-      in the working directory the event fired in, with the event in
-      `MUSTER_EVENT`, the root in `MUSTER_ROOT`, and the runtime's payload on
-      its standard input unchanged.
-- [ ] With muster's hooks loaded in Claude Code, a main session's turn ending
-      fires `stop`, and a subagent's fires `subagent-stop`.
-- [ ] A `pi` session with muster's extension fires `pi-settled` once each time
-      it settles.
-- [ ] The pull fallback fires the configured commands from an agent with no
-      adapter.
-- [ ] Inside Herdr, an agent whose status becomes `done` fires `herdr-done`.
+      in `MUSTER_CWD`, with the contract's fields in its environment and
+      nothing on its standard input.
+- [ ] Each event carries `MUSTER_EVENT`, `MUSTER_AGENT`, `MUSTER_SESSION`,
+      `MUSTER_CWD`, `MUSTER_ROOT` and `MUSTER_WAKE`. An agent's own payload goes
+      no further than its adapter.
+- [ ] No code outside `muster/adapters/` names an agent.
+- [ ] `muster install <name>` puts an adapter's registration in place for a
+      project.
+- [ ] With the `claude-code` adapter installed, a main session's turn ending
+      fires `settled`, and a subagent's fires `finished`.
+- [ ] A `pi` session with the `pi` adapter fires `settled` once each time it
+      settles.
+- [ ] Inside Herdr, an agent whose status becomes `done` fires `settled` through
+      the `herdr` adapter.
 - [ ] A turn that ended on a question fires as any other turn does.
 - [ ] A configured command's exit status, where it is not 0, is reported on
       `muster hook`'s stderr and never changes the hook's own exit status.
@@ -420,8 +444,9 @@ A trigger command's `watch` lines, and the wake they ask for, are M13's.
 
 Messages between sessions, and the wake that delivers one into the agent an
 address belongs to. Covers the envelope, `muster send`, `muster inbox list` and
-`muster inbox take`, the `watch` lines and the waiter, the `pi` wake, and the
-Claude Code wake S3 chose.
+`muster inbox take`, `muster wait --inbox`, the `watch` lines, and each
+adapter's wake: `push` for `pi`, and for Claude Code the `waiter`, the `push`, or
+both, as S3 found.
 
 ### Acceptance criteria
 
@@ -436,9 +461,12 @@ Claude Code wake S3 chose.
       address.
 - [ ] Muster reads neither `kind` nor `pointer`: any of each a sender gives
       comes back byte for byte.
-- [ ] A trigger command's `watch <address>` lines make `muster hook` wait on
-      those addresses for a `stop` or `pi-settled` event. Nothing waits for
-      `subagent-stop`.
+- [ ] `muster wait --inbox <address>` waits for the next message on the address,
+      takes it, and prints the same text a wake shows. With `--timeout`, it
+      gives up after that many seconds and takes nothing.
+- [ ] A trigger command's `watch <address>` lines ask for a wake on those
+      addresses, where the adapter's wake is `push` or `waiter`. A `finished`
+      event asks for none.
 - [ ] A message sent to an address a settled `pi` session watches starts a turn
       in that session, with the text muster's specification shows.
 - [ ] A message sent to an address an idle interactive Claude Code session
@@ -446,16 +474,19 @@ Claude Code wake S3 chose.
       wake S3 chose.
 - [ ] A session that ended three turns has a message taken once, by the waiter
       for its newest turn.
-- [ ] An agent no wake reaches, a Claude Code subagent among them, reads its
-      messages with `muster inbox take` and loses none.
+- [ ] An agent no wake reaches, a Claude Code subagent among them, loses no
+      message sent to it, and reads each with `muster wait --inbox` or
+      `muster inbox take`.
 
 ## M14 — Squiz on muster
 
 Squiz runs its reviewer as a muster session, `squiz review` becomes its one
 entry point, and the limits that came from running the reviewer inside a coding
 agent's hook or shell call go. `docs/specs/session-interface.md` governs, and
-this milestone is steps 2 to 5 of its migration:
+this milestone is steps 2 to 5 of its migration, after one step of its own:
 
+- muster moved to its own repository, with its history, and installed into
+  squiz's development the way a user installs it
 - the report file the reviewer's extension writes
 - the round host, `squiz host <number>`, run as a detached muster session per
   episode
@@ -464,12 +495,16 @@ this milestone is steps 2 to 5 of its migration:
 - `squiz review` as the harness specification sets it out, changed as the
   session interface changes it: it sends a message to the round host and waits
   on the record
-- `squiz hook` as the command muster's triggers run, with squiz's plugin
-  manifest registering muster's hooks in place of its own
+- `squiz hook` as the command muster's triggers run, with muster's adapters,
+  installed by `muster install`, in place of squiz's own hook
 - `"reviewer": "session"` as the default
 
 ### Acceptance criteria
 
+- [ ] Muster is in its own repository, `github.com/jacygao/muster`, with the
+      history it had in `muster/`, and `muster/` is gone from this repository.
+      Squiz is developed and tested against a `muster` installed the way a user
+      installs it. This is done before anything else in the milestone.
 - [ ] Squiz's spikes S5, S7 and S8, and S2's open remainder, each have a finding
       in `docs/notes/`, and the owner has decided D2 to D11 before what each
       decides is built. D10 waits for S6.
@@ -564,14 +599,14 @@ reaches somewhere a person reads. It needs M14's round host and extension.
 ## M9 — Install and dogfood
 
 The marketplace manifest, a README carrying the getting-started steps,
-`/squiz doctor`, and `docs/notes/` consolidated. Squiz installs with muster
-inside it while muster lives in this repository.
+`/squiz doctor`, and `docs/notes/` consolidated. Muster is installed on its own,
+from its own repository.
 
 ### Acceptance criteria
 
 - [ ] `/plugin marketplace add` followed by `/plugin install` works into a fresh
-      host project. *Changed by muster: the install also registers muster's
-      hooks and puts `muster` on the Bash tool's `PATH`.*
+      host project. *Changed by muster: the getting-started steps also install
+      `muster` and its adapters, and say how.*
 - [ ] `/squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
       Code, and the Node version, naming whatever is missing. *Changed by
       muster: it also reports `muster`, and whether Herdr or tmux is present,
