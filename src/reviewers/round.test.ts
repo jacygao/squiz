@@ -64,7 +64,7 @@ test("a review comes back with its findings, its verdicts and what it spent", as
 /**
  * The kill is the ordinary path rather than the exceptional one. Two runs of an
  * identical command over the same 450-line change took 408 seconds and 2,269,
- * against a default bound of 480.
+ * against the 480-second bound they ran under.
  */
 test("a reviewer that floods and does not stop is killed at the bound", async () => {
   await inATree(async (tree) => {
