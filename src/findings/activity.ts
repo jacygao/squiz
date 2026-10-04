@@ -21,8 +21,9 @@ import { readThread } from "./thread.ts";
  * Ties are broken in two steps:
  *
  * - GitHub gives the time only to the second, so replies posted in the same
- *   second go to the larger REST id. REST ids are assigned in increasing order,
- *   so a reply posted in the same second as the newest still changes the answer.
+ *   second go to the larger REST id. This assumes REST ids grow as replies are
+ *   posted. Where one did not, a reply posted in the same second as the newest
+ *   would leave the answer unchanged.
  * - Where neither decides, the larger node id wins. That says nothing about which
  *   came later, but gives the same answer however the threads are listed.
  */
