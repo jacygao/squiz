@@ -12,12 +12,12 @@
  * mechanism that dirties what it measures is worse than none.
  */
 
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readSync, readlinkSync, type Stats } from "node:fs";
 import { join } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
+import { runGit, type GitOutput } from "./git.ts";
 import { worktreeToplevel } from "./toplevel.ts";
 
 /** A worktree's files at one moment, or why git could not say. */
@@ -355,55 +355,18 @@ function digestOf(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-type GitOutput =
-  | { readonly ran: true; readonly stdout: string; readonly status: number }
-  | { readonly ran: false; readonly reason: string };
-
-/**
- * `answers` are the exit statuses that are answers rather than failures. One
- * other than 0 is an answer only where git said nothing on stderr.
- */
 function git(
   root: string,
   args: readonly string[],
   until?: Deadline,
   answers: readonly number[] = [0],
 ): GitOutput {
-  if (until?.passed() === true) return { ran: false, reason: RAN_OUT };
-
-  const result = spawnSync("git", args, {
-    cwd: root,
-    encoding: "utf8",
-    // Node's default stops at a mebibyte and hands back what it got, so a list
-    // of paths arrives as one that reads whole with files missing from the end.
-    maxBuffer: Infinity,
-    // A timeout of zero is no timeout at all, so a deadline with nothing left
-    // still bounds the call.
-    ...(until === undefined ? {} : { timeout: Math.max(1, until.remaining()) }),
-  });
-
-  if (result.error !== undefined) {
-    if (ranOut(result.error)) return { ran: false, reason: RAN_OUT };
-    return { ran: false, reason: `git could not be run: ${result.error.message}` };
-  }
-  const answered =
-    result.status === 0 ||
-    (result.status !== null && answers.includes(result.status) && result.stderr.trim() === "");
-  if (!answered || result.status === null) {
-    const said = result.stderr.split("\n", 1)[0]?.trim() ?? "";
-    const exit = describeExit(result.status, result.signal);
-    return { ran: false, reason: said === "" ? `${exit} and said nothing` : `${exit}: ${said}` };
-  }
-  return { ran: true, stdout: result.stdout, status: result.status };
+  return runGit(root, args, { until, answers, ranOut: RAN_OUT });
 }
 
 /** The NUL-terminated records of git's output, without the empty trailer. */
 function records(stdout: string): readonly string[] {
   return stdout.split("\0").filter((record) => record !== "");
-}
-
-function describeExit(status: number | null, signal: NodeJS.Signals | null): string {
-  return status === null ? `git was killed by ${signal ?? "a signal"}` : `git exited ${status}`;
 }
 
 /**
@@ -413,10 +376,6 @@ function describeExit(status: number | null, signal: NodeJS.Signals | null): str
  * `unchanged` would report a reviewer that changed nothing.
  */
 const RAN_OUT = "the reading ran out of the time it was given";
-
-function ranOut(error: Error): boolean {
-  return "code" in error && error.code === "ETIMEDOUT";
-}
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
