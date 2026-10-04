@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.20 (draft)
+**Version:** 0.21 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -404,10 +404,19 @@ The hooks and the report:
 - [ ] The hook records the session that owns the work: the session itself on
       `Stop`, with its messaging socket where it has one, and on `SubagentStop`
       the dispatching session and the subagent.
-- [ ] When a round records its result, the round host writes one note for that
+- [ ] When a round records its result, the round host writes a note for that
       owner, under a temporary name and renamed into place. It names the pull
-      request, the head commit and, for a subagent's work, the subagent, and
-      its text points to `squiz review`. It carries no finding.
+      request, the head commit and, for a subagent's work, the subagent. It
+      carries no finding. What its text says depends on the outcome:
+  - **Threads open, or the episode closed:** the text says what the review
+    found and points to `squiz review` to read it.
+  - **Failed:** the text gives the reason, names `squiz status`, and says that a
+    new commit, or running `squiz review` once, retries it. A failed state gets
+    one note, however many times it fails.
+  - **Not reviewed:** the text says why.
+  - **Reviewed clean, with the episode open because a later state is queued
+    behind it:** no note.
+  - **No hook recorded an owner:** no note.
 - [ ] An idle main session starts a turn with the note's text, by the messaging
       socket or by its newest `Stop` waiter. Whichever delivers moves the note
       into `delivered/`, so the other does not deliver it again.
