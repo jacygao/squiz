@@ -6,17 +6,33 @@
  * Nothing in the harness imports this. `pi` loads it from the path on the
  * command line, compiles it and the modules it imports, and runs the default
  * export once with its own API. So the types here describe as much of that API
- * as the three calls and the one subscription use, structurally: the package is
+ * as the three calls and the two subscriptions use, structurally: the package is
  * not a dependency of this one and nothing here may make it one.
  *
  * A report that is not one the harness could compose a comment or a mutation
  * from is refused, and the refusal reaches the reviewer as the call's error
  * while it is still there to correct it. The round's other reports stand: one
  * malformed finding is one refusal.
+ *
+ * Every accepted report, every refusal, every assistant message's usage and the
+ * finish go to the report file as they happen. The reviewer is told a report
+ * landed only once it is in the file, so a write that fails is answered as a
+ * failure:
+ *
+ * - a report or the finish that cannot be recorded is refused, and the reviewer
+ *   can make the call again;
+ * - a refusal that cannot be recorded still refuses, and says it was not
+ *   recorded;
+ * - usage that cannot be recorded throws, and `pi` shows the throw as the
+ *   extension's error and carries on.
+ *
+ * Where no file is named, nothing is written and every call answers as it would
+ * with one.
  */
 
 import { readFinding, readVerdict } from "../../findings/reported.ts";
 import { type Refusal, refuse, type ToolCall } from "./refusals.ts";
+import { type ReportFile, reportFileAt, REPORTS_VARIABLE, type UsageLine } from "./report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 
 /** One block of what a call answers with. Only text is ever returned here. */
@@ -46,16 +62,23 @@ type ToolDefinition = {
   readonly execute: (toolCallId: string, params: unknown) => Promise<ToolResult>;
 };
 
-/** As much of `pi`'s extension API as the three calls and the handler need. */
+/** A message `pi` finished, whoever it was from. Only an assistant's is recorded. */
+export type MessageEnd = { readonly type: "message_end"; readonly message: unknown };
+
+/** As much of `pi`'s extension API as the three calls and the two handlers need. */
 export type Registrar = {
   readonly registerTool: (tool: ToolDefinition) => void;
   /**
-   * Subscribe to an event `pi` offers a handler before it acts.
+   * Subscribe to an event.
    *
-   * `pi` passes a second argument this never reads, and takes a handler that
-   * answers nothing as one that objects to nothing.
+   * `pi` passes a second argument neither handler reads. It takes a handler
+   * that answers nothing as one that objects to nothing, and one that answers
+   * nothing at the end of a message as one that leaves the message as it was.
    */
-  readonly on: (event: "tool_call", handler: (call: ToolCall) => Refusal | undefined) => void;
+  readonly on: {
+    (event: "tool_call", handler: (call: ToolCall) => Refusal | undefined): void;
+    (event: "message_end", handler: (event: MessageEnd) => void): void;
+  };
 };
 
 /**
@@ -121,20 +144,39 @@ const verdictParameters = {
 
 const finishParameters = { type: "object", properties: {} };
 
+/** The extension as `pi` loads it, reporting to the file the adapter named. */
+export default function reportAsYouGo(pi: Registrar): void {
+  reportInto(pi, process.env[REPORTS_VARIABLE]);
+}
+
 /**
- * Register the three calls, and subscribe the refusal.
+ * Register the three calls and subscribe the two handlers, recording into the
+ * file at `reports`, or nowhere where it is not given.
  *
  * The threads already ruled on are held here, so that a second ruling on one
  * thread is refused while the reviewer can still decide which of the two it
- * meant. Nothing else is held: a report is answered and gone, and what the
- * round keeps it keeps from the stream.
+ * meant. Nothing else is held: a report is answered and gone.
  */
-export default function reportAsYouGo(pi: Registrar): void {
+export function reportInto(pi: Registrar, reports: string | undefined): void {
+  const file = reportFileAt(reports);
   const ruled = new Set<string>();
 
   // `pi` runs a tool the moment no handler objects, so a subscription that goes
   // missing takes the whole refusal with it and says nothing.
-  pi.on("tool_call", refuse);
+  pi.on("tool_call", (call) => {
+    const refusal = refuse(call);
+    if (refusal === undefined) return undefined;
+    const unrecorded = failureOf(() =>
+      file.record({ type: "refused", call: call.toolName, reason: refusal.reason, stopped: true }),
+    );
+    if (unrecorded === undefined) return refusal;
+    return { block: true, reason: `${refusal.reason} ${unrecordedRefusal(unrecorded)}` };
+  });
+
+  pi.on("message_end", (event) => {
+    const usage = usageOf(event.message);
+    if (usage !== undefined) file.record(usage);
+  });
 
   pi.registerTool({
     name: REPORT_FINDING,
@@ -148,7 +190,10 @@ export default function reportAsYouGo(pi: Registrar): void {
     parameters: findingParameters,
     execute: async (_toolCallId, params) => {
       const finding = readFinding(params);
-      if ("reason" in finding) throw new Error(`the finding ${finding.reason}`);
+      if ("reason" in finding) {
+        throw refusedReport(file, REPORT_FINDING, `the finding ${finding.reason}`);
+      }
+      recordReport(file, REPORT_FINDING, "the finding", finding.value);
       return {
         content: [{ type: "text", text: `Reported: ${excerptOf(finding.value.headline)}` }],
         details: finding.value,
@@ -168,11 +213,19 @@ export default function reportAsYouGo(pi: Registrar): void {
     parameters: verdictParameters,
     execute: async (_toolCallId, params) => {
       const verdict = readVerdict(params);
-      if ("reason" in verdict) throw new Error(`the verdict ${verdict.reason}`);
+      if ("reason" in verdict) {
+        throw refusedReport(file, REPORT_VERDICT, `the verdict ${verdict.reason}`);
+      }
       const { thread } = verdict.value;
       if (ruled.has(thread)) {
-        throw new Error(`thread ${thread} was already ruled on, and one ruling stands per thread`);
+        throw refusedReport(
+          file,
+          REPORT_VERDICT,
+          `thread ${thread} was already ruled on, and one ruling stands per thread`,
+        );
       }
+      recordReport(file, REPORT_VERDICT, "the verdict", verdict.value);
+      // Only once it is recorded, so that a ruling the file refused can be made again.
       ruled.add(thread);
       return {
         content: [{ type: "text", text: `Ruled ${verdict.value.verdict} on ${thread}` }],
@@ -191,11 +244,70 @@ export default function reportAsYouGo(pi: Registrar): void {
       `Use ${FINISH_REVIEW} as the last action of the review, including where there was nothing to report.`,
     ],
     parameters: finishParameters,
-    execute: async () => ({
-      content: [{ type: "text", text: "The review is complete." }],
-      details: {},
-    }),
+    execute: async () => {
+      const unrecorded = failureOf(() => file.record({ type: "finish" }));
+      if (unrecorded !== undefined) {
+        throw new Error(
+          `the finish could not be recorded, so the review is not finished (${unrecorded}). Call ${FINISH_REVIEW} again.`,
+        );
+      }
+      return { content: [{ type: "text", text: "The review is complete." }], details: {} };
+    },
   });
+}
+
+/** Record an accepted report, or throw the refusal the reviewer reads where it cannot be. */
+function recordReport(file: ReportFile, call: string, named: string, value: unknown): void {
+  const unrecorded = failureOf(() => file.record({ type: "report", call, value }));
+  if (unrecorded === undefined) return;
+  throw new Error(
+    `${named} could not be recorded, so it was not reported (${unrecorded}). Report it again.`,
+  );
+}
+
+/** The error a refused report is answered with, recorded before it is thrown. */
+function refusedReport(file: ReportFile, call: string, reason: string): Error {
+  const unrecorded = failureOf(() =>
+    file.record({ type: "refused", call, reason, stopped: false }),
+  );
+  if (unrecorded === undefined) return new Error(reason);
+  return new Error(`${reason}. ${unrecordedRefusal(unrecorded)}`);
+}
+
+function unrecordedRefusal(failure: string): string {
+  return `The refusal could not be recorded (${failure}).`;
+}
+
+/** What went wrong running `act`, or `undefined` where nothing did. */
+function failureOf(act: () => void): string | undefined {
+  try {
+    act();
+    return undefined;
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+/**
+ * The line an assistant message is recorded as, or `undefined` for anyone
+ * else's message.
+ *
+ * Read structurally, because `pi`'s own message type is not something this
+ * package may import. A field of a type this does not expect is left out
+ * rather than guessed at.
+ */
+function usageOf(message: unknown): UsageLine | undefined {
+  if (typeof message !== "object" || message === null) return undefined;
+  const fields = message as Readonly<Record<string, unknown>>;
+  if (fields["role"] !== "assistant") return undefined;
+  const { stopReason, errorMessage, model, usage } = fields;
+  return {
+    type: "usage",
+    ...(typeof stopReason === "string" ? { stopReason } : {}),
+    ...(typeof errorMessage === "string" ? { errorMessage } : {}),
+    ...(typeof model === "string" ? { model } : {}),
+    ...(typeof usage === "object" && usage !== null ? { usage } : {}),
+  };
 }
 
 /** As much of a headline as a confirmation carries. */
