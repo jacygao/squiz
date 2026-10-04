@@ -1,6 +1,6 @@
 # Session Interface: What Squiz Asks of Muster
 
-**Version:** 0.6 (draft)
+**Version:** 0.7 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -41,7 +41,8 @@ harness spec" below. Its CLI stays the core, and nothing here is built yet.
 
 | Need | Muster command squiz uses |
 |---|---|
-| Run `squiz hook` when a coding agent finishes, and wake it when squiz answers | A trigger in `.muster.json` running `squiz hook`, which prints `watch squiz-coder-<number>` |
+| Run `squiz hook` when a coding agent finishes, and wake whoever owns the work when squiz answers | A trigger in `.muster.json` running `squiz hook`, which prints `watch squiz-coder-<number>` |
+| Set itself up in one step | `muster install <agent>`, which `squiz init` calls |
 | Start the round host so that it outlives the trigger | `muster start --backend detached --name squiz-host-<number> -- squiz host <number>` |
 | Start each round's reviewer where a person can watch it | `muster start --name squiz-<number>-r<k> --kind pi --env … -- pi …` |
 | Know when the reviewer's process has ended | `muster wait squiz-<number>-r<k>` |
@@ -50,6 +51,26 @@ harness spec" below. Its CLI stays the core, and nothing here is built yet.
 | Take the round host's next request | `muster inbox take squiz-reviewer-<number>` |
 
 Every call passes `--root`, the toplevel of the coding agent's worktree.
+
+### Installing
+
+**A user installs squiz in one visible step, `squiz init`, and it sets up muster
+underneath.** Squiz and muster stay separate projects. Squiz itself arrives as
+the agent's own package, which for Claude Code is `/plugin install squiz`.
+`squiz init`, run in the project, then does every other part, and run again it
+checks each part and changes nothing that is already in place:
+
+1. **Muster.** It finds `muster` on the `PATH` and checks its version. Where it is
+   missing, it installs muster's release binary for the platform. Where it cannot,
+   it stops and says what to install.
+2. **The adapter.** It runs `muster install <agent>` for the agent squiz runs in,
+   or for each agent `--agent` names.
+3. **The trigger.** It adds the `squiz hook` trigger to `.muster.json`.
+4. **Ignored paths.** It adds `.squiz/` and `.muster/` to `.gitignore`.
+5. **The `AGENTS.md` section**, as the harness spec § 6 has `squiz init` add it
+   today.
+
+`/squiz doctor` reports each of the five, and names what is missing.
 
 ## 4. The sessions squiz runs
 
@@ -157,18 +178,34 @@ exits 4 at once.
 
 `squiz hook` is the command muster's trigger runs. It resolves the pull
 request whose head is the branch checked out where the event fired. Where that
-state has no record, it ensures the round host and sends `review-ready`. On a
-`settled` event it prints `watch squiz-coder-<number>` wherever a pull request
-exists, so muster wakes the coding agent with whatever squiz sends next, where
-the agent's adapter can wake it.
+state has no record, it ensures the round host and sends `review-ready`.
+Wherever a pull request exists, it prints `watch squiz-coder-<number>`, so
+muster wakes the owner of the work with whatever squiz sends next.
 
-**The wake reaches full sessions whose adapter can wake them, and nothing
-else.** A Claude Code subagent has ended by the time its `SubagentStop` fires,
-and in auto mode it has handed back, so no `threads-open` reaches it. An agent
-whose adapter has no wake, or that has no adapter, is not reached either. For
-every such coder the loop closes only because it runs `squiz review` itself and
-waits for it, which is #290's route and muster's pull fallback. `squiz hook` on
-a `finished` event still starts the review, and prints no `watch` line.
+**The report goes to whoever owns the work and is still alive.**
+
+- **Work a session did itself** fires `settled`. The owner is that session, and
+  the `watch` line binds the address to it.
+- **Work a subagent did** fires `finished`. The subagent has ended, and in Claude
+  Code's auto mode it has handed back, so nothing reaches it. The owner is the
+  session that dispatched it, which the event names in `MUSTER_PARENT`, and the
+  `watch` line binds the address to that parent. `squiz hook` records the
+  subagent's identifier, `MUSTER_SESSION`, against the episode.
+
+**The parent is a full session, so its own adapter wakes it.** What it receives
+names the pull request, the subagent and the open threads:
+
+```
+squiz-reviewer-41 sent threads-open: pr=41 head=3f9c2e0 subagent=a402ef8f56c1b2ed1 round=2 threads=PRRT_kwDOL7tYbc5abcd1,PRRT_kwDOL7tYbc5abcd2 next=squiz review 41
+```
+
+The parent decides what follows: it sends the same subagent back to work the
+threads, or dispatches another, or works them itself. Squiz does not choose.
+
+**`squiz review` stays the pull route for any coder.** A coder whose adapter
+cannot be woken, or that has no adapter, runs it itself and waits for it, which
+is #290's route and muster's pull fallback. A subagent may still do the same.
+It is no longer the only way a subagent's work gets its review back.
 
 ## 5. The message kinds
 
@@ -184,9 +221,11 @@ reply, from anyone other than the reviewer, on a thread the reviewer opened, or
 | `reply-posted` | `squiz reply` | `squiz-reviewer-<n>` | `pr= head= activity= thread=` | A reply landed on a reviewer's thread, which is a new state. Treated as `review-ready` for it. |
 | `re-review` | `squiz review`, a person | `squiz-reviewer-<n>` | `pr= head= activity=` | This state's last round failed. Run another. A reviewed state is never run again. |
 | `stop` | A person, a coordinator | `squiz-reviewer-<n>` | `now=yes` or `now=no` | End the round host after the running round, or at once, failing that round with a failure comment. |
-| `threads-open` | The round host | `squiz-coder-<n>` | `pr= head= round= threads= next=` | Threads are open. Work them. The harness spec's exit 2. |
-| `closed` | The round host | `squiz-coder-<n>` | `pr= head= exit= next=` | The episode closed, with `exit` 0 or 3. |
-| `failed` | The round host | `squiz-coder-<n>` | `pr= head= next=` | The round failed. The harness spec's exit 1. |
+| `threads-open` | The round host | `squiz-coder-<n>`, bound to the owner of the work | `pr= head= subagent= round= threads= next=` | Threads are open. Work them, or send a subagent to. The harness spec's exit 2. |
+| `closed` | The round host | `squiz-coder-<n>`, bound to the owner of the work | `pr= head= subagent= exit= next=` | The episode closed, with `exit` 0 or 3. |
+| `failed` | The round host | `squiz-coder-<n>`, bound to the owner of the work | `pr= head= subagent= next=` | The round failed. The harness spec's exit 1. |
+
+`subagent` is present only where a subagent did the work, and names it.
 
 `next` is the command that reads the outcome and starts nothing:
 
@@ -227,7 +266,7 @@ which appends to the report file and the progress log.
 
 | Path | Change |
 |---|---|
-| `src/cli.ts` | Adds `squiz host` and `squiz review --no-wait`. `squiz hook` becomes muster's trigger command. |
+| `src/cli.ts` | Adds `squiz host` and `squiz review --no-wait`. `squiz hook` becomes muster's trigger command. `squiz init` becomes the one install step. |
 | `src/review/` (#290) | `squiz review` sends a message and waits on the record. `squiz status` names each round's reviewer session, and ends the round's line with its resume command. |
 | `src/host/` | New. The round host. |
 | `src/hook/` | Resolves the pull request and sends `review-ready`. It no longer runs a round, and the exit-2 block goes. |
@@ -252,7 +291,7 @@ directory, the charter, and #290's CLI with exits 0 to 3.
 | The 480-second ceiling on the time bound | **Moves.** It becomes a wall-clock guard on a runaway round, with no ceiling. |
 | #291's 540-second question | **Gone** for the round. 540 seconds stays as the default wait of `squiz review`. |
 | The stall watchdog | **Does not apply.** Nothing holds a subagent. |
-| #278, a block that reaches no agent | **Gone for full sessions**, Claude Code or `pi`, which muster wakes. **Unchanged for subagents**, which no message reaches: the loop closes only where the subagent runs `squiz review` itself and waits, as under #290. |
+| #278, a block that reaches no agent | **Gone.** No hook blocks. A session's own work reports to it, and a subagent's work reports to its parent, which muster wakes. `squiz review` remains the pull route for any coder. |
 | #265, helper firings | **Harmless** since #290's one review per state. |
 | #264's remainder, a subagent working by path | **Gone** for sessions started in their own worktree. It stays for a subagent dispatched by path. |
 | #276, an invisible reviewer | **Gone.** |
