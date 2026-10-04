@@ -127,6 +127,7 @@ function invocationIn(tree: string): Invocation {
     // No space, so nothing records a group. What a refused call does is the whole
     // of what this reads, and it never reaches a shell.
     roundSpace: undefined,
+    terminal: "none",
   };
 }
 
