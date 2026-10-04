@@ -96,13 +96,15 @@ export function failureIn(conclusion: RoundConclusion): readonly string[] {
     case "block":
     case "no-pull-request":
     case "episode-over":
+    case "round-running":
       return [];
   }
 }
 
 /**
- * The one line a pass for want of a pull request is reported as, or `null` for
- * every other conclusion.
+ * The one line a pass that reviewed nothing is reported as, or `null` for every
+ * other conclusion. A pass is for want of a pull request, or because another
+ * round of the episode is running.
  *
  * Not a failure, and still said. A branch with no pull request and a subagent
  * whose hook fired in a tree it never worked in both reach the gate as a branch
@@ -110,6 +112,9 @@ export function failureIn(conclusion: RoundConclusion): readonly string[] {
  * things that tell them apart.
  */
 export function unreviewedIn(conclusion: RoundConclusion): string | null {
+  if (conclusion.outcome === "round-running") {
+    return `no review ran: a round is already running on PR #${conclusion.pullRequest}`;
+  }
   if (conclusion.outcome !== "no-pull-request") return null;
   const directory = quoted(conclusion.directory);
   if (conclusion.branch === null) {

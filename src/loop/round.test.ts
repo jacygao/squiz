@@ -127,6 +127,8 @@ type Setup = {
    * and every other write the round makes lands.
    */
   readonly blockMarker?: boolean;
+  /** What the episode's lock holds before the round starts, where it is there. */
+  readonly lockSource?: string;
   readonly marginMs?: number;
   readonly windowMs?: number;
   /** Whether a failed round posts its failure comment, where the caller says. */
@@ -141,6 +143,11 @@ type Setup = {
    * all: whatever it supplies the composer is what the composer renders.
    */
   readonly andThen?: readonly Later[];
+  /**
+   * Rounds started together against the one episode, each running `reviewer`,
+   * as two subagents stopping at once in one worktree start them.
+   */
+  readonly overlapping?: number;
 };
 
 /** One round after the first: what happened before it, and the reviewer it runs. */
@@ -187,6 +194,8 @@ type Ran = {
   readonly stateSource: string | null;
   /** How long the round itself took, with the fixture's own setup left out. */
   readonly elapsedMs: number;
+  /** Whether the episode's lock was still there once the rounds had ended. */
+  readonly lockLeft: boolean;
   /** What `.squiz/` holds once the rounds have ended, empty where it is not there. */
   readonly episodesLeft: readonly string[];
 };
@@ -460,6 +469,10 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     }
     const marker = join(episode.directory, "running.json");
     if (setup.blockMarker === true) mkdirSync(join(marker, "occupied"), { recursive: true });
+    if (setup.lockSource !== undefined) {
+      mkdirSync(episode.directory, { recursive: true });
+      writeFileSync(join(episode.directory, "host.lock"), setup.lockSource, "utf8");
+    }
 
     const invocations: Invocation[] = [];
     const directoriesReady: boolean[] = [];
@@ -496,19 +509,22 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     const conclusions: RoundConclusion[] = [];
     const started = Date.now();
-    for (running = 0; running < reviewers.length; running += 1) {
+    const roundSetup = {
+      worktree,
+      config: { ...defaultConfig, timeout: 5, ...setup.config },
+      adapter,
+      charterFile,
+      ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
+      ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
+      ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
+    };
+    if (setup.overlapping !== undefined) {
+      const together = Array.from({ length: setup.overlapping }, () => runRound(roundSetup));
+      conclusions.push(...(await Promise.all(together)));
+    }
+    for (running = 0; setup.overlapping === undefined && running < reviewers.length; running += 1) {
       laterRounds[running - 1]?.before?.(worktree);
-      conclusions.push(
-        await runRound({
-          worktree,
-          config: { ...defaultConfig, timeout: 5, ...setup.config },
-          adapter,
-          charterFile,
-          ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
-          ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
-          ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
-        }),
-      );
+      conclusions.push(await runRound(roundSetup));
     }
     const elapsedMs = Date.now() - started;
 
@@ -535,6 +551,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       stateSource,
       elapsedMs,
       episodesLeft: existsSync(episodes) ? readdirSync(episodes) : [],
+      lockLeft: existsSync(join(episode.directory, "host.lock")),
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -2097,6 +2114,55 @@ test("a firing after the episode reported its close reviews nothing and posts no
     ["prlist"],
     "an episode that is over asks GitHub which pull request keys it, and nothing else",
   );
+});
+
+/**
+ * Two rounds of one episode that overlap run one review between them.
+ *
+ * Two subagents that stop at once in one worktree fire on one pull request, so
+ * their rounds share one episode. Each would read the state before the other
+ * recorded anything, pass the cap, start a reviewer and post a summary, and the
+ * later write would drop the earlier round's cost.
+ */
+test("two overlapping rounds of one episode run one review, post one summary and record its cost", async () => {
+  const ran = await runInFixture({
+    overlapping: 2,
+    config: { rounds: 1 },
+    answers: POSTING,
+    // Slow enough that the second round starts while the first is reviewing.
+    reviewer: { command: "/bin/sh", args: ["-c", "sleep 1"], parse: reviews({}).parse },
+  });
+
+  assert.equal(ran.invocations.length, 1, "both rounds started a reviewer");
+  const summaries = ran.calls.filter((call) => call.kind === "summary");
+  assert.equal(summaries.length, 1, "both rounds posted a summary");
+  assert.deepEqual(
+    ran.conclusions.map((conclusion) => conclusion.outcome).sort(),
+    ["close", "round-running"],
+  );
+  assert.deepEqual(ran.state?.rounds.map((round) => round.tokens), [ANSWER_COST.tokens]);
+  assert.equal(ran.lockLeft, false, "the lock outlived the round");
+});
+
+/**
+ * A lock whose holder cannot be told running or gone is never taken for free.
+ * Something made it, and nothing says that something has stopped.
+ */
+test("a lock nobody can read runs no review, and says why", async () => {
+  const ran = await runInFixture({
+    lockSource: "not a holder\n",
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(
+    ran.conclusion.reason,
+    /^no review ran: whether a round is already running on PR #142 could not be told: .*names no pid and start time/u,
+  );
+  assert.equal(ran.invocations.length, 0, "a reviewer ran beside a holder nobody could rule out");
+  assert.deepEqual(ran.kinds, ["prlist"]);
 });
 
 /**

@@ -40,6 +40,7 @@ import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
+import { takeHostLock, type HostLock } from "../host/lock.ts";
 import {
   evidenceWith,
   headMovedIn,
@@ -69,6 +70,10 @@ import {
 } from "./round-decision.ts";
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 import { HOOK_CEILING_MS, POSTING_MARGIN_MS, PRE_REVIEW_MARGIN_MS } from "./window.ts";
+
+// Each `ps` run that tells whether a lock's holder is still running. Its own
+// bound rather than the round's, because a round that cannot tell runs nothing.
+const LOCK_BOUND_MS = 5_000;
 
 /** What one round needs to run. */
 export type RoundSetup = {
@@ -171,6 +176,11 @@ export type RoundConclusion =
    * not post one said so.
    */
   | { readonly outcome: "episode-over" }
+  /**
+   * Another round of the episode holds its lock, so this firing ran nothing and
+   * posted nothing.
+   */
+  | { readonly outcome: "round-running"; readonly pullRequest: number }
   /** Another round. The coding agent is handed the open threads, with this reason. */
   | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount & AroundTheReviewer)
   /** This round ended the episode, for the reason the decision gave. */
@@ -239,12 +249,23 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
     // Every path the round ends on comes through here, a throw included. A marker
     // left behind already reads as no round in flight, so clearing it keeps them
     // from piling up in a worktree rather than making any answer right.
-    if (opened.episode !== undefined) clearRoundRunning(opened.episode);
+    if (opened.held !== undefined) {
+      clearRoundRunning(opened.held.episode);
+      // A lock this round could not remove names a process that is about to
+      // exit, and the next round takes over a lock whose holder has gone.
+      opened.held.lock.release();
+    }
   }
 }
 
-/** The episode the round opened, once the gate has found the pull request that keys it. */
-type Opened = { episode?: Episode };
+/**
+ * The episode the round holds, once the gate has found the pull request that
+ * keys it and the round has taken its lock.
+ *
+ * Nothing is set for an episode whose lock another round holds. Its marker is
+ * that round's, and clearing it would hide a round still in flight.
+ */
+type Opened = { held?: { readonly episode: Episode; readonly lock: HostLock } };
 
 /** A step's answer, or the conclusion the round ended on instead of one. */
 type Step<T> = { readonly step: T } | { readonly ended: RoundConclusion };
@@ -282,7 +303,14 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   const keyed = keyedBy(directory, pullRequest);
   if ("ended" in keyed) return keyed.ended;
   const episode = keyed.step;
-  opened.episode = episode;
+
+  // Two subagents that stop at once in one worktree fire on one pull request.
+  // Everything from the state read to the last post is one round's, because two
+  // rounds that each read the state before the other wrote would both pass the
+  // cap, both review, and keep only one of their costs.
+  const locked = lockOf(episode, pullRequest.number);
+  if ("ended" in locked) return locked.ended;
+  opened.held = { episode, lock: locked.step };
 
   const stateRead = openState(episode);
   if ("ended" in stateRead) return stateRead.ended;
@@ -513,6 +541,30 @@ function gate(call: GhCall): Step<PullRequest> {
     return { ended: { outcome: "no-pull-request", branch: branch.name, directory } };
   }
   return { step: lookup };
+}
+
+/**
+ * The episode's lock, taken, or the conclusion the round ended on where another
+ * round holds it or nothing could tell.
+ *
+ * A holder that might still be running is never taken for gone, so a lock that
+ * cannot be read runs no review either.
+ */
+function lockOf(episode: Episode, pullRequest: number): Step<HostLock> {
+  const taking = takeHostLock(episode.directory, { boundMs: LOCK_BOUND_MS });
+  switch (taking.outcome) {
+    case "taken":
+      return { step: taking.lock };
+    case "held":
+      return { ended: { outcome: "round-running", pullRequest } };
+    case "unknown":
+      return {
+        ended: failed(
+          "harness",
+          `no review ran: whether a round is already running on PR #${pullRequest} could not be told: ${taking.reason}`,
+        ),
+      };
+  }
 }
 
 /**

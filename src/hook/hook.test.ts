@@ -881,6 +881,22 @@ test("stop_hook_active does not end a round", async () => {
   });
 });
 
+test("a firing while another round holds the episode exits 0 and says so in one line", async () => {
+  await withRepository(async (worktree) => {
+    const fired = await fire({
+      directory: worktree,
+      round: { returns: { outcome: "round-running", pullRequest: PULL_REQUEST } },
+    });
+
+    assert.equal(fired.code, 0, "a round already running must not stop the coding agent finishing");
+    assert.equal(
+      fired.stderr,
+      `squiz: no review ran: a round is already running on PR #${PULL_REQUEST}\n`,
+    );
+    assert.equal(fired.stdout, "");
+  });
+});
+
 test("a closing round exits 0 and says nothing", async () => {
   await withRepository(async (worktree) => {
     const fired = await fire({
@@ -1491,6 +1507,8 @@ type Answer = {
   readonly status?: number;
   readonly stdout?: string;
   readonly stderr?: string;
+  /** A directory the call takes the write permission off before it answers. */
+  readonly seals?: string;
 };
 
 /**
@@ -1646,6 +1664,7 @@ function answer(body) {
     process.exit(97);
   }
   const given = answers[Math.min(made, answers.length - 1)];
+  if (given.seals !== undefined) fs.chmodSync(given.seals, 0o555);
   setTimeout(() => {
     if (given.stdout !== undefined) fs.writeSync(1, given.stdout);
     if (given.stderr !== undefined) fs.writeSync(2, given.stderr);
@@ -1896,17 +1915,21 @@ test("a create GitHub refuses leaves the comment that landed where it is", async
 test("a state file that will not take the round after the review posts nothing", async () => {
   // The write happens after the review, and it stops what the round found from
   // being posted. The reviewer's own directories are made before the episode's
-  // directory is sealed, so the round reaches the review and fails on the write
-  // that follows it rather than on the read that precedes it.
+  // directory is sealed, and it is sealed by the diff call, once the round holds
+  // the episode's lock. So the round reaches the review and fails on the write
+  // that follows it rather than on the read or the lock that precede it.
   await withWorktree(async ({ worktree, beside }) => {
     const episode = join(worktree, ".squiz", String(PULL_REQUEST));
     await mkdir(join(episode, "session"), { recursive: true });
     await mkdir(join(episode, "scratch"), { recursive: true });
     const harness = await harnessIn(beside, {
-      gh: { ...REACHES_THE_REVIEW, summary: [{ stdout: SUMMARY_UP }] },
+      gh: {
+        ...REACHES_THE_REVIEW,
+        diff: [{ stdout: DIFF, seals: episode }],
+        summary: [{ stdout: SUMMARY_UP }],
+      },
       reviewer: reviews([confirmed(86, "high", LANDED)]),
     });
-    await chmod(episode, 0o555);
 
     try {
       const result = squizHook(worktree, harness.path, payload());
