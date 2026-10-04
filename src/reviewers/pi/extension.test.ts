@@ -3,9 +3,11 @@
  *
  * `pi` is not here, so what this holds is the half the harness owns — the names
  * registered, the schema the CLI is asked to validate against, what each call
- * answers with, that the refusal is subscribed at all, and what each call and
- * each assistant message writes to the report file. That `pi` loads the
- * file and grants the calls is held by the command line and the grant beside it.
+ * answers with, that the refusal is subscribed at all, what each call and each
+ * assistant message writes to the report file, and when the extension asks `pi`
+ * to shut down. That `pi` loads the file and grants the calls is held by the
+ * command line and the grant beside it, and that `pi` honours the shutdown is
+ * not held here at all.
  */
 
 import assert from "node:assert/strict";
@@ -14,7 +16,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import reportAsYouGo, { type MessageEnd, type Registrar, reportInto } from "./extension.ts";
+import reportAsYouGo, {
+  type Context,
+  type MessageEnd,
+  type Registrar,
+  reportInto,
+} from "./extension.ts";
 import type { Refusal, ToolCall } from "./refusals.ts";
 import { REPORTS_VARIABLE } from "./report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "./reporting.ts";
@@ -22,6 +29,7 @@ import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from ".
 type Tool = Parameters<Registrar["registerTool"]>[0];
 type Handler = (call: ToolCall) => Refusal | undefined;
 type MessageHandler = (event: MessageEnd) => void;
+type EndHandler = (event: { readonly type: string }, ctx: Context) => void;
 
 const lineFinding = {
   scope: "line",
@@ -480,7 +488,9 @@ for (const event of ["agent_settled", "session_shutdown"]) {
     assert.throws(() => message({ type: "message_end", message: closing }), /EACCES/u);
     chmodSync(reports, 0o644);
 
-    for (const handler of extension.handlers.get(event) ?? []) (handler as () => void)();
+    for (const handler of extension.handlers.get(event) ?? []) {
+      (handler as EndHandler)({ type: event }, { shutdown: () => {} });
+    }
     assert.deepEqual(
       linesIn(reports).map((line) => (line as { type: string }).type),
       ["finish", "usage"],
@@ -488,6 +498,89 @@ for (const event of ["agent_settled", "session_shutdown"]) {
     );
   });
 }
+
+/** The type of each line in the file, in order. */
+function typesIn(path: string): string[] {
+  return linesIn(path).map((line) => (line as { type: string }).type);
+}
+
+/** A context whose every shutdown records the types of the lines in the file at that moment. */
+function shuttingDown(reports: string): { ctx: Context; shutdowns: string[][] } {
+  const shutdowns: string[][] = [];
+  return { ctx: { shutdown: () => shutdowns.push(typesIn(reports)) }, shutdowns };
+}
+
+/** The extension's agent_settled handler, run as `pi` runs it once the agent settles. */
+function settle(extension: Loaded, ctx: Context): void {
+  (onlyHandler(extension, "agent_settled") as EndHandler)({ type: "agent_settled" }, ctx);
+}
+
+test("finishing the review shuts pi down once the finish is in the file", async (t) => {
+  const reports = reportsFile(t);
+  const { ctx, shutdowns } = shuttingDown(reports);
+  await toolNamed(FINISH_REVIEW, reports).execute("call_1", {}, undefined, undefined, ctx);
+  assert.deepEqual(shutdowns, [["finish"]], "pi was not shut down once, after the finish was written");
+});
+
+test("a finish that cannot be recorded does not shut pi down", async (t) => {
+  const missing = unwritable(t);
+  const { ctx, shutdowns } = shuttingDown(missing);
+  const finish = toolOf(loaded(missing), FINISH_REVIEW);
+  await assert.rejects(finish.execute("call_1", {}, undefined, undefined, ctx));
+  assert.deepEqual(shutdowns, [], "pi was shut down on a finish the reviewer was told to call again");
+});
+
+test("an agent that settles with no finish records an unfinished end and shuts pi down", (t) => {
+  const reports = reportsFile(t);
+  const { ctx, shutdowns } = shuttingDown(reports);
+  settle(loaded(reports), ctx);
+  assert.deepEqual(linesIn(reports), [{ type: "unfinished" }]);
+  assert.deepEqual(shutdowns, [["unfinished"]], "pi was not shut down once, after the unfinished end");
+});
+
+/**
+ * A file that ends unfinished while missing a message reads as a review that
+ * cost less than it did, so the lost usage goes first.
+ */
+test("usage that could not be recorded is written before the unfinished end", (t) => {
+  const missing = unwritable(t);
+  const extension = loaded(missing);
+  const message = onlyHandler(extension, "message_end") as MessageHandler;
+  assert.throws(() => message({ type: "message_end", message: assistantMessage }), /ENOENT/u);
+
+  mkdirSync(join(missing, ".."));
+  const { ctx, shutdowns } = shuttingDown(missing);
+  settle(extension, ctx);
+  assert.deepEqual(typesIn(missing), ["usage", "unfinished"]);
+  assert.deepEqual(shutdowns, [["usage", "unfinished"]]);
+});
+
+/** `pi` fires agent_settled after the closing message of a finished review as well. */
+test("an agent that settles after the finish records no unfinished end", async (t) => {
+  const reports = reportsFile(t);
+  const extension = loaded(reports);
+  await toolOf(extension, FINISH_REVIEW).execute("call_1", {}, undefined, undefined, { shutdown: () => {} });
+  const message = onlyHandler(extension, "message_end") as MessageHandler;
+  message({ type: "message_end", message: { ...assistantMessage, stopReason: "stop" } });
+
+  settle(extension, { shutdown: () => {} });
+  assert.deepEqual(typesIn(reports), ["finish", "usage"]);
+});
+
+/**
+ * The file cannot record that it refused the unfinished end, and the round
+ * already reads a run with no finish as unfinished. A `pi` left running would
+ * wait for input until the round's time bound.
+ */
+test("an unfinished end that cannot be recorded still shuts pi down, and throws for pi to show", (t) => {
+  const missing = unwritable(t);
+  let shutdowns = 0;
+  assert.throws(
+    () => settle(loaded(missing), { shutdown: () => (shutdowns += 1) }),
+    /ENOENT/u,
+  );
+  assert.equal(shutdowns, 1, "pi was left waiting for input");
+});
 
 /** Restore the variable, whatever the test set it to. */
 function keepVariable(t: { after: (fn: () => void) => void }): void {
