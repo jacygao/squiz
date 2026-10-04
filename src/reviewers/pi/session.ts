@@ -19,45 +19,66 @@ const HEADER_LIMIT = 64 * 1024;
 // The ids `pi` accepts, which also keeps the line one word to a shell.
 const sessionId = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 
+/** Whether a round's session can be resumed, and with what. */
+export type Resume =
+  | { readonly kind: "resumable"; readonly line: readonly string[] }
+  /** The run wrote no session that `pi` would list. */
+  | { readonly kind: "none" }
+  /**
+   * A session may be there, and could not be read. Any line given instead could
+   * resume a different conversation from the round's, so none is.
+   */
+  | { readonly kind: "unreadable"; readonly reason: string };
+
 type Header = { readonly id: string; readonly started: number };
 
 /**
- * The command line that resumes the latest session kept in `sessionDirectory`,
- * or `undefined` where there is none.
+ * How to resume the latest session kept in `sessionDirectory`.
  *
  * `pi` writes nothing until the first assistant message arrives, so a run
- * stopped before then has no session to resume. Run from the directory the
- * reviewer ran in, it resumes the session in place. From anywhere else `pi`
- * offers to fork the session instead.
+ * stopped before then has no session, and neither has a directory never made.
+ * Run from the directory the reviewer ran in, the line resumes the session in
+ * place. From anywhere else `pi` offers to fork the session instead.
  */
-export function resumeLine(sessionDirectory: string): readonly string[] | undefined {
+export function resumeLine(sessionDirectory: string): Resume {
   let names: string[];
   try {
     names = readdirSync(sessionDirectory);
-  } catch {
-    return undefined;
+  } catch (cause) {
+    if (codeOf(cause) === "ENOENT") return { kind: "none" };
+    const reason = `${sessionDirectory} could not be listed: ${messageOf(cause)}`;
+    return { kind: "unreadable", reason };
   }
   let latest: Header | undefined;
   for (const name of names) {
     if (!name.endsWith(".jsonl")) continue;
-    const header = headerOf(join(sessionDirectory, name));
+    const file = join(sessionDirectory, name);
+    let line: string;
+    try {
+      line = firstLine(file);
+    } catch (cause) {
+      return { kind: "unreadable", reason: `${file} could not be read: ${messageOf(cause)}` };
+    }
+    const header = headerIn(line);
     if (header !== undefined && (latest === undefined || header.started > latest.started)) {
       latest = header;
     }
   }
-  return latest === undefined ? undefined : ["pi", "--session-dir", sessionDirectory, "--session", latest.id];
+  if (latest === undefined) return { kind: "none" };
+  const line = ["pi", "--session-dir", sessionDirectory, "--session", latest.id];
+  return { kind: "resumable", line };
 }
 
-/** The header on the first line of `file`, where that line is one `pi` wrote. */
-function headerOf(file: string): Header | undefined {
-  let line: unknown;
+/** The header `line` holds, where it is one `pi` wrote. */
+function headerIn(line: string): Header | undefined {
+  let parsed: unknown;
   try {
-    line = JSON.parse(firstLine(file));
+    parsed = JSON.parse(line);
   } catch {
     return undefined;
   }
-  if (typeof line !== "object" || line === null) return undefined;
-  const { type, id, timestamp } = line as Record<string, unknown>;
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const { type, id, timestamp } = parsed as Record<string, unknown>;
   if (type !== "session" || typeof id !== "string" || !sessionId.test(id)) return undefined;
   const started = typeof timestamp === "string" ? Date.parse(timestamp) : Number.NaN;
   return Number.isNaN(started) ? undefined : { id, started };
@@ -74,4 +95,12 @@ function firstLine(file: string): string {
   } finally {
     closeSync(descriptor);
   }
+}
+
+function codeOf(cause: unknown): unknown {
+  return typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { resumeLine } from "./session.ts";
+import { type Resume, resumeLine } from "./session.ts";
 
 /** The header `pi` 0.85.1 wrote as the first line of a session it kept. */
 function header(id: string, timestamp: string): string {
@@ -28,10 +28,16 @@ function inADirectory(body: (directory: string) => void): void {
 
 const id = "01a10689-9e50-77f6-897f-fea5bbd5decc";
 
+const none = { kind: "none" } as const;
+
+function resuming(directory: string, session: string): Resume {
+  return { kind: "resumable", line: ["pi", "--session-dir", directory, "--session", session] };
+}
+
 test("a session the run wrote is resumed by the id its header carries", () => {
   inADirectory((directory) => {
     writeSession(directory, `2026-10-04T10-50-44-689Z_${id}.jsonl`, header(id, "2026-10-04T10:50:44.689Z"));
-    assert.deepEqual(resumeLine(directory), ["pi", "--session-dir", directory, "--session", id]);
+    assert.deepEqual(resumeLine(directory), resuming(directory, id));
   });
 });
 
@@ -40,7 +46,7 @@ test("a session the run wrote is resumed by the id its header carries", () => {
 test("the id is the header's, whatever the file is called", () => {
   inADirectory((directory) => {
     writeSession(directory, "renamed.jsonl", header(id, "2026-10-04T10:50:44.689Z"));
-    assert.deepEqual(resumeLine(directory), ["pi", "--session-dir", directory, "--session", id]);
+    assert.deepEqual(resumeLine(directory), resuming(directory, id));
   });
 });
 
@@ -50,10 +56,10 @@ test("the id is the header's, whatever the file is called", () => {
  */
 test("a run that wrote no session has nothing to resume", () => {
   inADirectory((directory) => {
-    assert.equal(resumeLine(directory), undefined);
-    assert.equal(resumeLine(join(directory, "never-made")), undefined);
+    assert.deepEqual(resumeLine(directory), none);
+    assert.deepEqual(resumeLine(join(directory, "never-made")), none);
     writeFileSync(join(directory, "notes.txt"), `${header(id, "2026-10-04T10:50:44.689Z")}\n`);
-    assert.equal(resumeLine(directory), undefined, "a file pi would not list is not a session");
+    assert.deepEqual(resumeLine(directory), none, "a file pi would not list is not a session");
   });
 });
 
@@ -64,7 +70,7 @@ test("of two sessions, the later one is resumed", () => {
     const later = "01a1068f-0000-7000-8000-000000000002";
     writeSession(directory, `b_${id}.jsonl`, header(id, "2026-10-04T10:50:44.689Z"));
     writeSession(directory, `a_${later}.jsonl`, header(later, "2026-10-04T10:58:01.002Z"));
-    assert.deepEqual(resumeLine(directory), ["pi", "--session-dir", directory, "--session", later]);
+    assert.deepEqual(resumeLine(directory), resuming(directory, later));
   });
 });
 
@@ -76,6 +82,33 @@ test("a session whose header is not one pi wrote is not resumed", () => {
     writeSession(directory, "b.jsonl", JSON.stringify({ type: "message", id }));
     writeSession(directory, "c.jsonl", header("$(touch pwned)", "2026-10-04T10:50:44.689Z"));
     writeSession(directory, "d.jsonl", header(id, "not a time"));
-    assert.equal(resumeLine(directory), undefined);
+    assert.deepEqual(resumeLine(directory), none);
+  });
+});
+
+// Passing it over would resume the older session, which is a different
+// conversation from the run the round's result came from.
+test("a newer session that cannot be read is reported, not passed over for an older one", () => {
+  inADirectory((directory) => {
+    const later = "01a1068f-0000-7000-8000-000000000002";
+    writeSession(directory, `a_${id}.jsonl`, header(id, "2026-10-04T10:50:44.689Z"));
+    writeSession(directory, `b_${later}.jsonl`, header(later, "2026-10-04T10:58:01.002Z"));
+    chmodSync(join(directory, `b_${later}.jsonl`), 0o000);
+    const resumed = resumeLine(directory);
+    assert.equal(resumed.kind, "unreadable", `came back as ${JSON.stringify(resumed)}`);
+    assert.match(resumed.kind === "unreadable" ? resumed.reason : "", /b_01a1068f/u);
+  });
+});
+
+test("a session directory that cannot be listed is reported, not read as empty", () => {
+  inADirectory((directory) => {
+    writeSession(directory, `a_${id}.jsonl`, header(id, "2026-10-04T10:50:44.689Z"));
+    chmodSync(directory, 0o000);
+    try {
+      const resumed = resumeLine(directory);
+      assert.equal(resumed.kind, "unreadable", `came back as ${JSON.stringify(resumed)}`);
+    } finally {
+      chmodSync(directory, 0o700);
+    }
   });
 });
