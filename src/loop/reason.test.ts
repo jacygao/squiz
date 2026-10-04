@@ -39,7 +39,13 @@ function raisedOnFile(id: string, finding: FileFinding): ReviewThread {
  * saying the reviewer wrote it.
  */
 function opened(finding: Finding): ThreadComment {
-  return { databaseId: null, author: "squiz", body: renderComment(finding) };
+  return {
+    id: "PRRC_fixture",
+    createdAt: "2026-09-06T07:13:05Z",
+    databaseId: null,
+    author: "squiz",
+    body: renderComment(finding),
+  };
 }
 
 function resolved(thread: ReviewThread): ReviewThread {

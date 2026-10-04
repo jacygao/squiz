@@ -161,11 +161,19 @@ const thread: ReviewThread = {
   anchor: { at: "line", line: 8 },
   comments: [
     {
+      id: "PRRC_fixture",
+      createdAt: "2026-09-06T07:13:05Z",
       databaseId: 11,
       author: "squiz",
       body: "`hasReplied` counted the finding itself as a reply.",
     },
-    { databaseId: 12, author: "coding-agent", body: "Now compares against 1 rather than 0." },
+    {
+      id: "PRRC_fixture",
+      createdAt: "2026-09-06T07:13:05Z",
+      databaseId: 12,
+      author: "coding-agent",
+      body: "Now compares against 1 rather than 0.",
+    },
   ],
 };
 
