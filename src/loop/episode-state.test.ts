@@ -142,6 +142,14 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 0}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 2.5}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": true}]}`,
+  // A record dropped on reading is a state with no record, which a trigger queues
+  // again, or a queued state that no round host ever takes.
+  `{"rounds": [], "records": {}}`,
+  `{"rounds": [], "records": [3]}`,
+  `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "postponed"}]}`,
+  `{"rounds": [], "records": [{"head": "3f9c2e0", "status": "queued"}]}`,
+  // Two records for one state leave no telling which of them is true.
+  `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}]}`,
 ];
 
 for (const contents of unreadableContents) {
@@ -353,4 +361,45 @@ test("a move of HEAD that is not a list of strings is unreadable", (t) => {
   const read = readState(episode);
   assert.equal(read.outcome, "unreadable");
   assert.match(read.outcome === "unreadable" ? read.reason : "", /"confinement\.moved" is "HEAD"/u);
+});
+
+test("the record for each state of the pull request is written and comes back", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    records: [
+      { head: "3f9c2e0", activity: null, status: "reviewed", result: "clean, episode open" },
+      {
+        head: "8d21a4f",
+        activity: "PRRC_kwDOL7tYbc6OmQx7a",
+        status: "reviewing",
+        owner: { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb", subagent: "a402ef8f56c1b2ed1" },
+        host: { pid: 4012, startedAt: 1_791_000_000 },
+      },
+      { head: "9e01b2c", activity: "PRRC_kwDOL7tYbc6OmQx7a", status: "queued" },
+    ],
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
+test("a state file written before records were kept reads with no records", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(episode.stateFile, JSON.stringify({ rounds: [firstRound], spentOutsideRounds: unspent }));
+
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: { rounds: [firstRound], spentOutsideRounds: unspent },
+  });
+});
+
+test("a record that cannot be read is named by its place in the file and what is wrong with it", (t) => {
+  const reason = refusalOf(
+    t,
+    `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "8d21a4f", "activity": null, "status": "postponed"}]}`,
+  );
+  assert.match(reason, /record 2 has "status" as "postponed"/u);
 });
