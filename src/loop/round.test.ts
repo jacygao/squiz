@@ -769,9 +769,11 @@ function listed(threads: readonly Listed[]): string {
                 pageInfo: { hasNextPage: false, endCursor: null },
                 nodes: [
                   {
+                    id: `PRRC_of_${thread.id}`,
                     databaseId: 51,
                     author: { login: "squiz" },
                     body: thread.opening ?? renderComment(finding("The name says nothing.")),
+                    createdAt: "2026-09-06T07:13:05Z",
                   },
                 ],
               },

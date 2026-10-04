@@ -19,11 +19,15 @@ import { callGraphql, saidBy, type GhCall, type GhFailure } from "./gh.ts";
 
 /** One comment of a thread. The first is what opened it and the rest are replies. */
 export type ThreadComment = {
+  /** The comment's own `PRRC_` node id, which is not the thread's and resolves nothing. */
+  readonly id: string;
   /** The REST id of this comment, which is not the thread's and resolves nothing. */
   readonly databaseId: number | null;
   // Null where the account that wrote it is gone.
   readonly author: string | null;
   readonly body: string;
+  // When the comment was posted, as GitHub spells it, to the second. An edit leaves it.
+  readonly createdAt: string;
 };
 
 /**
@@ -130,7 +134,7 @@ export type ThreadListing =
 /** What GitHub serves in one page of either connection. */
 const PAGE_SIZE = 100;
 
-const commentFields = `nodes { databaseId author { login } body }`;
+const commentFields = `nodes { id databaseId author { login } body createdAt }`;
 
 const pageFields = `pageInfo { hasNextPage endCursor }`;
 
@@ -354,15 +358,27 @@ function readThread(node: unknown): PartialThread | null {
   };
 }
 
+/**
+ * Every comment of one page, or `null` where any is unreadable.
+ *
+ * A comment with no node id, or no time it was posted, fails rather than being
+ * carried without them. Which reply is newest is read off those two, and a
+ * comment that cannot be placed would drop out of that answer unseen.
+ */
 function readComments(nodes: readonly unknown[]): readonly ThreadComment[] | null {
   const comments: ThreadComment[] = [];
   for (const node of nodes) {
+    const id = stringOf(fieldOf(node, "id"));
     const body = fieldOf(node, "body");
-    if (typeof body !== "string") return null;
+    const createdAt = stringOf(fieldOf(node, "createdAt"));
+    if (id === null || typeof body !== "string") return null;
+    if (createdAt === null || Number.isNaN(Date.parse(createdAt))) return null;
     comments.push({
+      id,
       databaseId: integerOf(fieldOf(node, "databaseId")),
       author: stringOf(fieldOf(fieldOf(node, "author"), "login")),
       body,
+      createdAt,
     });
   }
   return comments;

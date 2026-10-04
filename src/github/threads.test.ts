@@ -134,8 +134,11 @@ function commentsPage(nodes: readonly unknown[], pageInfo: Page = lastPage): Ans
   return answered({ data: { node: { comments: { pageInfo, nodes } } } });
 }
 
+/** When every fixture comment was written, unless a test says otherwise. */
+const writtenAt = "2026-09-06T07:13:05Z";
+
 function comment(login: string, body: string, databaseId: number): unknown {
-  return { databaseId, author: { login }, body };
+  return { id: `PRRC_${databaseId}`, databaseId, author: { login }, body, createdAt: writtenAt };
 }
 
 /**
@@ -200,16 +203,72 @@ test("a thread comes back with its node id, its state, its anchor and its commen
         anchor: { at: "line", line: 4 },
         comments: [
           {
+            id: "PRRC_3942350907",
             databaseId: 3942350907,
             author: "jacygao",
             body: "**Squiz reviewer · high** the finding",
+            createdAt: writtenAt,
           },
-          { databaseId: 3942350908, author: "jacygao", body: "**Squiz coding agent** fixed" },
+          {
+            id: "PRRC_3942350908",
+            databaseId: 3942350908,
+            author: "jacygao",
+            body: "**Squiz coding agent** fixed",
+            createdAt: writtenAt,
+          },
         ],
       });
     },
   );
 });
+
+test("both queries ask for each comment's node id and when it was written", async () => {
+  // GitHub answers only the fields asked for, and a fixture answers whatever it
+  // holds, so nothing else here would notice a query that stopped asking.
+  await withFakeGh(
+    [
+      threadsPage([
+        threadNode({
+          comments: {
+            pageInfo: { hasNextPage: true, endCursor: "comment-1" },
+            nodes: [comment("jacygao", "first", 1)],
+          },
+        }),
+      ]),
+      commentsPage([comment("jacygao", "second", 2)]),
+    ],
+    (gh) => {
+      listed(listReviewThreads(pullRequestId, { directory: tmpdir() }));
+
+      for (const nth of [1, 2]) {
+        const query = gh.sentAt(nth).query;
+        const commentFields = query.slice(query.indexOf("comments("));
+        assert.match(commentFields, /\bid\b/u, `call ${nth} asks for no comment id`);
+        assert.match(commentFields, /\bcreatedAt\b/u, `call ${nth} asks for no createdAt`);
+      }
+    },
+  );
+});
+
+for (const [missing, fields] of [
+  ["node id", { id: null }],
+  ["creation time", { createdAt: null }],
+  ["creation time that is no time", { createdAt: "yesterday" }],
+] as const) {
+  test(`a comment carrying no ${missing} fails the listing`, async () => {
+    // Which reply is newest is read off these two, so a comment without them
+    // would be a reply nothing can place.
+    const node = { ...(comment("jacygao", "a reply", 2) as object), ...fields };
+    await withFakeGh(
+      [threadsPage([threadNode({ comments: { pageInfo: lastPage, nodes: [node] } })])],
+      () => {
+        const result = listReviewThreads(pullRequestId, { directory: tmpdir() });
+
+        assert.equal(result.outcome, "unreadable");
+      },
+    );
+  });
+}
 
 test("the identifier carried out is the thread's, never the root comment's", async () => {
   // The two identifier spaces: only the thread's `PRRT_` node id is accepted by
@@ -441,14 +500,19 @@ test("a comment whose account is gone reads as having no author", async () => {
     [
       threadsPage([
         threadNode({
-          comments: { pageInfo: lastPage, nodes: [{ databaseId: 7, author: null, body: "gone" }] },
+          comments: {
+            pageInfo: lastPage,
+            nodes: [{ ...(comment("jacygao", "gone", 7) as object), author: null }],
+          },
         }),
       ]),
     ],
     () => {
       const thread = onlyThread(listReviewThreads(pullRequestId, { directory: tmpdir() }));
 
-      assert.deepEqual(thread.comments, [{ databaseId: 7, author: null, body: "gone" }]);
+      assert.deepEqual(thread.comments, [
+        { id: "PRRC_7", databaseId: 7, author: null, body: "gone", createdAt: writtenAt },
+      ]);
     },
   );
 });

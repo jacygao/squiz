@@ -1768,7 +1768,15 @@ function threadsPageBefore(cursor: string): string {
               subjectType: "LINE",
               comments: {
                 pageInfo: { hasNextPage: false, endCursor: null },
-                nodes: [{ databaseId: 11, author: { login: "squiz" }, body: "an earlier finding" }],
+                nodes: [
+                  {
+                    id: "PRRC_kwDOEarlier",
+                    databaseId: 11,
+                    author: { login: "squiz" },
+                    body: "an earlier finding",
+                    createdAt: "2026-09-06T07:13:05Z",
+                  },
+                ],
               },
             },
           ],
