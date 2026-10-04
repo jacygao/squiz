@@ -194,6 +194,7 @@ test("a snapshot already standing at the path is a failure naming it, and is lef
     const addition = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000));
 
     assert.equal(reasonOf(addition), `something already stands at ${leftover}`);
+    assert.equal("leftBehind" in addition, false, "what this attempt did not make is not handed over for removal");
     assert.equal(existsSync(leftover), true);
     assert.equal(git(agent, "worktree", "list", "--porcelain").includes(leftover), false);
   });
@@ -231,6 +232,57 @@ test("a commit that is not a full object name is refused before git sees it", as
     const addition = addSnapshot(agent, { ...roundTwo, commit: "--upload-pack=touch pwned" }, deadlineIn(30_000));
 
     assert.equal(reasonOf(addition), `"--upload-pack=touch pwned" is not a full commit name`);
+  });
+});
+
+/** Whatever an addition left at its path, added or failed, for removal to clear. */
+function leftAt(addition: SnapshotAddition): string | undefined {
+  return addition.outcome === "added" ? addition.path : addition.leftBehind;
+}
+
+test("a post-checkout hook that fails leaves nothing a retry after removal trips on", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, agent, head } = await repositoryWithLinkedWorktree(root);
+    const listBefore = git(main, "worktree", "list", "--porcelain");
+    await writeFile(join(main, ".git", "hooks", "post-checkout"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+    const first = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000));
+    const left = leftAt(first);
+    assert.notEqual(left, undefined, "a snapshot git made is one the caller is told about");
+    assert.deepEqual(removeSnapshot(agent, left ?? ""), { outcome: "removed" });
+    assert.equal(git(main, "worktree", "list", "--porcelain"), listBefore);
+
+    const retry = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000));
+    assert.equal(leftAt(retry), left);
+  });
+});
+
+test("the project's checkout hooks do not run in a snapshot", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, agent, head } = await repositoryWithLinkedWorktree(root);
+    const ran = join(root, "hook-ran");
+    await writeFile(join(main, ".git", "hooks", "post-checkout"), `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 });
+
+    addedPath(addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)));
+
+    assert.equal(existsSync(ran), false);
+  });
+});
+
+test("an add that fails after git made the snapshot names it for removal, apart from a refusal", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, agent, head } = await repositoryWithLinkedWorktree(root);
+    const listBefore = git(main, "worktree", "list", "--porcelain");
+
+    const first = await withFakeWorktreeAdd(root, () =>
+      addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)),
+    );
+    const path = join(agent, ".squiz", "41", "rounds", "2", "tree");
+    assert.equal(first.outcome, "failed");
+    assert.equal(first.outcome === "failed" && first.leftBehind, path);
+    assert.deepEqual(removeSnapshot(agent, path), { outcome: "removed" });
+    assert.equal(git(main, "worktree", "list", "--porcelain"), listBefore);
+    assert.equal(addedPath(addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000))), path);
   });
 });
 
@@ -287,6 +339,25 @@ async function withGitWhoseFetchHangs<T>(root: string, body: () => T): Promise<T
   return withFakeFetch(root, "exec sleep 30", body);
 }
 
+/** Run `body` with a `git` whose worktree add makes the snapshot and then exits 1. */
+async function withFakeWorktreeAdd<T>(root: string, body: () => T): Promise<T> {
+  const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
+  assert.equal(real.status, 0, "the test needs the real git to stand behind the fake");
+  const directory = join(root, "fake-git");
+  await mkdir(directory);
+  standIn(
+    directory,
+    "git",
+    [
+      "#!/bin/sh",
+      `for word in "$@"; do [ "$word" = worktree ] && { '${real.stdout.trim()}' "$@"; exit 1; }; done`,
+      `exec '${real.stdout.trim()}' "$@"`,
+      "",
+    ].join("\n"),
+  );
+  return withPathFirst(directory, body);
+}
+
 /** Run `body` with a `git` that runs `fetch` as `script`, and hands every other call to the real git. */
 async function withFakeFetch<T>(root: string, script: string, body: () => T): Promise<T> {
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
@@ -298,6 +369,11 @@ async function withFakeFetch<T>(root: string, script: string, body: () => T): Pr
     "git",
     ["#!/bin/sh", `[ "$1" = fetch ] && { ${script}; }`, `exec '${real.stdout.trim()}' "$@"`, ""].join("\n"),
   );
+  return withPathFirst(directory, body);
+}
+
+/** Run `body` with `directory` first on PATH, so the git there stands in for the real one. */
+function withPathFirst<T>(directory: string, body: () => T): T {
   const previous = process.env["PATH"];
   process.env["PATH"] = `${directory}:${previous ?? ""}`;
   try {

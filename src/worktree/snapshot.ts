@@ -20,7 +20,15 @@ import { runGit } from "./git.ts";
 /** The snapshot made, and whether its commit had to be fetched first, or why not. */
 export type SnapshotAddition =
   | { readonly outcome: "added"; readonly path: string; readonly fetched: boolean }
-  | { readonly outcome: "failed"; readonly reason: string };
+  | {
+      readonly outcome: "failed";
+      readonly reason: string;
+      /**
+       * Where git made the snapshot before the add failed, for the caller to
+       * remove once the round has its result. Absent where nothing was made.
+       */
+      readonly leftBehind?: string;
+    };
 
 export type SnapshotRemoval =
   | { readonly outcome: "removed" }
@@ -46,13 +54,17 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * worse than none.
  *
  * `until` bounds every git call, and a call with nothing left on it is not
- * started. Fails, adding nothing, where:
+ * started. Fails where:
  *
  * - the commit is not a full object name;
  * - anything already stands at the path, which is a killed round's snapshot
  *   for recovery to remove;
  * - the fetch fails, or finishes without bringing the commit;
  * - git refuses the add, or the deadline passes.
+ *
+ * Git makes the snapshot before the add can fail, so a failed add that left
+ * anything at the path says so in `leftBehind`. Nothing here removes it, because
+ * removal grows with the snapshot and does not belong before the review.
  */
 export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): SnapshotAddition {
   if (!FULL_COMMIT_NAME.test(of.commit)) {
@@ -79,8 +91,18 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
     if (!arrived.has) return failed(`the fetch finished without bringing ${of.commit}`);
   }
 
-  const added = runGit(worktree, ["worktree", "add", "--quiet", "--detach", path, of.commit], { until });
-  if (!added.ran) return failed(`the snapshot could not be added at ${path}: ${added.reason}`);
+  const added = runGit(
+    worktree,
+    // The project's checkout hooks are for the coding agent's worktree. In a
+    // snapshot they would spend the deadline, and could write outside it.
+    ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "--detach", path, of.commit],
+    { until },
+  );
+  if (!added.ran) {
+    const reason = `the snapshot could not be added at ${path}: ${added.reason}`;
+    // The path was clear before the add, so whatever stands there now is its.
+    return existsSync(path) ? { outcome: "failed", reason, leftBehind: path } : failed(reason);
+  }
   return { outcome: "added", path, fetched: !present.has };
 }
 
