@@ -3,19 +3,25 @@
  *
  * `pi` is not here, so what this holds is the half the harness owns — the names
  * registered, the schema the CLI is asked to validate against, what each call
- * answers with, and that the refusal is subscribed at all. That `pi` loads the
+ * answers with, that the refusal is subscribed at all, and what each call and
+ * each assistant message writes to the report file. That `pi` loads the
  * file and grants the calls is held by the command line and the grant beside it.
  */
 
 import assert from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
-import reportAsYouGo, { type Registrar } from "./extension.ts";
+import reportAsYouGo, { type MessageEnd, type Registrar, reportInto } from "./extension.ts";
 import type { Refusal, ToolCall } from "./refusals.ts";
+import { REPORTS_VARIABLE } from "./report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "./reporting.ts";
 
 type Tool = Parameters<Registrar["registerTool"]>[0];
 type Handler = (call: ToolCall) => Refusal | undefined;
+type MessageHandler = (event: MessageEnd) => void;
 
 const lineFinding = {
   scope: "line",
@@ -28,17 +34,72 @@ const lineFinding = {
 };
 
 /** What the extension did with `pi`'s API: the calls it registered and what it subscribed. */
-function loaded(): { tools: Map<string, Tool>; handlers: Map<string, Handler[]> } {
-  const tools = new Map<string, Tool>();
-  const handlers = new Map<string, Handler[]>();
-  reportAsYouGo({
-    registerTool: (tool) => tools.set(tool.name, tool),
-    on: (event, handler) => {
-      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+type Loaded = { tools: Map<string, Tool>; handlers: Map<string, unknown[]> };
+
+/** `pi`'s API, recording what the extension did with it. */
+function registrar(): { pi: Registrar; loaded: Loaded } {
+  const loaded: Loaded = { tools: new Map(), handlers: new Map() };
+  const pi: Registrar = {
+    registerTool: (tool) => loaded.tools.set(tool.name, tool),
+    on: (event: string, handler: unknown) => {
+      loaded.handlers.set(event, [...(loaded.handlers.get(event) ?? []), handler]);
     },
-  });
-  return { tools, handlers };
+  };
+  return { pi, loaded };
 }
+
+/** The extension loaded with its reports going to `reports`, or nowhere. */
+function loaded(reports?: string): Loaded {
+  const { pi, loaded } = registrar();
+  reportInto(pi, reports);
+  return loaded;
+}
+
+/** The one handler subscribed to `event`. */
+function onlyHandler(subscribed: Loaded, event: string): unknown {
+  const handlers = subscribed.handlers.get(event) ?? [];
+  assert.equal(handlers.length, 1, `the extension subscribed ${handlers.length} ${event} handlers`);
+  return handlers[0];
+}
+
+/** A report file of the test's own, in a directory removed when the test ends. */
+function reportsFile(t: { after: (fn: () => void) => void }): string {
+  const directory = mkdtempSync(join(tmpdir(), "squiz-extension-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  return join(directory, "reports.jsonl");
+}
+
+/** The file read back a line at a time, each line parsed on its own. */
+function linesIn(path: string): unknown[] {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  if (text === "") return [];
+  assert.ok(text.endsWith("\n"), "the last line carries no newline");
+  return text.slice(0, -1).split("\n").map((line) => JSON.parse(line) as unknown);
+}
+
+/** An assistant message as `pi` ends one, cost and all. */
+const assistantMessage = {
+  role: "assistant",
+  content: [{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "a.ts" } }],
+  api: "openai-completions",
+  provider: "deepseek",
+  model: "deepseek-v4-pro",
+  usage: {
+    input: 1200,
+    output: 80,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 1280,
+    cost: { input: 0.001, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.0012 },
+  },
+  stopReason: "toolUse",
+  timestamp: 1_759_500_000_000,
+};
 
 /** The three calls, registered as `pi` registers them. */
 function registered(): Map<string, Tool> {
@@ -52,8 +113,8 @@ function registered(): Map<string, Tool> {
  * that went missing takes the refusal with it and says nothing. Failing here is
  * what tells that apart from a reviewer that tried nothing.
  */
-function subscribedHandler(): Handler {
-  const subscribed = loaded().handlers.get("tool_call") ?? [];
+function subscribedHandler(reports?: string): Handler {
+  const subscribed = loaded(reports).handlers.get("tool_call") ?? [];
   assert.equal(
     subscribed.length,
     1,
@@ -61,11 +122,15 @@ function subscribedHandler(): Handler {
   );
   const [handler] = subscribed;
   assert.ok(handler !== undefined);
-  return handler;
+  return handler as Handler;
 }
 
-function toolNamed(name: string): Tool {
-  const tool = registered().get(name);
+function messageHandler(reports?: string): MessageHandler {
+  return onlyHandler(loaded(reports), "message_end") as MessageHandler;
+}
+
+function toolNamed(name: string, reports?: string): Tool {
+  const tool = loaded(reports).tools.get(name);
   assert.ok(tool !== undefined, `${name} was not registered`);
   return tool;
 }
@@ -196,4 +261,273 @@ test("every call describes itself to the reviewer", () => {
     assert.notEqual(tool.description, "", `${name} carries no description`);
     assert.equal(tool.label === "", false, `${name} carries no label`);
   }
+});
+
+/** The tool registered under `name` on one loaded extension. */
+function toolOf(subscribed: Loaded, name: string): Tool {
+  const tool = subscribed.tools.get(name);
+  assert.ok(tool !== undefined, `${name} was not registered`);
+  return tool;
+}
+
+/** A path in a directory that does not exist, where every append fails. */
+function unwritable(t: { after: (fn: () => void) => void }): string {
+  return join(reportsFile(t), "..", "not-yet", "reports.jsonl");
+}
+
+/**
+ * `pi` converts the arguments before the call runs, and the extension reads
+ * them into a finding, so what lands can differ from what the model sent. Here
+ * the reading drops a property the schema never declared, which `pi` passes
+ * through.
+ */
+test("a finding is recorded as the call accepted it, not as the arguments it was sent", async (t) => {
+  const reports = reportsFile(t);
+  await toolNamed(REPORT_FINDING, reports).execute("call_1", { ...lineFinding, unasked: "x" });
+  assert.deepEqual(linesIn(reports), [
+    { type: "report", call: REPORT_FINDING, value: lineFinding },
+  ]);
+});
+
+test("a verdict is recorded as the call accepted it", async (t) => {
+  const reports = reportsFile(t);
+  const ruling = { thread: "PRRT_kwDOAbc123", verdict: "fixed" };
+  await toolNamed(REPORT_VERDICT, reports).execute("call_1", ruling);
+  assert.deepEqual(linesIn(reports), [{ type: "report", call: REPORT_VERDICT, value: ruling }]);
+});
+
+test("a report the call refused is recorded with its refusal, as one that ran", async (t) => {
+  const reports = reportsFile(t);
+  const extension = loaded(reports);
+  const verdict = toolOf(extension, REPORT_VERDICT);
+  await verdict.execute("call_1", { thread: "PRRT_kwDOAbc123", verdict: "fixed" });
+  const second = await refusalOf(verdict, { thread: "PRRT_kwDOAbc123", verdict: "open" });
+  const malformed = await refusalOf(toolOf(extension, REPORT_FINDING), { scope: "line" });
+
+  assert.deepEqual(linesIn(reports).slice(1), [
+    { type: "refused", call: REPORT_VERDICT, reason: second, stopped: false },
+    { type: "refused", call: REPORT_FINDING, reason: malformed, stopped: false },
+  ]);
+});
+
+test("a call stopped before it ran is recorded with its refusal", (t) => {
+  const reports = reportsFile(t);
+  const handler = subscribedHandler(reports);
+  const refused = handler({ toolName: "bash", input: { command: "git push" } });
+  handler({ toolName: "bash", input: { command: "npm test" } });
+
+  assert.deepEqual(linesIn(reports), [
+    { type: "refused", call: "bash", reason: refused?.reason, stopped: true },
+  ]);
+});
+
+test("an assistant message is recorded with its usage and why it stopped", (t) => {
+  const reports = reportsFile(t);
+  messageHandler(reports)({ type: "message_end", message: assistantMessage });
+  assert.deepEqual(linesIn(reports), [
+    {
+      type: "usage",
+      stopReason: "toolUse",
+      model: "deepseek-v4-pro",
+      usage: assistantMessage.usage,
+    },
+  ]);
+});
+
+/** `pi` retries a failed request, so an errored message sits among working ones. */
+test("an errored assistant message is recorded with its error", (t) => {
+  const reports = reportsFile(t);
+  const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+  const errored = {
+    ...assistantMessage,
+    content: [],
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: zero },
+    stopReason: "error",
+    errorMessage: "429 Too Many Requests",
+  };
+  messageHandler(reports)({ type: "message_end", message: errored });
+  assert.deepEqual(linesIn(reports), [
+    {
+      type: "usage",
+      stopReason: "error",
+      errorMessage: "429 Too Many Requests",
+      model: "deepseek-v4-pro",
+      usage: errored.usage,
+    },
+  ]);
+});
+
+test("a message that is not the reviewer's records nothing", (t) => {
+  const reports = reportsFile(t);
+  const handler = messageHandler(reports);
+  handler({ type: "message_end", message: { role: "user", content: [] } });
+  handler({ type: "message_end", message: { role: "toolResult", content: [] } });
+  assert.deepEqual(linesIn(reports), []);
+});
+
+test("finishing the review is recorded", async (t) => {
+  const reports = reportsFile(t);
+  await toolNamed(FINISH_REVIEW, reports).execute("call_1", {});
+  assert.deepEqual(linesIn(reports), [{ type: "finish" }]);
+});
+
+test("the lines are in the order the reviewer did things", async (t) => {
+  const reports = reportsFile(t);
+  const extension = loaded(reports);
+  const message = onlyHandler(extension, "message_end") as MessageHandler;
+  const handler = onlyHandler(extension, "tool_call") as Handler;
+
+  message({ type: "message_end", message: assistantMessage });
+  handler({ toolName: "bash", input: { command: "git commit -m x" } });
+  await toolOf(extension, REPORT_FINDING).execute("call_2", lineFinding);
+  message({ type: "message_end", message: { ...assistantMessage, stopReason: "stop" } });
+  await toolOf(extension, FINISH_REVIEW).execute("call_3", {});
+
+  assert.deepEqual(
+    linesIn(reports).map((line) => (line as { type: string }).type),
+    ["usage", "refused", "report", "usage", "finish"],
+  );
+});
+
+/**
+ * The reviewer is told a report landed only where it is in the file. A report
+ * answered as accepted and missing from the file is lost with nobody knowing.
+ */
+test("a report that cannot be recorded is refused, and can be made again", async (t) => {
+  const missing = unwritable(t);
+  const verdict = toolOf(loaded(missing), REPORT_VERDICT);
+  const ruling = { thread: "PRRT_kwDOAbc123", verdict: "fixed" };
+
+  const refused = await refusalOf(verdict, ruling);
+  assert.match(refused, /the verdict could not be recorded, so it was not reported/u);
+
+  mkdirSync(join(missing, ".."));
+  assert.deepEqual((await verdict.execute("call_2", ruling)).details, ruling);
+  assert.deepEqual(linesIn(missing), [{ type: "report", call: REPORT_VERDICT, value: ruling }]);
+});
+
+test("a finish that cannot be recorded is refused", async (t) => {
+  const refused = await refusalOf(toolOf(loaded(unwritable(t)), FINISH_REVIEW), {});
+  assert.match(refused, /the finish could not be recorded, so the review is not finished/u);
+});
+
+/** The call is stopped either way, and what the reviewer reads still opens as a refusal. */
+test("a refusal that cannot be recorded still refuses, and says it was not recorded", (t) => {
+  const refused = subscribedHandler(unwritable(t))({
+    toolName: "bash",
+    input: { command: "git push" },
+  });
+  assert.equal(refused?.block, true);
+  assert.match(refused?.reason ?? "", /^squiz refused this call: /u);
+  assert.match(refused?.reason ?? "", /The refusal could not be recorded/u);
+});
+
+test("a report refused and not recorded says both", async (t) => {
+  const refused = await refusalOf(toolOf(loaded(unwritable(t)), REPORT_FINDING), {
+    scope: "line",
+  });
+  assert.match(refused, /^the finding /u);
+  assert.match(refused, /The refusal could not be recorded/u);
+});
+
+/**
+ * `pi` catches what a message handler throws and shows it as the extension's
+ * error, on stderr or in the pane. Swallowing it here would leave a round that
+ * undercounts its cost with nothing anywhere saying so.
+ */
+test("usage that cannot be recorded throws, for pi to show", (t) => {
+  const handler = messageHandler(unwritable(t));
+  assert.throws(
+    () => handler({ type: "message_end", message: assistantMessage }),
+    /ENOENT/u,
+  );
+});
+
+/**
+ * A file holding the finish and missing a message reads as a complete review
+ * that cost less than it did. So the lost usage is written ahead of the next
+ * line that can be, and the finish cannot land without it.
+ */
+test("usage that could not be recorded is written before a later finish", async (t) => {
+  const missing = unwritable(t);
+  const extension = loaded(missing);
+  const message = onlyHandler(extension, "message_end") as MessageHandler;
+  assert.throws(() => message({ type: "message_end", message: assistantMessage }), /ENOENT/u);
+
+  mkdirSync(join(missing, ".."));
+  await toolOf(extension, FINISH_REVIEW).execute("call_1", {});
+  assert.deepEqual(
+    linesIn(missing).map((line) => (line as { type: string }).type),
+    ["usage", "finish"],
+    "the finish was recorded and the usage lost before it was not",
+  );
+});
+
+/**
+ * `pi` defers its exit until the reviewer has written its closing message, so
+ * that message's usage arrives after the finish, with no later line to carry
+ * it. The end of the run is its last chance.
+ */
+for (const event of ["agent_settled", "session_shutdown"]) {
+  test(`usage lost after the finish is written on ${event}`, async (t) => {
+    const reports = reportsFile(t);
+    const extension = loaded(reports);
+    await toolOf(extension, FINISH_REVIEW).execute("call_1", {});
+
+    chmodSync(reports, 0o444);
+    const message = onlyHandler(extension, "message_end") as MessageHandler;
+    const closing = { ...assistantMessage, stopReason: "stop" };
+    assert.throws(() => message({ type: "message_end", message: closing }), /EACCES/u);
+    chmodSync(reports, 0o644);
+
+    for (const handler of extension.handlers.get(event) ?? []) (handler as () => void)();
+    assert.deepEqual(
+      linesIn(reports).map((line) => (line as { type: string }).type),
+      ["finish", "usage"],
+      "the closing message's usage was never written",
+    );
+  });
+}
+
+/** Restore the variable, whatever the test set it to. */
+function keepVariable(t: { after: (fn: () => void) => void }): void {
+  const before = process.env[REPORTS_VARIABLE];
+  t.after(() => {
+    if (before === undefined) delete process.env[REPORTS_VARIABLE];
+    else process.env[REPORTS_VARIABLE] = before;
+  });
+}
+
+test("the extension pi loads writes to the file the variable names", async (t) => {
+  keepVariable(t);
+  const reports = reportsFile(t);
+  process.env[REPORTS_VARIABLE] = reports;
+
+  const { pi, loaded: extension } = registrar();
+  reportAsYouGo(pi);
+  await toolOf(extension, FINISH_REVIEW).execute("call_1", {});
+  assert.deepEqual(linesIn(reports), [{ type: "finish" }]);
+});
+
+/**
+ * Nothing sets the variable until the adapter reads the file, and the rounds
+ * read `pi`'s stdout until then. So with it unset every call answers as it did.
+ */
+test("with no file named, every call answers as it did", async (t) => {
+  keepVariable(t);
+  delete process.env[REPORTS_VARIABLE];
+
+  const { pi, loaded: extension } = registrar();
+  reportAsYouGo(pi);
+  const unset = "with no file named, the call was refused rather than answered";
+  await assert.doesNotReject(async () => {
+    const answer = await toolOf(extension, REPORT_FINDING).execute("call_1", lineFinding);
+    assert.deepEqual(answer.details, lineFinding);
+  }, unset);
+  await assert.doesNotReject(toolOf(extension, FINISH_REVIEW).execute("call_2", {}), unset);
+  const message = onlyHandler(extension, "message_end") as MessageHandler;
+  assert.doesNotThrow(
+    () => message({ type: "message_end", message: assistantMessage }),
+    "with no file named, an assistant message threw",
+  );
 });
