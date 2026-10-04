@@ -1,10 +1,11 @@
 /**
- * The failure pointer: the one line the hook writes to stderr when a round
- * exits 0 having failed, or having found no pull request to review.
+ * The failure pointer: the line the hook writes to stderr for each thing that
+ * failed when a round exits 0, or for a round that found no pull request to
+ * review.
  *
  * The hook's other stderr channel, the blocking reason a round exits 2 with,
- * does not come through here. There is one function because there is one line,
- * so a second output format has nowhere to grow.
+ * does not come through here. There is one function because every line has one
+ * shape, so a second output format has nowhere to grow.
  */
 
 import { writeToStderr } from "./stderr.ts";

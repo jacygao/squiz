@@ -183,19 +183,31 @@ function oneLine(text: string): string {
  * about the rounds, and the bound is about the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
-  const found = episode.confinement;
   const lines = [
     ...unthreaded(episode.findings).map(noteLine),
-    ...whatChanged(found.changed),
-    ...whereHeadMoved(found.moved),
-    ...whatWasNotCompared(found.uncompared),
-    ...whoElseWasHere(found.shared),
-    ...whoWasNotEstablished(found.unestablished),
+    ...worktreeNotes(episode.confinement).map((note) => `- ${note}`),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because),
   ];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
+}
+
+/**
+ * What the readings around the reviewer established, one note per line and with
+ * no bullet, in the order Notes lists them.
+ *
+ * A failed round's failure comment lists the same notes, and its stderr prints
+ * each as a line of its own.
+ */
+export function worktreeNotes(found: ConfinementEvidence): readonly string[] {
+  return [
+    ...whatChanged(found.changed),
+    ...whereHeadMoved(found.moved),
+    ...whatWasNotCompared(found.uncompared),
+    ...whoElseWasHere(found.shared),
+    ...whoWasNotEstablished(found.unestablished),
+  ];
 }
 
 /** Every file a reviewer changed, on one line, where any round found one. */
@@ -205,12 +217,12 @@ function whatChanged(paths: readonly string[]): readonly string[] {
   // A path git gives can hold a newline, which left in would make a second bullet
   // out of one note.
   const which = paths.map((path) => `\`${oneLine(path)}\``).join(", ");
-  return [`- ${many} changed in the worktree while the reviewer ran: ${which}`];
+  return [`${many} changed in the worktree while the reviewer ran: ${which}`];
 }
 
 /** One line per move of `HEAD` a round found, each naming both ends. */
 function whereHeadMoved(moves: readonly string[]): readonly string[] {
-  return moves.map((move) => `- \`HEAD\` moved while the reviewer ran: ${oneLine(move)}`);
+  return moves.map((move) => `\`HEAD\` moved while the reviewer ran: ${oneLine(move)}`);
 }
 
 /**
@@ -228,7 +240,7 @@ function whereHeadMoved(moves: readonly string[]): readonly string[] {
 function whatWasNotCompared(reasons: readonly string[]): readonly string[] {
   return reasons.map(
     (reason) =>
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
+      "A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
       ` ${oneLine(reason)}`,
   );
 }
@@ -237,7 +249,7 @@ function whatWasNotCompared(reasons: readonly string[]): readonly string[] {
 function whoElseWasHere(ids: readonly string[]): readonly string[] {
   if (ids.length === 0) return [];
   const many = ids.length === 1 ? "Another episode was" : "Other episodes were";
-  return [`- ${many} in the worktree while the reviewer ran: ${ids.join(", ")}`];
+  return [`${many} in the worktree while the reviewer ran: ${ids.join(", ")}`];
 }
 
 /**
@@ -249,7 +261,7 @@ function whoElseWasHere(ids: readonly string[]): readonly string[] {
 function whoWasNotEstablished(reasons: readonly string[]): readonly string[] {
   return reasons.map(
     (reason) =>
-      "- A round could not tell whether another episode was in the worktree" +
+      "A round could not tell whether another episode was in the worktree" +
       ` while the reviewer ran: ${oneLine(reason)}`,
   );
 }

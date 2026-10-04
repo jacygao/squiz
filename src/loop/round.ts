@@ -1,7 +1,8 @@
 /**
  * One round, composed: gate on the episode and on the pull request, run the
  * reviewer, post what it found, apply what it ruled, post the episode's summary
- * where the round closed it, and return what the round concluded.
+ * where the round closed it or the failure comment where it failed, and return
+ * what the round concluded.
  *
  * **A round the reviewer failed is not a round that found nothing.** The
  * reviewer's own outcome is carried out to the caller, so a round killed at its
@@ -23,6 +24,7 @@ import { mkdirSync } from "node:fs";
 import type { Config } from "../config/config.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
+import type { CommentPosting } from "../github/summary.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
@@ -55,6 +57,7 @@ import {
   type StateWrite,
 } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
+import { postFailure } from "./failure-comment.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
 import { blockingReason } from "./reason.ts";
@@ -102,6 +105,11 @@ export type RoundSetup = {
    * It only lowers, like the posting margin, and for the same reason.
    */
   readonly preReviewMs?: number;
+  /**
+   * Whether a failed round posts its failure comment. It does unless a caller
+   * asks otherwise, for a round whose failure is announced some other way.
+   */
+  readonly postsFailure?: boolean;
 };
 
 /** Why a round reported a failure, and whose failure it was. */
@@ -140,9 +148,9 @@ export type AroundTheReviewer = {
    * the review.
    *
    * The round reports none of this itself, except that a blocking reason names
-   * a move of `HEAD`. The summary comment names what the readings found and the
-   * hook names a marker that was not written. None of them changes what the
-   * round concluded or what it posted.
+   * a move of `HEAD`. The summary comment, or a failed round's failure comment,
+   * names what the readings found, and the hook names a marker that was not
+   * written. None of them changes what the round concluded.
    */
   readonly confinement?: RoundConfinement;
 };
@@ -201,6 +209,18 @@ export type RoundConclusion =
        * round that reviewed.
        */
       readonly salvaged?: RoundAccount;
+      /**
+       * What became of the failure comment. Absent where none was attempted:
+       * the round never found its pull request, the caller asked for none, or
+       * the harness threw.
+       *
+       * A comment that failed leaves the round the failure it was. The caller
+       * reports the comment's reason beside the round's own.
+       */
+      readonly failureComment?: {
+        readonly pullRequest: number;
+        readonly posting: CommentPosting;
+      };
     } & AroundTheReviewer);
 
 /**
@@ -264,6 +284,49 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
   if ("ended" in gated) return gated.ended;
   const pullRequest = gated.step;
 
+  // One posting reserve for the round, made the first time anything asks for it.
+  // The failure comment goes up under the deadline the salvaged findings ran
+  // under, and a reserve made afresh for it would outlast theirs.
+  let reserve: Deadline | undefined;
+  const posting = (): Deadline =>
+    (reserve ??= deadlineIn(Math.min(window.remaining(), postingMs)));
+
+  const concluded = await reviewOn(pullRequest, onFile, {
+    setup,
+    window,
+    beforePosting,
+    preReview,
+    posting,
+  });
+  if (concluded.outcome !== "failed" || setup.postsFailure === false) return concluded;
+  return {
+    ...concluded,
+    failureComment: {
+      pullRequest: pullRequest.number,
+      posting: postFailure(pullRequest.number, concluded, { directory, until: posting() }),
+    },
+  };
+}
+
+/** What the part of a round after the gate runs with. */
+type AfterTheGate = {
+  readonly setup: RoundSetup;
+  readonly window: Deadline;
+  /** The moment the review has to be over by. */
+  readonly beforePosting: Deadline;
+  readonly preReview: GhCall;
+  /** The posting reserve, the same deadline every time it is asked for. */
+  readonly posting: () => Deadline;
+};
+
+/** Everything a round does once the gate has found its pull request. */
+async function reviewOn(
+  pullRequest: PullRequest,
+  onFile: EpisodeState | null,
+  { setup, window, beforePosting, preReview, posting: reserve }: AfterTheGate,
+): Promise<RoundConclusion> {
+  const { episode, config } = setup;
+  const directory = episode.worktree;
   const state = orEmpty(onFile);
 
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
@@ -351,7 +414,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     pullRequest,
     diff: fetched.diff,
     directory,
-    margin: deadlineIn(Math.min(window.remaining(), postingMs)),
+    margin: reserve(),
   };
 
   if (review.outcome !== "reviewed") return salvage(review, handedOver, posting, confinement);
@@ -597,7 +660,7 @@ function keepCost(
       ended: {
         outcome: "failed",
         failure: "harness",
-        reason: `nothing was posted: ${written.reason}`,
+        reason: `nothing the reviewer found was posted: ${written.reason}`,
         // The reviewer ran and both readings were taken, and the tree has moved on
         // by the time anything could ask again.
         confinement,
@@ -824,8 +887,8 @@ type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
  * decision is asked for.
  *
  * No summary comment either. Nothing here closed the episode, and counts taken
- * from a review that did not finish would read as one that did. The hook's stderr
- * carries the failure.
+ * from a review that did not finish would read as one that did. The failure
+ * comment that follows is what reports the round.
  *
  * The posting runs on the round's own margin, which is what is left of the one
  * window. A round that reached its time bound has spent most of that window, and

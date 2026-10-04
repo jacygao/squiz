@@ -9,15 +9,16 @@
  * The two stderr channels stay apart. A blocked round writes the reason it
  * composed and nothing else, because the runtime hands that text to the coding
  * agent as its next instruction. A round that exits 0 having failed writes one
- * line saying what failed, and `failureIn` is the only place that line is
- * composed. A pass for want of a pull request writes one line of the same shape,
- * composed by `unreviewedIn`.
+ * line for each thing that failed, and `failureIn` is the only place those lines
+ * are composed. A pass for want of a pull request writes one line of the same
+ * shape, composed by `unreviewedIn`.
  */
 
 import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../config/config.ts";
 import { episodeAt } from "../loop/episode.ts";
+import { failureReport } from "../loop/failure-comment.ts";
 import {
   runRound,
   type AroundTheReviewer,
@@ -64,35 +65,39 @@ export async function runHook(firing: Firing): Promise<HookExit> {
     return 2;
   }
 
-  const line = failureIn(conclusion) ?? unreviewedIn(conclusion);
-  if (line !== null) reportFailure(line);
+  const unreviewed = unreviewedIn(conclusion);
+  for (const line of unreviewed === null ? failureIn(conclusion) : [unreviewed]) {
+    reportFailure(line);
+  }
   return 0;
 }
 
 /**
- * The one line a conclusion that exits 0 is reported as, or `null` where there
- * is nothing to report.
+ * The lines a conclusion that exits 0 is reported as, one for each thing that
+ * failed, and none where there is nothing to report.
  *
  * Every failure pointer the hook writes is composed here. One place is what
- * holds the pointer to one line and one shape, and it decides once what counts
+ * holds each pointer to one line and one shape, and it decides once what counts
  * as a failure rather than leaving each path that might be one to decide for
  * itself.
  */
-export function failureIn(conclusion: RoundConclusion): string | null {
+export function failureIn(conclusion: RoundConclusion): readonly string[] {
   switch (conclusion.outcome) {
     case "failed":
       return failedFailure(conclusion);
-    case "close":
+    case "close": {
       // An episode that closed at its cap or its budget has not failed. What it
       // could not put on the pull request is the only thing left to say.
-      return closingFailure(conclusion);
+      const failure = closingFailure(conclusion);
+      return failure === null ? [] : [failure];
+    }
     // A blocked round's stderr is its reason alone. A branch nobody opened a pull
     // request for failed at nothing, and an episode that had already reported its
     // close ran nothing: what it came to was said when it closed.
     case "block":
     case "no-pull-request":
     case "episode-over":
-      return null;
+      return [];
   }
 }
 
@@ -135,18 +140,36 @@ type FailedRound = Extract<RoundConclusion, { readonly outcome: "failed" }>;
 type ClosedRound = Extract<RoundConclusion, { readonly outcome: "close" }>;
 
 /**
- * What the round failed at, what of the review it could not put up with it, and
- * the marker it could not write.
+ * What the round failed at, what else it established, what of the review it
+ * could not put up, and what became of its failure comment, a line each.
  *
- * The failure is what the line opens on, because nothing a round managed to post
- * makes it a round that succeeded. What it could not post follows, on the same
- * terms as a closing round's, because a salvaged finding that reached no thread
- * is as lost as any other.
+ * The first line and the items after it are the failure comment's own words,
+ * read from the one report the comment is rendered from. The failure comes first,
+ * because nothing a round managed to post makes it a round that succeeded. What
+ * it could not post follows, on the same terms as a closing round's, because a
+ * salvaged finding that reached no thread is as lost as any other.
  */
-function failedFailure(round: FailedRound): string {
+function failedFailure(round: FailedRound): readonly string[] {
+  const report = failureReport(round);
   const failures = [unsalvagedBy(round), unmarkedBy(round)].filter((what) => what !== null);
-  if (failures.length === 0) return round.reason;
-  return `${round.reason}; it failed to ${failures.join(" and to ")}`;
+  return [
+    report.reason,
+    ...report.established,
+    ...(failures.length === 0 ? [] : [`the round failed to ${failures.join(" and to ")}`]),
+    ...announcedBy(round),
+  ];
+}
+
+/**
+ * Where the failure comment went, or why it went nowhere. No line where none was
+ * attempted, which is a round that never found its pull request.
+ */
+function announcedBy(round: FailedRound): readonly string[] {
+  const comment = round.failureComment;
+  if (comment === undefined) return [];
+  const at = `PR #${comment.pullRequest}`;
+  if (comment.posting.outcome === "posted") return [`the failure is posted on ${at}`];
+  return [`the failure could not be posted on ${at}: ${comment.posting.reason}`];
 }
 
 /**

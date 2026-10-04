@@ -41,7 +41,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
-import type { SummaryPosting } from "../github/summary.ts";
+import type { CommentPosting } from "../github/summary.ts";
 import type { RoundConfinement } from "../loop/confinement.ts";
 import type { StateWrite } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
@@ -122,7 +122,7 @@ function closedRound(
   outcomes: readonly FindingOutcome[] = [],
   ruled: readonly AppliedVerdict[] = [],
   unreadableDiff?: Error,
-  summary: SummaryPosting = { outcome: "posted" },
+  summary: CommentPosting = { outcome: "posted" },
   recorded: StateWrite = { outcome: "written" },
 ): RoundConclusion {
   return {
@@ -164,7 +164,7 @@ const NO_SUMMARY: EpisodeSummary = {
 };
 
 /** A summary GitHub refused, which leaves the episode no record of itself. */
-const SUMMARY_REFUSED: SummaryPosting = {
+const SUMMARY_REFUSED: CommentPosting = {
   outcome: "failed",
   reason: "gh answered HTTP 502 without posting the summary",
 };
@@ -229,11 +229,11 @@ function refused(thread: string): AppliedVerdict {
   };
 }
 
-/** The pointer for `conclusion`, or the assertion that it composed none. */
+/** The pointer's lines for `conclusion`, joined, or the assertion that it composed none. */
 function pointerFor(conclusion: RoundConclusion): string {
-  const failure = failureIn(conclusion);
-  assert.notEqual(failure, null, `nothing was reported for ${JSON.stringify(conclusion)}`);
-  return failure ?? "";
+  const lines = failureIn(conclusion);
+  assert.notEqual(lines.length, 0, `nothing was reported for ${JSON.stringify(conclusion)}`);
+  return lines.join("\n");
 }
 
 test("a reviewer that is not installed is reported as what failed", () => {
@@ -289,15 +289,15 @@ test("a state file that will not take the round surfaces the underlying error", 
 test("the round cap and the token bound are not failures", () => {
   // Both close the episode with what they have, and the summary comment is
   // where they are reported. A pointer would read as a round that broke.
-  assert.equal(failureIn(closedRound("round-cap")), null);
-  assert.equal(failureIn(closedRound("token-bound")), null);
-  assert.equal(failureIn(closedRound("nothing-open")), null);
+  assert.deepEqual(failureIn(closedRound("round-cap")), []);
+  assert.deepEqual(failureIn(closedRound("token-bound")), []);
+  assert.deepEqual(failureIn(closedRound("nothing-open")), []);
 });
 
 test("a branch with no pull request is no failure", () => {
   const conclusion = { outcome: "no-pull-request", branch: "main", directory: "/work" } as const;
 
-  assert.equal(failureIn(conclusion), null);
+  assert.deepEqual(failureIn(conclusion), []);
 });
 
 test("a branch with no pull request is named, with the directory the gate looked in", () => {
@@ -330,7 +330,7 @@ test("a line separator in the directory survives the pointer as an escape", () =
 });
 test("a blocked round composes no pointer", () => {
   // Its stderr is the blocking reason and nothing beside it.
-  assert.equal(failureIn(blockedRound("Squiz reviewed the change on this branch.")), null);
+  assert.deepEqual(failureIn(blockedRound("Squiz reviewed the change on this branch.")), []);
 });
 
 test("a round that could post none of its findings says so", () => {
@@ -349,7 +349,7 @@ test("a round that could post none of its findings says so", () => {
 test("a finding the summary carries is not a finding that failed to post", () => {
   // A finding routed to the summary was never going to open a thread, so a
   // round holding only those has posted everything it could.
-  assert.equal(failureIn(closedRound("nothing-open", [noted("the change needs a test")])), null);
+  assert.deepEqual(failureIn(closedRound("nothing-open", [noted("the change needs a test")])), []);
 });
 
 test("a diff nothing could be anchored against is announced", () => {
@@ -425,7 +425,7 @@ test("a summary the window left no time to send carries that as its reason", () 
 test("a firing of an episode that is over composes no pointer", () => {
   // The comment went up when the episode closed, or the firing that could not
   // post it said so then. A second line would report a failure twice.
-  assert.equal(failureIn({ outcome: "episode-over" }), null);
+  assert.deepEqual(failureIn({ outcome: "episode-over" }), []);
 });
 
 test("a close the harness could not record says so", () => {
@@ -504,14 +504,14 @@ test("everything a close failed at shares the one line, the summary last", () =>
 test("a round that posted everything it found and applied every verdict says nothing", () => {
   const conclusion = closedRound("nothing-open", [threaded("the anchor is off")], [applied("PRRT_1")]);
 
-  assert.equal(failureIn(conclusion), null);
+  assert.deepEqual(failureIn(conclusion), []);
 });
 
 /** The reason a killed round that salvaged two findings gives for itself. */
 const KILLED =
   "the reviewer was killed at its 480-second bound, and the round kept the 2 findings the reviewer had reported";
 
-test("a salvaged round that could not post what it kept says so on the failure's line", () => {
+test("a salvaged round that could not post what it kept says so on the line after the failure", () => {
   // A salvaged finding that reached no thread is as lost as any other, and the
   // round that failed is the only thing that will ever have held it.
   const conclusion = salvagedRound("timed-out", KILLED, [
@@ -521,7 +521,7 @@ test("a salvaged round that could not post what it kept says so on the failure's
 
   assert.equal(
     pointerFor(conclusion),
-    `${KILLED}; it failed to post 1 of 2 findings on PR #142`,
+    `${KILLED}\nthe round failed to post 1 of 2 findings on PR #142`,
   );
 });
 
@@ -540,7 +540,7 @@ test("a salvaged round that could not apply a verdict says that too", () => {
 
   assert.equal(
     pointerFor(conclusion),
-    `${reason}; it failed to apply 1 of 2 verdicts on PR #142`,
+    `${reason}\nthe round failed to apply 1 of 2 verdicts on PR #142`,
   );
 });
 
@@ -587,22 +587,64 @@ test("a failed round whose marker could not be written says so after the failure
 
   assert.match(
     pointerFor(conclusion),
-    /^the reviewer was killed at its 480-second bound; it failed to mark itself as running for the other episodes of the worktree: .*running\.json could not be written: /u,
+    /^the reviewer was killed at its 480-second bound\nthe round failed to mark itself as running for the other episodes of the worktree: .*running\.json could not be written: /u,
   );
 });
 
 test("a round whose marker was written says nothing of it", () => {
   const written: MarkWrite = { outcome: "written" };
 
-  assert.equal(failureIn(around(closedRound("nothing-open"), written)), null);
+  assert.deepEqual(failureIn(around(closedRound("nothing-open"), written)), []);
   assert.equal(
     pointerFor(around(failedRound("timed-out", "the reviewer was killed"), written)),
     "the reviewer was killed",
   );
 });
 
+/** `conclusion`, with what became of its failure comment on PR #142. */
+function announced(conclusion: RoundConclusion, posting: CommentPosting): RoundConclusion {
+  return { ...conclusion, failureComment: { pullRequest: PULL_REQUEST, posting } } as RoundConclusion;
+}
+
+test("a failure comment that went up is named after the failure", () => {
+  const conclusion = announced(failedRound("timed-out", KILLED), { outcome: "posted" });
+
+  assert.deepEqual(failureIn(conclusion), [KILLED, "the failure is posted on PR #142"]);
+});
+
+test("a failure comment that could not be posted says why, and the failure stands", () => {
+  const conclusion = announced(failedRound("timed-out", KILLED), {
+    outcome: "failed",
+    reason: "gh answered HTTP 502 without posting the failure",
+  });
+
+  assert.deepEqual(failureIn(conclusion), [
+    KILLED,
+    "the failure could not be posted on PR #142: gh answered HTTP 502 without posting the failure",
+  ]);
+});
+
+test("what the failed round established is a line each, between the failure and the comment", () => {
+  const confinement: RoundConfinement = {
+    trackedFiles: { outcome: "changed", paths: ["src/ui/card.ts"] },
+    otherEpisodes: { outcome: "alone" },
+    marked: { outcome: "written" },
+  };
+  const conclusion = announced(
+    { ...salvagedRound("timed-out", KILLED, [unpostable("the anchor is off")]), confinement } as RoundConclusion,
+    { outcome: "posted" },
+  );
+
+  assert.deepEqual(failureIn(conclusion), [
+    KILLED,
+    "A file changed in the worktree while the reviewer ran: `src/ui/card.ts`",
+    "the round failed to post 1 of 1 findings on PR #142",
+    "the failure is posted on PR #142",
+  ]);
+});
+
 test("a blocked round's marker is not reported, because its stderr is the coding agent's", () => {
-  assert.equal(failureIn(around(blockedRound("Address the open threads.\n"), UNMARKED)), null);
+  assert.deepEqual(failureIn(around(blockedRound("Address the open threads.\n"), UNMARKED)), []);
 });
 
 test("every pointer the hook composes is one line", () => {
@@ -625,9 +667,11 @@ test("every pointer the hook composes is one line", () => {
   ];
 
   for (const conclusion of conclusions) {
-    const line = failureLine(pointerFor(conclusion));
-    assert.equal(line.indexOf("\n"), line.length - 1, `not one line: ${JSON.stringify(line)}`);
-    assert.ok(line.startsWith("squiz: "), `no prefix: ${JSON.stringify(line)}`);
+    for (const reason of failureIn(conclusion)) {
+      const line = failureLine(reason);
+      assert.equal(line.indexOf("\n"), line.length - 1, `not one line: ${JSON.stringify(line)}`);
+      assert.ok(line.startsWith("squiz: "), `no prefix: ${JSON.stringify(line)}`);
+    }
   }
 });
 
@@ -1269,8 +1313,10 @@ test("a reviewer that is not installed ends the round at exit 0, saying so", asy
 
     assert.equal(result.code, 0, "a reviewer that is missing must not stop the turn");
     assert.equal(result.stdout, "");
-    assert.match(result.stderr, /^squiz: the reviewer could not run: /u);
-    assertOneLine(result.stderr);
+    const [failure, announced, ...rest] = result.stderr.split("\n");
+    assert.match(failure ?? "", /^squiz: the reviewer could not run: /u);
+    assert.match(announced ?? "", /^squiz: the failure (is|could not be) posted on PR #142/u);
+    assert.deepEqual(rest, [""], "one line for the failure and one for its comment");
   });
 });
 
@@ -1856,7 +1902,7 @@ test("a state file that will not take the round after the review posts nothing",
     await mkdir(join(episode, "session"), { recursive: true });
     await mkdir(join(episode, "scratch"), { recursive: true });
     const harness = await harnessIn(beside, {
-      gh: REACHES_THE_REVIEW,
+      gh: { ...REACHES_THE_REVIEW, summary: [{ stdout: SUMMARY_UP }] },
       reviewer: reviews([confirmed(86, "high", LANDED)]),
     });
     await chmod(episode, 0o555);
@@ -1868,15 +1914,15 @@ test("a state file that will not take the round after the review posts nothing",
       assert.equal(result.stdout, "");
       assert.match(
         result.stderr,
-        /^squiz: nothing was posted: .*state\.json could not be written: [A-Z]+: /u,
+        /^squiz: nothing the reviewer found was posted: .*state\.json could not be written: [A-Z]+: /u,
         "the pointer must carry the filesystem's own error rather than the word failed",
       );
-      assertOneLine(result.stderr);
+      assert.match(result.stderr, /\nsquiz: the failure is posted on PR #142\n$/u);
 
       assert.equal(harness.reviewerRuns(), 1, "the review has to have run for this to be the write");
       assert.deepEqual(
         callKinds(harness),
-        ["pull-request", "threads", "diff"],
+        ["pull-request", "threads", "diff", "summary"],
         "a finding reached the pull request on a round that recorded nothing",
       );
     } finally {
@@ -1993,6 +2039,7 @@ test("a threads listing that cannot be finished runs no reviewer and posts nothi
       gh: {
         "pull-request": [{ stdout: LISTING }],
         threads: [{ stdout: threadsPageBefore("page-2") }, GATEWAY_REFUSED],
+        summary: [{ stdout: SUMMARY_UP }],
       },
       reviewer: reviews([confirmed(86, "high", LANDED)]),
     });
@@ -2003,12 +2050,12 @@ test("a threads listing that cannot be finished runs no reviewer and posts nothi
     assert.equal(result.stdout, "");
     assert.equal(
       result.stderr,
-      `squiz: no review ran: the threads on PR #142 could not be listed: ${GATEWAY_REASON}\n`,
+      `squiz: no review ran: the threads on PR #142 could not be listed: ${GATEWAY_REASON}\n` +
+        "squiz: the failure is posted on PR #142\n",
     );
-    assertOneLine(result.stderr);
 
     assert.equal(harness.reviewerRuns(), 0, "a reviewer ran on a subset of the threads");
-    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "threads"]);
+    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "threads", "summary"]);
   });
 });
 
@@ -2027,6 +2074,7 @@ test("the calls before the review spending their share leave the last of them no
         "pull-request": [{ sleepMs: slow, stdout: LISTING }],
         threads: [{ sleepMs: slow, stdout: NO_THREADS }],
         diff: [{ sleepMs: slow, stdout: DIFF }],
+        summary: [{ stdout: SUMMARY_UP }],
       },
       reviewer: reviews([confirmed(86, "high", LANDED)]),
     });
@@ -2036,7 +2084,7 @@ test("the calls before the review spending their share leave the last of them no
     assert.equal(result.code, 0);
     assert.equal(result.stdout, "");
     const spent =
-      /^squiz: no review ran: the diff of PR #142 could not be fetched: gh did not answer within (\d+(?:\.\d+)?) seconds, so GitHub could not be reached\n$/u.exec(
+      /^squiz: no review ran: the diff of PR #142 could not be fetched: gh did not answer within (\d+(?:\.\d+)?) seconds, so GitHub could not be reached\nsquiz: the failure is posted on PR #142\n$/u.exec(
         result.stderr,
       );
     assert.notEqual(spent, null, `the pointer does not name the call that ran out: ${result.stderr}`);
@@ -2046,7 +2094,11 @@ test("the calls before the review spending their share leave the last of them no
     );
 
     assert.equal(harness.reviewerRuns(), 0);
-    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff"]);
+    assert.deepEqual(
+      callKinds(harness),
+      ["pull-request", "threads", "diff", "summary"],
+      "the posting reserve is the round's own, so the failure goes up after the phase before it ran out",
+    );
   });
 });
 
@@ -2056,7 +2108,7 @@ test("a reviewer that writes prose and stops is retried once and reported as no 
   // round runs a fresh process once before it reports it.
   await withWorktree(async ({ worktree, beside }) => {
     const harness = await harnessIn(beside, {
-      gh: REACHES_THE_REVIEW,
+      gh: { ...REACHES_THE_REVIEW, summary: [{ stdout: SUMMARY_UP }] },
       reviewer: {
         said: "Nothing here looks wrong to me.",
         stopReason: "stop",
@@ -2071,10 +2123,11 @@ test("a reviewer that writes prose and stops is retried once and reported as no 
     assert.equal(result.stdout, "");
     assert.equal(
       result.stderr,
-      "squiz: the review did not run: the reviewer reported nothing and did not finish its review\n",
+      "squiz: the review did not run: the reviewer reported nothing and did not finish its review\n" +
+        "squiz: the failure is posted on PR #142\n",
     );
 
     assert.equal(harness.reviewerRuns(), 2, "the round is allowed one retry and has to take it");
-    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff"]);
+    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff", "summary"]);
   });
 });

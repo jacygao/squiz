@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { defaultConfig, type Config } from "../config/config.ts";
+import { failureIn } from "../hook/hook.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import {
@@ -80,7 +81,8 @@ type Kind =
   | "lookup"
   | "resolve"
   | "unresolve"
-  | "summary";
+  | "summary"
+  | "failure";
 
 /** What the fake answers each kind of call with. A kind with no answer exits 1. */
 type Answers = Partial<Record<Kind, string>>;
@@ -128,6 +130,8 @@ type Setup = {
   readonly blockMarker?: boolean;
   readonly marginMs?: number;
   readonly windowMs?: number;
+  /** Whether a failed round posts its failure comment, where the caller says. */
+  readonly postsFailure?: boolean;
   readonly detached?: boolean;
   /**
    * The rounds after the first, in order.
@@ -500,6 +504,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
           charterFile,
           ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
           ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
+          ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
         }),
       );
     }
@@ -633,7 +638,9 @@ const GH_SCRIPT = [
   // Before the create, which is the other POST. The summary goes to the issues
   // path and a finding's thread to the pulls path, and those two paths are the
   // whole of the difference between a comment on the pull request and a comment
-  // on a line of its diff.
+  // on a line of its diff. The failure comment goes to the same path, and its
+  // marker is what tells it from the summary.
+  "  *'/issues/'*'/comments'*'Squiz review failed'*) kind=failure ;;",
   "  *'/issues/'*'/comments'*) kind=summary ;;",
   "  *'--method POST'*) kind=create ;;",
   "  *'pr list'*) kind=prlist ;;",
@@ -1320,7 +1327,7 @@ test("a round the reviewer failed posts no summary", async () => {
   assert.deepEqual(
     ran.kinds.filter((kind) => kind === "summary"),
     [],
-    "a failed round is reported on the hook's stderr, not as a summary of a review that did not finish",
+    "a failed round is reported by its failure comment, not as a summary of a review that did not finish",
   );
 });
 
@@ -1436,8 +1443,8 @@ test("a reviewer killed at its bound is a failed round and not an empty review",
   assert.match(ran.conclusion.reason, /killed at its 1-second bound/u);
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "diff"],
-    "a round with no review posts nothing",
+    ["prlist", "threads", "diff", "failure"],
+    "a round with no review posts nothing but its failure comment",
   );
   assert.deepEqual(
     untimed(ran.state),
@@ -1455,7 +1462,7 @@ test("a reviewer nothing can be read from is reported unavailable", async () => 
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "unavailable");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "failure"]);
   assert.deepEqual(
     untimed(ran.state)?.rounds,
     [{ dollars: 0.02, tokens: 600, messages: 2 }],
@@ -1551,7 +1558,7 @@ test("a round posts the findings the reviewer reported before it failed, whateve
       ["PRRT_new"],
       `${failure} discarded the finding the reviewer had already confirmed`,
     );
-    assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "create", "lookup"]);
+    assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "create", "lookup", "failure"]);
     assert.match(ran.conclusion.reason, /kept the 1 finding the reviewer had reported/u);
     assert.deepEqual(
       untimed(ran.state)?.rounds ?? [],
@@ -1605,7 +1612,7 @@ test("the verdicts a failed round reported are applied, and no other thread is t
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "diff", "resolve"],
+    ["prlist", "threads", "diff", "resolve", "failure"],
     "the closed thread the reviewer never ruled on was re-opened, which reads a review that stopped early as a ruling that it is still wrong",
   );
   assert.deepEqual(
@@ -1614,7 +1621,7 @@ test("the verdicts a failed round reported are applied, and no other thread is t
   );
 });
 
-test("a round that reported nothing before it failed posts nothing and makes no call", async () => {
+test("a round that reported nothing before it failed posts only its failure comment", async () => {
   const ran = await runInFixture({
     config: { timeout: 1 },
     // Round 2, so a thread was handed over for a verdict the reviewer never gave.
@@ -1630,7 +1637,7 @@ test("a round that reported nothing before it failed posts nothing and makes no 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.equal(ran.conclusion.salvaged, undefined, "there was nothing for the round to salvage");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "failure"]);
 });
 
 /**
@@ -1724,7 +1731,7 @@ test("a state file that will not read back stops the round before the reviewer r
   );
 });
 
-test("threads that could not be listed end the round with nothing posted", async () => {
+test("threads that could not be listed end the round with nothing posted but the failure", async () => {
   const ran = await runInFixture({
     answers: { prlist: PR_LIST, diff: DIFF, create: CREATED, lookup: LOOKUP },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
@@ -1733,7 +1740,7 @@ test("threads that could not be listed end the round with nothing posted", async
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
   assert.match(ran.conclusion.reason, /the threads on PR #142 could not be listed/u);
-  assert.deepEqual(ran.kinds, ["prlist", "threads"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "failure"]);
   assert.equal(ran.invocations.length, 0);
 });
 
@@ -2456,7 +2463,7 @@ test("a cost that could not be recorded keeps what the readings established", as
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
-  assert.match(ran.conclusion.reason, /nothing was posted/u);
+  assert.match(ran.conclusion.reason, /nothing the reviewer found was posted/u);
   assert.deepEqual(
     ran.conclusion.confinement?.trackedFiles,
     { outcome: "changed", paths: [TRACKED] },
@@ -2464,8 +2471,8 @@ test("a cost that could not be recorded keeps what the readings established", as
   );
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "diff"],
-    "nothing is posted on a state file that would not take the round",
+    ["prlist", "threads", "diff", "failure"],
+    "nothing the reviewer found is posted on a state file that would not take the round",
   );
 });
 
@@ -2779,4 +2786,201 @@ test("a reviewer that exits on its own records how long it ran, and no cut", asy
   assert.ok((round?.elapsedSeconds ?? -1) >= 0);
   assert.equal(round?.cutShortAtSeconds, undefined);
   assert.doesNotMatch(summaryBody(ran), /cut short/u);
+});
+
+/** The failure comment GitHub created: an issue comment, like the summary. */
+const FAILURE_POSTED = included("201 Created", JSON.stringify({
+  id: 2140876532,
+  node_id: "IC_kwDOUEd2qM7q-4A8",
+  html_url: `https://github.com/o/r/pull/${PULL_REQUEST}#issuecomment-2140876532`,
+}));
+
+/** Everything a failed round that salvaged one finding needs answering. */
+const FAILING: Answers = { ...POSTING, failure: FAILURE_POSTED };
+
+/** The body of the one failure comment the round posted. */
+function failureBody(ran: Ran): string {
+  const posted = ran.calls.filter((call) => call.kind === "failure");
+  assert.equal(posted.length, 1, "a failed round posts one failure comment");
+  return sent(posted[0]?.body ?? "");
+}
+
+/**
+ * A reviewer that reports its findings, declares its review finished, and is
+ * then cut at the bound while it writes its closing message.
+ */
+function declaresThenHangs(cost: RoundCost, findings: readonly Finding[]): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", "sleep 30"],
+    parse: async (_stdout, progressSoFar): Promise<ParsedRun> => {
+      progressSoFar?.({
+        cost,
+        findings,
+        verdicts: [],
+        refusals: 0,
+        finished: true,
+        broken: undefined,
+      });
+      await new Promise<never>(() => {});
+      throw new Error("the round read a parse that never finished");
+    },
+  };
+}
+
+test("a failed round posts one failure comment after what it salvaged, naming the reason", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.deepEqual(
+    ran.kinds,
+    ["prlist", "threads", "diff", "create", "lookup", "failure"],
+    "the failure comment goes up after the salvaged findings, and once",
+  );
+  assert.match(ran.calls.at(-1)?.argv ?? "", /issues\/142\/comments/u);
+  const [first, ...rest] = failureBody(ran).split("\n");
+  assert.equal(first, `**Squiz review failed — ${ran.conclusion.reason}**`);
+  assert.match(rest.join("\n"), /^\nThe finding is posted as a thread\. The review is still open\./u);
+  assert.deepEqual(ran.conclusion.failureComment, { pullRequest: PULL_REQUEST, posting: { outcome: "posted" } });
+});
+
+test("a failed round's comment counts the findings that landed, not the ones reported", async () => {
+  const { create: _create, ...noCreate } = FAILING;
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: noCreate,
+    // The first create lands and the second has no answer, so gh fails it.
+    sequences: { create: [CREATED] },
+    reviewer: hangs(ANSWER_COST, {
+      findings: [finding("The flag is never read"), finding("The card renders twice")],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.match(failureBody(ran), /\n1 of the 2 findings the reviewer reported is posted as a thread\./u);
+});
+
+test("a failure comment gh refuses leaves the round failed as it was, and is not retried", async () => {
+  const reviewer = hangs(ANSWER_COST, { findings: [finding("The flag is never read")] });
+  const refused = await runInFixture({ config: { timeout: 1 }, answers: POSTING, reviewer });
+  const posted = await runInFixture({ config: { timeout: 1 }, answers: FAILING, reviewer });
+
+  assert.ok(refused.conclusion.outcome === "failed");
+  assert.ok(posted.conclusion.outcome === "failed");
+  assert.equal(refused.conclusion.failure, posted.conclusion.failure);
+  assert.equal(refused.conclusion.reason, posted.conclusion.reason);
+  assert.deepEqual(refused.conclusion.salvaged?.posted, ["PRRT_new"]);
+  assert.deepEqual(
+    refused.kinds.filter((kind) => kind === "failure"),
+    ["failure"],
+    "posting is a create, so a second attempt would be a second comment",
+  );
+  const comment = refused.conclusion.failureComment?.posting;
+  assert.equal(comment?.outcome, "failed");
+  assert.match(comment?.outcome === "failed" ? comment.reason : "", /no answer fixtured for failure/u);
+});
+
+test("a review the reviewer declared before the bound cut it posts no failure comment", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 1 },
+    answers: FAILING,
+    reviewer: declaresThenHangs(ANSWER_COST, [finding("The flag is never read")]),
+  });
+
+  assert.equal(ran.conclusion.outcome, "close", "a declared review is the review it declared");
+  assert.deepEqual(ran.kinds.filter((kind) => kind === "failure"), []);
+});
+
+test("a round that failed before the review posts its failure comment, with nothing salvaged", async () => {
+  const ran = await runInFixture({
+    answers: { prlist: PR_LIST, failure: FAILURE_POSTED },
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "failure"]);
+  const body = failureBody(ran);
+  assert.equal(body.split("\n")[0], `**Squiz review failed — ${ran.conclusion.reason}**`);
+  assert.doesNotMatch(body, /posted as a thread/u, "nothing was salvaged, so nothing is counted");
+});
+
+test("a caller that asks for no failure comment gets none, and the round is failed all the same", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: FAILING,
+    postsFailure: false,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "create", "lookup"]);
+  assert.equal(ran.conclusion.failureComment, undefined);
+});
+
+test("a failed round whose posting time is spent attempts no failure comment, and says why", async () => {
+  const ran = await runInFixture({
+    windowMs: 3_000,
+    marginMs: 500,
+    config: { timeout: 2 },
+    answers: FAILING,
+    reviewer: reportsThenHolds(ANSWER_COST, [finding("The flag is never read")]),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.deepEqual(ran.kinds.filter((kind) => kind === "failure"), []);
+  const comment = ran.conclusion.failureComment?.posting;
+  assert.equal(comment?.outcome, "failed");
+  assert.match(comment?.outcome === "failed" ? comment.reason : "", /ran out before this call was made/u);
+});
+
+test("a failure comment lists the file the killed reviewer changed", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: FAILING,
+    reviewer: writesThenHangs(ANSWER_COST),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.match(
+    failureBody(ran),
+    /\n\n- A file changed in the worktree while the reviewer ran: `src\/ui\/card\.ts`$/u,
+  );
+});
+
+/**
+ * The comment's first line and the caller's stderr carry one reason, word for
+ * word, for every kind of failure that posts a comment. Each item the comment
+ * lists is a stderr line too.
+ */
+test("each kind of failure says the same reason and items on the pull request and on stderr", async () => {
+  const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
+  const failures: readonly { readonly name: string; readonly setup: Setup }[] = [
+    {
+      name: "timed-out",
+      setup: { config: { timeout: 1 }, answers: FAILING, reviewer: writesThenHangs(floor) },
+    },
+    { name: "unavailable", setup: { answers: FAILING, reviewer: unreadable(floor) } },
+    { name: "setup", setup: { answers: FAILING, reviewer: notInstalled } },
+    {
+      name: "harness",
+      setup: { answers: { prlist: PR_LIST, failure: FAILURE_POSTED }, reviewer: reviews({}) },
+    },
+  ];
+
+  for (const { name, setup } of failures) {
+    const ran = await runInFixture(setup);
+    assert.ok(ran.conclusion.outcome === "failed", `${name} did not fail`);
+    const [first, ...rest] = failureBody(ran).split("\n");
+    const stderr = failureIn(ran.conclusion);
+    assert.equal(first, `**Squiz review failed — ${stderr[0]}**`, `${name} said two reasons`);
+    const items = rest.filter((line) => line.startsWith("- "));
+    if (name === "timed-out") assert.ok(items.length > 0, "the killed reviewer's write is listed");
+    for (const item of items) {
+      assert.ok(stderr.includes(item.slice(2)), `${name} listed "${item}" and printed no such line`);
+    }
+  }
 });

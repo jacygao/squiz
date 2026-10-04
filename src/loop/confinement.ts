@@ -46,7 +46,8 @@
  * that finished and the posting after it.
  *
  * Nothing here reports. What the readings establish is carried to the round's
- * close, and the summary comment is what names it. A move of `HEAD` is named
+ * close, and the summary comment is what names it, or the failure comment where
+ * the round failed. A move of `HEAD` is named
  * by the round that blocks as well, because the next firing gates on the branch
  * `HEAD` names then and may find no pull request to close the episode on.
  *
