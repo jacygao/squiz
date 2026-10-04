@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.15 (draft)
+**Version:** 0.16 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -264,15 +264,14 @@ It delivered, all under the hook:
   round stops every group it recorded, the ones `pi` detached included.
 - **Shared-tree detection.** Two live episodes on one toplevel disable the
   comparison for that round, and the summary names the other episodes.
-- **The test command.** The configured test command reaches the reviewer.
+- **The test command in the prompt.** The configured test command is written
+  into the reviewer's prompt at depth `deep`. The configuration still refuses
+  `deep`, so no round reaches it yet.
 - **A cut-short review recorded.** A round the time bound cut short says so in
   the summary.
 
 ### Acceptance criteria met
 
-- [x] The specification's prerequisites for `squiz review` each have a finding in
-      `docs/notes/`, and any that contradicts the specification is reconciled
-      there before the command is built.
 - [x] A file mutated during a run is named in the summary.
 - [x] Two live episodes on one toplevel disable the comparison for that round.
       The round still runs, and the summary names the other episodes in flight.
@@ -281,6 +280,9 @@ It delivered, all under the hook:
 
 Each is restated there, against the round host.
 
+- The specification's prerequisites for `squiz review` each have a finding in
+  `docs/notes/`. Five do. The sixth, whether a subagent handed a long exit-2
+  output works every thread, has none.
 - `squiz review` exits 0, 2, 3, 4 and 1 in the cases the specification gives.
   M14 changes what exit 4 means: the wait ran out, and a rerun attaches.
 - A run on a closed episode, on a state under review, and on a state already
@@ -292,8 +294,8 @@ Each is restated there, against the round host.
 - A round that fails posts a failure comment.
 - The plugin ships the review skill, and a dispatched subagent loads it.
 - `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor` reports it.
-- Depth `deep` produces a command line with `bash`. Half of this criterion, the
-  test command reaching the reviewer, was met.
+- Depth `deep` produces a command line with `bash`, and the configured test
+  command reaches the reviewer.
 
 ### Acceptance criteria muster makes moot
 
@@ -505,8 +507,10 @@ this milestone is steps 2 to 5 of its migration, after one step of its own:
       history it had in `muster/`, and `muster/` is gone from this repository.
       Squiz is developed and tested against a `muster` installed the way a user
       installs it. This is done before anything else in the milestone.
-- [ ] Squiz's spikes S5, S7 and S8, and S2's open remainder, each have a finding
-      in `docs/notes/`, and the owner has decided D2 to D11 before what each
+- [ ] Squiz's spikes S5, S7 and S8, S2's open remainder, and the harness
+      specification's remaining prerequisite for `squiz review`, whether a
+      subagent handed a long exit-2 output works every thread, each have a
+      finding in `docs/notes/`, and the owner has decided D2 to D11 before what each
       decides is built. D10 waits for S6.
 - [ ] The reviewer's extension writes every accepted report, every refusal and
       the usage of every assistant message to the report file. A test holds the
@@ -546,7 +550,8 @@ this milestone is steps 2 to 5 of its migration, after one step of its own:
       pull request's threads to exit 0 or 3.
 - [ ] `squiz init` adds the `AGENTS.md` section once, and `/squiz doctor`
       reports whether the skill or the section is there.
-- [ ] Depth `deep` produces a command line with `bash`, and the reviewer runs it
+- [ ] Depth `deep` produces a command line with `bash`, the configured test
+      command reaches the reviewer, and the reviewer runs
       in the snapshot worktree D4 gives, so the tracked-file comparison reads
       only the reviewer.
 - [ ] The subagent-era workarounds are gone from the code and from the harness
