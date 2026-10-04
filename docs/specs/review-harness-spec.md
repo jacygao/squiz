@@ -2009,6 +2009,9 @@ the `.ts` files as they are, so there is no build step and no compiled output.
   union of string literals stands where an enum would.
 - **Types are checked by `tsc --noEmit` in CI.** Stripping does not check them.
 - **Node 24 or later.** The setup check reports the version.
+- **macOS and Linux.** Squiz detaches its round host, finds its processes again
+  and stops them through Unix process calls: `ps`, `setsid`, process groups and
+  signals. On Windows it runs under WSL.
 - **`bin/squiz` is a shell shim.** Node decides to strip types from the `.ts`
   extension, so the entry point cannot be an extensionless Node file. The shim
   execs the real one.
