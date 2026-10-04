@@ -17,7 +17,6 @@
 import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../config/config.ts";
-import { episodeAt } from "../loop/episode.ts";
 import { failureReport } from "../loop/failure-comment.ts";
 import {
   runRound,
@@ -293,11 +292,13 @@ function unreportedBy(round: RoundAccount): string | null {
  * What one firing came to, before anything is written and before an exit code
  * is chosen.
  *
- * The payload, the worktree, the episode key and the settings are read in turn,
- * and a firing that loses any of them runs no round at all. A payload that
- * cannot be read is not a round that found nothing: nothing about the firing is
- * known, the episode least of all, and half an episode is not something to
- * review against.
+ * The payload, the worktree and the settings are read in turn, and a firing that
+ * loses any of them runs no round at all. A payload that cannot be read is not a
+ * round that found nothing: nothing about the firing is known, and half a firing
+ * is not something to review against.
+ *
+ * The episode is not opened here. Its key is the number of the pull request the
+ * round finds, so the round opens it once it has found one.
  */
 async function concluded(firing: Firing): Promise<RoundConclusion> {
   const read = await readPayloadFrom(firing.stdin);
@@ -311,14 +312,13 @@ async function concluded(firing: Firing): Promise<RoundConclusion> {
   let setup: RoundSetup;
   try {
     setup = {
-      episode: episodeAt(worktree.path, read.payload.agentId),
+      worktree: worktree.path,
       config: loadConfig(worktree.path),
       adapter: pi,
       charterFile,
     };
   } catch (cause) {
-    // The episode's key arrives in a payload and the settings arrive in a file.
-    // Each refuses a value it cannot use by throwing.
+    // The settings refuse a value they cannot use by throwing.
     return harness(`no review ran: ${reasonFor(cause)}`);
   }
 

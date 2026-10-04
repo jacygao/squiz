@@ -44,7 +44,6 @@ import type { Finding } from "../findings/finding.ts";
 import type { CommentPosting } from "../github/summary.ts";
 import type { RoundConfinement } from "../loop/confinement.ts";
 import type { StateWrite } from "../loop/episode-state.ts";
-import type { Episode } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
 import type { EpisodeSummary } from "../loop/post-summary.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
@@ -677,7 +676,7 @@ test("every pointer the hook composes is one line", () => {
 
 /** What the round was handed, read back from the process that ran it. */
 type HandedOver = {
-  readonly episode: Episode;
+  readonly worktree: string;
   readonly config: Config;
   readonly charterFile: string;
   /** The command the adapter the hook chose would start. */
@@ -750,16 +749,16 @@ function fixture(setup: Firing, handedFile: string): string {
     ``,
     `const round = async (given) => {`,
     `  const invocation = {`,
-    `    directory: given.episode.worktree,`,
+    `    directory: given.worktree,`,
     `    charterFile: given.charterFile,`,
     `    prompt: "",`,
-    `    sessionDirectory: given.episode.sessionDirectory,`,
-    `    scratchDirectory: given.episode.scratchDirectory,`,
+    `    sessionDirectory: given.worktree,`,
+    `    scratchDirectory: given.worktree,`,
     `    depth: given.config.depth,`,
     `    thinking: given.config.thinking,`,
     `  };`,
     `  writeFileSync(${JSON.stringify(handedFile)}, JSON.stringify({`,
-    `    episode: given.episode,`,
+    `    worktree: given.worktree,`,
     `    config: given.config,`,
     `    charterFile: given.charterFile,`,
     `    reviewer: given.adapter.argv(invocation).command,`,
@@ -1004,19 +1003,21 @@ test("every way a round can fail exits 0", async () => {
   });
 });
 
-test("the episode the round is handed is keyed on the subagent's id", async () => {
+test("two subagents' firings on one pull request hand the round the same setup", async () => {
+  // The round keys the episode by the pull request it finds in the worktree, so
+  // nothing that tells two subagents apart may reach it.
   await withRepository(async (worktree) => {
-    const fired = await fire({ directory: worktree });
-    const handed = fired.handed;
+    const one = await fire({ directory: worktree });
+    const other = await fire({
+      directory: worktree,
+      payload: payload({ agent_id: "ad5b06227fb235983", prompt_id: "another-turn" }),
+    });
 
-    assert.notEqual(handed, null, "no round ran");
-    assert.equal(handed?.episode.id, AGENT_ID);
-    assert.equal(handed?.episode.directory, join(worktree, ".squiz", AGENT_ID));
-    assert.equal(
-      JSON.stringify(handed?.episode).includes(PROMPT_ID),
-      false,
-      "prompt_id reached the episode, and it is one string for every subagent in a session",
-    );
+    assert.notEqual(one.handed, null, "no round ran");
+    assert.deepEqual(other.handed, one.handed);
+    for (const id of [AGENT_ID, PROMPT_ID]) {
+      assert.equal(JSON.stringify(one.handed).includes(id), false, `${id} reached the round`);
+    }
   });
 });
 
@@ -1029,31 +1030,18 @@ test("the worktree is resolved rather than read off the directory the hook fired
 
     const fired = await fire({ directory: inside });
 
-    assert.equal(fired.handed?.episode.worktree, worktree);
+    assert.equal(fired.handed?.worktree, worktree);
   });
 });
 
-test("an id that would traverse out of the worktree does not", async () => {
-  // The id is read from a payload rather than generated, and the episode's
-  // directory is named after it.
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      payload: payload({ agent_id: "../../elsewhere" }),
-    });
-
-    assert.equal(fired.handed?.episode.directory.startsWith(join(worktree, ".squiz")), true);
-  });
-});
-
-test("an id no directory name can be made of runs no round", async () => {
+test("a subagent id no directory name can be made of still runs the round", async () => {
+  // Nothing is keyed by the subagent's id, so nothing about it can stop a round.
   await withRepository(async (worktree) => {
     const fired = await fire({ directory: worktree, payload: payload({ agent_id: "../.." }) });
 
     assert.equal(fired.code, 0);
-    assert.equal(fired.handed, null, "a round ran against an episode with no key");
-    assert.match(fired.stderr, /^squiz: no review ran: the subagent's id /u);
-    assertOneLine(fired.stderr);
+    assert.notEqual(fired.handed, null, "no round ran");
+    assert.equal(fired.stderr, "");
   });
 });
 
@@ -1334,6 +1322,11 @@ test("a branch with no pull request posts nothing, runs nothing, and says which 
       "a pass for want of a pull request must not read like a subagent reviewed against the wrong tree",
     );
     assert.ok(tools.ghWasRun(), "the branch was never asked about");
+    assert.equal(
+      existsSync(join(worktree, ".squiz")),
+      false,
+      "an episode was opened with no pull request to key it",
+    );
   });
 });
 
@@ -1906,7 +1899,7 @@ test("a state file that will not take the round after the review posts nothing",
   // directory is sealed, so the round reaches the review and fails on the write
   // that follows it rather than on the read that precedes it.
   await withWorktree(async ({ worktree, beside }) => {
-    const episode = join(worktree, ".squiz", AGENT_ID);
+    const episode = join(worktree, ".squiz", String(PULL_REQUEST));
     await mkdir(join(episode, "session"), { recursive: true });
     await mkdir(join(episode, "scratch"), { recursive: true });
     const harness = await harnessIn(beside, {
@@ -1947,7 +1940,7 @@ test("a marker the round could not write is named on stderr and nowhere on the p
   // A directory where the marker goes: the rename that would put it there fails,
   // and nothing else the round writes is in its way.
   await withWorktree(async ({ worktree, beside }) => {
-    const marker = join(worktree, ".squiz", AGENT_ID, "running.json");
+    const marker = join(worktree, ".squiz", String(PULL_REQUEST), "running.json");
     await mkdir(join(marker, "occupied"), { recursive: true });
     const harness = await harnessIn(beside, { gh: CLOSES_CLEAN, reviewer: reviews([]) });
 

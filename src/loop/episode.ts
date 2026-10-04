@@ -1,12 +1,11 @@
 /**
  * An episode's identity, and the paths it owns inside its worktree.
  *
- * The key is the subagent's id, which the harness reads from a hook payload
- * rather than generating, so nothing about it is trusted. This is the module
- * where that string becomes a path component, so the strip that makes it safe
- * sits here rather than at each caller: `episodeAt` is the only way to obtain a
- * path under the episode's directory, and no code path can reach the filesystem
- * with an id as it arrived.
+ * The key is the number of the pull request the episode reviews. This is the
+ * module where that number becomes a path component, so the check that makes it
+ * safe sits here rather than at each caller: `episodeAt` is the only way to
+ * obtain a path under the episode's directory, and nothing but a positive whole
+ * number reaches the filesystem as a key.
  *
  * The reviewer's session directory and its scratch space hang off the episode's
  * own directory and are derived here too. A second place that computed them
@@ -23,31 +22,16 @@ const episodesDirectory = ".squiz";
 
 const stateFileName = "state.json";
 
-/**
- * What an episode's directory name may be made of: lowercase hexadecimal, which
- * is every character any id the runtime has been seen to emit is made of. Every
- * other character is dropped, so a separator, a dot, a null byte or a control
- * character cannot reach the filesystem.
- *
- * Two ids differing only outside this set would share one directory. No id seen
- * from the runtime holds a character outside it.
- */
-const unsafeCharacters = /[^0-9a-f]/gu;
-
-/**
- * Characters of the id kept. A name longer than 255 bytes is rejected by the
- * filesystem rather than here, and an id anywhere near this bound is nothing
- * like the seventeen characters the runtime emits.
- */
-const nameLimit = 64;
+/** How a key is spelled as a directory name, and the only spelling read back as one. */
+const keySpelling = /^[1-9][0-9]*$/u;
 
 /** One pull request's rounds, and where everything they write lives. */
 export type Episode = {
   /** The git work tree the rounds review, and the root the paths below sit in. */
   readonly worktree: string;
-  /** The subagent's id, stripped to what a directory name may hold. */
+  /** The pull request's number, as the episode's directory spells it. */
   readonly id: string;
-  /** `<worktree>/.squiz/<id>`, which holds the whole episode. */
+  /** `<worktree>/.squiz/<number>`, which holds the whole episode. */
   readonly directory: string;
   /** The pull request, what each round spent, and what was spent outside them. */
   readonly stateFile: string;
@@ -61,10 +45,10 @@ export type Episode = {
 };
 
 /**
- * A subagent id that no directory name can be made of.
+ * A key that is no pull request's number.
  *
- * Reaching this means the payload's id is nothing like the ones the runtime has
- * emitted, so the round has no key to hold its state under and cannot run.
+ * The number arrives from GitHub, so reaching this means something handed over a
+ * value no pull request has, and the round has no key to hold its state under.
  */
 export class EpisodeError extends Error {
   constructor(message: string) {
@@ -74,14 +58,20 @@ export class EpisodeError extends Error {
 }
 
 /**
- * The episode `agentId` keys, and every path it owns, inside `worktree`.
+ * The episode of pull request `pullRequest`, and every path it owns, inside
+ * `worktree`.
  *
- * Throws an `EpisodeError` where the id holds no character a directory name may
- * be made of. Every other id, whatever it arrived as, yields paths under
- * `<worktree>/.squiz/`.
+ * Throws an `EpisodeError` for anything but a positive whole number a JavaScript
+ * number holds exactly. A larger one would be spelled as some other number, or in
+ * exponent notation.
  */
-export function episodeAt(worktree: string, agentId: string): Episode {
-  const id = safeName(agentId);
+export function episodeAt(worktree: string, pullRequest: number): Episode {
+  if (typeof pullRequest !== "number" || !Number.isSafeInteger(pullRequest) || pullRequest < 1) {
+    throw new EpisodeError(
+      `${describe(pullRequest)} is no pull request's number, so no episode is keyed by it`,
+    );
+  }
+  const id = String(pullRequest);
   const directory = join(worktree, episodesDirectory, id);
   return {
     worktree,
@@ -95,26 +85,20 @@ export function episodeAt(worktree: string, agentId: string): Episode {
 
 /**
  * The episode whose state the directory named `name` holds, or nothing where no
- * episode key could have produced that name.
+ * key is spelled that way.
  *
- * A name that is not what a key would have been stripped to is nobody's episode,
- * and reading under it would read at paths no episode owns.
+ * A name that is not how a key is spelled is nobody's episode, and reading under
+ * it would read at paths no episode owns.
  */
 export function episodeNamed(worktree: string, name: string): Episode | undefined {
+  if (!keySpelling.test(name)) return undefined;
   try {
-    const episode = episodeAt(worktree, name);
-    return episode.id === name ? episode : undefined;
+    return episodeAt(worktree, Number(name));
   } catch {
     return undefined;
   }
 }
 
-function safeName(agentId: string): string {
-  const stripped = agentId.replace(unsafeCharacters, "").slice(0, nameLimit);
-  if (stripped === "") {
-    throw new EpisodeError(
-      `the subagent's id ${JSON.stringify(agentId)} holds no character a directory name may be made of`,
-    );
-  }
-  return stripped;
+function describe(value: unknown): string {
+  return typeof value === "string" ? JSON.stringify(value) : String(value);
 }

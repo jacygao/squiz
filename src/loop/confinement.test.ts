@@ -31,8 +31,9 @@ import {
 import { writeState } from "./episode-state.ts";
 import { episodeAt, type Episode } from "./episode.ts";
 
-const AGENT_ID = "ab12cd34";
-const OTHER_AGENT_ID = "ef56ab78";
+// Pull requests' numbers, as the episodes' directories spell them.
+const KEY = "41";
+const OTHER_KEY = "42";
 
 /** A tracked file, which is what a comparison is about. */
 const TRACKED = "src/card.ts";
@@ -64,7 +65,7 @@ async function withWorktree<T>(body: (episode: Episode) => Promise<T> | T): Prom
     await writeFile(join(root, TRACKED), "// line 1\n", "utf8");
     git(root, "add", ".");
     git(root, "commit", "--quiet", "--message", "the change under review");
-    return await body(episodeAt(root, AGENT_ID));
+    return await body(episodeAt(root, Number(KEY)));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -88,13 +89,13 @@ async function wroteToTheTree(episode: Episode): Promise<void> {
 
 /** A round of another episode, started in this worktree after ours. */
 function otherRoundStarts(worktree: string, id: string): void {
-  const marked = markRoundRunning(episodeAt(worktree, id));
+  const marked = markRoundRunning(episodeAt(worktree, Number(id)));
   assert.equal(marked.outcome, "written", marked.outcome === "failed" ? marked.reason : "");
 }
 
 /** An episode of the worktree that has run `rounds` rounds and reported its close. */
 function episodeRanRounds(worktree: string, id: string, rounds: number): void {
-  const written = writeState(episodeAt(worktree, id), {
+  const written = writeState(episodeAt(worktree, Number(id)), {
     rounds: Array.from({ length: rounds }, () => unspent),
     spentOutsideRounds: unspent,
     closeReported: true,
@@ -104,7 +105,7 @@ function episodeRanRounds(worktree: string, id: string, rounds: number): void {
 
 /** An episode of the worktree that has run a round and not closed. */
 function liveEpisode(worktree: string, id: string): void {
-  const written = writeState(episodeAt(worktree, id), {
+  const written = writeState(episodeAt(worktree, Number(id)), {
     rounds: [unspent],
     spentOutsideRounds: unspent,
   });
@@ -162,7 +163,7 @@ test("the round is marked before the worktree is asked about", async () => {
 
 test("a worktree shared with another live episode takes no comparison", async () => {
   await withWorktree(async (episode) => {
-    liveEpisode(episode.worktree, OTHER_AGENT_ID);
+    liveEpisode(episode.worktree, OTHER_KEY);
 
     const confinement = await around(episode, () => wroteToTheTree(episode));
 
@@ -171,12 +172,12 @@ test("a worktree shared with another live episode takes no comparison", async ()
       confinement.otherEpisodes.outcome === "shared"
         ? confinement.otherEpisodes.episodes.map((other) => other.id)
         : [],
-      [OTHER_AGENT_ID],
+      [OTHER_KEY],
     );
     assert.equal(confinement.trackedFiles.outcome, "not-taken");
     assert.match(
       confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`shared with live episode ${OTHER_AGENT_ID}`, "u"),
+      new RegExp(`shared with live episode ${OTHER_KEY}`, "u"),
       "the reading would have named the other episode's writing as this reviewer's",
     );
   });
@@ -184,7 +185,7 @@ test("a worktree shared with another live episode takes no comparison", async ()
 
 test("a worktree nothing could be established about takes no comparison either", async () => {
   await withWorktree(async (episode) => {
-    const other = episodeAt(episode.worktree, OTHER_AGENT_ID);
+    const other = episodeAt(episode.worktree, Number(OTHER_KEY));
     await mkdir(other.directory, { recursive: true });
     await writeFile(other.stateFile, "{ not json", "utf8");
 
@@ -273,7 +274,7 @@ test("an episode that became live after the first reading is not compared agains
     const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
 
-    otherRoundStarts(episode.worktree, OTHER_AGENT_ID);
+    otherRoundStarts(episode.worktree, OTHER_KEY);
     await wroteToTheTree(episode);
 
     const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
@@ -296,7 +297,7 @@ test("an episode that came and went inside the review is not compared against", 
     const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
 
-    episodeRanRounds(episode.worktree, OTHER_AGENT_ID, 1);
+    episodeRanRounds(episode.worktree, OTHER_KEY, 1);
     await wroteToTheTree(episode);
 
     const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
@@ -304,7 +305,7 @@ test("an episode that came and went inside the review is not compared against", 
     assert.equal(confinement.trackedFiles.outcome, "not-taken");
     assert.match(
       confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`${OTHER_AGENT_ID} worked in the worktree`, "u"),
+      new RegExp(`${OTHER_KEY} worked in the worktree`, "u"),
       "the episode that appeared while the reviewer ran is what the answer names",
     );
   });
@@ -354,12 +355,12 @@ test("a reading that runs past its bound is cut short and answered as one that f
  */
 test("an episode that ran and closed inside the review is not compared against", async () => {
   await withWorktree(async (episode) => {
-    episodeRanRounds(episode.worktree, OTHER_AGENT_ID, 1);
+    episodeRanRounds(episode.worktree, OTHER_KEY, 1);
 
     const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" }, "the other episode has closed");
 
-    episodeRanRounds(episode.worktree, OTHER_AGENT_ID, 2);
+    episodeRanRounds(episode.worktree, OTHER_KEY, 2);
     await wroteToTheTree(episode);
 
     const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
@@ -368,7 +369,7 @@ test("an episode that ran and closed inside the review is not compared against",
     assert.equal(confinement.trackedFiles.outcome, "not-taken");
     assert.match(
       confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`${OTHER_AGENT_ID} worked in the worktree`, "u"),
+      new RegExp(`${OTHER_KEY} worked in the worktree`, "u"),
       "the write may be the other episode's, and naming it here accuses this reviewer of it",
     );
   });
@@ -380,7 +381,7 @@ test("an episode that ran and closed inside the review is not compared against",
  */
 test("an episode with nothing recorded is not a tree this round had to itself", async () => {
   await withWorktree(async (episode) => {
-    await mkdir(episodeAt(episode.worktree, OTHER_AGENT_ID).directory, { recursive: true });
+    await mkdir(episodeAt(episode.worktree, Number(OTHER_KEY)).directory, { recursive: true });
 
     const confinement = await around(episode, () => wroteToTheTree(episode));
 
@@ -388,7 +389,7 @@ test("an episode with nothing recorded is not a tree this round had to itself", 
     assert.equal(confinement.trackedFiles.outcome, "not-taken");
     assert.match(
       confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`${OTHER_AGENT_ID}: nothing is recorded`, "u"),
+      new RegExp(`${OTHER_KEY}: nothing is recorded`, "u"),
       "an episode that recorded nothing cannot be shown to have done nothing",
     );
   });
@@ -544,16 +545,16 @@ test("a file an earlier round found changed survives a round that found nothing"
 });
 
 test("an earlier round that could not compare survives a closing round that could", () => {
-  const shared = `the worktree is shared with live episode ${OTHER_AGENT_ID}`;
+  const shared = `the worktree is shared with live episode ${OTHER_KEY}`;
   assert.deepEqual(
     after(
       {
-        otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_AGENT_ID, pid: 4021 }] },
+        otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_KEY, pid: 4021 }] },
         trackedFiles: { outcome: "not-taken", reason: shared },
       },
       {},
     ),
-    { changed: [], moved: [], uncompared: [shared], shared: [OTHER_AGENT_ID], unestablished: [] },
+    { changed: [], moved: [], uncompared: [shared], shared: [OTHER_KEY], unestablished: [] },
   );
 });
 
@@ -684,13 +685,13 @@ test("a file an earlier round found changed survives a later round that fills th
  * its place.
  */
 test("an episode an earlier round found here survives a later round that fills the cap", () => {
-  const crowd = aCapsWorth("a");
+  const crowd = aCapsWorth("1");
   const evidence = after(
     {
-      otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_AGENT_ID, pid: 4021 }] },
+      otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_KEY, pid: 4021 }] },
       trackedFiles: {
         outcome: "not-taken",
-        reason: `the worktree is shared with live episode ${OTHER_AGENT_ID}`,
+        reason: `the worktree is shared with live episode ${OTHER_KEY}`,
       },
     },
     {
@@ -708,12 +709,12 @@ test("an episode an earlier round found here survives a later round that fills t
 
   assert.deepEqual(
     evidence?.shared,
-    [...crowd.slice(0, 63), OTHER_AGENT_ID],
+    [...crowd.slice(0, 63), OTHER_KEY],
     "the cap drops the episode that arrived last, and orders what it kept for display",
   );
   assert.ok(
-    comment.includes(OTHER_AGENT_ID),
-    `episode ${OTHER_AGENT_ID} was in the worktree and the comment does not name it:\n${comment}`,
+    comment.includes(OTHER_KEY),
+    `episode ${OTHER_KEY} was in the worktree and the comment does not name it:\n${comment}`,
   );
 });
 
@@ -757,7 +758,7 @@ test("a reviewer that amended the commit is named from a clean tree, and so is t
 // read with the files or not at all.
 test("a HEAD moved in a shared worktree is not named as this reviewer's", async () => {
   await withWorktree(async (episode) => {
-    liveEpisode(episode.worktree, OTHER_AGENT_ID);
+    liveEpisode(episode.worktree, OTHER_KEY);
 
     const confinement = await around(episode, () => amendedTheCommit(episode));
 
