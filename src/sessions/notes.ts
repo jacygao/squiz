@@ -68,8 +68,14 @@ export function writeNote(directory: string, sessionId: string, fields: NoteFiel
     writeFileSync(temporary, lines.join(""), { flag: "wx" });
     renameSync(temporary, join(session, name));
   } catch (error) {
-    rmSync(temporary, { force: true });
-    return { outcome: "failed", reason: `the note for ${sessionId} was not written: ${describe(error)}` };
+    const reason = `the note for ${sessionId} was not written: ${describe(error)}`;
+    // The path that refused the write can refuse its cleanup too, and `force` excuses only a missing file.
+    try {
+      rmSync(temporary, { force: true });
+    } catch (cleanup) {
+      return { outcome: "failed", reason: `${reason}; and its temporary file was not removed: ${describe(cleanup)}` };
+    }
+    return { outcome: "failed", reason };
   }
   return { outcome: "written", name };
 }

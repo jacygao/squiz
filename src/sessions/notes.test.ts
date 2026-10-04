@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -130,6 +130,35 @@ test("a session id that is not one plain name is refused, and nothing is written
       assert.equal(delivery.outcome, "failed", `delivering for ${JSON.stringify(sessionId)} was not refused`);
     }
     assert.deepEqual(everything(parent), []);
+  });
+});
+
+test("a notes directory that cannot be entered fails the write as a value", { skip: process.getuid?.() === 0 && "root enters any directory" }, async () => {
+  await withDirectory((parent) => {
+    const directory = join(parent, "notes");
+    mkdirSync(directory, { mode: 0o000 });
+    try {
+      const result = writeNote(directory, SESSION, { to: "x" });
+      assert.equal(result.outcome, "failed");
+      const reason = result.outcome === "failed" ? result.reason : "";
+      assert.match(reason, /EACCES[^;]*mkdir/u, "the failure must carry the write's own error");
+      assert.match(reason, /temporary file was not removed: EACCES/u, "the failure must carry the cleanup's error");
+    } finally {
+      chmodSync(directory, 0o700);
+    }
+  });
+});
+
+test("a file where the notes directory should be fails the write as a value", async () => {
+  await withDirectory((parent) => {
+    const directory = join(parent, "notes");
+    writeFileSync(directory, "");
+
+    const result = writeNote(directory, SESSION, { to: "x" });
+    assert.equal(result.outcome, "failed");
+    const reason = result.outcome === "failed" ? result.reason : "";
+    assert.match(reason, /ENOTDIR[^;]*mkdir/u, "the failure must carry the write's own error");
+    assert.match(reason, /temporary file was not removed: ENOTDIR/u, "the failure must carry the cleanup's error");
   });
 });
 
