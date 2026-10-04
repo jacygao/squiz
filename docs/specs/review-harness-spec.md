@@ -187,8 +187,9 @@ whether the episode has reported its close and what was open at that close, and
 what its rounds established about the worktree. The directory also holds:
 
 - `rounds/<k>/`, for each round: the report file the reviewer's extension
-  writes, the reviewer's `pi` session, and `resume.txt`, the command that resumes
-  that session.
+  writes, the reviewer's `pi` session, `resume.txt`, the command that resumes
+  that session, and `tree/`, the snapshot the reviewer reads while the round
+  runs.
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - The reviewer's scratch space.
@@ -331,8 +332,8 @@ flowchart TD
    whether the state is queued.
 3. **Run the reviewer.** The round host starts the reviewer as a session of its
    own (§ 4), hands it the pull request for scope and intent together with
-   the threads the reviewer itself opened on it, and lets it read the working
-   tree directly: files the diff did not touch, callers, and git history. At
+   the threads the reviewer itself opened on it, and lets it read its snapshot
+   of the head commit directly: files the diff did not touch, callers, and git history. At
    depth `deep` it also runs the tests. The reviewer never edits the code it is
    reviewing.
 4. **Post the findings, and act on the verdicts.** Each new finding opens a new
@@ -346,13 +347,10 @@ flowchart TD
    nor the output, so it never keeps the loop going and an episode ends with one
    still open. § 6 shows what is printed.
 
-   Where the round's comparison found that `HEAD` moved while the reviewer ran,
-   the output ends with a paragraph naming both ends of the move, as Notes does
-   under § 5. A move to a detached `HEAD`, or to another branch, ends the next run
-   at the gate, before it reads anything the episode recorded. Unless `HEAD`
-   returns to the pull request's branch, no later round of this episode runs and
-   no summary comment is posted, so this paragraph is the move's one report. A
-   round that failed reports its move in its failure comment, under § 7.
+   Where the round's comparison found that `HEAD` moved in the reviewer's
+   snapshot while the reviewer ran, the output ends with a paragraph naming both
+   ends of the move, and Notes names it under § 5. A round that failed reports its
+   move in its failure comment, under § 7.
 6. **Close the episode.** Otherwise the round posts one summary comment on the
    pull request and records the close in the episode's state. A run of
    `squiz review` exits 0 where nothing of this review is open, and 3 where the
@@ -401,9 +399,9 @@ Identity's markers.
 
 **The round runs in the round host, not in the caller.** `squiz review` waits
 inside the caller's tool call, but stopping that call stops only the wait. A
-coding agent that ended its turn may be editing the tree while a round runs, and
-the tracked-file comparison under Confinement reads such an edit as the
-reviewer's.
+coding agent that ended its turn may be editing its worktree while a round runs.
+The reviewer never reads that worktree: it reads a snapshot of the head commit,
+as The snapshot under § 4 sets out, so neither sees the other's changes.
 
 ### The round host
 
@@ -570,6 +568,10 @@ whose worktree is gone exits. The episode's state
 goes with the worktree, and nothing in it outlives the worktree, because the pull
 request holds the findings.
 
+**A reviewer's snapshot is its own, so no shared tree reaches the comparison.**
+The shared-tree detection below is in the list of what reviewer sessions make
+redundant (§ 8), and is removed with it.
+
 Where a tree is shared, the harness detects it by resolving
 `git rev-parse --show-toplevel` and comparing it against the live episodes. Two
 live episodes on one toplevel means a shared tree. Under the key above they are
@@ -610,7 +612,7 @@ Five things are handed to it:
 
 | | |
 |---|---|
-| **A working directory** | The git work tree holding the change under review. The reviewer runs with this as its current directory. |
+| **A working directory** | A snapshot of the pull request's head commit, in a worktree of its own (The snapshot, below). The reviewer runs with this as its current directory. |
 | **The pull request** | Its number, its base and head refs, its description, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness fetches all of this and passes it in. |
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
@@ -634,8 +636,8 @@ it.** The round host starts it in the first place that applies:
 
 | Where | How the round host starts it |
 |---|---|
-| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <worktree> --label squiz-41-r2 --no-focus` gives a pane, and `herdr agent start squiz-41-r2 --kind pi --pane <pane> -- <pi arguments>` starts `pi` in it |
-| tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <worktree> '<pi command line>'` |
+| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus` gives a pane, and `herdr agent start squiz-41-r2 --kind pi --pane <pane> -- <pi arguments>` starts `pi` in it |
+| tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<pi command line>'` |
 | Neither | As a child of the round host, with no terminal |
 
 In a pane, `pi` runs interactively with the pane as its terminal, and draws its
@@ -664,6 +666,50 @@ itself.** At the time bound it signals the reviewer's process group, found from
 the pid the backend reports for the pane, and the groups the reviewer's shells
 recorded, as Confinement sets out. Then it closes the pane. Which processes a pane
 close reaches on its own is not established (§ 8 Prerequisites).
+
+### The snapshot
+
+**Every reviewer reads its own snapshot of the head commit, at either depth.**
+The coding agent may be editing its worktree while a round runs, so the reviewer
+never reads that worktree. Before the reviewer starts, the round host adds a
+detached worktree at the head commit of the state under review:
+
+```
+git worktree add --detach .squiz/41/rounds/2/tree 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+```
+
+The commit is the one GitHub reports as the pull request's head. Where the
+repository does not have it yet, because it was pushed from elsewhere, the round
+host fetches it first. The snapshot shares the repository's object store, and
+`.squiz/` is gitignored, so it shows in neither the coding agent's `git status`
+nor its commits.
+
+**The snapshot holds the commit and nothing else.** It carries none of the coding
+agent's uncommitted changes, which no state names, and none of its untracked
+files, build output or installed dependencies.
+
+**The round host removes the snapshot when the round ends**, with
+`git worktree remove --force` and then `git worktree prune`, whatever the round
+became. A round host that finds a snapshot a killed round left behind removes it
+before it starts its own round.
+
+**Confinement applies to the snapshot.** The tracked-file comparison is taken in
+it before the reviewer starts and again when the reviewer exits. The refused
+calls and the shell-group record work as before, and scratch space stays at
+`.squiz/<number>/scratch/`. Nothing but the reviewer writes the snapshot, so a
+change the comparison finds is the reviewer's.
+
+**What it costs:**
+
+- **Time and disk on every round.** Checking out every tracked file grows with
+  the size of the repository, not the size of the change. How long it takes on a
+  large repository is not measured (§ 8 Prerequisites).
+- **A build before tests at `deep`.** The snapshot has no installed
+  dependencies, so the configured test command has to install or build what it
+  needs before it runs the tests. A project that names a test command at `deep`
+  names one that works in a fresh checkout.
+- **Committed work only.** The reviewer reviews what was committed. Work the
+  coding agent has not committed is reviewed in a later round, once it is.
 
 ### Depth
 
@@ -707,7 +753,7 @@ follows. None is configurable, and each applies where the third column says.
 | **Scratch space.** `TMPDIR` points at `.squiz/<number>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
 | **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref` — or pushes with `git push`. The comparison names a moved `HEAD` once the reviewer has exited, and a refused call never moves it. | At `deep`, where a shell is granted |
-| **A comparison of `git status`, the hashes of tracked files, and `HEAD`**, taken before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell, and a `HEAD` that names another branch or another commit. | Except in a shared worktree, where nothing detects such a write |
+| **A comparison of `git status`, the hashes of tracked files, and `HEAD`**, taken in the snapshot before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell, and a `HEAD` that names another branch or another commit. | Always, in the snapshot |
 | **The process group each shell records for itself**, signalled when the round ends. | A tool the reviewer started outliving the round, where the signal to the reviewer's own group does not reach it. | Where the reviewer CLI starts a shell in a group of its own |
 
 The first three prevent, the fourth detects, and the fifth reaches what the
@@ -1264,7 +1310,7 @@ Each move of `HEAD` a round found is a line of its own, naming both ends as the
 comparison read them:
 
 ```markdown
-- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to refs/heads/feature-a at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
+- `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 ```
 
 **A round whose review the time bound cut short is a line of its own.** Its
@@ -1302,7 +1348,7 @@ Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1
 
 - About the change as a whole: the retry queue duplicates the scheduler already
   in `packages/sync/src/scheduler.ts`, which nothing calls
-- The review ran against uncommitted changes in `packages/sync/src/queue.test.ts`
+- The reviewer changed `packages/sync/src/queue.test.ts` in its snapshot while it ran
 ```
 
 Notes is omitted when there is nothing to report.
@@ -1507,7 +1553,7 @@ the comment went:
 
 ```
 squiz: review failed: the reviewer was stopped at the time bound of 480 seconds, after reporting 2 findings
-squiz: `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+squiz: `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 squiz: the failure is posted on PR #41
 ```
 
@@ -1523,7 +1569,7 @@ Where the round's comparison found that `HEAD` moved while the reviewer ran, the
 output of a run that exits 2 or 3 ends with a paragraph naming both ends:
 
 ```
-`HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90. Squiz did not move it back. The next round reviews the branch `HEAD` is on when it starts, and only where that branch has a pull request.
+`HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258. The move was in the reviewer's snapshot, which is removed after the round, and the coding agent's worktree is as it was.
 ```
 
 Every number and every thread in the output is computed from what the round read
@@ -1639,7 +1685,7 @@ says how many it posted as threads.
 
 Both findings are posted as threads. The review is still open, and the next run of `squiz review` reviews again.
 
-- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+- `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 ```
 
 The reason on the first line is the reason the command prints on stderr, word for
@@ -1862,6 +1908,33 @@ tested by `src/config/config.test.ts`. One `include` then covers the code and
 its tests together, and a directory lists what it holds beside how it is
 checked.
 
+### What reviewer sessions make redundant
+
+The cleanup that follows this design removes each of these, in the spec and in
+the code:
+
+- **The hook-path timing and windows.** The 600-second window a hook's round ran
+  in, its 540-second reviewer cap, and the per-path `timeout` cap, in
+  `src/loop/window.ts` and in the hook's registration test. No round runs inside
+  a hook or a shell call.
+- **The hand-back assumptions.** The hook's exit-2 block and the blocking reason
+  it carried, in `src/loop/reason.ts`; the table mapping a review's exit to the
+  hook's; and the reading that auto mode drops a block after the hand-back. The
+  hooks never block, and the report goes to a live session.
+- **Duplicate-episode handling.** Shared-tree detection in
+  `src/worktree/shared-tree.ts`, the other-episodes and could-not-tell lists the
+  state file keeps for it, the Notes items built from them, and the comparison
+  switched off in a shared tree. The snapshot gives each reviewer a tree only it
+  writes, and one review per state already stops a second firing from starting a
+  second round.
+- **The reviewer as a child of the hook.** The round started from `squiz hook`
+  in `src/hook/hook.ts`, and the reliance on the runtime signalling the hook's
+  process tree to stop a reviewer. The round host is the reviewer's parent or
+  closes its pane.
+- **The watchdog-driven bounds.** Sizing any bound against the subagent stall
+  threshold, `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`, and the test holding the
+  hook's window to its declared timeout. No hook holds a subagent.
+
 ### What ships
 
 **P0** has to exist for the harness to do its job at all. **P1** is expected,
@@ -1941,6 +2014,9 @@ These remain open:
   `SubagentStop` hook's environment carries the parent's
   `CLAUDE_CODE_MESSAGING_SOCKET`. Where it does not, a subagent's result reaches
   its parent through the parent's `Stop` waiter, or by pull.
+- **What a snapshot costs.** How long `git worktree add` and removal take on a
+  large repository, and what installing dependencies before tests at `deep` adds
+  to a round.
 - **Linux.** The detach and pane probes ran on macOS alone.
 - **GitHub Copilot CLI, as a later agent.** Its documentation lists `agentStop`
   and `subagentStop` hooks. Whether they fire, whether `subagentStop` names the
