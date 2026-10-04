@@ -50,7 +50,7 @@ test("an absent .squiz.json is not an error, and yields the six defaults", () =>
     rounds: 3,
     depth: "read",
     test: null,
-    timeout: 480,
+    timeout: 900,
     tokens: 10_000_000,
     thinking: "medium",
   });
@@ -86,19 +86,17 @@ test("rounds accepts 1 and 8, and refuses 0 and 9", () => {
   rejection(`{"rounds": -1}`);
 });
 
-test("timeout accepts 1 and 480, and refuses 0 and 481", () => {
-  assert.equal(load(`{"timeout": 1}`).timeout, 1);
-  assert.equal(load(`{"timeout": 480}`).timeout, 480);
+test("timeout accepts 60 and 3,600, and refuses 59 and 3,601", () => {
+  assert.equal(load(`{"timeout": 60}`).timeout, 60);
+  assert.equal(load(`{"timeout": 3600}`).timeout, 3_600);
+  rejection(`{"timeout": 59}`);
+  rejection(`{"timeout": 3601}`);
   rejection(`{"timeout": 0}`);
-  rejection(`{"timeout": 481}`);
   rejection(`{"timeout": -1}`);
 });
 
-// The bound a project inherits is the largest the hook's ceiling leaves room to
-// post inside, so the only direction configuration can move it is down.
-test("the default timeout is the top of its range, so a project can only lower it", () => {
-  assert.equal(defaultConfig.timeout, 480);
-  rejection(`{"timeout": ${defaultConfig.timeout + 1}}`);
+test("the default timeout is 900 seconds", () => {
+  assert.equal(defaultConfig.timeout, 900);
 });
 
 test("tokens accepts 100,000 and 10,000,000, and refuses 99,999 and 10,000,001", () => {
@@ -141,7 +139,7 @@ test("a value in range but below the default survives the load", () => {
   // The other half of the truthiness trap: a small valid number is kept, not
   // rounded up to the default.
   assert.equal(load(`{"rounds": 1}`).rounds, 1);
-  assert.equal(load(`{"timeout": 1}`).timeout, 1);
+  assert.equal(load(`{"timeout": 60}`).timeout, 60);
   assert.equal(load(`{"tokens": 100000}`).tokens, 100_000);
 });
 
@@ -226,8 +224,9 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"depth": 3}`, setting: "depth", given: "3", expected: /"read" or "deep"/ },
     { contents: `{"depth": "deep"}`, setting: "depth", given: `"deep"`, expected: /not supported yet/ },
     { contents: `{"test": ""}`, setting: "test", given: `""`, expected: /a command to run/ },
-    { contents: `{"timeout": 600}`, setting: "timeout", given: "600", expected: /seconds from 1 to 480/ },
-    { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 1 to 480/ },
+    { contents: `{"timeout": 3601}`, setting: "timeout", given: "3601", expected: /seconds from 60 to 3,600/ },
+    { contents: `{"timeout": 59}`, setting: "timeout", given: "59", expected: /seconds from 60 to 3,600/ },
+    { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 60 to 3,600/ },
     { contents: `{"tokens": 20000000}`, setting: "tokens", given: "20000000", expected: /tokens from 100,000 to 10,000,000/ },
     { contents: `{"tokens": true}`, setting: "tokens", given: "true", expected: /tokens from 100,000 to 10,000,000/ },
     { contents: `{"thinking": "higher"}`, setting: "thinking", given: `"higher"`, expected: /"medium".*"high".*"xhigh"/ },

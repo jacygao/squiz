@@ -31,11 +31,13 @@ import {
   type RoundOutput,
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { readState, writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
-import { runRound, type RoundConclusion } from "./round.ts";
+import { reviewSeconds, runRound, type RoundConclusion } from "./round.ts";
+import { HOOK_CEILING_MS, POSTING_MARGIN_MS } from "./window.ts";
 
 const BRANCH = "review-me";
 const PULL_REQUEST = 142;
@@ -1906,6 +1908,19 @@ test("what the calls before the review spend comes off the reviewer's own bound"
     bound !== undefined && Number(bound) < 5,
     `the reviewer was given ${bound ?? "no"} seconds, which is the whole of what the project configured`,
   );
+});
+
+// The hook runs the round inside the ceiling, and a configured bound larger than
+// what the window leaves would let the runtime cancel the hook with nothing posted.
+test("a configured timeout longer than the hook's window still fits the reviewer inside it", () => {
+  const reviewMs = HOOK_CEILING_MS - POSTING_MARGIN_MS;
+  for (const configured of [defaultConfig.timeout, 900, 3_600]) {
+    const seconds = reviewSeconds(configured, deadlineIn(reviewMs));
+    assert.ok(
+      seconds !== null && seconds * 1_000 <= reviewMs,
+      `a timeout of ${configured} gave the reviewer ${seconds ?? "no"} seconds, past the ${reviewMs / 1_000} the hook's window leaves it`,
+    );
+  }
 });
 
 /**

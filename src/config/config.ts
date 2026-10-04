@@ -45,8 +45,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   rounds: 3,
   depth: "read",
   test: null,
-  // The top of its own range, so a project can lower this bound and never raise it.
-  timeout: 480,
+  timeout: 900,
   // Well above the widest round a legitimate review has been measured spending,
   // so a reviewer that reads widely does not reach it.
   tokens: 10_000_000,
@@ -147,9 +146,9 @@ function parse(source: string, path: string): Config {
           path,
           "timeout",
           raw["timeout"],
-          1,
-          480,
-          "a whole number of seconds from 1 to 480",
+          60,
+          3_600,
+          "a whole number of seconds from 60 to 3,600",
         )
       : defaultConfig.timeout,
     tokens: has(raw, "tokens")

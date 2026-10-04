@@ -1035,7 +1035,7 @@ function share(margin: Deadline, calls: number): number {
  * starting a reviewer it would kill at once, which would spend a round of the
  * cap on a review nobody could have done.
  */
-function reviewSeconds(configured: number, beforePosting: Deadline): number | null {
+export function reviewSeconds(configured: number, beforePosting: Deadline): number | null {
   const seconds = Math.min(configured, Math.floor(beforePosting.remaining() / 1_000));
   return seconds < 1 ? null : seconds;
 }
