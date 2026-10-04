@@ -473,9 +473,15 @@ test("with no file named, every call answers as it did", async (t) => {
 
   const { pi, loaded: extension } = registrar();
   reportAsYouGo(pi);
-  const answer = await toolOf(extension, REPORT_FINDING).execute("call_1", lineFinding);
-  assert.deepEqual(answer.details, lineFinding);
-  await toolOf(extension, FINISH_REVIEW).execute("call_2", {});
+  const unset = "with no file named, the call was refused rather than answered";
+  await assert.doesNotReject(async () => {
+    const answer = await toolOf(extension, REPORT_FINDING).execute("call_1", lineFinding);
+    assert.deepEqual(answer.details, lineFinding);
+  }, unset);
+  await assert.doesNotReject(toolOf(extension, FINISH_REVIEW).execute("call_2", {}), unset);
   const message = onlyHandler(extension, "message_end") as MessageHandler;
-  message({ type: "message_end", message: assistantMessage });
+  assert.doesNotThrow(
+    () => message({ type: "message_end", message: assistantMessage }),
+    "with no file named, an assistant message threw",
+  );
 });
