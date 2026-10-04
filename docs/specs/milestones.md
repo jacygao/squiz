@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.16 (draft)
+**Version:** 0.17 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -565,6 +565,21 @@ this milestone is steps 2 to 5 of its migration, after one step of its own:
   - duplicate-episode handling for a firing the session never dispatched, where
     keying the episode on the pull request's number makes it moot
 - [ ] Every issue below is built or closed, with the reason on the issue.
+
+### A decision for the owner
+
+Once muster is in its own repository, the owner decides how to run work on the
+two projects in parallel:
+
+- **Try firstmate as the owner's own workflow tool**, on a small piece of work,
+  and judge whether it is worth its weight. It is about 114,000 lines of shell
+  with no releases, it needs tmux or Herdr, and its crewmates are full
+  sessions.
+- **Run both projects through muster itself**, as dogfooding.
+
+Either way this is how the owner works, and neither squiz nor muster depends on
+it. Muster builds its own sessions, triggers and inbox, and uses firstmate's
+inbox format but not its code.
 
 ### Issues to re-judge
 
