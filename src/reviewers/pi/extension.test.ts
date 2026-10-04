@@ -443,6 +443,26 @@ test("usage that cannot be recorded throws, for pi to show", (t) => {
   );
 });
 
+/**
+ * A file holding the finish and missing a message reads as a complete review
+ * that cost less than it did. So the lost usage is written ahead of the next
+ * line that can be, and the finish cannot land without it.
+ */
+test("usage that could not be recorded is written before a later finish", async (t) => {
+  const missing = unwritable(t);
+  const extension = loaded(missing);
+  const message = onlyHandler(extension, "message_end") as MessageHandler;
+  assert.throws(() => message({ type: "message_end", message: assistantMessage }), /ENOENT/u);
+
+  mkdirSync(join(missing, ".."));
+  await toolOf(extension, FINISH_REVIEW).execute("call_1", {});
+  assert.deepEqual(
+    linesIn(missing).map((line) => (line as { type: string }).type),
+    ["usage", "finish"],
+    "the finish was recorded and the usage lost before it was not",
+  );
+});
+
 /** Restore the variable, whatever the test set it to. */
 function keepVariable(t: { after: (fn: () => void) => void }): void {
   const before = process.env[REPORTS_VARIABLE];

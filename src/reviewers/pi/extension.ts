@@ -24,7 +24,10 @@
  * - a refusal that cannot be recorded still refuses, and says it was not
  *   recorded;
  * - usage that cannot be recorded throws, and `pi` shows the throw as the
- *   extension's error and carries on.
+ *   extension's error and carries on. The line is kept and written ahead of
+ *   the next line that can be written, so a finish never lands in a file still
+ *   missing usage, which would read as a complete review that cost less than
+ *   it did.
  *
  * Where no file is named, nothing is written and every call answers as it would
  * with one.
@@ -32,7 +35,13 @@
 
 import { readFinding, readVerdict } from "../../findings/reported.ts";
 import { type Refusal, refuse, type ToolCall } from "./refusals.ts";
-import { type ReportFile, reportFileAt, REPORTS_VARIABLE, type UsageLine } from "./report-file.ts";
+import {
+  type Line,
+  type ReportFile,
+  reportFileAt,
+  REPORTS_VARIABLE,
+  type UsageLine,
+} from "./report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 
 /** One block of what a call answers with. Only text is ever returned here. */
@@ -155,10 +164,11 @@ export default function reportAsYouGo(pi: Registrar): void {
  *
  * The threads already ruled on are held here, so that a second ruling on one
  * thread is refused while the reviewer can still decide which of the two it
- * meant. Nothing else is held: a report is answered and gone.
+ * meant. The usage the file refused is held until it can be written. Nothing
+ * else is held: a report is answered and gone.
  */
 export function reportInto(pi: Registrar, reports: string | undefined): void {
-  const file = reportFileAt(reports);
+  const file = keepingLostUsage(reportFileAt(reports));
   const ruled = new Set<string>();
 
   // `pi` runs a tool the moment no handler objects, so a subscription that goes
@@ -254,6 +264,30 @@ export function reportInto(pi: Registrar, reports: string | undefined): void {
       return { content: [{ type: "text", text: "The review is complete." }], details: {} };
     },
   });
+}
+
+/**
+ * The file, writing the usage it refused ahead of every later line.
+ *
+ * A later line is not written until the usage before it is, so every line
+ * after a lost one fails with it, the finish included.
+ */
+function keepingLostUsage(file: ReportFile): ReportFile {
+  const lost: Line[] = [];
+  return {
+    record: (line) => {
+      try {
+        while (lost[0] !== undefined) {
+          file.record(lost[0]);
+          lost.shift();
+        }
+        file.record(line);
+      } catch (cause) {
+        if (line.type === "usage") lost.push(line);
+        throw cause;
+      }
+    },
+  };
 }
 
 /** Record an accepted report, or throw the refusal the reviewer reads where it cannot be. */
