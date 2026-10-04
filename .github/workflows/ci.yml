@@ -27,6 +27,14 @@ jobs:
       - name: Report the Node version
         run: node --version
 
+      # The tests of src/sessions/ start windows on a tmux server of their own,
+      # under each shell tmux may hand a command line to.
+      - name: Install tmux and the shells
+        run: sudo apt-get update && sudo apt-get install -y tmux zsh fish
+
+      - name: Report the tmux version
+        run: tmux -V
+
       - name: Install development dependencies
         run: npm ci
 
