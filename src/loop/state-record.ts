@@ -36,17 +36,38 @@ export type Owner = {
 
 export type Backend = "herdr" | "tmux" | "detached";
 
-/** The reviewer's session, as the round host started it. */
-export type ReviewerSession = {
+/** Where the reviewer runs or ran. */
+export type ReviewerPlace = {
   readonly backend: Backend;
   /** The Herdr pane or tmux window. A detached reviewer has none. */
   readonly pane?: string;
+};
+
+/** The reviewer's session, as the round host started it. */
+export type ReviewerSession = ReviewerPlace & {
   readonly process: ProcessIdentity;
   /** When the reviewer's time bound runs out, in whole seconds since the epoch. */
   readonly boundEndsAt: number;
   /** The path of the snapshot the reviewer reads. */
   readonly snapshot: string;
 };
+
+/**
+ * The round that reached a finished record, as `squiz status` prints it.
+ *
+ * A finished record without one was written before records kept it, and
+ * nothing is known of when its round ran or where its reviewer was.
+ */
+export type FinishedRound = {
+  /** In whole seconds since the epoch, as is `endedAt`. */
+  readonly startedAt: number;
+  readonly endedAt: number;
+  /** Absent where the round failed before a reviewer started. */
+  readonly reviewer?: ReviewerPlace;
+};
+
+/** A reviewed round always had a reviewer. */
+export type ReviewedRound = FinishedRound & { readonly reviewer: ReviewerPlace };
 
 /** A `squiz review` exit status a round can end on. */
 export type ReviewedExit = 0 | 2 | 3;
@@ -67,23 +88,24 @@ export type StateRecord = Shared &
         /** Absent until the reviewer's session has started. */
         readonly reviewer?: ReviewerSession;
       }
-    | {
-        readonly status: "reviewed";
-        readonly result: "exited";
-        readonly exitStatus: ReviewedExit;
-        /** The node ids of the reviewer's threads the round left open. */
-        readonly openThreads: readonly string[];
-      }
-    | {
-        // Nothing was left open, and a later state was queued behind this one,
-        // so the round reached no close and has no exit status.
-        readonly status: "reviewed";
-        readonly result: "clean, episode open";
-      }
+    | ({ readonly status: "reviewed"; readonly round?: ReviewedRound } & (
+        | {
+            readonly result: "exited";
+            readonly exitStatus: ReviewedExit;
+            /** The node ids of the reviewer's threads the round left open. */
+            readonly openThreads: readonly string[];
+          }
+        | {
+            // Nothing was left open, and a later state was queued behind this one,
+            // so the round reached no close and has no exit status.
+            readonly result: "clean, episode open";
+          }
+      ))
     | {
         readonly status: "failed";
         readonly reason: string;
         readonly ownerNoted: boolean;
+        readonly round?: FinishedRound;
       }
     | {
         readonly status: "not reviewed";
@@ -157,7 +179,10 @@ export function recordFrom(entry: unknown): ReadRecord {
       if (!isText(reason)) return { problem: `has "reason" as ${render(reason)}` };
       const noted = entry["ownerNoted"];
       if (typeof noted !== "boolean") return { problem: `has "ownerNoted" as ${render(noted)}` };
-      return { record: { ...shared, status, reason, ownerNoted: noted } };
+      const round = roundFrom(entry["round"]);
+      if ("problem" in round) return round;
+      const kept = round.round === undefined ? {} : { round: round.round };
+      return { record: { ...shared, status, reason, ownerNoted: noted, ...kept } };
     }
     case "not reviewed": {
       const reason = entry["reason"];
@@ -193,6 +218,42 @@ function ownerFrom(found: unknown): ReadOwner {
   };
 }
 
+type ReadRound = { readonly round: FinishedRound | undefined } | { readonly problem: string };
+
+function roundFrom(found: unknown): ReadRound {
+  if (found === undefined) return { round: undefined };
+  if (!isObject(found)) return { problem: `has "round" as ${render(found)}` };
+  const startedAt = found["startedAt"];
+  if (!isWholeSeconds(startedAt)) return { problem: `has "round.startedAt" as ${render(startedAt)}` };
+  const endedAt = found["endedAt"];
+  if (!isWholeSeconds(endedAt)) return { problem: `has "round.endedAt" as ${render(endedAt)}` };
+  if (endedAt < startedAt) {
+    return { problem: `has a round that ended at ${endedAt}, before it started at ${startedAt}` };
+  }
+  if (found["reviewer"] === undefined) return { round: { startedAt, endedAt } };
+  const reviewer = placeFrom(found["reviewer"], "round.reviewer");
+  if ("problem" in reviewer) return reviewer;
+  return { round: { startedAt, endedAt, reviewer: reviewer.place } };
+}
+
+type ReadPlace = { readonly place: ReviewerPlace } | { readonly problem: string };
+
+function placeFrom(found: unknown, field: string): ReadPlace {
+  if (!isObject(found)) return { problem: `has "${field}" as ${render(found)}` };
+  const backend = found["backend"];
+  if (backend !== "herdr" && backend !== "tmux" && backend !== "detached") {
+    return { problem: `has "${field}.backend" as ${render(backend)}` };
+  }
+  const pane = found["pane"];
+  // Recovery closes a running reviewer's pane by this name, and status prints a
+  // finished one's. A pane-backed reviewer without one is missing what it is read
+  // for, and a detached one naming one is a wrong record.
+  if (backend === "detached" ? pane !== undefined : !isText(pane)) {
+    return { problem: `has "${field}.pane" as ${render(pane)} for a ${backend} reviewer` };
+  }
+  return { place: { backend, ...(typeof pane === "string" ? { pane } : {}) } };
+}
+
 function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadRecord {
   const host = identityFrom(entry["host"]);
   if (host === undefined) return { problem: `has "host" as ${render(entry["host"])}` };
@@ -200,17 +261,8 @@ function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadReco
   const found = entry["reviewer"];
   if (found === undefined) return { record: { ...shared, status: "reviewing", host } };
   if (!isObject(found)) return { problem: `has "reviewer" as ${render(found)}` };
-
-  const backend = found["backend"];
-  if (backend !== "herdr" && backend !== "tmux" && backend !== "detached") {
-    return { problem: `has "reviewer.backend" as ${render(backend)}` };
-  }
-  const pane = found["pane"];
-  // Recovery closes the pane by this name, so a pane-backed reviewer without one
-  // could not be confirmed gone, and a detached one naming one is a wrong record.
-  if (backend === "detached" ? pane !== undefined : !isText(pane)) {
-    return { problem: `has "reviewer.pane" as ${render(pane)} for a ${backend} reviewer` };
-  }
+  const place = placeFrom(found, "reviewer");
+  if ("problem" in place) return place;
   const started = identityFrom(found["process"]);
   if (started === undefined) return { problem: `has "reviewer.process" as ${render(found["process"])}` };
   const boundEndsAt = found["boundEndsAt"];
@@ -219,8 +271,7 @@ function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadReco
   if (!isText(snapshot)) return { problem: `has "reviewer.snapshot" as ${render(snapshot)}` };
 
   const reviewer: ReviewerSession = {
-    backend,
-    ...(typeof pane === "string" ? { pane } : {}),
+    ...place.place,
     process: started,
     boundEndsAt,
     snapshot,
@@ -229,13 +280,22 @@ function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadReco
 }
 
 function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecord {
+  const read = roundFrom(entry["round"]);
+  if ("problem" in read) return read;
+  const { round } = read;
+  let kept: { round?: ReviewedRound } = {};
+  if (round !== undefined) {
+    const { reviewer } = round;
+    if (reviewer === undefined) return { problem: "is reviewed, and has a round with no reviewer" };
+    kept = { round: { ...round, reviewer } };
+  }
   const result = entry["result"];
   const exitStatus = entry["exitStatus"];
   if (result === "clean, episode open") {
     if (exitStatus !== undefined) {
       return { problem: `is reviewed clean with the episode open, which has no exit status, and has "exitStatus" as ${render(exitStatus)}` };
     }
-    return { record: { ...shared, status: "reviewed", result } };
+    return { record: { ...shared, status: "reviewed", result, ...kept } };
   }
   if (result !== "exited") return { problem: `has "result" as ${render(result)}` };
 
@@ -246,7 +306,7 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
   if (!Array.isArray(openThreads) || !openThreads.every(isText)) {
     return { problem: `has "openThreads" as ${render(openThreads)} rather than an array of thread ids` };
   }
-  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads } };
+  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...kept } };
 }
 
 function identityFrom(found: unknown): ProcessIdentity | undefined {
