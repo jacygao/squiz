@@ -3160,6 +3160,55 @@ test("a failure comment lists the file the killed reviewer changed", async () =>
 });
 
 /**
+ * A reviewer that committed in its snapshot and then never finished, so the bound
+ * kills it.
+ *
+ * The snapshot starts detached at the head commit, so a commit is what moves
+ * `HEAD` there. A bare `git checkout --detach` would leave it where it was.
+ */
+function commitsThenHangs(cost: RoundCost): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", "git commit --quiet --allow-empty --message moved; sleep 30"],
+    parse: hangs(cost).parse,
+  };
+}
+
+test("a killed reviewer that moved HEAD names the move in the failure comment and on stderr (#273)", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: FAILING,
+    reviewer: commitsThenHangs(ANSWER_COST),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out", "the bound ended the round, and nothing before it");
+  const moved = new RegExp(
+    `^\`HEAD\` moved while the reviewer ran: from a detached HEAD at ${ran.head} to a detached HEAD at (?!${ran.head})[0-9a-f]{40}$`,
+    "u",
+  );
+  const items = failureBody(ran)
+    .split("\n")
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2));
+  assert.ok(
+    items.some((item) => moved.test(item)),
+    `the failure comment names no move of the snapshot's HEAD: ${JSON.stringify(items)}`,
+  );
+  const failed = {
+    outcome: "failed",
+    pullRequest: PULL_REQUEST,
+    reason: ran.conclusion.reason,
+    items: failureLinesOf(ran.conclusion),
+  } as const;
+  const stderr = composeReview(failed, "/unwritten").stderr.split("\n");
+  assert.ok(
+    stderr.some((line) => line.startsWith("squiz: ") && moved.test(line.slice("squiz: ".length))),
+    `squiz review's stderr names no move of the snapshot's HEAD: ${JSON.stringify(stderr)}`,
+  );
+});
+
+/**
  * The comment's first line and `squiz review`'s stderr carry one reason, word for
  * word, for every kind of failure that posts a comment. Each item the comment
  * lists is a stderr line too. The stderr is composed from what the round host
