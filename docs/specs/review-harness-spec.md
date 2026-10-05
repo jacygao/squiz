@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.59 (draft)
+**Version:** 0.60 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -351,8 +351,11 @@ flowchart TD
     K -->|yes| D[Print the close, exit 0 or 3]
     K -->|no| R{Record for this commit<br/>and these replies?}
     R -->|reviewed| P[Print its result,<br/>exit as it did]
-    R -->|queued or reviewing| W[squiz review waits;<br/>a hook returns]
-    R -->|none or killed| Q[Queue the state,<br/>start a round host]
+    R -->|queued, or reviewing<br/>by a live host| W[squiz review waits;<br/>a hook returns]
+    R -->|reviewing, host<br/>cannot be told| U[Change nothing;<br/>squiz review exits 1]
+    R -->|none| Q[Queue the state,<br/>start a round host]
+    R -->|reviewing by a<br/>host that has gone| V[Recover the round:<br/>stop its reviewer,<br/>record it failed]
+    V --> X
     R -->|failed| X{squiz review?}
     X -->|yes| Q
     X -->|no, a hook| Y[Queue nothing]
