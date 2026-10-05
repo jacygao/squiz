@@ -176,7 +176,10 @@ const findings: PostedFindings = {
 /** A worktree every round had to itself and left alone. No note at all. */
 const undisturbed: ConfinementEvidence = nothingEstablished;
 
-/** An episode of two rounds, closing at its cap with one thread still open. */
+/**
+ * An episode of two rounds, closing at its cap with one thread still open and a
+ * later state queued behind it.
+ */
 const closing: ClosingRound = {
   pullRequest: PULL_REQUEST,
   rounds: [COST, COST],
@@ -188,6 +191,17 @@ const closing: ClosingRound = {
   findings,
   because: "round-cap",
   confinement: undisturbed,
+  leftNotReviewed: {
+    bound: "round-cap",
+    states: [
+      {
+        head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6",
+        activity: null,
+        status: "not reviewed",
+        reason: "the episode closed at the round cap, after reviewing 3f9c2e0",
+      },
+    ],
+  },
 };
 
 /** A margin with time left on it, which is what a round hands over. */
@@ -214,6 +228,7 @@ test("the body posted is the body the composer wrote for the episode", async () 
         findings,
         because: "round-cap",
         confinement: undisturbed,
+        leftNotReviewed: closing.leftNotReviewed,
       }),
       "the comment is never edited, so a body composed from anything but the episode is permanent",
     );
@@ -241,7 +256,7 @@ test("the composed body carries the counts, the spend, what needs a person and t
         "**Notes**",
         "",
         "- About the change as a whole: The queue duplicates the scheduler",
-        "- The episode ended at its round cap rather than with nothing left open",
+        "- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f",
       ].join("\n"),
     );
   });
@@ -287,7 +302,7 @@ test("a round that could not compare its worktree says so in the comment it post
         "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
           " the worktree is shared with live episode 2f3a",
         "- Another episode was in the worktree while the reviewer ran: 2f3a",
-        "- The episode ended at its round cap rather than with nothing left open",
+        "- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f",
       ].join("\n"),
     );
   });

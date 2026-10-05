@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { renderSummary } from "../github/summary-body.ts";
+import { nothingEstablished } from "./confinement.ts";
 import { decideAfterRound, type EpisodeBounds } from "./round-decision.ts";
 import { decideRoundEnd, type EndedRound, type QueuedRecord } from "./round-end.ts";
 
@@ -8,6 +10,8 @@ const reviewedHead = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
 const laterHead = "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6";
 const laterStill = "c47e19b2a0d3f5e6c7b8a9d0e1f2a3b4c5d6e7f8";
 const reply = "PRRC_kwDOL7tYbc6OmQx7a";
+
+const unspentRound = { dollars: 0, tokens: 0, messages: 0 };
 
 const owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
 
@@ -62,21 +66,24 @@ test("the round cap closes the episode and records each of two queued states not
       exitStatus: 3,
       openThreads: ["PRRT_a"],
     },
-    notReviewed: [
-      {
-        head: laterHead,
-        activity: null,
-        owner: { sessionId: "b-session" },
-        status: "not reviewed",
-        reason: "the episode closed at the round cap, after reviewing 3f9c2e0",
-      },
-      {
-        head: laterStill,
-        activity: reply,
-        status: "not reviewed",
-        reason: "the episode closed at the round cap, after reviewing 3f9c2e0",
-      },
-    ],
+    leftNotReviewed: {
+      bound: "round-cap",
+      states: [
+        {
+          head: laterHead,
+          activity: null,
+          owner: { sessionId: "b-session" },
+          status: "not reviewed",
+          reason: "the episode closed at the round cap, after reviewing 3f9c2e0",
+        },
+        {
+          head: laterStill,
+          activity: reply,
+          status: "not reviewed",
+          reason: "the episode closed at the round cap, after reviewing 3f9c2e0",
+        },
+      ],
+    },
   });
 });
 
@@ -86,8 +93,9 @@ test("the token bound closes the episode and records each of two queued states n
   assert.ok(ended.outcome === "closed");
   assert.equal(ended.because, "token-bound");
   assert.equal(ended.record.result === "exited" && ended.record.exitStatus, 3);
+  assert.equal(ended.leftNotReviewed?.bound, "token-bound");
   assert.deepEqual(
-    ended.notReviewed.map((record) => [record.head, record.status, record.reason]),
+    ended.leftNotReviewed.states.map((record) => [record.head, record.status, record.reason]),
     [
       [laterHead, "not reviewed", "the episode closed at the token bound, after reviewing 3f9c2e0"],
       [laterStill, "not reviewed", "the episode closed at the token bound, after reviewing 3f9c2e0"],
@@ -103,17 +111,39 @@ test("nothing open on the last round closes the episode and records the queued s
   assert.ok(atCap.outcome === "closed", `the cap is spent, and the episode closed as ${atCap.outcome}`);
   assert.equal(atCap.because, "nothing-open");
   assert.equal(atCap.record.result === "exited" && atCap.record.exitStatus, 0);
+  // The bound is named apart from the close, which says only that nothing was open.
+  assert.equal(atCap.leftNotReviewed?.bound, "round-cap");
   assert.deepEqual(
-    atCap.notReviewed.map((record) => record.reason),
+    atCap.leftNotReviewed.states.map((record) => record.reason),
     ["the episode closed at the round cap, after reviewing 3f9c2e0"],
   );
 
   const atBound = decideRoundEnd(roundOf(1, [], bound), bounds, twoQueued.slice(0, 1));
   assert.ok(atBound.outcome === "closed", `the bound is reached, and the episode closed as ${atBound.outcome}`);
   assert.equal(atBound.because, "nothing-open");
+  assert.equal(atBound.leftNotReviewed?.bound, "token-bound");
   assert.deepEqual(
-    atBound.notReviewed.map((record) => record.reason),
+    atBound.leftNotReviewed.states.map((record) => record.reason),
     ["the episode closed at the token bound, after reviewing 3f9c2e0"],
+  );
+});
+
+test("the close of a clean last round hands the summary the cap and the state it stopped", () => {
+  const ended = decideRoundEnd(roundOf(3, []), bounds, twoQueued.slice(0, 1));
+  assert.ok(ended.outcome === "closed");
+  const comment = renderSummary({
+    rounds: [unspentRound, unspentRound, unspentRound],
+    threads: [],
+    findings: { outcomes: [] },
+    because: ended.because,
+    confinement: nothingEstablished,
+    leftNotReviewed: ended.leftNotReviewed,
+  });
+  assert.ok(
+    comment.endsWith(
+      "- The episode ended at its round cap with nothing left open, and did not review 8d21a4f",
+    ),
+    `the cap and the state it stopped were not noted: ${comment}`,
   );
 });
 
@@ -143,7 +173,7 @@ test("with nothing queued, every round ends where the round decision says", () =
     }
     assert.ok(ended.outcome === "closed", `${label} closes today, and ended as ${ended.outcome}`);
     assert.equal(ended.because, today.because, label);
-    assert.deepEqual(ended.notReviewed, [], label);
+    assert.equal(ended.leftNotReviewed, null, label);
     assert.equal(
       ended.record.result === "exited" && ended.record.exitStatus,
       round.openThreads.length === 0 ? 0 : 3,

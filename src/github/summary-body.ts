@@ -21,6 +21,7 @@ import type { ConfinementEvidence } from "../loop/confinement.ts";
 import type { RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
+import type { LeftNotReviewed, StoppingBound } from "../loop/round-end.ts";
 import { renderSpendLine } from "./spend-line.ts";
 
 /** What the episode came to, which is everything the comment is written from. */
@@ -50,6 +51,11 @@ export type ClosedEpisode = {
    * comment, so a file it found changed is named here or nowhere.
    */
   readonly confinement: ConfinementEvidence;
+  /**
+   * The queued states the close recorded not reviewed, and the bound that
+   * stopped them. `null` where nothing was queued.
+   */
+  readonly leftNotReviewed: LeftNotReviewed | null;
 };
 
 /**
@@ -187,7 +193,7 @@ function notes(episode: ClosedEpisode): readonly string[] {
     ...unthreaded(episode.findings).map(noteLine),
     ...worktreeNotes(episode.confinement).map((note) => `- ${note}`),
     ...cutShort(episode.rounds),
-    ...closedEarly(episode.because),
+    ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
@@ -336,22 +342,41 @@ function where(finding: Finding): string | undefined {
 }
 
 /**
- * The bound that ended the episode, where one did.
+ * The bound that ended the episode, where one did, and each queued state it left
+ * not reviewed.
  *
  * An episode that closed with nothing left open closed because the review was
  * finished, which is not a note. A bound is, because it says the findings above
  * it were never reviewed again.
+ *
+ * A bound that stopped a queued state is a note even where nothing was left
+ * open, because no other line of the comment says that state was never read.
+ * The line then names the bound from `left`, since `because` names none.
  */
-function closedEarly(because: ClosingReason | null): readonly string[] {
-  switch (because) {
-    case "round-cap":
-      return ["- The episode ended at its round cap rather than with nothing left open"];
-    case "token-bound":
-      return ["- The episode ended at the token bound rather than with nothing left open"];
-    case "nothing-open":
-    case null:
-      return [];
+function closedEarly(
+  because: ClosingReason | null,
+  left: LeftNotReviewed | null,
+): readonly string[] {
+  const closedAtBound = because === "round-cap" || because === "token-bound";
+  if (left === null) {
+    if (!closedAtBound) return [];
+    return [`- The episode ended at ${boundName(because)} rather than with nothing left open`];
   }
+  const how = closedAtBound
+    ? `${boundName(because)} rather than with nothing left open`
+    : `${boundName(left.bound)} with nothing left open`;
+  const heads = left.states.map((state) => state.head.slice(0, 7));
+  return [`- The episode ended at ${how}, and did not review ${eitherOf(heads)}`];
+}
+
+function boundName(bound: StoppingBound): string {
+  return bound === "round-cap" ? "its round cap" : "the token bound";
+}
+
+/** `a`, `a or b`, or `a, b or c`. */
+function eitherOf(items: readonly string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
 }
 
 /** How many of `thing` there are, the plural agreeing with the number. */

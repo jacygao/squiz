@@ -22,6 +22,22 @@ export type ReviewedRecord = Extract<StateRecord, { readonly status: "reviewed" 
 
 export type NotReviewedRecord = Extract<StateRecord, { readonly status: "not reviewed" }>;
 
+/** A bound that can stop a queued state from being reviewed. */
+export type StoppingBound = Exclude<ClosingReason, "nothing-open">;
+
+/**
+ * The queued states a close recorded not reviewed, in queue order, and the bound
+ * that left no round for them.
+ *
+ * The bound is not always the close's reason. A last round that left nothing
+ * open closes as `nothing-open`, and the cap or the token bound still stopped
+ * the states behind it.
+ */
+export type LeftNotReviewed = {
+  readonly bound: StoppingBound;
+  readonly states: readonly NotReviewedRecord[];
+};
+
 /** The round that has just finished, as its own state's record needs it. */
 export type EndedRound = {
   /** The state the round reviewed, with the owner its record carries where it has one. */
@@ -45,12 +61,15 @@ export type RoundEnd =
    * is no close, no summary and no note for the owner.
    */
   | { readonly outcome: "reviewed clean, episode open"; readonly record: ReviewedRecord }
-  /** The episode closes. Each queued state is recorded not reviewed, in queue order. */
+  /**
+   * The episode closes. Each queued state is recorded not reviewed, and
+   * `leftNotReviewed` is `null` exactly where nothing was queued.
+   */
   | {
       readonly outcome: "closed";
       readonly because: ClosingReason;
       readonly record: ReviewedRecord;
-      readonly notReviewed: readonly NotReviewedRecord[];
+      readonly leftNotReviewed: LeftNotReviewed | null;
     };
 
 /**
@@ -73,7 +92,7 @@ export function decideRoundEnd(
   if (decision.because !== "nothing-open") {
     return closed(round, decision.because, notReviewed(queued, decision.because, round));
   }
-  if (queued.length === 0) return closed(round, "nothing-open", []);
+  if (queued.length === 0) return closed(round, "nothing-open", null);
 
   // Asked as though the round had left work, the decision says whether the cap
   // and the bound allow the round the queued state needs.
@@ -97,10 +116,10 @@ export function decideRoundEnd(
 function closed(
   round: EndedRound,
   because: ClosingReason,
-  stopped: readonly NotReviewedRecord[],
+  leftNotReviewed: LeftNotReviewed | null,
 ): RoundEnd {
   const exitStatus = round.openThreads.length === 0 ? 0 : 3;
-  return { outcome: "closed", because, record: exited(round, exitStatus), notReviewed: stopped };
+  return { outcome: "closed", because, record: exited(round, exitStatus), leftNotReviewed };
 }
 
 function exited(round: EndedRound, exitStatus: 0 | 2 | 3): ReviewedRecord {
@@ -115,10 +134,14 @@ function exited(round: EndedRound, exitStatus: 0 | 2 | 3): ReviewedRecord {
 
 function notReviewed(
   queued: readonly QueuedRecord[],
-  bound: Exclude<ClosingReason, "nothing-open">,
+  bound: StoppingBound,
   round: EndedRound,
-): NotReviewedRecord[] {
+): LeftNotReviewed | null {
+  if (queued.length === 0) return null;
   const at = bound === "round-cap" ? "the round cap" : "the token bound";
   const reason = `the episode closed at ${at}, after reviewing ${round.state.head.slice(0, 7)}`;
-  return queued.map(({ status: _queued, ...state }) => ({ ...state, status: "not reviewed", reason }));
+  const states = queued.map(
+    ({ status: _queued, ...state }): NotReviewedRecord => ({ ...state, status: "not reviewed", reason }),
+  );
+  return { bound, states };
 }

@@ -934,6 +934,8 @@ function closeAfterReview(
       // that blocked posted no comment, so a file it found changed is named here
       // or nowhere.
       confinement: state.confinement ?? nothingEstablished,
+      // This round reads no queue, so no state queued behind it is stopped.
+      leftNotReviewed: null,
     },
     { directory: on.directory, until: on.margin },
   );

@@ -65,6 +65,7 @@ const quiet: ClosedEpisode = {
   findings: posted(),
   because: "nothing-open",
   confinement: undisturbed,
+  leftNotReviewed: null,
 };
 
 /**
@@ -122,6 +123,7 @@ test("the episode renders as the specification shows", () => {
     ),
     because: "nothing-open",
     confinement: { ...undisturbed, changed: ["packages/sync/src/queue.test.ts"] },
+    leftNotReviewed: null,
   };
 
   assert.equal(
@@ -365,6 +367,106 @@ test("the token bound is a note", () => {
   assert.ok(
     comment.endsWith("- The episode ended at the token bound rather than with nothing left open"),
     `the token bound was not noted: ${comment}`,
+  );
+});
+
+/** States queued behind the closing round, each a different head commit. */
+const later = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null };
+const laterStill = { head: "c47e19b2a0d3f5e6c7b8a9d0e1f2a3b4c5d6e7f8", activity: "PRRC_kwDOL7tYbc6OmQx7a" };
+
+/** A state the close recorded not reviewed, with the reason its record carries. */
+function stopped(state: typeof later | typeof laterStill, at: string) {
+  const reason = `the episode closed at ${at}, after reviewing 3f9c2e0`;
+  return { ...state, status: "not reviewed", reason } as const;
+}
+
+test("the round cap names each state it left not reviewed, after threads were left open", () => {
+  const comment = renderSummary({
+    ...quiet,
+    threads: [thread("open", "src/queue.ts:134")],
+    because: "round-cap",
+    leftNotReviewed: {
+      bound: "round-cap",
+      states: [stopped(later, "the round cap"), stopped(laterStill, "the round cap")],
+    },
+  });
+  assert.ok(
+    comment.endsWith(
+      "**Notes**\n\n" +
+        "- The episode ended at its round cap rather than with nothing left open," +
+        " and did not review 8d21a4f or c47e19b",
+    ),
+    `the states the cap left were not named: ${comment}`,
+  );
+});
+
+test("the token bound names the state it left not reviewed, after threads were left open", () => {
+  const comment = renderSummary({
+    ...quiet,
+    threads: [thread("open", "src/queue.ts:134")],
+    because: "token-bound",
+    leftNotReviewed: { bound: "token-bound", states: [stopped(later, "the token bound")] },
+  });
+  assert.ok(
+    comment.endsWith(
+      "**Notes**\n\n" +
+        "- The episode ended at the token bound rather than with nothing left open," +
+        " and did not review 8d21a4f",
+    ),
+    `the state the bound left was not named: ${comment}`,
+  );
+});
+
+/**
+ * The close is `nothing-open`, which alone is no note. The cap still stopped the
+ * queued state, and the note is the only place a person learns of it.
+ */
+test("the round cap names the state it left not reviewed, after nothing was left open", () => {
+  const comment = renderSummary({
+    ...quiet,
+    because: "nothing-open",
+    leftNotReviewed: { bound: "round-cap", states: [stopped(later, "the round cap")] },
+  });
+  assert.equal(
+    comment,
+    [
+      ...quietOpens,
+      "- The episode ended at its round cap with nothing left open, and did not review 8d21a4f",
+    ].join("\n"),
+  );
+});
+
+test("the token bound names each state it left not reviewed, after nothing was left open", () => {
+  const comment = renderSummary({
+    ...quiet,
+    because: "nothing-open",
+    leftNotReviewed: {
+      bound: "token-bound",
+      states: [stopped(later, "the token bound"), stopped(laterStill, "the token bound")],
+    },
+  });
+  assert.equal(
+    comment,
+    [
+      ...quietOpens,
+      "- The episode ended at the token bound with nothing left open," +
+        " and did not review 8d21a4f or c47e19b",
+    ].join("\n"),
+  );
+});
+
+test("three states left not reviewed are listed with a comma and an or", () => {
+  const third = { head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567", activity: null };
+  const comment = renderSummary({
+    ...quiet,
+    leftNotReviewed: {
+      bound: "round-cap",
+      states: [stopped(later, "the round cap"), stopped(laterStill, "the round cap"), stopped(third, "the round cap")],
+    },
+  });
+  assert.ok(
+    comment.endsWith("and did not review 8d21a4f, c47e19b or 0a1b2c3"),
+    `the three states were not listed: ${comment}`,
   );
 });
 
