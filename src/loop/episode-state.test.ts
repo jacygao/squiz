@@ -155,9 +155,7 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "confinement": "src/card.ts"}`,
   `{"rounds": [], "confinement": {"changed": "src/card.ts"}}`,
   `{"rounds": [], "confinement": {"changed": [3]}}`,
-  `{"rounds": [], "confinement": {"shared": {}}}`,
   `{"rounds": [], "confinement": {"uncompared": [null]}}`,
-  `{"rounds": [], "confinement": {"unestablished": 1}}`,
   // How long a round ran and posted, and the bound that cut it short, are the measurements a
   // later reading takes from this file. A figure that is there and cannot be read
   // would be a measurement nobody took.
@@ -287,8 +285,8 @@ test("a reported close is written and comes back, and one never written is absen
 
 /**
  * What the rounds established about the worktree outlives the rounds, because a
- * round that blocks posts no comment. The closing round composes the summary from
- * this.
+ * round that leaves threads open posts no summary. The closing round composes the
+ * summary from this.
  */
 test("what the rounds established about the worktree is written and comes back", (t) => {
   const episode = episodeIn(t);
@@ -298,9 +296,7 @@ test("what the rounds established about the worktree is written and comes back",
     confinement: {
       changed: ["src/card.ts"],
       moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
-      uncompared: ["the worktree is shared with live episode ef56ab78"],
-      shared: ["ef56ab78"],
-      unestablished: ["ps was killed by SIGKILL"],
+      uncompared: ["the round had too little of its window left to read the worktree"],
     },
   };
 
@@ -339,12 +335,10 @@ test("a state file naming some of the worktree lists reads the ones it names", (
     changed: ["src/card.ts"],
     moved: [],
     uncompared: [],
-    shared: [],
-    unestablished: [],
   });
 });
 
-// A file written before HEAD was compared carries the four lists it had, and the
+// A file written before HEAD was compared carries the lists it had, and the
 // episode it belongs to has run rounds the bound counts.
 test("a state file written before HEAD was compared reads with no move", (t) => {
   const episode = episodeIn(t);
@@ -372,8 +366,41 @@ test("a state file written before HEAD was compared reads with no move", (t) => 
         changed: ["src/card.ts"],
         moved: [],
         uncompared: [],
+      },
+    },
+  });
+});
+
+// A live episode's state file can still hold the lists of the other episodes it
+// found and of why it could not tell, which earlier versions kept. Unreadable,
+// it would end every round of that episode before the reviewer ran.
+test("a state file holding the other-episodes and could-not-tell lists reads without them", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(
+    episode.stateFile,
+    JSON.stringify({
+      rounds: [firstRound],
+      spentOutsideRounds: unspent,
+      confinement: {
+        changed: ["src/card.ts"],
+        moved: [],
+        uncompared: ["the worktree is shared with live episode ef56ab78"],
         shared: ["ef56ab78"],
-        unestablished: [],
+        unestablished: ["ps was killed by SIGKILL"],
+      },
+    }),
+  );
+
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: {
+      rounds: [firstRound],
+      spentOutsideRounds: unspent,
+      confinement: {
+        changed: ["src/card.ts"],
+        moved: [],
+        uncompared: ["the worktree is shared with live episode ef56ab78"],
       },
     },
   });

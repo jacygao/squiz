@@ -618,7 +618,7 @@ test("every move of HEAD is named in Notes, after the files that changed", () =>
  */
 test("a comparison the round never took does not read as a worktree nothing changed", () => {
   const comment = aboutTheWorktree({
-    uncompared: ["the worktree is shared with live episode 91bc"],
+    uncompared: ["the round had too little of its window left to read the worktree"],
   });
 
   assert.equal(
@@ -626,7 +626,7 @@ test("a comparison the round never took does not read as a worktree nothing chan
     [
       ...quietOpens,
       "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the worktree is shared with live episode 91bc",
+        " the round had too little of its window left to read the worktree",
     ].join("\n"),
   );
   assert.notEqual(
@@ -655,79 +655,6 @@ test("a comparison that was taken and could not be had says so", () => {
     comment,
     renderSummary(quiet),
     "a comparison that could not be had composed the comment of one that found nothing",
-  );
-});
-
-test("the other episodes in the worktree are named where the tree was shared", () => {
-  assert.equal(
-    aboutTheWorktree({
-      shared: ["2f3a", "91bc"],
-      uncompared: ["the worktree is shared with live episodes 2f3a, 91bc"],
-    }),
-    [
-      ...quietOpens,
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the worktree is shared with live episodes 2f3a, 91bc",
-      "- Other episodes were in the worktree while the reviewer ran: 2f3a, 91bc",
-    ].join("\n"),
-  );
-});
-
-test("one other episode in the worktree reads as one", () => {
-  assert.equal(
-    aboutTheWorktree({
-      shared: ["2f3a"],
-      uncompared: ["the worktree is shared with live episode 2f3a"],
-    }),
-    [
-      ...quietOpens,
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the worktree is shared with live episode 2f3a",
-      "- Another episode was in the worktree while the reviewer ran: 2f3a",
-    ].join("\n"),
-  );
-});
-
-// A tree nothing could be established about is not a tree the round had to
-// itself, and the comparison above the line is only worth what this answer is.
-test("a round that could not tell who else was in the worktree says so", () => {
-  const comment = aboutTheWorktree({
-    unestablished: ["ps was killed by SIGKILL"],
-    uncompared: [
-      "the live episodes of the worktree could not be established: ps was killed by SIGKILL",
-    ],
-  });
-
-  assert.equal(
-    comment,
-    [
-      ...quietOpens,
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the live episodes of the worktree could not be established: ps was killed by SIGKILL",
-      "- A round could not tell whether another episode was in the worktree" +
-        " while the reviewer ran: ps was killed by SIGKILL",
-    ].join("\n"),
-  );
-  assert.notEqual(
-    comment,
-    renderSummary(quiet),
-    "a round that could not tell who else was here composed the comment of a round that was alone",
-  );
-});
-
-/**
- * The two answers arrive separately and each is its own line, so a composer that
- * stopped after the first would write a comment that is not wrong, only
- * incomplete.
- */
-test("a shared worktree and a changed file are both carried", () => {
-  assert.equal(
-    aboutTheWorktree({ changed: ["src/queue.ts"], shared: ["2f3a"] }),
-    [
-      ...quietOpens,
-      "- A file changed in the worktree while the reviewer ran: `src/queue.ts`",
-      "- Another episode was in the worktree while the reviewer ran: 2f3a",
-    ].join("\n"),
   );
 });
 

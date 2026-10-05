@@ -278,8 +278,7 @@ test("a round that could not compare its worktree says so in the comment it post
         ...closing,
         confinement: {
           ...nothingEstablished,
-          shared: ["2f3a"],
-          uncompared: ["the worktree is shared with live episode 2f3a"],
+          uncompared: ["the reading before could not be taken: git exited 128"],
         },
       },
       margin(),
@@ -301,8 +300,7 @@ test("a round that could not compare its worktree says so in the comment it post
         "",
         "- About the change as a whole: The queue duplicates the scheduler",
         "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-          " the worktree is shared with live episode 2f3a",
-        "- Another episode was in the worktree while the reviewer ran: 2f3a",
+          " the reading before could not be taken: git exited 128",
         "- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f",
       ].join("\n"),
     );
