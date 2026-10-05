@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.70 (draft)
+**Version:** 0.71 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -189,7 +189,7 @@ long ago anything happened.
 `.squiz/<number>/` inside the worktree. The state file holds the round count, the
 cost of each round, what the episode spent on attempts that were no round,
 whether the episode has reported its close and what was open at that close, and
-what its rounds established about the worktree. The directory also holds:
+what its rounds' comparisons established. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
   handed, the report file the reviewer's extension writes, the reviewer's `pi`
@@ -380,10 +380,9 @@ never reviewed starts no round once the close is recorded; it prints the close,
 as § 6 shows. A second episode on the same pull request starts in another
 worktree on the same branch, which holds no state for it.
 
-What the rounds established about the worktree is four lists: the tracked paths
-any round found changed, the other episodes any round found in the worktree, why a
-round could take no comparison, and why a round could not tell who else was there.
-The summary comment's Notes are composed from all four.
+What the rounds' comparisons established is three lists: the tracked paths any
+round found changed, each move of `HEAD` any round found, and why a round could
+take no comparison. The summary comment's Notes are composed from all three.
 
 Each list holds an entry once, however many rounds gave it, and stops at
 sixty-four entries. One round can reach that on its own, because one reading can
@@ -397,10 +396,6 @@ the comment the closing round posts.
 
 The state file is gitignored with the rest of `.squiz/`, so the comparison of
 tracked files under Confinement never reads it as a change.
-
-**The reviewing record is what makes an episode's first round visible.** It is
-written before the reviewer starts, so a second episode starting during a first
-round finds it and does not read the worktree as its own.
 
 ### End-to-end workflow
 
@@ -729,30 +724,13 @@ whose worktree is gone exits. The episode's state
 goes with the worktree, and nothing in it outlives the worktree, because the pull
 request holds the findings.
 
-**A reviewer's snapshot is its own, so no shared tree reaches the comparison.**
-The shared-tree detection below is in the list of what reviewer sessions make
-redundant (§ 8), and is removed with it.
-
-Where a tree is shared, the harness detects it by resolving
-`git rev-parse --show-toplevel` and comparing it against the live episodes. Two
-live episodes on one toplevel means a shared tree. Under the key above they are
-two pull requests' episodes, which one tree holds when its `HEAD` moved to another
-branch while the first episode was live. The round still runs, the summary comment
-names the other episodes that were in flight, and the tracked-file comparison
-under Confinement is disabled for that round.
-
-An episode whose round died without recording a close is live by the definition
-above, so it counts. A worktree holding one therefore has the comparison disabled
-for every episode after it, until that episode's directory is gone. This is the
-direction to be wrong in: the comparison reports a tracked file that changed, and
-reading a live episode as over runs it against a tree another coding agent is
-editing, which names a file the reviewer never touched. Reading an abandoned
-episode as live only means nothing is detected that round.
+**A reviewer's snapshot is its own, so a tree two episodes share reaches neither
+comparison.** One tree holds two pull requests' episodes when its `HEAD` moved to
+another branch while the first episode was live. Each keeps its state under its
+own number, and each reviewer reads a snapshot that only it writes.
 
 **Two coding agents on one branch in one tree share one episode, and nothing tells
-them apart.** They spend one round cap between them, and a round's comparison is
-taken while the other agent may be editing, which names that agent's work as the
-reviewer's. Nothing detects this.
+them apart.** They spend one round cap between them. Nothing detects this.
 
 ## 4. The reviewer
 
@@ -1546,9 +1524,8 @@ Three blocks, in this order.
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
    finding carries; a tracked file that changed while the reviewer ran; a `HEAD`
-   that moved while the reviewer ran, with what it was and what it became; other
-   episodes that shared the worktree; a round that could not tell whether the
-   worktree was shared or what changed in it; a round whose review the time
+   that moved while the reviewer ran, with what it was and what it became; a
+   round that could take no comparison, with why; a round whose review the time
    bound cut short, with the round's number and the bound; and a cap or bound
    that ended the episode early, with each queued state it left not reviewed.
 
@@ -1556,14 +1533,13 @@ A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
 a comment that left it out would read as a review that found nothing there.
 
-A round that could not tell says so, rather than saying nothing. Both answers it
-gives have three values and not two: the worktree was shared, was not, or could
-not be established; and a tracked file changed or `HEAD` moved, neither
+A round that could not tell says so, rather than saying nothing. Its comparison
+has three answers and not two: a tracked file changed or `HEAD` moved, neither
 happened, or no comparison could be taken. A comment that renders "none" and
 "could not tell" alike reports a review nothing checked as a review that found
 nothing wrong.
 
-**The Notes items about the worktree cover every round of the episode, not the
+**The Notes items from the comparison cover every round of the episode, not the
 round that closed it.** A round that leaves threads open posts no summary, so a
 file it found changed, or a `HEAD` it found moved, is named in the closing round's
 comment or nowhere. Each round adds what its readings found to the episode's state, and the
@@ -2059,8 +2035,8 @@ nothing retries one.
 
 A round that fails posts one issue-level comment on the pull request saying so. It
 names what failed, and lists what else the round established: a tracked file that
-changed or a `HEAD` that moved while the reviewer ran, other episodes in the
-worktree, and a comparison that could not be taken. A round that salvaged findings
+changed or a `HEAD` that moved while the reviewer ran, and a comparison that
+could not be taken. A round that salvaged findings
 says how many it posted as threads.
 
 ```markdown
@@ -2269,7 +2245,7 @@ src/
   host/                      the round host, which takes queued states and runs their rounds
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, and the note and its wake; no review knowledge
   loop/                      episode state, round cap, verdict decisions
-  worktree/                  toplevel resolution, shared-tree detection
+  worktree/                  toplevel resolution, the reviewer's snapshot, and reading its tracked files
   reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first
   github/                    the pull request, threads, replies, resolve and re-open, summary
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
@@ -2293,33 +2269,6 @@ A test sits beside the code it tests, named for it: `src/config/config.ts` is
 tested by `src/config/config.test.ts`. One `include` then covers the code and
 its tests together, and a directory lists what it holds beside how it is
 checked.
-
-### What reviewer sessions make redundant
-
-The cleanup that follows this design removes each of these, in the spec and in
-the code:
-
-- **The hook-path timing and windows.** The 600-second window a hook's round ran
-  in, its 540-second reviewer cap, and the per-path `timeout` cap, in
-  `src/loop/window.ts` and in the hook's registration test. No round runs inside
-  a hook or a shell call.
-- **The hand-back assumptions.** The hook's exit-2 block and the blocking reason
-  it carried, in `src/loop/reason.ts`; the table mapping a review's exit to the
-  hook's; and the reading that auto mode drops a block after the hand-back. The
-  hooks never block, and the report goes to a live session.
-- **Duplicate-episode handling.** Shared-tree detection in
-  `src/worktree/shared-tree.ts`, the other-episodes and could-not-tell lists the
-  state file keeps for it, the Notes items built from them, and the comparison
-  switched off in a shared tree. The snapshot gives each reviewer a tree only it
-  writes, and one review per state already stops a second firing from starting a
-  second round.
-- **The reviewer as a child of the hook.** The round started from `squiz hook`
-  in `src/hook/hook.ts`, and the reliance on the runtime signalling the hook's
-  process tree to stop a reviewer. The round host is the reviewer's parent or
-  closes its pane.
-- **The watchdog-driven bounds.** Sizing any bound against the subagent stall
-  threshold, `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`, and the test holding the
-  hook's window to its declared timeout. No hook holds a subagent.
 
 ### What ships
 
@@ -2349,7 +2298,6 @@ until something asks.
 | **P1** | The tracked-file comparison | `git status`, the hashes of tracked files, and `HEAD`, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
-| **P1** | Shared-tree detection | Two live episodes on one toplevel, which disables the tracked-file comparison for that round |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review` |
 | **P1** | `squiz init` | Adds the review section to `AGENTS.md`, for coding agents other than Claude Code |
