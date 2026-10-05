@@ -293,6 +293,47 @@ test("a command Herdr would not start failed, and its pane is closed", () => {
   );
 });
 
+test("a pane whose shell is not yet at its prompt is waited for, and the command starts once", () => {
+  withFakeHerdr(
+    {
+      "tab-create": [tabCreated("w1:p7")],
+      "agent-start": [refusal("agent_pane_busy"), refusal("agent_pane_busy"), agentStarted("squiz-test", "w1:p7")],
+      "pane-process-info": [processInfo("w1:p7", process.pid, 1)],
+    },
+    ({ options, calls }) => {
+      const started = startInHerdrPane(command, options);
+
+      assert.equal(started.outcome, "started", JSON.stringify(started));
+      const starts = calls().filter((call) => call.startsWith("agent start "));
+      assert.equal(starts.length, 3, calls().join("; "));
+      assert.equal(calls().filter((call) => call.startsWith("pane close ")).length, 0, calls().join("; "));
+    },
+  );
+});
+
+test("a pane still busy when the bound runs out failed with the reason, and is closed", () => {
+  withFakeHerdr(
+    {
+      "tab-create": [tabCreated("w1:p7")],
+      "agent-start": [refusal("agent_pane_busy")],
+      "pane-close": [closedOk],
+      "pane-get": [refusal("pane_not_found")],
+    },
+    ({ options, calls }) => {
+      const begun = Date.now();
+      const started = startInHerdrPane(command, { ...options, boundMs: 1_000 });
+      const elapsedMs = Date.now() - begun;
+
+      assert.equal(started.outcome, "failed", JSON.stringify(started));
+      assert.match("reason" in started ? started.reason : "", /agent_pane_busy/u);
+      assert.equal("paneLeftOpen" in started, false, JSON.stringify(started));
+      assert.ok(calls().filter((call) => call.startsWith("agent start ")).length > 1, calls().join("; "));
+      assert.ok(elapsedMs >= 1_000 && elapsedMs < 5_000, `the busy pane was waited on for ${elapsedMs}ms`);
+      assert.deepEqual(calls().slice(-2), ["pane close w1:p7", "pane get w1:p7"]);
+    },
+  );
+});
+
 test("a foreground group that is the shell's is never returned, and the pane is closed", () => {
   withFakeHerdr(
     {
@@ -442,10 +483,13 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
       "utf8",
     );
     chmodSync(join(fakes, "pi"), 0o755);
+    // Holds a pane's shell back from its prompt, as a person's slow dotfiles
+    // would, wherever the tab sets SHELL_STARTS_IN.
+    writeFileSync(join(home, ".zshenv"), '[ -n "$SHELL_STARTS_IN" ] && sleep "$SHELL_STARTS_IN"\n', "utf8");
 
     const socket = join(home, ".config", "herdr", "sessions", session, "herdr.sock");
-    // The pane's shell reads this home's dotfiles, of which there are none, so
-    // `pi` is the fake wherever the system's profile puts it on the path.
+    // The pane's shell reads this home's dotfiles, which leave the path alone,
+    // so `pi` is the fake wherever the system's profile puts it on the path.
     server = spawn(herdrPath, ["--session", session, "server"], {
       env: environmentFor({ PATH: `${fakes}:/usr/bin:/bin` }) as NodeJS.ProcessEnv,
       stdio: "ignore",
@@ -546,6 +590,26 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     if (started.outcome !== "started") return;
     try {
       assert.equal(readFileSync(markFile, "utf8"), variables.SESSION_MARK);
+    } finally {
+      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
+    }
+  });
+
+  test("a pane whose shell is slow to reach its prompt still starts the command, once", () => {
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    const pidFile = join(home, "slow-shell.pid");
+    const started = startInHerdrPane(
+      { ...fakeCommand("squiz-slow-shell", pidFile, 60), variables: { SHELL_STARTS_IN: "2" } },
+      options,
+    );
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    if (started.outcome !== "started") return;
+    try {
+      assert.equal(started.leader.pid, Number(readFileSync(pidFile, "utf8").trim()));
+      const agents = JSON.parse(herdr(["agent", "list"]).output).result.agents;
+      const named = agents.filter((agent: { name?: string }) => agent.name === "squiz-slow-shell");
+      assert.equal(named.length, 1, JSON.stringify(agents));
     } finally {
       assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
     }

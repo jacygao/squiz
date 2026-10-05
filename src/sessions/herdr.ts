@@ -29,7 +29,10 @@ export type HerdrEnvironment = Readonly<Record<string, string | undefined>>;
 export type HerdrOptions = {
   /** What every `herdr` runs with. Its `HERDR_SOCKET_PATH` names the server. */
   readonly environment: HerdrEnvironment;
-  /** Bounds each `herdr` and `ps` this runs. One cut short could not tell what it did. */
+  /**
+   * Bounds each `herdr` and `ps` this runs, since one cut short could not tell
+   * what it did. Also bounds the wait for a new pane's shell to reach its prompt.
+   */
   readonly boundMs: number;
 };
 
@@ -101,23 +104,33 @@ export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): P
     return { outcome: "failed", reason: `herdr tab create named no pane: ${JSON.stringify(created.result)}` };
   }
 
-  const agent = herdr(
-    [
-      "agent",
-      "start",
-      command.name,
-      "--kind",
-      command.kind,
-      "--pane",
-      pane,
-      "--timeout",
-      String(command.readyWithinMs),
-      "--",
-      ...command.arguments,
-    ],
-    options.environment,
-    command.readyWithinMs + options.boundMs,
-  );
+  const start = [
+    "agent",
+    "start",
+    command.name,
+    "--kind",
+    command.kind,
+    "--pane",
+    pane,
+    "--timeout",
+    String(command.readyWithinMs),
+    "--",
+    ...command.arguments,
+  ];
+  // A new pane's shell is busy with its own startup for a while, and Herdr
+  // refuses with `agent_pane_busy` until it is at its prompt. That refusal is
+  // given before Herdr sends the pane anything, so asking again cannot start
+  // the command twice.
+  const busyUntil = Date.now() + options.boundMs;
+  let agent = herdr(start, options.environment, command.readyWithinMs + options.boundMs);
+  while (agent.outcome === "refused" && agent.code === "agent_pane_busy" && Date.now() < busyUntil) {
+    pause(BUSY_RETRY_MS);
+    agent = herdr(start, options.environment, command.readyWithinMs + options.boundMs);
+  }
+  if (agent.outcome === "refused" && agent.code === "agent_pane_busy") {
+    const reason = `herdr agent start: ${describe(agent)}, still after ${options.boundMs}ms of asking again`;
+    return abandon(pane, reason, options);
+  }
   if (agent.outcome !== "answered") return abandon(pane, `herdr agent start: ${describe(agent)}`, options);
   if (field(agent.result, "type") !== "agent_started") {
     return abandon(pane, `herdr agent start did not say it started: ${JSON.stringify(agent.result)}`, options);
@@ -157,6 +170,13 @@ function abandon(pane: string, reason: string, options: HerdrOptions): PaneStart
   const closed = closeHerdrPane(pane, options);
   if (closed.outcome === "closed") return { outcome: "failed", reason };
   return { outcome: "failed", reason: `${reason}; and ${closed.reason}`, paneLeftOpen: pane };
+}
+
+const BUSY_RETRY_MS = 100;
+
+/** Block this thread for `ms`. The start is synchronous throughout, so there is nothing to yield to. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 type GroupRead =
