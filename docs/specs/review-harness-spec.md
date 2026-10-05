@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.58 (draft)
+**Version:** 0.59 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -221,14 +221,20 @@ Each record is in one of five states:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. |
-| Failed | The reason the round failed, and whether its owner has been sent a note about it. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window, which `squiz status` prints. |
+| Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, and why. |
 
 A record also names the session that owns the work, where a trigger knew it:
 the session's identifier, the subagent that did the work where one did, and the
 session's messaging socket where the hook found one. The Claude Code hooks
 record it, and `squiz review` records none.
+
+A record also carries the Herdr workspace the trigger ran in, from the
+`HERDR_WORKSPACE_ID` in its environment, where it has one. Herdr sets it in every
+pane it manages, so a hook or a `squiz review` run from the coding agent's pane
+finds the coding agent's workspace. The reviewer's tab opens there (§ 4 The
+reviewer session).
 
 **A trigger reads the record for the pull request's state before it queues
 anything.** It has looked up the pull request and listed its threads by then,
@@ -717,7 +723,7 @@ it.** The round host starts it in the first place that applies:
 
 | Where | How the round host starts it |
 |---|---|
-| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus` gives a pane, and `herdr agent start squiz-41-r2 --kind pi --pane <pane> -- <pi arguments>` starts `pi` in it |
+| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus --workspace <id>` gives a pane, in the workspace the state's record names, and in the focused workspace where it names none, and `herdr agent start squiz-41-r2 --kind pi --pane <pane> -- <pi arguments>` starts `pi` in it |
 | tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<pi command line>'` |
 | Neither | As a child of the round host, with no terminal |
 
