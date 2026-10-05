@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.73 (draft)
+**Version:** 0.74 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2307,8 +2307,7 @@ coding agent is told to run the command. The reviewer it checks for is the one
 **Every failure the harness controls ends the command with a status the coding
 agent can read.** A run that could not review exits 1. A failure that leaves the
 round's outcome standing keeps the outcome's status, 0, 2 or 3, and adds a line on
-stderr. A command stopped from outside ends only its own wait: the round runs in
-the round host and goes on.
+stderr.
 
 **A failure is always announced, on the pull request where GitHub can be
 reached.** Silence must never read as a clean review. A round that fails posts a
@@ -2331,7 +2330,7 @@ nothing retries one.
 
 | Failure | Behaviour |
 |---|---|
-| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. A missing Copilot arrives instead as a Copilot adapter run that completed no message, because the line the round starts is `sh`, and is reported as a setup problem by the row below. Detached, its reason carries `sh`'s complaint that `copilot` was not found; in a pane it names no cause. |
+| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. A missing Copilot arrives instead as a Copilot adapter run that completed no message, because the line the round starts is `sh`, and is reported as a setup problem by the row below. |
 | The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. The failure comment and stderr carry the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The reviewer's output cannot be read, and no retry recovers it | Exit 1, and what the reviewer reported before its output stopped being readable is posted. The failure comment and stderr say the review did not run. A retry whose output cannot be read either and a first attempt that left no time for a retry both arrive here. |
 | The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. |
@@ -2414,27 +2413,11 @@ The review budget bounds a review two ways. Both are configurable.
 | **Time**, per round | 900 seconds | The reviewer is stopped, the round records that the bound cut it short, and it posts the findings reported before the stop. |
 | **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
-Killing the reviewer yields the findings it had reported by then, because a
-finding arrives in the call that reports it rather than at the end of the run. A
-round killed a second after a finding was confirmed has that finding, and what
-the reviewer had not got to is not a thing the round has.
-
-The kill also yields a cost. For `pi`, the assistant messages that completed
-carry their own, and the round records that sum as its last tracked cost. The
-findings and the figure are read from the same moment of the run, so a round
-never reports a cost from one moment beside findings from another.
-
-**A killed Copilot round yields no cost.** Copilot reports nothing per call,
-and a round records its totals only where Copilot ended by itself. A round the
-time bound stopped, by `SIGTERM` or `SIGKILL`, records no cost, so it counts
-nothing against the token bound, and the time bound is what capped it.
-
-**The round records that the bound cut it short.** Its entry in the episode's
-state carries the bound it ran under, and the summary the episode closes with
-names the round and the bound in Notes (§ 5). A killed review and a finished one
-both leave findings on the pull request, and that line is what tells them apart.
-A reviewer that reported its review complete before the bound is a review that
-finished, whenever its process stopped, and records no cut.
+A `pi` reviewer killed at the time bound yields a cost as well as its findings.
+The assistant messages that completed carry their own, and the round records
+that sum as its last tracked cost. The findings and the figure are read
+from the same moment of the run, so a round never reports a cost from one moment
+beside findings from another.
 
 **What a failed round salvaged goes on the pull request, and the round is a
 failed round still.** The findings the reviewer confirmed are posted and the
@@ -2458,13 +2441,6 @@ three parts, each bounded on its own:
 | The review | The time bound | The reviewer |
 | Posting | A reserve of 60 seconds | The findings, the verdicts, the summary comment and the failure comment |
 
-**Sixty seconds of posting is several times what rounds have needed.** #275's
-round posted three findings within 4 seconds, and #261's busiest round posted its
-findings within about 25. A round that runs out of posting time loses what it had
-not posted, and says so, as the posting row under § 7's failures sets out. Each
-round records how long its posting took (§ 5), so a reserve that has grown tight
-shows in the state files before it shows as lost findings.
-
 Stopping the reviewer runs after the moment the review had to be over by, and a
 reviewer that ignores the signal spends the grace and the kill there. The
 readings it takes of the groups its shells recorded are bounded as well, so
@@ -2482,11 +2458,6 @@ counts against the deadline: the gate, the threads listing and the wait.
   failed. It posts no second failure comment.
 - **A run whose deadline arrives first exits 4.** Its state is queued or under
   review, so the round goes on, and the next run returns it.
-
-The hooks have no deadline of their own. They queue and return, and the `Stop`
-hook's waiter waits for a note rather than for a round. The stall threshold bounds
-nothing here: no hook holds a subagent, and a subagent waiting on a shell command
-is making progress.
 
 **A part is one deadline every call inside it runs under, and a call with
 nothing left on it is not made at all.** How many calls a part holds is not
@@ -2519,9 +2490,7 @@ spent. It stops the next round rather than the running one, because a round
 already running is never killed for its tokens. **What the bound does is detect a
 round that ran away, not prevent one.** The round that reaches it has already
 spent whatever it spent, which may be more than the bound, and the time bound is
-the only thing that caps a single round. An episode that reaches the bound closes
-with the findings it has, and the summary comment reports that the bound was
-reached, so the round it closed does not read as a round the reviewer failed.
+the only thing that caps a single round.
 
 **The token bound holds a Copilot round that has a cost as it holds a `pi`
 one.** Such a round records what it spent as it ends, which is when the bound is
@@ -2533,10 +2502,7 @@ does, so one bound means the same thing whichever CLI reviews.
 
 The bound counts tokens because tokens are what both reviewer CLIs report for
 every model they run. Dollars and AI credits are recorded beside them and
-reported in the summary comment, and they bound nothing. `pi` prices a round
-from a catalogue that refreshes itself, that catalogue reports no dollars at all
-against real tokens for a model it does not cover, and a subscription has no
-per-round figure to read. Copilot reports AI credits and no dollars.
+reported in the summary comment, and they bound nothing.
 
 ## 8. The project
 
