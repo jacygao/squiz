@@ -46,7 +46,7 @@ import { standIn } from "../testing/stand-in.ts";
 import type { Invocation, RoundCost, ThreadVerdict } from "./adapter.ts";
 import { pi } from "./pi/adapter.ts";
 import { extensionFile } from "./pi/argv.ts";
-import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import { composePrompt } from "./prompt.ts";
 import { runRound } from "./round.ts";
 

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ParsedRun, RoundProgress } from "../adapter.ts";
-import type { Line } from "./report-file.ts";
+import type { Line } from "../report-file.ts";
+import { REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 import { readReports } from "./reports.ts";
-import { REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 
 const finding = {
   scope: "line",

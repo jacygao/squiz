@@ -4,10 +4,10 @@ import { test } from "node:test";
 
 import type { Depth, Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
+import { REPORTS_VARIABLE } from "../report-file.ts";
+import { reportingTools } from "../reporting.ts";
 import { argv, extensionFile, grants } from "./argv.ts";
 import { refusedTools } from "./refusals.ts";
-import { REPORTS_VARIABLE } from "./report-file.ts";
-import { reportingTools } from "./reporting.ts";
 
 /**
  * An invocation whose paths and prompt spell no tool name, so the only place a
