@@ -27,7 +27,7 @@ import {
 } from "../loop/round.ts";
 import { pi } from "../reviewers/pi/adapter.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
-import { readPayloadFrom, type PayloadStream } from "./payload.ts";
+import { readPayloadFrom, type PayloadRead, type PayloadStream } from "./payload.ts";
 import { reportFailure } from "./report.ts";
 import { writeToStderr } from "./stderr.ts";
 import type { HookExit } from "./trap.ts";
@@ -57,7 +57,12 @@ export type Firing = {
  * does.
  */
 export async function runHook(firing: Firing): Promise<HookExit> {
-  const conclusion = await concluded(firing);
+  const read = await readPayloadFrom(firing.stdin);
+  // Claude Code fires these after an interactive turn ends, with no subagent
+  // behind them, so there is nothing to review and nothing to report.
+  if (read.outcome === "no subagent's work") return 0;
+
+  const conclusion = await concluded(firing, read);
 
   if (conclusion.outcome === "block") {
     writeToStderr(ending(conclusion.reason));
@@ -305,8 +310,7 @@ function unreportedBy(round: RoundAccount): string | null {
  * The episode is not opened here. Its key is the number of the pull request the
  * round finds, so the round opens it once it has found one.
  */
-async function concluded(firing: Firing): Promise<RoundConclusion> {
-  const read = await readPayloadFrom(firing.stdin);
+async function concluded(firing: Firing, read: SubagentsPayload): Promise<RoundConclusion> {
   if (read.outcome === "unreadable") return harness(`no review ran: ${read.reason}`);
 
   const worktree = worktreeToplevel(firing.directory);
@@ -347,6 +351,8 @@ function honoured(conclusion: RoundConclusion): RoundConclusion {
   if (conclusion.outcome !== "block" || conclusion.reason.trim() !== "") return conclusion;
   return harness(`the round blocked on PR #${conclusion.pullRequest} with nothing to say`);
 }
+
+type SubagentsPayload = Exclude<PayloadRead, { readonly outcome: "no subagent's work" }>;
 
 /** A failure of the harness's own, as the conclusion a pointer is composed from. */
 function harness(reason: string): RoundConclusion {

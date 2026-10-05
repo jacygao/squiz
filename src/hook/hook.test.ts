@@ -1452,6 +1452,61 @@ test("a hook fired with no payload runs no round", async () => {
   });
 });
 
+/**
+ * One of the firings an interactive session makes after a turn ends, which no
+ * dispatched subagent caused: an empty `agent_type`, a fresh `agent_id`, no last
+ * message, and no tasks.
+ */
+const PHANTOM = JSON.stringify({
+  session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
+  transcript_path: "/transcripts/60517e1f-e1dc-49b1-8e39-6fcbe686f3fb.jsonl",
+  cwd: "/work/session-directory",
+  prompt_id: PROMPT_ID,
+  permission_mode: "default",
+  agent_id: "a52d5fd4b5ef193bc",
+  agent_type: "",
+  hook_event_name: "SubagentStop",
+  stop_hook_active: false,
+  agent_transcript_path:
+    "/transcripts/60517e1f-e1dc-49b1-8e39-6fcbe686f3fb/subagents/agent-a52d5fd4b5ef193bc.jsonl",
+  background_tasks: [],
+  session_crons: [],
+});
+
+test("a SubagentStop with an empty agent_type asks gh nothing, writes nothing and says nothing", async () => {
+  await withRepository(async (worktree) => {
+    const tools = await toolsIn(worktree, { pullRequests: LISTING, diff: DIFF });
+
+    const result = squizHook(worktree, tools.path, PHANTOM);
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "", "a firing no subagent caused is not a pass to report");
+    assert.deepEqual(tools.ghArguments(), [], "a firing no subagent caused looked up a pull request");
+    assert.equal(existsSync(join(worktree, ".squiz")), false, "a firing no subagent caused wrote state");
+  });
+});
+
+test("a SubagentStop with no agent_type, or a named one, still looks for a pull request", async () => {
+  const absent: Record<string, unknown> = JSON.parse(payload());
+  delete absent["agent_type"];
+  for (const text of [JSON.stringify(absent), payload({ agent_type: "Explore" })]) {
+    await withRepository(async (worktree) => {
+      const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
+
+      const result = squizHook(worktree, tools.path, text);
+
+      assert.equal(result.code, 0);
+      assert.equal(
+        result.stderr,
+        `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(worktree)}\n`,
+        `a subagent's firing was taken for no subagent's work: ${text}`,
+      );
+      assert.ok(tools.ghWasRun(), "a subagent's firing never asked about its branch");
+    });
+  }
+});
+
 test("nothing in a branch name reaches a shell", async () => {
   // `>pwned` writes a file if any of this is ever parsed by one, and the whole
   // name arriving as one argument is what says it was not.
