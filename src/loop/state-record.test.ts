@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  type FinishedRound,
   type StateKey,
   type StateRecord,
   putRecord,
@@ -58,6 +59,40 @@ const everyState: readonly StateRecord[] = [
     openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
     owner: { sessionId: owner.sessionId },
   },
+  {
+    head,
+    activity: reply,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
+    round: { number: 2, startedAt: 1_791_000_000, endedAt: 1_791_000_160, reviewer: { backend: "tmux", pane: "@14" } },
+  },
+  {
+    head,
+    activity: reply,
+    status: "reviewed",
+    result: "clean, episode open",
+    round: { number: 3, startedAt: 1_791_000_000, endedAt: 1_791_000_160, reviewer: { backend: "herdr", pane: "w1-p3" } },
+  },
+  {
+    head,
+    activity: reply,
+    status: "failed",
+    reason: "the reviewer was stopped at the time bound",
+    ownerNoted: true,
+    round: { number: 1, startedAt: 1_791_000_000, endedAt: 1_791_000_480, reviewer: { backend: "detached" } },
+  },
+  // Failed before a reviewer started.
+  {
+    head,
+    activity: reply,
+    status: "failed",
+    reason: "the snapshot could not be made",
+    ownerNoted: false,
+    round: { number: 4, startedAt: 1_791_000_000, endedAt: 1_791_000_002 },
+  },
+  // Written before records kept the round, as the next two are.
   { head, activity: null, status: "reviewed", result: "clean, episode open" },
   { head, activity: null, status: "failed", reason: "the round host died", ownerNoted: false },
   {
@@ -68,12 +103,17 @@ const everyState: readonly StateRecord[] = [
   },
 ];
 
+function roundShape(round: FinishedRound | undefined): string {
+  if (round === undefined) return "with no round";
+  return round.reviewer === undefined ? "with no reviewer" : `by a ${round.reviewer.backend} reviewer`;
+}
+
 for (const record of everyState) {
   const shape =
     record.status === "reviewing" && record.reviewer !== undefined
       ? `reviewing by a ${record.reviewer.backend} reviewer`
-      : record.status === "reviewed"
-        ? `reviewed (${record.result})`
+      : record.status === "reviewed" || record.status === "failed"
+        ? `${record.status === "reviewed" ? `reviewed (${record.result})` : "failed"} ${roundShape(record.round)}`
         : record.status;
   test(`a ${shape} record reads back as it was written`, () => {
     assert.deepEqual(recordFrom(JSON.parse(JSON.stringify(record))), { record });
@@ -132,6 +172,39 @@ const malformed: readonly [string, unknown][] = [
   // Clean, episode open has no exit status. One carrying it is a writer that
   // meant something else.
   ["a clean, episode open record with an exit status", { head, activity: null, status: "reviewed", result: "clean, episode open", exitStatus: 0 }],
+  ["a round that is not an object", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: 7 }],
+  ["a round starting before the epoch", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: -1, endedAt: 5 } }],
+  ["a round ending at a fraction of a second", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 1, endedAt: 5.5 } }],
+  ["a round ending before it started", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 9, endedAt: 8 } }],
+  // Without its number a round's directory, and so its resume command, cannot be found.
+  ["a round with no number", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { startedAt: 1, endedAt: 2 } }],
+  ["a round numbered zero", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 0, startedAt: 1, endedAt: 2 } }],
+  ["a round numbered with a fraction", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1.5, startedAt: 1, endedAt: 2 } }],
+  ["a round numbered with a string", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: "2", startedAt: 1, endedAt: 2 } }],
+  ["a round with no end", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 9 } }],
+  ["a round with no start", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, endedAt: 9 } }],
+  [
+    "a round's reviewer on an unknown backend",
+    { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "screen", pane: "1" } } },
+  ],
+  [
+    "a round's tmux reviewer with no window",
+    { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "tmux" } } },
+  ],
+  [
+    "a round's detached reviewer naming a pane",
+    { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached", pane: "1" } } },
+  ],
+  // A reviewed round always had a reviewer, so a round without one is a writer
+  // that dropped it, and status would print no session for it.
+  [
+    "a reviewed round with no reviewer",
+    { head, activity: null, status: "reviewed", result: "clean, episode open", round: { number: 1, startedAt: 1, endedAt: 2 } },
+  ],
+  [
+    "an exited round's reviewer on an unknown backend",
+    { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "screen", pane: "1" } } },
+  ],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.
   ["a failed record not saying whether its owner was noted", { head, activity: null, status: "failed", reason: "r" }],
