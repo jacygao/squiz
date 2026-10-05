@@ -55,15 +55,22 @@ type Open = RoundResult & Moved & { readonly exit: 2 };
 type Clean = RoundResult & {
   readonly exit: 0;
   /** The run's own state, which the close left unreviewed, and what closed the episode. */
-  readonly notReviewed?: { readonly commit: string; readonly closedAt: Bound } | undefined;
+  readonly notReviewed?: NotReviewed | undefined;
 };
+
+/**
+ * A state the close left unreviewed. `state` is how it is printed: its short
+ * head commit, with how its replies differ where it shares a head with a state
+ * before it, as `namedStates` names it.
+ */
+type NotReviewed = { readonly state: string; readonly closedAt: Bound };
 
 type ClosedOpen = RoundResult &
   Moved & {
     readonly exit: 3;
     readonly closedAt: Bound;
     /** The run's own state, which the close left unreviewed. */
-    readonly notReviewed?: { readonly commit: string } | undefined;
+    readonly notReviewed?: Pick<NotReviewed, "state"> | undefined;
   };
 
 /**
@@ -205,9 +212,9 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         "Nothing is open. The review is closed, and its summary is on the pull request.",
       ];
     case 3: {
-      const unreviewed = result.notReviewed?.commit;
+      const unreviewed = result.notReviewed?.state;
       const notReviewed =
-        unreviewed === undefined ? undefined : { commit: unreviewed, closedAt: result.closedAt };
+        unreviewed === undefined ? undefined : { state: unreviewed, closedAt: result.closedAt };
       return [
         withNotReviewed(heading, result, notReviewed),
         [
@@ -225,11 +232,11 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
 function withNotReviewed(
   heading: string,
   result: RoundResult,
-  notReviewed: { readonly commit: string; readonly closedAt: Bound } | undefined,
+  notReviewed: NotReviewed | undefined,
 ): string {
   if (notReviewed === undefined) return heading;
   const why = `the episode closed at the ${notReviewed.closedAt}, after reviewing ${result.commit}`;
-  return `${heading}\nSquiz did not review PR #${result.pullRequest} at ${notReviewed.commit}: ${why}.`;
+  return `${heading}\nSquiz did not review PR #${result.pullRequest} at ${notReviewed.state}: ${why}.`;
 }
 
 function movedParagraph(moved: string | undefined): readonly string[] {
