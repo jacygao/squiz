@@ -90,7 +90,7 @@ test("inside Herdr the session starts in a Herdr pane, and nowhere else", async 
 test("a workspace given reaches the Herdr pane's start", async () => {
   const { backends, calls } = fakes({});
   await startSession({ ...request, workspace: "w3" }, { environment: insideHerdr, boundMs: BOUND_MS }, backends);
-  assert.equal((calls.herdr[0]?.command as { workspace?: string } | undefined)?.workspace, "w3");
+  assert.equal(calls.herdr[0]?.command.workspace, "w3");
 });
 
 test("inside tmux and not Herdr the session starts in a tmux window", async () => {
@@ -214,6 +214,19 @@ test("tmux failing with no window known is returned without one", async () => {
   const { backends } = fakes({ tmux: { outcome: "failed", reason: "tmux did not answer" } });
   const started = await startSession(request, { environment: insideTmux, boundMs: BOUND_MS }, backends);
   assert.deepEqual(started, { outcome: "failed", backend: "tmux", reason: "tmux did not answer" });
+});
+
+test("the variables given reach the command on every backend", async () => {
+  const variables = { SESSION_MARK: "marked" };
+  const environment: Environment = { ...insideBoth, PATH: "/usr/bin" };
+  const { backends, calls } = fakes({
+    herdr: { outcome: "refused", reason: "herdr said no" },
+    tmux: { outcome: "refused", reason: "tmux said no" },
+  });
+  await startSession({ ...request, variables }, { environment, boundMs: BOUND_MS }, backends);
+  assert.deepEqual(calls.herdr[0]?.command.variables, variables);
+  assert.deepEqual(calls.tmux[0]?.request.variables, variables);
+  assert.deepEqual(calls.child[0]?.environment, { ...environment, ...variables });
 });
 
 test("a child that cannot be started is returned as a failure", async () => {

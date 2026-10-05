@@ -26,10 +26,19 @@ export type SessionRequest = {
   readonly readyWithinMs: number;
   /** The Herdr workspace to open the tab in. Without one, Herdr uses the focused workspace. */
   readonly workspace?: string;
+  /**
+   * Set in the command's environment on every backend. A pane's command
+   * otherwise has the pane server's environment, not the caller's.
+   */
+  readonly variables?: Readonly<Record<string, string>>;
 };
 
 export type SessionOptions = {
-  /** Chooses the backend, and is what every program this runs runs with, the command included. */
+  /**
+   * Chooses the backend, and is what Herdr and tmux run with. A child runs
+   * with it too, under the request's variables. It is not passed into a pane
+   * whole, where the caller's `TERM` or `TMUX` would be wrong for the pane.
+   */
   readonly environment: Environment;
   /** Bounds each program this runs to start the session. */
   readonly boundMs: number;
@@ -88,14 +97,14 @@ export async function startSession(
   const refusals: Refusal[] = [];
 
   if (insideHerdr(environment)) {
-    // Herdr opens the tab in the workspace, where one is given.
-    const command: PaneCommand & { readonly workspace?: string } = {
+    const command: PaneCommand = {
       directory: request.directory,
       name: request.name,
       kind: request.inPane.program,
       arguments: request.inPane.arguments,
       readyWithinMs: request.readyWithinMs,
       ...(request.workspace === undefined ? {} : { workspace: request.workspace }),
+      ...(request.variables === undefined ? {} : { variables: request.variables }),
     };
     const pane = backends.herdr(command, { environment, boundMs });
     if (pane.outcome === "started") {
@@ -111,7 +120,13 @@ export async function startSession(
 
   if (insideTmux(environment)) {
     const argv = [request.inPane.program, ...request.inPane.arguments];
-    const window = backends.tmux({ name: request.name, directory: request.directory, argv }, environment, boundMs);
+    const windowRequest: WindowRequest = {
+      name: request.name,
+      directory: request.directory,
+      argv,
+      ...(request.variables === undefined ? {} : { variables: request.variables }),
+    };
+    const window = backends.tmux(windowRequest, environment, boundMs);
     if (window.outcome === "opened") {
       const place: SessionPlace = { backend: "tmux", window: window.window, identity: window.identity };
       return { outcome: "started", place, refusals };
@@ -125,7 +140,11 @@ export async function startSession(
   }
 
   const { program, arguments: args } = request.withoutTerminal;
-  const child = await backends.child({ program, arguments: args, directory: request.directory }, environment, boundMs);
+  const child = await backends.child(
+    { program, arguments: args, directory: request.directory },
+    { ...environment, ...request.variables },
+    boundMs,
+  );
   if (child.outcome === "failed") return failure("child", child.reason, undefined);
   return { outcome: "started", place: { backend: "child", identity: child.identity }, child: child.child, refusals };
 }

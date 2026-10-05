@@ -426,13 +426,15 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     fakes = join(home, "bin");
     mkdirSync(fakes);
     const herdrPath = spawnSync("/bin/sh", ["-c", "command -v herdr"], { encoding: "utf8" }).stdout.trim();
-    // Stands in for the agent: it writes its pid, tells Herdr it is a ready
-    // `pi`, and becomes a sleep of the given length with the same pid.
+    // Stands in for the agent: it writes its pid, and its SESSION_MARK where a
+    // third argument names a file for it, tells Herdr it is a ready `pi`, and
+    // becomes a sleep of the given length with the same pid.
     writeFileSync(
       join(fakes, "pi"),
       [
         "#!/bin/sh",
         'echo "$$" > "$1"',
+        'if [ -n "$3" ]; then printf "%s" "${SESSION_MARK-unset}" > "$3"; fi',
         `'${herdrPath}' pane report-agent --source squiz-test --agent pi --state idle "$HERDR_PANE_ID" >/dev/null 2>&1`,
         'exec sleep "$2"',
         "",
@@ -525,6 +527,27 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
       } finally {
         assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
       }
+    }
+  });
+
+  // The client has the variable too. Herdr starts the pane's shell with the
+  // server's environment, so the client having it is not enough.
+  test("the variables given reach the command, though the server never had them", () => {
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    const variables = { SESSION_MARK: "it's $HOME; a b=c" };
+    const markFile = join(home, "mark.txt");
+    const command = fakeCommand("squiz-variables", join(home, "variables.pid"), 60);
+    const started = startInHerdrPane(
+      { ...command, arguments: [...command.arguments, markFile], variables },
+      { ...options, environment: { ...options.environment, ...variables } },
+    );
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    if (started.outcome !== "started") return;
+    try {
+      assert.equal(readFileSync(markFile, "utf8"), variables.SESSION_MARK);
+    } finally {
+      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
     }
   });
 

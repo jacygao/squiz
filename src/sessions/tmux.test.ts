@@ -79,22 +79,27 @@ async function eventually(done: () => boolean, ms: number): Promise<boolean> {
 }
 
 /**
- * A node program that writes its pid, its working directory and its arguments
- * to the file named by its first argument, then sleeps until it is stopped.
+ * A node program that writes its pid, its working directory, its arguments and
+ * its `SESSION_MARK` to the file named by its first argument, then sleeps until it is stopped.
  * The file appears whole, by a rename, so it is never read half written.
  */
 function recorder(file: string, ...args: string[]): string[] {
   const script = [
     "const [file, ...rest] = process.argv.slice(1);",
     "const fs = require('node:fs');",
-    "fs.writeFileSync(file + '.part', JSON.stringify({ pid: process.pid, cwd: process.cwd(), args: rest }));",
+    "fs.writeFileSync(file + '.part', JSON.stringify({ pid: process.pid, cwd: process.cwd(), args: rest, mark: process.env.SESSION_MARK ?? null }));",
     "fs.renameSync(file + '.part', file);",
     "setInterval(() => {}, 60000);",
   ].join("\n");
   return [process.execPath, "-e", script, file, ...args];
 }
 
-type Recorded = { readonly pid: number; readonly cwd: string; readonly args: readonly string[] };
+type Recorded = {
+  readonly pid: number;
+  readonly cwd: string;
+  readonly args: readonly string[];
+  readonly mark: string | null;
+};
 
 async function recordOf(file: string): Promise<Recorded> {
   assert.ok(await eventually(() => existsSync(file), 10_000), "the command never ran");
@@ -137,6 +142,25 @@ test("the window opens without taking the focus", { skip }, async (t) => {
   );
 
   assert.equal(server.tmux("display", "-p", "-t", "main", "#{window_id}"), before);
+});
+
+// The server starts without the variable. tmux starts a window's command with
+// the server's environment, not the client's, so the client having it is not enough.
+test("the variables given reach the command, though the server never had them", { skip }, async (t) => {
+  const server = privateServer(t);
+  const directory = scratch(t);
+  const file = join(directory, "record.json");
+  const variables = { SESSION_MARK: "it's $HOME; #{pane_id} a\nb=c" };
+
+  opened(
+    openWindow(
+      { name: "squiz-variables", directory, argv: recorder(file), variables },
+      { ...server.environment, ...variables },
+      BOUND_MS,
+    ),
+  );
+
+  assert.equal((await recordOf(file)).mark, variables.SESSION_MARK);
 });
 
 const AWKWARD = [
