@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -172,7 +172,7 @@ test("a command the binary does not have is named on stderr, and still exits 0",
   assert.equal(result.code, 0, "the binary is the hook entry point, and only exit 2 may block a turn");
   assert.equal(
     result.stderr,
-    'squiz: no command "frobnicate". The commands are: hook, threads, reply\n',
+    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status\n',
     "the list backs the message, so a command the binary has must be on it",
   );
   assert.equal(result.stdout, "");
@@ -182,7 +182,7 @@ test("no command at all is reported the same way", async () => {
   const result = await run(shim, [], { cwd: elsewhere });
 
   assert.equal(result.code, 0);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status\n");
   assert.equal(result.stdout, "");
 });
 
@@ -455,4 +455,33 @@ test("a reply is posted under the coding agent's marker, not as the text alone (
     "**Squiz coding agent**\n\nFixed in befac71.",
     "an unmarked reply reads as a person's, and the thread it answers is reported as a finding nobody answered",
   );
+});
+
+test("squiz status lists the reviews of every worktree, and never runs gh", async () => {
+  const fakes = await mkdtemp(join(tmpdir(), "squiz-no-gh-"));
+  const linked = join(fakes, "squiz-linked");
+  try {
+    gitIn(onABranch, ["worktree", "add", "--quiet", "--detach", linked]);
+    const episode = join(linked, ".squiz", "41");
+    await mkdir(episode, { recursive: true });
+    const record = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null, status: "queued" };
+    const state = { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 }, records: [record] };
+    await writeFile(join(episode, "state.json"), JSON.stringify(state), "utf8");
+    const called = join(fakes, "gh-was-called");
+    standIn(fakes, "gh", `#!/bin/sh\ntouch '${called}'\nexit 1\n`);
+
+    const result = await run(shim, ["status"], {
+      cwd: onABranch,
+      path: `${fakes}:${process.env["PATH"] ?? ""}`,
+    });
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, "");
+    assert.match(result.stdout, /^PR +Commit +Replies +State/u);
+    assert.match(result.stdout, /\n#41 +8d21a4f +— +queued +— +— +— +— +\S*squiz-linked +—\n$/u);
+    await assert.rejects(stat(called), "squiz status asks nothing of GitHub");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", linked], { cwd: onABranch });
+    await rm(fakes, { recursive: true, force: true });
+  }
 });
