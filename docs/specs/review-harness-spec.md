@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.71 (draft)
+**Version:** 0.72 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -34,7 +34,7 @@ one of them is required.
 |---|---|---|
 | Git repository | `git` | The review runs against a working tree and a merge base. The repository needs a remote for a pull request to exist against. |
 | Runtime | Claude Code | Runs the coding agent, whose shell tool runs `squiz review`. Fires the `Stop` and `SubagentStop` hooks, which start a review. Wakes the session that owns the work when the review is done. Distributes the harness as a plugin. |
-| Reviewer | `pi` | The agent that reads the change and reports what is wrong with it. It must run a different model from the coding agent. |
+| Reviewer | `pi`, or the GitHub Copilot CLI where `reviewer` names it | The agent that reads the change and reports what is wrong with it. It must run a different model from the coding agent. Only the reviewer the configuration names has to be installed. |
 | Forge | GitHub, through an authenticated `gh` | The pull request is where the review is conducted and recorded. |
 
 A terminal multiplexer is optional. Where tmux or Herdr is running, each
@@ -51,6 +51,7 @@ each.
 | `git` | 2.50.1 | `git --version` |
 | `gh` | 2.97.0, authenticated against github.com | `gh --version`, `gh auth status` |
 | `pi` | 0.84.2 | `pi --version` |
+| GitHub Copilot CLI | 1.0.91 | `copilot --version` |
 | Claude Code | 2.1.261 | `claude --version` |
 
 These behaviours were established rather than assumed:
@@ -192,10 +193,9 @@ whether the episode has reported its close and what was open at that close, and
 what its rounds' comparisons established. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
-  handed, the report file the reviewer's extension writes, the reviewer's `pi`
-  session, `resume.txt`, the command that resumes
-  that session, and `tree/`, the snapshot the reviewer reads while the round
-  runs.
+  handed, the report file the reviewer reports into, the reviewer's session,
+  `resume.txt`, the command that resumes that session, and `tree/`, the
+  snapshot the reviewer reads while the round runs.
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
@@ -805,8 +805,10 @@ child. `pi`'s own line carries none unless a path in it does (The `pi` adapter).
 
 In a pane, `pi` runs interactively with the pane as its terminal, and draws its
 own interface there. Detached, it runs in print mode. Either way it reports
-through the same extension, into the same report file (The `pi` adapter). The
-environment the adapter sets reaches it through `--env` and `-e`.
+through the same extension, into the same report file (The `pi` adapter).
+Copilot runs in print mode in a pane and detached alike, and prints its work to
+the pane as text (The Copilot adapter). The environment the adapter sets reaches
+the reviewer through `--env` and `-e`.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits. Herdr returns the pane to its shell when
@@ -829,10 +831,11 @@ Fork this session into current directory? [y/N]
 
 Answering yes opens the reviewer's conversation in the worktree, with everything
 the reviewer read and said. A conversation resumed after the round is not part
-of the review.
+of the review. Copilot's resume line is under The Copilot adapter.
 
-**What a person types into a reviewer's pane reaches `pi`.** It can steer the
-review, and nothing records it.
+**What a person types into a `pi` reviewer's pane reaches `pi`.** It can steer
+the review, and nothing records it. A Copilot reviewer's pane can be watched and
+takes no input.
 
 **The round host stops a reviewer in a pane the way it stops one it started
 itself.** At the time bound it signals the reviewer's process group, then the
@@ -841,7 +844,7 @@ the pane. It reads the reviewer's group from the backend while `pi` runs:
 
 | Backend | Where the reviewer's group comes from |
 |---|---|
-| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is `pi`, so this is `pi`'s own pid and leads its group. |
+| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is the one the adapter built, `pi` or the Copilot adapter's runner, so this is that command's own pid and leads its group. |
 | Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold `pi`. |
 
 A pane close is not relied on to stop anything. tmux's `kill-window` sends one
@@ -926,7 +929,8 @@ change the comparison finds is the reviewer's.
 Depth is a configuration setting controlling how much the reviewer is allowed to
 do. It has two values, and `edit` and `write` are granted at neither. The tool
 names below are `pi`'s; another adapter maps the same two values onto its own
-CLI's names.
+CLI's names. The Copilot adapter grants `read` alone, under the names The
+Copilot adapter gives.
 
 | Depth | Tools granted | What it can answer |
 |---|---|---|
@@ -1031,9 +1035,10 @@ answer about a process leaves a tool running rather than holding the round open.
 
 ### Adapters
 
-An adapter is the code that knows how to drive one reviewer CLI. `pi` has the
-first one. A second reviewer means writing a second adapter and changing nothing
-else. A new adapter implements four things:
+An adapter is the code that knows how to drive one reviewer CLI. There are two,
+for `pi` and for the GitHub Copilot CLI, and `reviewer` in Configuration chooses
+between them. A further reviewer means writing a further adapter and changing
+nothing else. An adapter implements four things:
 
 | | |
 |---|---|
@@ -1045,16 +1050,28 @@ else. A new adapter implements four things:
 The harness passes `read` or `deep`, and the adapter turns that into the right
 flags for its CLI. The adapter must not choose for itself.
 
-**An adapter may ship a file its CLI loads**, where that is what turns reporting
-a finding into a call the CLI validates. Such a file is the adapter's own, it is
-named on the command line `argv` builds, and the names it registers are in
-`grants`. Nothing above the adapter knows it exists. The `pi` adapter ships one;
-a CLI that validates a reporting call without being handed anything ships none.
+**An adapter may ship files its CLI runs**, where reporting a finding needs one:
+an extension the CLI loads, or a server it starts. Each is the adapter's own, it
+is named on the command line `argv` builds, and the names it registers are in
+`grants`. Nothing above the adapter knows it exists. The `pi` adapter ships an
+extension, and the Copilot adapter ships a server and the runner that starts
+Copilot.
 
-**A finding reaches the harness as `read` reads it out of the report file.** An
-adapter whose CLI has no way to report a finding before the run ends reports them
-all at the end, which is a working adapter whose rounds keep nothing when they
-are killed.
+**Every reporting call is checked by the harness's own report checks, whatever
+serves it.** They decide what a report must carry, and refuse one the harness
+could not compose a comment or a mutation from. A CLI that validates a call
+against its schema first, as `pi` does, may convert an argument before the checks
+see it. A CLI that validates nothing, as Copilot does, hands the checks the
+arguments exactly as the model sent them, so the checks are the only validation
+the call gets. The schema the model is shown guides the model and guards
+nothing.
+
+**A finding reaches the harness as `read` reads it out of the report file, and
+so does the run's cost.** An adapter whose CLI has no way to report a finding
+before the run ends reports them all at the end, which is a working adapter whose
+rounds keep nothing when they are killed. An adapter whose CLI reports its cost
+only once the run is over writes the cost into the file then. A round of it that
+is killed outright, with no chance to write, keeps no cost.
 
 **A reviewer CLI must exit on `SIGTERM`, and so must every process it starts.**
 That is what the time bound rests on: the round signals the reviewer's process
@@ -1063,12 +1080,17 @@ may never reach its own escalation. A CLI that ignores `SIGTERM` runs on
 after the round that started it, spending against the model API with no episode
 left to record it. An adapter for such a CLI is not one this harness can hold.
 
+**The exit status does not say how a run ended.** A CLI can exit 0 when it was
+stopped, as Copilot does. A run declared its review finished where the report
+file holds the finish, and the round knows when it stopped a run itself, because
+the stop is its own. Nothing else is read for it.
+
 **A CLI that starts a shell tool in a group of its own puts that tool outside
 that signal.** The round signals the reviewer's group, and a shell the CLI
 detached leads a group that is not it. `confine` is where such an adapter
 delivers the line its CLI runs inside every shell, which is what has each shell
 record the group it leads. What the round then does with those groups is under
-Confinement.
+Confinement. Copilot starts every shell this way, which matters at `deep` alone.
 
 ### The `pi` adapter
 
@@ -1252,6 +1274,243 @@ depths. Without it `pi` takes the level from the user's own settings, and the
 review a change gets depends on the machine it ran on. A level `pi` does not
 recognise is not taken silently: it warns on stderr and is otherwise ignored,
 which leaves the round thinking at the level those settings hold.
+
+### The Copilot adapter
+
+The adapter for the GitHub Copilot CLI, which a project chooses with
+`"reviewer": "copilot"`. It grants depth `read` alone. What `deep` would need
+from it is the last part of this section.
+
+#### The command line
+
+The line the round starts is the adapter's runner, which starts Copilot:
+
+```bash
+<node> <runner> <charter-file> .squiz/<number>/rounds/<k>/prompt.md \
+       .squiz/<number>/rounds/<k>/session/usage.json -- \
+  copilot --no-ask-user --allow-all-tools \
+          --available-tools=view,grep,glob,squiz-report_finding,squiz-report_verdict,squiz-finish_review \
+          --no-custom-instructions \
+          --disable-builtin-mcps \
+          --additional-mcp-config '{"mcpServers":{"squiz":{"type":"local","command":"<node>","args":["<server>"],"env":{"SQUIZ_REPORTS":"<reports-file>"},"tools":["*"]}}}' \
+          --reasoning-effort medium
+```
+
+`<node>` is the Node the harness runs on, and `<runner>` and `<server>` are the
+two files the adapter ships, by absolute path. The environment adds
+`COPILOT_HOME`, pointing at the round's session directory,
+`.squiz/<number>/rounds/<k>/session/`, which `confine` creates empty.
+
+**The runner starts Copilot with two more arguments**:
+`--usage-output-file` naming the usage file, and `-p` carrying the charter and
+then the task prompt, as one argument. Copilot runs as the runner's child, in
+the runner's process group and on the runner's standard input and output, and
+with `COPILOT_ALLOW_ALL` taken out of its environment. Because the runner hands
+Copilot the prompt itself, no newline from the charter or the prompt reaches the
+line a Herdr pane's shell reads.
+
+**Copilot runs with `-p` in a pane and detached alike.** In a pane it prints
+each call and its answer as text, then its usage, and exits by itself once the
+reviewer's last message is written. `-i` is never used: it waits at its prompt
+once the work is done, and no flag or extension ends it. Detached, the round
+hands the runner `/dev/null` as standard input, as it does `pi`.
+
+| Flag | What it does for the round |
+|---|---|
+| `--no-ask-user`, `--allow-all-tools` | Copilot runs to the end with nobody to answer it. `--allow-all-tools` lets the granted tools run without asking, and `-p` requires it. |
+| `--available-tools` | The grant. A tool outside it is disabled, and the model is not shown it. |
+| `--no-custom-instructions` | Keeps the tree's `AGENTS.md`, `.github/copilot-instructions.md` and `.github/instructions/` out of the system prompt. These load whether or not the folder is trusted. |
+| `--disable-builtin-mcps` | The GitHub MCP server is not started for a reviewer that has no GitHub access of its own. |
+| `--additional-mcp-config` | Starts the reporting server. |
+| `--reasoning-effort` | The thinking level, on every command line. |
+
+The tree's `AGENTS.md` still reaches the reviewer, by the charter's instruction
+to read it, which it does with `view`.
+
+`--reasoning-effort` takes `thinking` as it is, except that `off` is `none`.
+The adapter passes no `--model`, so the round runs on Copilot's default model.
+Nothing of the user's own Copilot configuration chooses another.
+
+#### Keeping the project and the user out
+
+**`COPILOT_HOME` is the adapter's own, and holds no trusted folders.** Copilot
+runs a project's hooks and starts its MCP servers only in a folder it trusts,
+and it trusts a folder below any folder it was told to trust. The snapshot sits
+inside the coding agent's worktree, so a user who trusted the project would have
+trusted every snapshot. Under the adapter's `COPILOT_HOME`, Copilot trusts
+nothing, and none of the tree's hooks or MCP servers runs. The credential is in
+the system's credential store rather than in `COPILOT_HOME`, so the reviewer
+still signs in.
+
+`COPILOT_ALLOW_ALL` set to `true` trusts the working directory whatever
+`COPILOT_HOME` holds, which is why the runner takes it out.
+
+`-p` never opens the folder-trust dialog, so no answer to it is ever needed.
+`--add-dir` is never passed, because it loads the skills and agents of the
+directory it names as trusted configuration.
+
+**Skills are kept out by the grant.** A tree's `.github/skills/` and
+`.claude/skills/` load whether or not the folder is trusted. The grant leaves out
+`skill`, and with it disabled no skill reaches the reviewer.
+
+**None of the user's own Copilot configuration reaches the reviewer**: not its
+model, its effort level, its hooks, its MCP servers or its skills. The harness
+sets the reasoning effort on the command line every round, and the user's MCP
+servers and hooks are code that would run with the round's environment.
+
+#### The grant
+
+| Depth | Tools granted |
+|---|---|
+| `read` | `view`, `grep`, `glob`, and the three reporting calls |
+| `deep` | Not granted. The configuration refuses `deep` |
+
+The reporting calls are named `<server>-<call>` under `--available-tools`, so
+the grant carries `squiz-report_finding`, `squiz-report_verdict` and
+`squiz-finish_review`. The model may be shown a granted tool under another name,
+as `grep` is shown as `rg` to some models, and the grant still holds it.
+
+At `read` the grant is the whole of the confinement, as Confinement sets out.
+Nothing is refused by pattern, so the run's refusals are always zero.
+
+#### The reporting server
+
+**The three reporting calls are served by an MCP server the adapter ships.**
+Copilot starts it from `--additional-mcp-config` and talks to it over standard
+input and output, in newline-delimited JSON-RPC. The server lists the three calls
+with the schemas the report checks declare, and it answers each call as `pi`'s
+extension does. It writes the same lines to the report file that
+`SQUIZ_REPORTS` names, so the round reads the file as it reads `pi`'s.
+
+**The server applies the report checks to every call, because Copilot validates
+none.** Copilot hands the server the arguments exactly as the model sent them:
+a severity outside the schema's `enum`, a missing `headline`, a `line` written as
+the string `"12"`. The checks refuse each one, and the server answers with
+`isError: true` and the refusal as its text. Copilot hands that to the model as
+the call's own error, and the model can make the call again. Nothing converts an
+argument first, so the value a report records is always what the model sent.
+
+The server exits when its standard input closes, and on `SIGTERM` and `SIGHUP`.
+Copilot sends it `SIGTERM` as it exits, and `SIGHUP` where a signal reached
+Copilot's own pid rather than its group.
+
+The report file carries no assistant message's usage line while the run goes
+on, because Copilot reports no usage per call.
+
+#### How the run ends and is read back
+
+**Copilot exits by itself once the reviewer's last message is written**, whether
+or not the reviewer finished its review. The finish in the report file is what
+says it did. A run that exits with no finish recorded is a review that stopped
+without finishing, as § 7 sets out, unless it reached no model at all.
+
+**The runner records what the run spent once Copilot has exited.** It reads the
+usage file Copilot wrote and appends it whole to the report file as one usage
+line:
+
+```json
+{"type":"usage","usage":{"totalNanoAiu":535970000,"modelMetrics":{"gpt-5-mini":{"requests":{"count":5,"cost":0},"usage":{"inputTokens":60586,"outputTokens":521,"cacheReadTokens":48128,"cacheWriteTokens":0,"reasoningTokens":64}}}, …}}
+```
+
+The adapter's read takes three figures from that line:
+
+| Figure | Read as |
+|---|---|
+| Tokens | The sum, over every model in `modelMetrics`, of `inputTokens` and `outputTokens`. `inputTokens` already holds cache reads and cache writes. |
+| AI credits | `totalNanoAiu`, at 10⁹ to a credit. |
+| Messages | The sum, over every model, of `requests.count`. |
+
+A Copilot round has no dollar figure. A usage line that lacks any of the three
+is a line that cannot be read, so a field Copilot renamed fails the round loudly
+rather than costing nothing.
+
+Where Copilot could not be started at all, the runner appends a usage line
+carrying an `errorMessage` that names `copilot` and says why, and exits 127.
+Where Copilot exited and wrote no usage file, the runner appends nothing.
+
+**What the read concludes:**
+
+| The file holds | The run |
+|---|---|
+| A finish | Reviewed |
+| No finish, and a usage line counting at least one request | Stopped without finishing |
+| No finish, and no usage line or one counting no request | Completed no message, with the `errorMessage` where there is one |
+
+**The cost is a total only where the run ended by itself and its usage line was
+read.** A run with no usage line spent an amount nothing reported, and its cost
+is unknown, as § 5 gives it.
+
+#### Stopping
+
+The round stops a Copilot reviewer as it stops any other: `SIGTERM` to the
+reviewer's group, which is the runner's, then `SIGKILL` after the grace for
+whatever is left.
+
+- **Copilot exits on `SIGTERM` at once, and exits 0.** Before it exits it writes
+  the usage file and stops the reporting server.
+- **The runner does not exit on `SIGTERM` or `SIGHUP`.** It waits for Copilot,
+  appends the usage line, and then exits, inside the grace. So a round the time
+  bound stopped still records what Copilot spent.
+- **After `SIGKILL` nothing is recorded.** Copilot writes no usage file, and the
+  runner is gone. The round's cost is unknown.
+
+#### Resuming
+
+Copilot keeps its session under `COPILOT_HOME`, in
+`session/session-state/<session id>/`. The adapter reads the session's
+identifier from there, and the round writes the command that resumes it to
+`resume.txt`:
+
+```
+COPILOT_HOME=.squiz/41/rounds/2/session copilot --resume=99b4a257-0666-4e1f-a9a2-94d9c79b14be
+```
+
+The pane prints the same identifier on its `Resume` line before it closes.
+
+#### Not established
+
+These were not measured:
+
+- **Which model the reviewer runs on.** With no `--model` and a `COPILOT_HOME`
+  holding no configuration, Copilot's default was not measured. § 2 requires the
+  reviewer to run a different model from the coding agent, and nothing here
+  makes sure of it.
+- **Whether every model takes every `--reasoning-effort` level**, and what
+  Copilot does with one a model does not.
+- **Whether a charter carried in the first message holds the reviewer as one
+  appended to the system prompt does.** Copilot has no flag that appends a file
+  to its system prompt.
+- **A prompt the size of one argument.** Linux limits a single argument to
+  128 KiB, and a prompt carrying many threads can be longer.
+- **What a run that reached no model reports**: whether it writes a usage file,
+  and where Copilot puts the reason. Until that is measured, such a run is read
+  as completing no message, without the reason.
+- **Whether `reasoningTokens` is part of `outputTokens`**, as it is in `pi`.
+- **Whether the resume line resumes from the coding agent's worktree**, after
+  the snapshot is gone, and whether it opens the folder-trust dialog there.
+- **Copilot detached with `/dev/null` as standard input, and Copilot in a Herdr
+  pane.** The pane runs were in tmux.
+
+**`deep` waits for M11, and needs two things this section does not have.**
+
+- **A record of each shell's group.** Copilot runs each shell call as
+  `/bin/bash --norc --noprofile -c '<command>'`, leading a session of its own,
+  so the round's signal to the reviewer's group never reaches it. Copilot
+  signals its shells as it exits, and that is all that does: a shell that ignores
+  `SIGTERM` and `SIGHUP` outlives Copilot, and so does every shell after
+  `SIGKILL`. Copilot's nearest to `pi`'s shell prefix is `--bash-env`, which
+  enables `BASH_ENV`. Whether bash reads that file under `--norc --noprofile` is
+  not measured.
+- **Refusals the round can count.** `--deny-tool='shell(git commit)'` refuses a
+  git subcommand wherever it is the command, with git's options before it and
+  inside a compound line, a subshell or a command substitution. A flag needs
+  the `:*` form, as in `shell(git reset --soft:*)`, and `shell(git checkout -B)`
+  matches nothing, so `git checkout` would be refused whole. `env git commit`,
+  `sh -c 'git commit'` and `git "com"mit` each run, and `git switch -C` matches
+  none of the patterns. A refusal reaches the model as the call's own error, with
+  `"code": "denied"`, in Copilot's event stream and in
+  `session-state/<session id>/events.jsonl`. It never reaches the report file,
+  so the round would count none of them.
 
 ### Charter
 
@@ -1509,7 +1768,8 @@ Three blocks, in this order.
 1. **The counts and what the review spent.** Rounds run, findings raised, how
    many ended `fixed`, `withdrawn`, `open` and `disputed`, and the tokens each
    round spent with the episode's total, followed by the dollars where the
-   reviewer's CLI priced the model. Findings raised counts every thread of the
+   reviewer's CLI priced the model, and the AI credits where it reported
+   those. Findings raised counts every thread of the
    episode, and every finding of the closing round that no thread holds. The
    findings that no thread holds carry no status. Every thread of the episode is
    counted because the threads persist on the pull request. Only the closing
@@ -1616,7 +1876,9 @@ before anything is posted, and its posting time is added once posting ends:
 
 - `dollars` and `tokens` are what the round spent, the dollars being zero where
   the reviewer's CLI did not price the model. `messages` is how many assistant
-  messages the two cover.
+  messages the two cover, or for Copilot how many model requests.
+- `credits` is the AI credits the round spent, where the reviewer's CLI
+  reported them, as Copilot does. It is absent for a `pi` round.
 - `elapsedSeconds` is the wall clock from starting the reviewer to having it
   stopped, to a tenth of a second. A round that ran the reviewer twice counts
   both runs.
@@ -1629,8 +1891,8 @@ before anything is posted, and its posting time is added once posting ends:
   and absent where it is a total.
 
 A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
-`postingSeconds` and `floor` existed has none of them, and reads back as rounds
-with no timing, no cut, and costs that are totals. A field that is there and
+`postingSeconds`, `floor` and `credits` existed has none of them, and reads back
+as rounds with no timing, no cut, no credits, and costs that are totals. A field that is there and
 does not hold a value of the right kind makes the file unreadable, like any
 other.
 
@@ -1639,12 +1901,24 @@ every reviewer is priced. A model run on a subscription has no dollar figure at
 all, and the line carries none for it. Where some rounds were priced and others
 were not, the dollar total covers the rounds that carry one.
 
+**A Copilot round carries AI credits in place of dollars**, to two decimal
+places. Copilot reports no dollars, so the line shows none for its rounds, and
+never shows zero dollars for them:
+
+```markdown
+31,400 tokens over 2 rounds: 18,200, 13,200 · 0.84 AI credits
+```
+
+Where some rounds carry credits and others dollars, the line gives both totals,
+each covering the rounds that carry it.
+
 A round that completed no assistant message is given as unknown rather than as
-zero. Nothing it spent was reported, and zero would say it spent nothing.
+zero. So is a Copilot round whose usage line never arrived. Nothing it spent was
+reported, and zero would say it spent nothing.
 
 **A figure that is a floor reads "at least".** That is a round whose cost is a
-floor, and every total of an episode holding one, its tokens and its dollars
-alike. An episode none of whose rounds is a floor reads as the format above
+floor, and every total of an episode holding one, its tokens, its dollars and
+its credits alike. An episode none of whose rounds is a floor reads as the format above
 shows. Here the second of two rounds is a floor:
 
 ```markdown
@@ -1653,7 +1927,8 @@ At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.010
 
 A round the time bound killed is one such round. It reports its **last tracked
 spend**, which covers the assistant messages that completed, and the message in
-flight when the reviewer was killed was spent and never reported. A floor round
+flight when the reviewer was killed was spent and never reported. A Copilot
+round the bound stopped reports the totals Copilot wrote as it exited. A floor round
 that completed no assistant message is given as unknown, and the totals beside it
 are still marked, because what it spent is in none of them.
 
@@ -1975,7 +2250,8 @@ squiz: AGENTS.md already has the review section; nothing changed
 dependencies is missing or unauthenticated, and how the instruction to run
 `squiz review` reaches a coding agent: whether the plugin's skill is loaded, and
 whether `AGENTS.md` has the review section. Where neither is there, it says no
-coding agent is told to run the command.
+coding agent is told to run the command. The reviewer it checks for is the one
+`reviewer` names, `pi` or `copilot`.
 
 ## 7. Failure modes
 
@@ -2006,7 +2282,7 @@ nothing retries one.
 
 | Failure | Behaviour |
 |---|---|
-| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. |
+| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. A missing Copilot arrives through the Copilot adapter's runner, as a run that completed no message with a reason naming `copilot`, and is reported as a setup problem by the row below. |
 | The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. The failure comment and stderr carry the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The reviewer's output cannot be read, and no retry recovers it | Exit 1, and what the reviewer reported before its output stopped being readable is posted. The failure comment and stderr say the review did not run. A retry whose output cannot be read either and a first attempt that left no time for a retry both arrive here. |
 | The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. |
@@ -2094,10 +2370,17 @@ finding arrives in the call that reports it rather than at the end of the run. A
 round killed a second after a finding was confirmed has that finding, and what
 the reviewer had not got to is not a thing the round has.
 
-The kill also yields a cost: the assistant messages that completed carry their
-own, and the round records that sum as its last tracked cost. The findings and
-the figure are read from the same moment of the run, so a round never reports a
-cost from one moment beside findings from another.
+The kill also yields a cost. For `pi`, the assistant messages that completed
+carry their own, and the round records that sum as its last tracked cost. The
+findings and the figure are read from the same moment of the run, so a round
+never reports a cost from one moment beside findings from another.
+
+**A Copilot round's cost arrives once, as Copilot exits.** Copilot reports
+nothing per call, so a Copilot round has no cost while it runs. Stopped at the
+time bound, Copilot answers `SIGTERM` by writing its totals, and the round
+records them as a floor, as it records any stopped round's cost. A round that
+needed `SIGKILL` records no cost: its cost is unknown, and it adds nothing to
+what the token bound counts. The time bound is what capped it.
 
 **The round records that the bound cut it short.** Its entry in the episode's
 state carries the bound it ran under, and the summary the episode closes with
@@ -2193,12 +2476,18 @@ the only thing that caps a single round. An episode that reaches the bound close
 with the findings it has, and the summary comment reports that the bound was
 reached, so the round it closed does not read as a round the reviewer failed.
 
-The bound counts tokens because tokens are what the reviewer reports for every
-model it can run. Dollars are recorded beside them and reported in the summary
-comment, and they bound nothing. The reviewer CLI prices a round from a catalogue
-that refreshes itself, that catalogue reports no dollars at all against real
-tokens for a model it does not cover, and a subscription has no per-round figure
-to read.
+**The token bound holds a Copilot round as it holds a `pi` one.** A Copilot
+round records what it spent as it ends, which is when the bound is read again,
+so the bound stops the next round on the same terms. Its tokens are input and
+output together, the input counting cache reads and writes, as `pi`'s total
+does, so one bound means the same thing whichever CLI reviews.
+
+The bound counts tokens because tokens are what both reviewer CLIs report for
+every model they run. Dollars and AI credits are recorded beside them and
+reported in the summary comment, and they bound nothing. `pi` prices a round
+from a catalogue that refreshes itself, that catalogue reports no dollars at all
+against real tokens for a model it does not cover, and a subscription has no
+per-round figure to read. Copilot reports AI credits and no dollars.
 
 ## 8. The project
 
@@ -2246,7 +2535,7 @@ src/
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, and the note and its wake; no review knowledge
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution, the reviewer's snapshot, and reading its tracked files
-  reviewers/                 one adapter per reviewer CLI, and what each hands its CLI; pi/ is the first
+  reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
   github/                    the pull request, threads, replies, resolve and re-open, summary
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
 docs/specs/                  this document
@@ -2282,7 +2571,7 @@ until something asks.
 | **P0** | The review skill | The skill that tells a Claude Code coding agent to run `squiz review` and work what it prints |
 | **P0** | The Claude Code hooks | The `Stop` and `SubagentStop` registrations, which resolve the pull request for their worktree, queue the review and return |
 | **P0** | The round host | `squiz host`, started by a double fork, which runs an episode's rounds one at a time and is found again by pid and start time |
-| **P0** | The reviewer session | A fresh `pi` per round in a tmux or Herdr pane, or detached, whose pane closes at the end and whose session stays resumable |
+| **P0** | The reviewer session | A fresh reviewer per round in a tmux or Herdr pane, or detached, whose pane closes at the end and whose session stays resumable |
 | **P0** | The report | The note for the session that owns the work, and its wake by the messaging socket or the `asyncRewake` waiter |
 | **P0** | The `pi` adapter | The command line, the extension the reviewer reports through and the report file it writes, the read of that file, and the `read` grant |
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<number>/scratch/` |
@@ -2301,9 +2590,9 @@ until something asks.
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review` |
 | **P1** | `squiz init` | Adds the review section to `AGENTS.md`, for coding agents other than Claude Code |
+| **P1** | A second reviewer adapter | The Copilot adapter: its runner, the reporting server, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
-| **P2** | A second reviewer adapter | A second CLI means a second adapter and no other change |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
@@ -2348,12 +2637,48 @@ This is settled by measurement on one machine:
   reports the reviewer's group, as § 4 The reviewer session sets out. Measured
   with stand-ins and `pi` 0.85.1, with no model call.
 
+These are settled for the Copilot reviewer, measured against Copilot CLI 1.0.91
+on macOS, in short runs of at most seven model calls:
+
+- Copilot reports tokens and AI credits once a run, in `--usage-output-file`,
+  and nothing per call. A run stopped by `SIGTERM` still writes the file, and
+  one stopped by `SIGKILL` writes none.
+- `copilot -i` waits at its prompt once it is done. `copilot -p` in a tmux pane
+  prints its work as text and exits 0 by itself.
+- A folder below a trusted folder is trusted, and runs the tree's hooks and MCP
+  servers. A `COPILOT_HOME` holding no trusted folders, with
+  `COPILOT_ALLOW_ALL` unset, keeps them out, and the run still signs in.
+  `--no-custom-instructions` keeps out the tree's instructions, and leaving
+  `skill` out of `--available-tools` keeps out its skills.
+- Copilot validates no MCP call against its schema, and hands the model a
+  server's `isError` answer as the call's error.
+- Copilot exits 0 on `SIGTERM`, and stops its MCP server and its shells as it
+  exits. Each shell leads a session of its own, so one that ignores the signal,
+  and every one after `SIGKILL`, outlives Copilot.
+- `--deny-tool='shell(git commit)'` refuses a git subcommand wherever it is the
+  command, and not after `env`, inside `sh -c`, or built from quoting.
+
 These remain open:
 
 - **What installing dependencies before tests at `deep` adds to a round.**
 - **What a snapshot costs on a repository of several hundred thousand files.**
-- **Linux.** The detach and pane probes ran on macOS alone.
-- **GitHub Copilot CLI, as a later agent.** Its documentation lists `agentStop`
+- **Linux.** The detach and pane probes ran on macOS alone, and so did every
+  Copilot run, whose credential was in macOS's own credential store.
+- **Copilot in a Herdr pane.** The Copilot pane runs were in tmux.
+- **Whether a shell under Copilot can record its group.** `--bash-env` enables
+  `BASH_ENV`, and whether bash reads it under `--norc --noprofile` was not run.
+  Copilot at `deep` waits for it.
+- **Whether Copilot reports usage during a long run.** Its stream's
+  `session.usage_checkpoint` was seen only once a run, just before the end, and
+  every run was short. Where it comes during a run, a Copilot round could keep a
+  floor when it is killed outright.
+- **`--max-ai-credits`.** Copilot's own cap on a session's credits was not
+  tried.
+- **The rest of the Copilot adapter's open questions**, listed at the end of
+  § 4 The Copilot adapter: the default model, effort levels per model, the
+  charter in the first message, the size of one argument, a run that reaches
+  no model, `reasoningTokens`, resuming, and a detached run.
+- **GitHub Copilot CLI, as a coding agent.** Its documentation lists `agentStop`
   and `subagentStop` hooks. Whether they fire, whether `subagentStop` names the
   parent session, and whether anything can wake an idle session from outside are
   not established.
@@ -2463,6 +2788,7 @@ its own branch. Squiz does not create them, and does not remove them.
 
 | Setting | Default | |
 |---|---|---|
+| `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
@@ -2478,6 +2804,12 @@ short and says so. The review budget names the parts of a round.
 `tokens` is the review budget's other bound. The review budget says what it
 counts, when it is read, and what an episode's ceiling comes to under a given
 round cap.
+
+`reviewer` chooses the adapter, and nothing else changes with it. `copilot`
+needs the GitHub Copilot CLI installed and signed in. Under it, the user's own
+Copilot configuration does not reach the reviewer, its model included, as § 4
+The Copilot adapter sets out. `thinking` reaches Copilot as its reasoning
+effort, with `off` given as `none`.
 
 A setting outside its range, or of a type the table does not give it, is
 rejected with an error naming the setting, the value given and what was
