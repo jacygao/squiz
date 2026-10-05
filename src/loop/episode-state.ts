@@ -26,10 +26,11 @@ import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 
 /**
  * One round as the state file keeps it: what it spent, how long its reviewer ran,
- * and the time bound that ended the reviewer where one did.
+ * the time bound that ended the reviewer where one did, and how long its posting
+ * took.
  *
- * A file written before the last two were recorded carries neither, so a reader
- * takes neither as given.
+ * A file written before the timings were recorded carries none of them, so a
+ * reader takes none as given.
  */
 export type RoundRecord = RoundCost & {
   /** Wall-clock seconds from starting the reviewer to having it stopped, to a tenth. */
@@ -40,13 +41,20 @@ export type RoundRecord = RoundCost & {
    * that declared itself finished just before the bound.
    */
   readonly cutShortAtSeconds?: number;
+  /**
+   * Wall-clock seconds from the first call of the posting reserve to the last, to
+   * a tenth. Absent where the round posted nothing, or was stopped before its
+   * posting ended.
+   */
+  readonly postingSeconds?: number;
 };
 
 /** What the rounds of one episode have established so far. */
 export type EpisodeState = {
   /**
-   * Each round, in the order the rounds ran. Rounds are appended and never
-   * edited, so the number of entries is the number of rounds that have run.
+   * Each round, in the order the rounds ran. Rounds are appended, and the only
+   * edit is a round's own posting time once its posting ends, so the number of
+   * entries is the number of rounds that have run.
    */
   readonly rounds: readonly RoundRecord[];
   /**
@@ -176,6 +184,25 @@ export function writeState(episode: Episode, state: EpisodeState): StateWrite {
  */
 export function recordRound(state: EpisodeState, round: RoundRecord): EpisodeState {
   return { ...state, rounds: [...state.rounds, round] };
+}
+
+/**
+ * The state with `seconds` as the posting time of round `ordinal`, counted from 1.
+ *
+ * Unchanged where the episode has no such round, so a time is never put on a
+ * round it was not measured for.
+ */
+export function recordPostingSeconds(
+  state: EpisodeState,
+  ordinal: number,
+  seconds: number,
+): EpisodeState {
+  const round = state.rounds[ordinal - 1];
+  if (round === undefined) return state;
+  const rounds = state.rounds.map((entry, at) =>
+    at === ordinal - 1 ? { ...round, postingSeconds: seconds } : entry,
+  );
+  return { ...state, rounds };
 }
 
 /**
@@ -387,12 +414,17 @@ function roundFrom(entry: unknown): ReadRound {
   if (cut !== undefined && !isCount(cut)) {
     return { problem: `has "cutShortAtSeconds" as ${render(cut)}` };
   }
+  const posting = entry["postingSeconds"];
+  if (posting !== undefined && !isAmount(posting)) {
+    return { problem: `has "postingSeconds" as ${render(posting)}` };
+  }
 
   return {
     round: {
       ...read.cost,
       ...(elapsed === undefined ? {} : { elapsedSeconds: elapsed }),
       ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
+      ...(posting === undefined ? {} : { postingSeconds: posting }),
     },
   };
 }
