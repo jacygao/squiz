@@ -289,7 +289,7 @@ commit, is queued behind it:
 |---|---|
 | Threads open, rounds remaining | B is reviewed next, as usual. |
 | Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
-| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
+| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. Its Notes name the cap or the bound and each state left not reviewed, whether A left threads open or nothing. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
 
 The line comes right after the heading of the close the run is handed:
 
@@ -1427,7 +1427,7 @@ Three blocks, in this order.
    episodes that shared the worktree; a round that could not tell whether the
    worktree was shared or what changed in it; a round whose review the time
    bound cut short, with the round's number and the bound; and a cap or bound
-   that ended the episode early.
+   that ended the episode early, with each queued state it left not reviewed.
 
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
