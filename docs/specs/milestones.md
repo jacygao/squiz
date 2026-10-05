@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.23 (draft)
+**Version:** 0.24 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -18,7 +18,7 @@ something that can be run or seen, never in a module written.
 | 5 | M4 — The reviewer | Done |
 | 6 | M5 — The round | Done |
 | 7 | M6 — The summary comment | Done |
-| 8 | M7 — The reviewer as a detached session | In progress. Its confinement work is done |
+| 8 | M7 — The reviewer as a detached session | Done |
 | 9 | M10 — The subagent-era workarounds removed | |
 | 10 | M11 — Depth `deep` | |
 | 11 | M8 — Episode boundaries | |
@@ -317,100 +317,111 @@ Two parts of the design wait until the MVP ships, held with `milestone:M9`:
 
 ### Acceptance criteria
 
+All are met for the MVP. Gaps in them that the MVP does not need are held
+for after it, labelled `held` and `milestone:M9`; among them, the round host can
+exit just as a trigger queues a state (#412), and the round's branch lookup is
+not bounded by the 30 seconds before the review (#432). A live run, recorded in
+`docs/notes/a-subagent-works-a-thread-to-exit-0-through-the-skill-with-the-reviewer-in-a-herdr-pane.md`,
+showed a subagent whose brief did not name squiz load the skill, run
+`squiz review`, and work a planted finding from exit 2 to exit 0 with the
+reviewer in a Herdr pane. Exit 3, a disputed thread, and the owner's note and
+socket wake are built and tested but were not reached in that run; M9's
+dogfooding exercises them.
+
 The findings, each in `docs/notes/` before the part that rests on it is built:
 
-- [ ] **What closing a pane reaches.** Which processes Herdr's pane close and
+- [x] **What closing a pane reaches.** Which processes Herdr's pane close and
       tmux's window close signal, whether a shell `pi` started in a session of
       its own escapes them, and whether Herdr returns a pane to its shell when
       the agent exits.
-- [ ] **Whether the socket wake can reach a subagent's parent**, that is,
+- [x] **Whether the socket wake can reach a subagent's parent**, that is,
       whether a `SubagentStop` hook's environment carries the parent's
       `CLAUDE_CODE_MESSAGING_SOCKET`.
-- [ ] **What a snapshot costs**: how long `git worktree add` and its removal
+- [x] **What a snapshot costs**: how long `git worktree add` and its removal
       take on a large repository.
-- [ ] **Whether a subagent handed a long exit-2 output works every thread.**
+- [x] **Whether a subagent handed a long exit-2 output works every thread.**
 
 The round host and the reviewer:
 
-- [ ] `src/sessions/` starts and finds sessions, closes panes, reads a hook's
+- [x] `src/sessions/` starts and finds sessions, closes panes, reads a hook's
       payload, and writes and delivers notes. It imports nothing from the rest
       of `src/`, and a test fails on any import that reaches out of it.
-- [ ] A trigger that queues a state starts a round host where none is running.
+- [x] A trigger that queues a state starts a round host where none is running.
       The host outlives the call that started it, holds `host.lock`, takes
       queued states oldest first, and exits when nothing is left queued or its
       worktree is gone. Two triggers that each start one leave one running.
-- [ ] Each state's record is queued, reviewing, reviewed, failed or not
+- [x] Each state's record is queued, reviewing, reviewed, failed or not
       reviewed, as the harness specification's state file sets out.
-- [ ] Every reviewer, at every depth, reads a worktree of its own, detached at
+- [x] Every reviewer, at every depth, reads a worktree of its own, detached at
       the state's head commit, in `.squiz/<number>/rounds/<k>/tree/`. The round
       host removes it when the round ends, whatever the round became.
-- [ ] The tracked-file comparison, the `HEAD` comparison, the refused calls and
+- [x] The tracked-file comparison, the `HEAD` comparison, the refused calls and
       the shell-group record apply to that snapshot. An edit the coding agent
       makes to its own worktree while the reviewer runs appears in no round's
       comparison.
-- [ ] Each round's reviewer runs in a tmux pane inside tmux, in a Herdr pane
+- [x] Each round's reviewer runs in a tmux pane inside tmux, in a Herdr pane
       inside Herdr, and detached otherwise, and detached where no pane can be
       opened.
-- [ ] Its pane closes when its review ends. The command that resumes its session
+- [x] Its pane closes when its review ends. The command that resumes its session
       is in `.squiz/<number>/rounds/<k>/resume.txt` and on its line in
       `squiz status`.
-- [ ] The reviewer's extension writes every accepted report, every refusal and
+- [x] The reviewer's extension writes every accepted report, every refusal and
       the usage of every assistant message to the round's report file, and the
       round reads that file.
-- [ ] The extension ends the reviewer after `finish_review`. After
+- [x] The extension ends the reviewer after `finish_review`. After
       `agent_settled` with no `finish_review`, it records an unfinished end and
       ends the reviewer.
 
 The bounds:
 
-- [ ] A round has at most 30 seconds before the review, the time bound for the
+- [x] A round has at most 30 seconds before the review, the time bound for the
       review, and a posting reserve of 60 seconds, each bounded on its own. No
       call to GitHub takes more than 30 seconds.
-- [ ] `timeout` defaults to 900 seconds and accepts 60 to 3,600.
-- [ ] Each round's state records `postingSeconds`.
+- [x] `timeout` defaults to 900 seconds and accepts 60 to 3,600.
+- [x] Each round's state records `postingSeconds`.
 
 `squiz review`, `squiz status` and the failure comment:
 
-- [ ] `squiz review` waits within one deadline of 540 seconds for the whole
+- [x] `squiz review` waits within one deadline of 540 seconds for the whole
       invocation. It exits 0, 2, 3 and 1 in the cases the harness specification
       gives, and 4 where its deadline arrives first. The next run returns the
       round's result.
-- [ ] A run on a closed episode runs no round and prints the close. A run on a
+- [x] A run on a closed episode runs no round and prints the close. A run on a
       state queued or under review waits for it, and a run on a state already
       reviewed returns its result without queueing anything.
-- [ ] A new commit, or a new reply on one of the reviewer's threads, is a new
+- [x] A new commit, or a new reply on one of the reviewer's threads, is a new
       state and starts a round. A disputed finding with no commit after it is
       ruled `withdrawn` or `open`, and the round counts against the cap.
-- [ ] A failed state is retried only on a fresh request: a new commit, a new
+- [x] A failed state is retried only on a fresh request: a new commit, a new
       reply, or a run of `squiz review`. A hook firing on a failed state queues
       nothing, and a failed state gets one note however many times it fails.
-- [ ] One review runs per state, whatever number of triggers fire for it. Two
+- [x] One review runs per state, whatever number of triggers fire for it. Two
       firings for one state post one set of threads.
-- [ ] A state queued behind a round is never dropped. It is reviewed, or
+- [x] A state queued behind a round is never dropped. It is reviewed, or
       recorded as not reviewed with the reason.
-- [ ] `squiz status` lists running, finished and failed reviews across
+- [x] `squiz status` lists running, finished and failed reviews across
       worktrees, and names each round's reviewer session.
-- [ ] A round that fails posts a failure comment naming what failed and what
+- [x] A round that fails posts a failure comment naming what failed and what
       else it established, and the command prints the same reason on stderr.
       Where GitHub cannot be reached, or the posting reserve is spent, stderr is
       the only channel.
-- [ ] The plugin ships the review skill. A dispatched subagent whose brief does
+- [x] The plugin ships the review skill. A dispatched subagent whose brief does
       not mention squiz loads it, runs `squiz review`, and works a real pull
       request's threads to exit 0 or 3.
-- [ ] `squiz init` adds the `AGENTS.md` section once.
+- [x] `squiz init` adds the `AGENTS.md` section once.
 
 The hooks and the report:
 
-- [ ] `hooks/hooks.json` registers `squiz hook` on `Stop`, in the background
+- [x] `hooks/hooks.json` registers `squiz hook` on `Stop`, in the background
       with `asyncRewake`, and on `SubagentStop`. A turn ending on a branch with
       a pull request queues its state, from a main session and from a subagent.
-- [ ] The hook exits 0 whatever it found. It never runs a round and never
+- [x] The hook exits 0 whatever it found. It never runs a round and never
       blocks. A turn that pushed nothing, or a firing for a state already
       queued, reviewed or failed, queues nothing.
-- [ ] The hook records the session that owns the work: the session itself on
+- [x] The hook records the session that owns the work: the session itself on
       `Stop`, with its messaging socket where it has one, and on `SubagentStop`
       the dispatching session and the subagent.
-- [ ] When a round records its result, the round host writes a note for that
+- [x] When a round records its result, the round host writes a note for that
       owner, under a temporary name and renamed into place. It names the pull
       request, the head commit and, for a subagent's work, the subagent. It
       carries no finding. What its text says depends on the outcome:
@@ -423,16 +434,16 @@ The hooks and the report:
   - **Reviewed clean, with the episode open because a later state is queued
     behind it:** no note.
   - **No hook recorded an owner:** no note.
-- [ ] An idle main session starts a turn with the note's text, by the messaging
+- [x] An idle main session starts a turn with the note's text, by the messaging
       socket. Delivering it moves the note into `delivered/`.
-- [ ] For a subagent's work, the note reaches the parent session, by the socket
+- [x] For a subagent's work, the note reaches the parent session, by the socket
       the hook carries.
-- [ ] A note no wake reached stays where it was written, and the owner learns
+- [x] A note no wake reached stays where it was written, and the owner learns
       the result from `squiz review` or `squiz status`.
 
 CI:
 
-- [ ] CI installs tmux and tests the tmux and detached sessions there. It does
+- [x] CI installs tmux and tests the tmux and detached sessions there. It does
       not install Herdr, which is before 1.0. Herdr panes are tested where
       Herdr is installed by hand.
 
