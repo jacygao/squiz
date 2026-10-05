@@ -66,6 +66,27 @@ test("how long each round ran, and the bound that cut one short, come back as wr
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
+/** A floor read back as a total is a cost the reader takes as complete. */
+test("a cost that is a floor comes back as a floor, in a round and outside the rounds", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [firstRound, { ...secondRound, floor: true }],
+    spentOutsideRounds: { ...firstRound, floor: true },
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
+test("spend outside the rounds is a floor once any of it is", () => {
+  const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
+  const after = recordSpendOutsideRounds(
+    recordSpendOutsideRounds(start, { ...firstRound, floor: true }),
+    secondRound,
+  );
+  assert.equal(after.spentOutsideRounds.floor, true);
+});
+
 test("the episode's directory is made by the write that needs it", (t) => {
   const episode = episodeIn(t);
   assert.deepEqual(writeState(episode, { rounds: [], spentOutsideRounds: unspent }), { outcome: "written" });
@@ -114,6 +135,9 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [{"dollars": 0.01, "tokens": 100}]}`,
   `{"rounds": [{"dollars": "0.01", "tokens": 100, "messages": 1}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": -1, "messages": 1}]}`,
+  // A floor that is there and cannot be read must not stand in for a total.
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "floor": false}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "floor": "true"}]}`,
   // A spend that is there and cannot be read must not stand in for zero: the
   // token bound would then let the episode spend past a bound it had reached.
   `{"rounds": [], "spentOutsideRounds": 0.04}`,

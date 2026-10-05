@@ -9,13 +9,13 @@
  * either: its last message is prose, so there are no findings in it to read. So
  * the stand-in is an executable named `pi` that consumes the command line the
  * adapter builds, reads the seeded file out of the tree it was pointed at, and
- * answers in the stream shape `pi` emits.
+ * writes the lines the extension would write to the report file it was named.
  *
  * What that establishes is the composition. The prompt reaches the reviewer, the
  * command line runs, the working directory is the tree handed over, the scratch
  * space holds what the reviewer writes, the tree is as it was afterwards, and
  * the findings come back in the contract's shape anchored to a real line of a
- * real file. It does not establish that a model finds the defect, which takes a
+ * real file, read out of the report file. It does not establish that a model finds the defect, which takes a
  * credential and a live run.
  *
  * The stand-in refuses instead of answering wherever one of the four things it
@@ -139,6 +139,7 @@ const defectLine = headModule.split("\n").indexOf(defect) + 1;
 /** The scratch space and the session directory, named as the harness names them. */
 const scratchDirectory = ".squiz/agent-104/scratch";
 const sessionDirectory = ".squiz/agent-104/session";
+const reportsFile = ".squiz/104/rounds/1/reports.jsonl";
 
 /** The charter that ships, handed over as the file the reviewer's CLI appends. */
 const charterFile = fileURLToPath(new URL("../../charter.md", import.meta.url));
@@ -200,8 +201,8 @@ const expectedFinding: LineFinding = {
 /** The earlier finding's defect is gone, so the ruling on its thread is `fixed`. */
 const expectedVerdicts: readonly ThreadVerdict[] = [{ thread: thread.id, verdict: "fixed" }];
 
-/** What the two assistant messages of the stand-in's stream report between them. */
-const expectedCost: RoundCost = { dollars: 0.002, tokens: 2_400, messages: 2 };
+/** What the stand-in's three assistant messages report between them. */
+const expectedCost: RoundCost = { dollars: 0.003, tokens: 3_600, messages: 3 };
 
 /**
  * Long enough that nothing here rests on how fast the machine is, and short
@@ -295,6 +296,7 @@ function invocationIn(tree: string): Invocation {
       { depth: "read", command: null },
     ),
     sessionDirectory,
+    reportsFile,
     scratchDirectory,
     depth: "read",
     thinking: "medium",
@@ -413,45 +415,27 @@ function piIn(under: string): string {
   return bin;
 }
 
-/** One assistant message as `pi` reports it, priced at half a round. */
-function message(stopReason: string, content: readonly unknown[]): unknown {
+/** One assistant message's line of the report file, priced at a third of a round. */
+function message(stopReason: string): unknown {
   return {
-    type: "message_end",
-    message: {
-      role: "assistant",
-      model: "stand-in",
-      stopReason,
-      content,
-      usage: {
-        input: 1_000,
-        output: 200,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 1_200,
-        cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
-      },
+    type: "usage",
+    stopReason,
+    model: "stand-in",
+    usage: {
+      input: 1_000,
+      output: 200,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 1_200,
+      cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
     },
   };
 }
 
-/** The message that reached for the file, which carries no text and no findings. */
-const reaching = message("toolUse", [{ type: "toolCall", toolName: "read" }]);
-
-/**
- * The message the reporting calls hang off.
- *
- * It stops for a tool call rather than for an answer, because the review ends
- * on the call that finishes it and not on a message. The thinking block is what
- * a real message carries and nothing reads.
- */
-const reporting = message("toolUse", [
-  { type: "thinking", thinking: "reading the file" },
-  { type: "toolCall", toolName: REPORT_FINDING },
-]);
-
 /**
  * The stand-in for `pi`: it consumes the command line the adapter builds, reads
- * the tree it was pointed at, and answers in the stream shape `pi` emits.
+ * the tree it was pointed at, and writes to the report file what the extension
+ * would write: a line for each message, each report and the finish.
  *
  * It refuses rather than answering wherever an input is missing, so nothing it
  * was not handed can be read out of a round that reviewed. What it reports as
@@ -476,35 +460,29 @@ const refuse = (said) => {
   process.stderr.write("pi stand-in: " + said + "\\n");
   process.exit(1);
 };
-const say = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
-const update = (assistantMessageEvent) => say({ type: "message_update", assistantMessageEvent });
+const reports = process.env.SQUIZ_REPORTS;
+if (reports === undefined || reports === "") refuse("no report file was named");
+const record = (line) => fs.appendFileSync(reports, JSON.stringify(line) + "\\n");
 
 const reviewedFile = ${JSON.stringify(reviewedFile)};
 const defect = ${JSON.stringify(defect)};
 const fixedComparison = ${JSON.stringify(fixedComparison)};
 const body = ${JSON.stringify(findingBody)};
-const toolUse = ${JSON.stringify(reaching)};
-const reported = ${JSON.stringify(reporting)};
+const message = ${JSON.stringify(message("toolUse"))};
+const closing = ${JSON.stringify(message("stop"))};
 const reportFinding = ${JSON.stringify(REPORT_FINDING)};
 const reportVerdict = ${JSON.stringify(REPORT_VERDICT)};
 const finishReview = ${JSON.stringify(FINISH_REVIEW)};
 
-/** One reporting call answered, as the harness reads a report back. */
-const answer = (id, toolName, details) =>
-  say({
-    type: "tool_execution_end",
-    toolCallId: id,
-    toolName,
-    isError: false,
-    result: { content: [{ type: "text", text: "Reported" }], details },
-  });
+/** One report the extension accepted, as it records it. */
+const accepted = (call, value) => record({ type: "report", call, value });
 
 function review() {
   for (const required of ["--print", "--no-extensions"]) {
     if (!args.includes(required)) refuse("the command line carries no " + required);
   }
   if (args.includes("--no-session")) refuse("the session is not kept for a person to resume");
-  if (after("--mode") !== "json") refuse("the output mode is not json");
+  if (args.includes("--mode")) refuse("the command line asks for an output mode nothing reads");
 
   const tools = after("--tools");
   if (tools === undefined) refuse("the command line carries no tool grant");
@@ -564,32 +542,13 @@ function review() {
   // stands, which is the only thing that settles it.
   const verdict = lines.includes(fixedComparison) ? "fixed" : "open";
 
-  say({ type: "session", sessionId: "stand-in" });
-  say({ type: "agent_start" });
-  say({ type: "turn_start" });
-  say({ type: "message_start", message: { role: "assistant" } });
-  update({ type: "text_start" });
-  update({ type: "text_delta", delta: "Reading " + reviewedFile });
-  say(toolUse);
-  say({ type: "tool_execution_start", toolCallId: "1", toolName: "read", args: { path: read } });
-  say({
-    type: "tool_execution_end",
-    toolCallId: "1",
-    toolName: "read",
-    isError: false,
-    result: { content: [{ type: "text", text: "the file it asked for" }] },
-  });
-  const result = { type: "text", text: "the file it asked for" };
-  say({ type: "message_end", message: { role: "toolResult", content: [result] } });
-  say(reported);
-  answer("2", reportFinding, finding);
-  answer("3", reportVerdict, { thread: ruled[1], verdict: verdict });
-  answer("4", finishReview, {});
-  say({ type: "turn_end" });
-  // The largest line of a real stream, repeating the whole transcript. Nothing
-  // reads it, and a reader that held it would hold the round's whole output.
-  say({ type: "agent_end", willRetry: false, messages: [toolUse.message, reported.message] });
-  say({ type: "agent_settled" });
+  // Reading the file is a message of its own, and the reports hang off a second.
+  record(message);
+  record(message);
+  accepted(reportFinding, finding);
+  accepted(reportVerdict, { thread: ruled[1], verdict: verdict });
+  record({ type: "finish" });
+  record(closing);
 }
 
 try {

@@ -821,6 +821,9 @@ function git(directory: string, ...args: readonly string[]): void {
 
 function commitOn(directory: string, branch: string): void {
   git(directory, "init", "--quiet", "--initial-branch", branch);
+  // Ignored, as adopting the harness asks: the reviewer's report file is
+  // written there, and the confinement reading would take it for a change.
+  writeFileSync(join(directory, ".git", "info", "exclude"), ".squiz/\n");
   git(
     directory,
     "-c",
@@ -1736,7 +1739,7 @@ process.stdin.on("end", () => answer(Buffer.concat(chunks).toString("utf8")));
 
 /**
  * The fake reviewer: one assistant message, then the reporting calls the plan
- * gives it.
+ * gives it, written to the report file as the extension would write them.
  *
  * It records that it ran, which is how a retry is read back. Nothing about the
  * command line it was handed is checked here; what reaches the reviewer is
@@ -1750,37 +1753,24 @@ const fs = require("node:fs");
 const plan = ${JSON.stringify(plan)};
 fs.appendFileSync(${JSON.stringify(log)}, "ran\\n");
 
-const say = (event) => fs.writeSync(1, JSON.stringify(event) + "\\n");
-const answered = (id, toolName, details) =>
-  say({
-    type: "tool_execution_end",
-    toolCallId: String(id),
-    toolName: toolName,
-    isError: false,
-    result: { content: [{ type: "text", text: "Reported" }], details: details },
-  });
+const record = (line) => fs.appendFileSync(process.env.SQUIZ_REPORTS, JSON.stringify(line) + "\\n");
 
-say({
-  type: "message_end",
-  message: {
-    role: "assistant",
-    model: "stand-in",
-    stopReason: plan.stopReason,
-    content: [{ type: "text", text: plan.said }],
-    usage: {
-      input: 1000,
-      output: 200,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 1200,
-      cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
-    },
+record({
+  type: "usage",
+  model: "stand-in",
+  stopReason: plan.stopReason,
+  usage: {
+    input: 1000,
+    output: 200,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 1200,
+    cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
   },
 });
 
-let call = 1;
-for (const finding of plan.findings) answered(call++, "report_finding", finding);
-if (plan.finish) answered(call++, "finish_review", {});
+for (const finding of plan.findings) record({ type: "report", call: "report_finding", value: finding });
+if (plan.finish) record({ type: "finish" });
 process.exit(0);
 `;
 }
@@ -1977,6 +1967,7 @@ test("a state file that will not take the round after the review posts nothing",
     const episode = join(worktree, ".squiz", String(PULL_REQUEST));
     await mkdir(join(episode, "session"), { recursive: true });
     await mkdir(join(episode, "scratch"), { recursive: true });
+    await mkdir(join(episode, "rounds", "1"), { recursive: true });
     const harness = await harnessIn(beside, {
       gh: {
         ...REACHES_THE_REVIEW,

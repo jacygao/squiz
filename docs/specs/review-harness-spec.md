@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.60 (draft)
+**Version:** 0.61 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1092,6 +1092,24 @@ once per message rather than once per run. `pi` prices the run itself from a
 local catalogue, so a model the catalogue does not cover reports a zero cost
 against a non-zero token count. The adapter returns the token count alongside the
 cost, which is what tells that case apart from a round that cost nothing.
+
+**A round's cost is marked a floor wherever the run's end cannot confirm it as
+a total.** A floor is at least what the round spent, and may be less. Three
+things leave it unconfirmed:
+
+- **The file's last line is not a message's usage.** Every run ends on an
+  assistant message, so a file ending on a report, a refusal or the finish is
+  still owed one. A finish proves nothing here. The closing message comes after
+  it, and where the file refuses that message's usage, nothing can be written to
+  say so.
+- **The time bound stopped the reviewer.** A request in flight at the stop was
+  spent and is never reported, whatever the file ends on.
+- **A line of the file could not be read, or the file could not be read to its
+  end.** A last line with no newline is such a line. What was not read may have
+  been a message's usage, so the sum may be missing that spend, whatever lines
+  follow it.
+
+A round that ran the reviewer twice has a floor where either run does.
 
 An assistant message carries a `stopReason`, and a value of `error` on one of
 them does not mean the run failed: `pi` retries a failed request, so a round that

@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Depth } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
+import { REPORTS_VARIABLE } from "./report-file.ts";
 import { reportingTools } from "./reporting.ts";
 
 const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
@@ -77,8 +78,10 @@ export function argv(invocation: Invocation): CommandLine {
     command: "pi",
     directory: invocation.directory,
     stdin: detached ? "/dev/null" : "terminal",
+    environment: { [REPORTS_VARIABLE]: invocation.reportsFile },
     args: [
-      ...(detached ? ["--print", "--mode", "json"] : []),
+      // Nothing reads pi's output, so print mode needs no event stream.
+      ...(detached ? ["--print"] : []),
       // The session is kept so a person can resume it, under .squiz/ rather
       // than in the user's own history. Nothing of it reaches the next round,
       // which starts a fresh process.

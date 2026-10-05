@@ -94,10 +94,8 @@ export const refusedCommands: readonly RefusedCommand[] = Object.freeze([
 ]);
 
 /**
- * What every refusal opens with.
- *
- * It is the only thing that tells a call refused here from a tool that failed on
- * its own, and the round counts its refusals by it.
+ * What every refusal opens with, so the reviewer can tell a call refused here
+ * from a tool that failed on its own.
  */
 const REFUSED = "squiz refused this call: ";
 
@@ -188,23 +186,7 @@ export function refuse(call: ToolCall): Refusal | undefined {
   );
 }
 
-/**
- * Whether the call this result answers was refused here.
- *
- * `pi` answers a blocked call with the reason as the result's only text, so the
- * opening of that text is what a reader of the stream has to go on.
- */
-export function wasRefused(result: unknown): boolean {
-  const content = fieldOf(result, "content");
-  if (!Array.isArray(content)) return false;
-  const blocks: readonly unknown[] = content;
-  return blocks.some((block) => {
-    const text = fieldOf(block, "text");
-    return typeof text === "string" && text.startsWith(REFUSED);
-  });
-}
-
-/** One refusal, opened with the marker the round counts by. */
+/** One refusal, opened with the marker. */
 function refusal(said: string): Refusal {
   return { block: true, reason: `${REFUSED}${said}` };
 }

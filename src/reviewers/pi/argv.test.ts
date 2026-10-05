@@ -6,6 +6,7 @@ import type { Depth, Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
 import { argv, extensionFile, grants } from "./argv.ts";
 import { refusedTools } from "./refusals.ts";
+import { REPORTS_VARIABLE } from "./report-file.ts";
 import { reportingTools } from "./reporting.ts";
 
 /**
@@ -17,6 +18,7 @@ const invocation: Invocation = {
   charterFile: "/tmp/squiz/plugin/charter.md",
   prompt: "Review pull request 142.",
   sessionDirectory: ".squiz/agent-7/session",
+  reportsFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
   thinking: "medium",
@@ -70,10 +72,9 @@ test("the command line is the one the specification gives", () => {
     command: "pi",
     directory: "/tmp/squiz/worktree",
     stdin: "/dev/null",
+    environment: { SQUIZ_REPORTS: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl" },
     args: [
       "--print",
-      "--mode",
-      "json",
       "--session-dir",
       ".squiz/agent-7/session",
       "--no-approve",
@@ -119,10 +120,32 @@ test("the pane and the detached command lines differ in print mode and nothing e
   for (const depth of depths) {
     const detached = argv({ ...invocation, depth, terminal: "none" });
     const pane = argv({ ...invocation, depth, terminal: "pane" });
-    assert.deepEqual(detached.args.slice(0, 3), ["--print", "--mode", "json"]);
-    assert.deepEqual(pane.args, detached.args.slice(3), `depth ${depth} differs beyond the mode`);
+    assert.deepEqual(detached.args.slice(0, 1), ["--print"]);
+    assert.deepEqual(pane.args, detached.args.slice(1), `depth ${depth} differs beyond the mode`);
     assert.equal(pane.command, detached.command);
     assert.equal(pane.directory, detached.directory);
+    assert.deepEqual(pane.environment, detached.environment);
+  }
+});
+
+/**
+ * The reports reach the round through the file this names, in a pane and
+ * detached alike. A line without it leaves the extension writing nothing and
+ * answering every call as accepted.
+ */
+test("every command line names the report file the extension writes to", () => {
+  for (const terminal of ["pane", "none"] as const) {
+    for (const depth of depths) {
+      const line = argv({ ...invocation, depth, terminal });
+      assert.equal(line.environment[REPORTS_VARIABLE], invocation.reportsFile, `${terminal}, ${depth}`);
+    }
+  }
+});
+
+/** Nothing reads `pi`'s output any longer, so nothing asks it for the event stream. */
+test("no command line asks pi for its event stream", () => {
+  for (const terminal of ["pane", "none"] as const) {
+    assert.ok(!argv({ ...invocation, terminal }).args.includes("--mode"), terminal);
   }
 });
 

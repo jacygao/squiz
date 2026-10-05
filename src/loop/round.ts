@@ -20,6 +20,7 @@
  */
 
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 import type { Config } from "../config/config.ts";
 import { readThread } from "../findings/thread.ts";
@@ -424,6 +425,7 @@ async function reviewOn(
           { depth: config.depth, command: config.test },
         ),
         sessionDirectory: episode.sessionDirectory,
+        reportsFile: join(episode.directory, "rounds", String(state.rounds.length + 1), "reports.jsonl"),
         scratchDirectory: episode.scratchDirectory,
         thinking: config.thinking,
         depth: config.depth,

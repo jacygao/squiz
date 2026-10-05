@@ -3,7 +3,7 @@
  * sides share.
  *
  * An adapter is the whole of what knowing a CLI costs: the command line it
- * takes, the tools it is granted at each depth, how its output reads back, and
+ * takes, the tools it is granted at each depth, how what the reviewer reported reads back, and
  * whatever that CLI has to be handed for reporting a finding to be a call it
  * validates. Everything around it — starting the process, confining it,
  * bounding its time, deciding what the round returned — is written once against
@@ -27,6 +27,12 @@ export type Invocation = {
   /** The task prompt, carrying the pull request and the threads already on it. */
   readonly prompt: string;
   readonly sessionDirectory: string;
+  /**
+   * The file the reviewer reports into, one line for each thing it did that the
+   * round reads. The round empties it before each process starts, so nothing of
+   * an earlier run is read as this one's.
+   */
+  readonly reportsFile: string;
   /**
    * Where the reviewer's temporary files go, so that a probe script or a
    * scratch file cannot land in the tree under review. `TMPDIR` points at it,
@@ -72,6 +78,11 @@ export type CommandLine = {
    * because a CLI handed the wrong stdin can hang with nothing to show for it.
    */
   readonly stdin: "/dev/null" | "terminal";
+  /**
+   * What to add to the process's environment. It travels with the command line
+   * because a pane runs the line as given, with nothing else passed alongside.
+   */
+  readonly environment: Readonly<Record<string, string>>;
 };
 
 /** What a round spent: the dollars the CLI priced it at, and the tokens behind them. */
@@ -81,6 +92,12 @@ export type RoundCost = {
   readonly tokens: number;
   /** How many assistant messages the two figures cover. */
   readonly messages: number;
+  /**
+   * The figures are at least what was spent and may be less than it, because
+   * the run's end could not confirm that every message's spend was counted.
+   * Absent where it could.
+   */
+  readonly floor?: true;
 };
 
 /**
@@ -120,17 +137,18 @@ export type Reported = RoundOutput & {
    * Whether the reviewer has reported its review complete.
    *
    * It is the only thing that says a review is finished, and it is why a caller
-   * stopped mid-stream keeps this: a run the time bound ended after the reviewer
+   * stopped at the bound keeps this: a run the time bound ended after the reviewer
    * declared its review is that review rather than a round that failed.
    */
   readonly finished: boolean;
   /**
-   * Why a report the run accepted could not be read back, where one could not.
+   * Why a line of the report file could not be read, or a report the run
+   * accepted could not be read back, where either happened.
    *
-   * The two ends of one report disagreeing, which the reviewer was told had
-   * landed. It fails the output rather than shortening it, and a declaration does
-   * not settle it, so a caller stopped mid-stream needs it beside `finished`.
-   * `undefined` is every report read back as the reviewer made it.
+   * The reviewer was told that report had landed. It fails the output rather
+   * than shortening it, and a declaration does not settle it, so a caller
+   * stopped at the bound needs it beside `finished`. `undefined` is every line
+   * read as the reviewer wrote it.
    */
   readonly broken: string | undefined;
 };
@@ -141,10 +159,9 @@ export type RoundProgress = { readonly cost: RoundCost } & Reported;
 /**
  * Told what the round has so far, each time the run adds to it.
  *
- * It is where a killed round's findings and its figure both come from. The
- * process is stopped with its output half-read, so the last the caller was told
- * is all there is, and waiting for the parse to finish would wait on a stream
- * that has stopped.
+ * It is where a killed round's findings and its figure both come from, so each
+ * telling carries both as of the same point of the run. The last the caller was
+ * told is all a round stopped at its bound has.
  */
 export type ProgressSoFar = (progress: RoundProgress) => void;
 
@@ -205,19 +222,20 @@ export type Adapter = {
    */
   readonly confine: (invocation: Invocation) => Confinement;
   /**
-   * Read the run's whole output: what it cost, and the review it returned.
+   * Read the report file as it grows: what the run cost, and the review it
+   * returned.
    *
-   * One pass, holding nothing. The stream runs to tens of megabytes, so a
-   * second reader over a buffer of it is the one implementation ruled out.
-   * `soFar` is how a caller that will stop the process mid-stream still has
-   * what the reviewer had reached.
+   * `reports` is the file's bytes as they are appended, ending once the process
+   * is gone, and a chunk can end partway through a line. `soFar` is how a
+   * caller that stops the process at its bound still has what the reviewer had
+   * reached.
    *
    * Each report is passed on as the run makes it. An adapter for a CLI that
    * cannot report a finding before its run ends passes them all on at the end,
    * and rounds of that CLI keep nothing when they are killed.
    */
   readonly parse: (
-    stdout: AsyncIterable<string | Uint8Array>,
+    reports: AsyncIterable<string | Uint8Array>,
     soFar?: ProgressSoFar,
   ) => Promise<ParsedRun>;
   /**
