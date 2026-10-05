@@ -20,9 +20,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { defaultConfig, type Config } from "../config/config.ts";
-import { failureIn } from "../hook/hook.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
+import { failureLinesOf } from "../host/host.ts";
 import {
   unspent,
   type Adapter,
@@ -32,7 +32,9 @@ import {
   type RoundOutput,
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
+import { composeReview } from "../review/output.ts";
 import { standIn } from "../testing/stand-in.ts";
+import { headMovedIn } from "./confinement.ts";
 import { readState, writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
@@ -1031,8 +1033,6 @@ test("the first round of a first episode posts its finding, is handed no thread,
   assert.equal(ran.conclusion.outcome, "block");
   assert.ok(ran.conclusion.outcome === "block");
   assert.deepEqual(ran.conclusion.posted, ["PRRT_new"]);
-  assert.match(ran.conclusion.reason, /PRRT_new src\/ui\/card\.ts:88/u);
-  assert.match(ran.conclusion.reason, new RegExp(`PR #${PULL_REQUEST}`, "u"));
   assert.equal(ran.invocations.length, 1);
   assert.equal(
     ran.invocations[0]?.prompt.includes("## Threads already on this pull request"),
@@ -1148,8 +1148,8 @@ test("a second episode's first round is handed the threads already on the pull r
  *
  * Nothing else is open here, so the episode closes over a thread that is. That is
  * the point: the thread is a conversation on the pull request rather than work of
- * this review, and a round that counted it would block the coding agent over a
- * comment nobody asked it to work.
+ * this review, and a round that counted it would keep the episode open over a
+ * comment nobody asked the coding agent to work.
  */
 test("a person's thread is not handed over, and an episode closes with one still open", async () => {
   const ran = await runInFixture({
@@ -1180,33 +1180,6 @@ test("a person's thread is not handed over, and an episode closes with one still
     "the person's thread was counted among the open threads, so the episode blocked over work this review does not have",
   );
   assert.deepEqual(ran.conclusion.verdicts.threads, []);
-});
-
-/**
- * A round that blocks over its own thread does not name a person's in the reason
- * it hands the coding agent.
- */
-test("the blocking reason names no thread a person opened", async () => {
-  const ran = await runInFixture({
-    rounds: [ANSWER_COST],
-    answers: {
-      prlist: PR_LIST,
-      diff: DIFF,
-      threads: listed([
-        { id: "PRRT_person", isResolved: false, opening: PERSON_WROTE },
-        { id: "PRRT_ours", isResolved: false },
-      ]),
-    },
-    reviewer: reviews({ verdicts: [{ thread: "PRRT_ours", verdict: "open" }] }),
-  });
-
-  assert.ok(ran.conclusion.outcome === "block");
-  assert.match(ran.conclusion.reason, /1 thread is open on it:\nPRRT_ours/u);
-  assert.equal(
-    ran.conclusion.reason.includes("PRRT_person"),
-    false,
-    "the reason told the coding agent to work a person's comment as a finding of this review",
-  );
 });
 
 /**
@@ -1264,8 +1237,7 @@ test("a resolved thread of the reviewer's own is handed over, and a verdict re-o
   });
 
   assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "unresolve"]);
-  assert.ok(ran.conclusion.outcome === "block");
-  assert.match(ran.conclusion.reason, /1 thread is open on it:\nPRRT_closed/u);
+  assert.equal(ran.conclusion.outcome, "block");
 });
 
 test("the round's cost is recorded in the episode state with its token count", async () => {
@@ -1323,12 +1295,6 @@ test("a later round hands over the reviewer's threads with their state and appli
 
   assert.ok(ran.conclusion.outcome === "block");
   assert.deepEqual(ran.conclusion.posted, []);
-  assert.match(
-    ran.conclusion.reason,
-    /left no new comments/u,
-    "a round that found nothing new still blocks over what an earlier round left open, and must not claim it raised it",
-  );
-  assert.match(ran.conclusion.reason, /1 thread is open on it:\nPRRT_two/u);
 });
 
 test("a round that leaves nothing open closes the episode", async () => {
@@ -2952,17 +2918,22 @@ test("a file the first round changed is named in the comment the closing round p
   );
 });
 
+/** The move of `HEAD` the round read, as the round host reports it, or "" where it read none. */
+function movedIn(conclusion: RoundConclusion & { readonly outcome: "block" }): string {
+  return conclusion.confinement === undefined ? "" : (headMovedIn(conclusion.confinement) ?? "");
+}
+
 /** A reviewer that moved `HEAD` through its shell with `move`, and reviewed. */
 function movesHeadThenReviews(move: string, findings: readonly Finding[]): Reviewer {
   return { command: "/bin/sh", args: ["-c", move], parse: reviews({ findings }).parse };
 }
 
 /**
- * A move of `HEAD` in the snapshot is named by the round that blocks, and leaves
- * the coding agent's branch where it was, so the next firing finds the pull
- * request again.
+ * A move of `HEAD` in the snapshot is read by the round, which the round host
+ * reports, and leaves the coding agent's branch where it was, so the next round
+ * finds the pull request again.
  */
-test("a reviewer that committed in its snapshot is named in the blocking reason", async () => {
+test("a reviewer that committed in its snapshot is read as a move of HEAD", async () => {
   const ran = await runInFixture({
     answers: TWO_ROUNDS,
     sequences: THREADS_OF_TWO_ROUNDS,
@@ -2979,15 +2950,12 @@ test("a reviewer that committed in its snapshot is named in the blocking reason"
   );
   assert.ok(ran.conclusions[0]?.outcome === "block");
   assert.match(
-    ran.conclusions[0].reason,
-    new RegExp(
-      `\`HEAD\` moved while the reviewer ran: from a detached HEAD at ${ran.head} to a detached HEAD at (?!${ran.head})[0-9a-f]{40}\\. The move was in the reviewer's snapshot, which is removed after the round, and the coding agent's worktree is as it was\\.\\n$`,
-      "u",
-    ),
+    movedIn(ran.conclusions[0]),
+    new RegExp(`^from a detached HEAD at ${ran.head} to a detached HEAD at (?!${ran.head})[0-9a-f]{40}$`, "u"),
   );
 });
 
-test("a reviewer that switched its snapshot to a branch is named in the blocking reason", async () => {
+test("a reviewer that switched its snapshot to a branch is read as a move of HEAD", async () => {
   const ran = await runInFixture({
     answers: TWO_ROUNDS,
     sequences: THREADS_OF_TWO_ROUNDS,
@@ -3003,12 +2971,9 @@ test("a reviewer that switched its snapshot to a branch is named in the blocking
     "the coding agent's branch is untouched, so the next firing finds its pull request",
   );
   assert.ok(ran.conclusions[0]?.outcome === "block");
-  assert.match(
-    ran.conclusions[0].reason,
-    new RegExp(
-      `\`HEAD\` moved while the reviewer ran: from a detached HEAD at ${ran.head} to refs/heads/elsewhere at ${ran.head}`,
-      "u",
-    ),
+  assert.equal(
+    movedIn(ran.conclusions[0]),
+    `from a detached HEAD at ${ran.head} to refs/heads/elsewhere at ${ran.head}`,
   );
 });
 
@@ -3348,9 +3313,10 @@ test("a failure comment lists the file the killed reviewer changed", async () =>
 });
 
 /**
- * The comment's first line and the caller's stderr carry one reason, word for
+ * The comment's first line and `squiz review`'s stderr carry one reason, word for
  * word, for every kind of failure that posts a comment. Each item the comment
- * lists is a stderr line too.
+ * lists is a stderr line too. The stderr is composed from what the round host
+ * records for the failure, as `squiz review` reads it back.
  */
 test("each kind of failure says the same reason and items on the pull request and on stderr", async () => {
   const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
@@ -3371,12 +3337,19 @@ test("each kind of failure says the same reason and items on the pull request an
     const ran = await runInFixture(setup);
     assert.ok(ran.conclusion.outcome === "failed", `${name} did not fail`);
     const [first, ...rest] = failureBody(ran).split("\n");
-    const stderr = failureIn(ran.conclusion);
-    assert.equal(first, `**Squiz review failed — ${stderr[0]}**`, `${name} said two reasons`);
+    const failed = {
+      outcome: "failed",
+      pullRequest: PULL_REQUEST,
+      reason: ran.conclusion.reason,
+      items: failureLinesOf(ran.conclusion),
+    } as const;
+    const stderr = composeReview(failed, "/unwritten").stderr.split("\n");
+    const reason = /^\*\*Squiz review failed — (.*)\*\*$/u.exec(first ?? "")?.[1];
+    assert.equal(stderr[0], `squiz: review failed: ${reason}`, `${name} said two reasons`);
     const items = rest.filter((line) => line.startsWith("- "));
     if (name === "timed-out") assert.ok(items.length > 0, "the killed reviewer's write is listed");
     for (const item of items) {
-      assert.ok(stderr.includes(item.slice(2)), `${name} listed "${item}" and printed no such line`);
+      assert.ok(stderr.includes(`squiz: ${item.slice(2)}`), `${name} listed "${item}" and printed no such line`);
     }
   }
 });

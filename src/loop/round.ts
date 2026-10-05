@@ -51,7 +51,6 @@ import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
 import { takeHostLock, type HostLock } from "../host/lock.ts";
 import {
   evidenceWith,
-  headMovedIn,
   nothingEstablished,
   readAfterReviewer,
   readBeforeReviewer,
@@ -72,7 +71,6 @@ import type { LeftNotReviewed, QueuedRecord, RoundEnd } from "./round-end.ts";
 import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } from "./state-record.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
-import { blockingReason } from "./reason.ts";
 import {
   decideAfterRound,
   tokenBoundIsReached,
@@ -214,10 +212,9 @@ export type AroundTheReviewer = {
    * the worktree. Absent where no reviewer ran, which is every conclusion reached
    * before the review.
    *
-   * The round reports none of this itself, except that a blocking reason names
-   * a move of `HEAD`. The summary comment, or a failed round's failure comment,
-   * names what the readings found, and the hook names a marker that was not
-   * written. None of them changes what the round concluded.
+   * The round reports none of this itself. The summary comment, or a failed
+   * round's failure comment, names what the readings found, and the round host
+   * reports a move of `HEAD`. None of them changes what the round concluded.
    */
   readonly confinement?: RoundConfinement;
 };
@@ -249,8 +246,8 @@ export type RoundConclusion =
    * the pull request is in now.
    */
   | { readonly outcome: "superseded"; readonly pullRequest: number; readonly by: StateKey }
-  /** Another round. The coding agent is handed the open threads, with this reason. */
-  | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount & AroundTheReviewer)
+  /** Threads are open, and the episode stays open for another round. */
+  | ({ readonly outcome: "block" } & RoundAccount & AroundTheReviewer)
   /**
    * Nothing is open, and a later state is queued behind this one, so the episode
    * stays open and no summary is posted. Only a caller's `endsOn` decides this.
@@ -711,17 +708,7 @@ async function reviewOn(
       closed,
     );
   }
-  return {
-    outcome: "block",
-    reason: blockingReason({
-      pullRequest: pullRequest.number,
-      posted: account.posted,
-      threads,
-      moved: headMovedIn(confinement),
-    }),
-    confinement,
-    ...account,
-  };
+  return { outcome: "block", confinement, ...account };
 }
 
 /**
@@ -845,7 +832,7 @@ function orEmpty(state: EpisodeState | null): EpisodeState {
  * by the time the arithmetic sees it, and a round the reviewer failed never
  * reaches the arithmetic at all. Both are reachable — an episode that recorded a
  * round and fired again, and a cap or a token bound lowered between firings —
- * and nothing outside this stops a hook that keeps reviewing.
+ * and nothing outside this stops an episode that keeps reviewing.
  *
  * A cap of R allows R rounds, so the round about to run is the one after the
  * count already recorded. A cap that is not a whole number leaves no round,
@@ -880,9 +867,9 @@ function nothingDone(pullRequest: number): RoundAccount {
  * ends the round with nothing posted.
  *
  * A thread a person opened is left out, and nothing downstream reaches it: no
- * verdict is sent to it, it is not counted among the open threads, and the
- * blocking reason does not name it. It is a conversation on the pull request
- * rather than part of this review, so an episode may close with one still open.
+ * verdict is sent to it, and it is not counted among the open threads. It is a
+ * conversation on the pull request rather than part of this review, so an
+ * episode may close with one still open.
  *
  * The reviewer's own resolved threads go over with the rest, because re-opening
  * one is a verdict and a verdict only reaches a thread that was handed over.
@@ -1083,8 +1070,8 @@ function nothingSpent(cost: RoundCost): boolean {
  * a setup problem rather than a bad round. Both fail the same way every firing
  * until someone fixes the install or the credential, and charging the cap for
  * them would leave a project no rounds once it had. Neither can run the loop
- * away either: a setup problem never blocks, so the coding agent's turn ends and
- * no further round fires.
+ * away either: a setup problem fails the round, and the next one waits on a new
+ * commit, a reply or a run of `squiz review`.
  *
  * Every other outcome is a round. A round killed at its bound and output no fresh
  * process could read both got as far as reviewing, and an empty review is a round
@@ -1117,9 +1104,9 @@ type Posting = {
  * findings.
  *
  * The verdicts go first. One that is not applied leaves a thread in a state the
- * reviewer did not rule on, and the round then blocks the coding agent over a
- * finding it was told was settled; a finding that is not posted is one the next
- * round reads the same code and makes again.
+ * reviewer did not rule on, and the episode then stays open over a finding the
+ * reviewer ruled settled; a finding that is not posted is one the next round
+ * reads the same code and makes again.
  *
  * `ruleOn` is the threads a verdict may reach. One in it that the reviewer ruled
  * on nowhere takes the default verdict, so what a caller passes is what decides
@@ -1202,9 +1189,7 @@ function endUnderLock(
  * round opened, and the two together are the whole episode.
  *
  * A comment that could not be posted leaves the close a close. The episode is
- * over, so nothing is retried and no later round reads the same code again, and a
- * failure that ended the coding agent's turn would cost the work the round was
- * reviewing.
+ * over, so nothing is retried and no later round reads the same code again.
  */
 function closeAfterReview(
   episode: Episode,
@@ -1364,9 +1349,7 @@ function alsoKept(failure: string, kept: number): string {
 /**
  * The threads the round handed over, each in the state its verdict left it in.
  *
- * Computed from what the round did rather than read back a second time. Every
- * identifier came from GitHub, so the agent that checks the reason against the
- * pull request finds the threads the reason named.
+ * Computed from what the round did rather than read back a second time.
  *
  * A thread finds its verdict by the identifier the verdict names. A round need
  * not have offered every thread it handed over to a verdict, and one read off its
@@ -1406,8 +1389,7 @@ function leftResolved(thread: ReviewThread, ruled: AppliedVerdict | undefined): 
  *
  * Their identifiers came back from the read-back each create makes, so a later
  * round and the coding agent can both address them. A comment that landed
- * without one is left out: nothing can be addressed to it, and a reason that
- * counted it would name fewer threads than it claimed.
+ * without one is left out, because nothing can be addressed to it.
  */
 function threadsOpened(posted: PostedFindings): readonly ReviewThread[] {
   const threads: ReviewThread[] = [];
@@ -1420,7 +1402,7 @@ function threadsOpened(posted: PostedFindings): readonly ReviewThread[] {
 }
 
 /**
- * One finding's new thread, as the blocking reason lists it.
+ * One finding's new thread, as the open threads count it.
  *
  * `null` where nothing can be addressed to it: a comment whose thread id did not
  * come back, and a finding carrying no file, which is one no thread was opened
@@ -1438,7 +1420,7 @@ function asThread(outcome: Threaded): ReviewThread | null {
     path: finding.file,
     anchor: anchorOf(outcome),
     // The round holds no read-back of the comment it wrote, and what reads this
-    // reads the identifier and the location.
+    // reads the identifier.
     comments: [],
   };
 }

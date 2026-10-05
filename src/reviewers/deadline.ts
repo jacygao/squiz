@@ -62,7 +62,7 @@ export function deadlineIn(milliseconds: number, now: () => number = Date.now): 
       }
       timer = setTimeout(look, Math.min(remaining(), LOOK_INTERVAL_MS));
       // An unreferenced timer cannot hold the process open. A cancel that was
-      // missed then costs a stray timer rather than a hook that never exits.
+      // missed then costs a stray timer rather than a process that never exits.
       timer.unref();
     };
     look();

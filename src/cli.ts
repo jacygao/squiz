@@ -1,10 +1,10 @@
 /**
  * The entry point `bin/squiz` execs. Every command dispatches from here, and
  * the dispatch itself runs under the top-level trap. Every command but
- * `squiz review` and `squiz init` exits 0 whatever it is handed, so nothing
- * stops the coding agent finishing its turn. `squiz review` exits with the
- * status its result gives, and 1 where it could not run. `squiz init` is run by
- * a person, and exits 1 where it could not add the section.
+ * `squiz review` and `squiz init` exits 0 whatever it is handed, and says on
+ * stderr what failed. `squiz review` exits with the status its result gives,
+ * and 1 where it could not run. `squiz init` is run by a person, and exits 1
+ * where it could not add the section.
  *
  * stdout carries the answer to a command and nothing else. Everything that is
  * not an answer — a failure, a usage line, a branch with no pull request — goes

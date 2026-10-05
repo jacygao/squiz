@@ -256,7 +256,8 @@ function reviewedResult(record: StateRecord & { readonly status: "reviewed" }): 
   if (record.result === "clean, episode open") return "nothing open, episode open";
   const count = record.openThreads.length;
   const open = count === 0 ? "nothing open" : `${count} thread${count === 1 ? "" : "s"} open`;
-  // Exit 2 is a round that asked for another. 0 and 3 closed the episode.
+  // Exit 2 is a round that left threads open and the episode with them. 0 and 3
+  // closed the episode.
   return record.exitStatus === 2 ? open : `${open}, review closed`;
 }
 

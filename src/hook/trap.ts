@@ -9,7 +9,8 @@
 
 import { reportFailure } from "./report.ts";
 
-// 0 lets the turn finish and 2 would block it. Every hook path returns 0.
+// 0 lets the turn finish. 2 is the `asyncRewake` waiter's, which starts a turn
+// in an idle session. Every path that queues returns 0.
 export type HookExit = 0 | 2;
 
 /**

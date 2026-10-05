@@ -1,22 +1,18 @@
 /**
- * What a finished round does next: block the coding agent into another round, or
+ * What a finished round does next: leave its threads open for another round, or
  * close the episode.
  *
- * This arithmetic is the only bound on the loop. Every block the harness has
- * asked for was honoured, no ceiling on consecutive blocks is known to exist,
- * and nothing outside the harness stops a hook that keeps blocking. A round that
- * blocks when it should not have is therefore an unbounded billed loop, so
- * blocking is decided only from counts this can do arithmetic on and every doubt
- * closes.
+ * An episode whose threads are open runs another round on every push or reply,
+ * so the cap and the token bound here are what end it. A round that leaves the
+ * episode open when it should have closed it is a billed loop with no end, so
+ * the choice is made only from counts this can do arithmetic on, and every
+ * doubt closes.
  *
- * **`stop_hook_active` is not consulted.** The runtime sets it from the second
- * firing of an episode onward, which is every firing where the loop means to
- * block, so a decision that read it would cap every episode at one round and
- * round 2 would never happen. The cap is counted from the episode's own rounds
- * instead, and nothing the runtime supplies ends a round.
+ * Nothing the runtime supplies decides it. The cap is counted from the
+ * episode's own rounds.
  *
  * This decides and performs nothing. It returns what the round concluded, and
- * the caller turns that into an exit code.
+ * the caller records it.
  */
 
 /** What the decision needs to know about the round that has just finished. */
@@ -48,7 +44,7 @@ export type ClosingReason =
 
 /** What the round concluded. */
 export type RoundDecision =
-  /** Another round: the coding agent is handed the open threads to work. */
+  /** Threads are open, and the episode stays open for another round. */
   | { readonly next: "block" }
   | { readonly next: "close"; readonly because: ClosingReason };
 

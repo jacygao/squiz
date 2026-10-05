@@ -10,25 +10,6 @@ test("the failure pointer reads the way the specification records it", () => {
   );
 });
 
-test("a blocking reason cannot be carried by the failure pointer", () => {
-  // The hook's two stderr channels stay apart. A blocking reason is several lines of
-  // the round's own text, and the coding agent reads it as an instruction.
-  // Anything handed to the reporter leaves as one line under the failure
-  // prefix, so the pointer has nowhere to grow into the other channel.
-  const blockingReason = [
-    "Squiz reviewed the change on this branch and left 3 comments on PR #6.",
-    "",
-    "  gh pr view 6 --comments",
-    "",
-    "Address what applies, reply on anything you disagree with, then finish.",
-  ].join("\n");
-
-  const line = failureLine(blockingReason);
-
-  assert.ok(line.startsWith("squiz: "));
-  assert.equal(line.indexOf("\n"), line.length - 1);
-});
-
 test("every reason leaves as exactly one line", () => {
   const reasons = [
     "posting to PR #142 failed",

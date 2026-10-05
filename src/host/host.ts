@@ -368,7 +368,7 @@ function reportOf(
 }
 
 /** What a failed round's comment lists after its reason, then where the comment went. */
-function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>): readonly string[] {
+export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>): readonly string[] {
   const comment = conclusion.failureComment;
   const went =
     comment === undefined
