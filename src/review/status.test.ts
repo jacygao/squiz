@@ -105,7 +105,7 @@ test("a finished round prints every column § 6 shows, its resume line included"
   assert.equal(printed.stderr, "");
   assert.deepEqual(rowsOf(printed.stdout), [
     ["PR", "Commit", "Replies", "State", "Started", "Elapsed", "Result", "Session", "Worktree", "Resume"],
-    ["#41", "3f9c2e0", "OmQx7a", "reviewed", "07:06:02", "2m 40s", "1 thread open", "tmux @14", `wt-${made}`, line],
+    ["#41", "3f9c2e0", "OmQx7a", "reviewed", "07:06:02", "2m 40s", "1 thread open", "tmux squiz-41-r2", `wt-${made}`, line],
   ]);
 });
 
@@ -187,7 +187,7 @@ test("elapsed is the time so far while a review runs, and — where a record kee
   const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now: sevenOhSix + 192 })).stdout);
 
   assert.deepEqual(rows.slice(1).map((row) => row.slice(3, 8)), [
-    ["reviewing", "07:06:02", "3m 12s", "—", "herdr w2-p3"],
+    ["reviewing", "07:06:02", "3m 12s", "—", "herdr squiz-41-r3"],
     ["reviewed", "—", "—", "nothing open, episode open", "—"],
   ]);
 });
@@ -321,4 +321,66 @@ test("no record anywhere says so rather than printing an empty table", () => {
 
   assert.equal(printed.stdout, "No review is recorded in any worktree of this repository.\n");
   assert.equal(printed.stderr, "");
+});
+
+test("session is the label squiz-<number>-r<k>, never the backend's own id, and — where no reviewer started", () => {
+  const root = worktree({
+    41: [
+      {
+        head,
+        activity: null,
+        status: "failed",
+        reason: "pi could not be started",
+        ownerNoted: true,
+        round: { number: 1, startedAt: sevenOhSix - 900, endedAt: sevenOhSix - 899 },
+      },
+      {
+        head: laterHead,
+        activity: null,
+        status: "reviewed",
+        result: "exited",
+        exitStatus: 2,
+        openThreads: ["a"],
+        round: { number: 2, startedAt: sevenOhSix - 600, endedAt: sevenOhSix - 400, reviewer: { backend: "tmux", pane: "@14" } },
+      },
+      {
+        head: latestHead,
+        activity: null,
+        status: "reviewing",
+        host: { pid: 900, startedAt: sevenOhSix - 300 },
+        // A snapshot that does not stand at rounds/<k>/tree names no round.
+        reviewer: {
+          backend: "tmux",
+          pane: "@15",
+          process: { pid: 901, startedAt: sevenOhSix },
+          boundEndsAt: sevenOhSix + 480,
+          snapshot: "/somewhere/else",
+        },
+      },
+    ],
+  });
+
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+
+  assert.deepEqual(rows.slice(1).map((row) => row[7]), ["tmux", "tmux squiz-41-r2", "—"]);
+});
+
+test("started is the time of day for a review started today, and the date and time otherwise", () => {
+  const root = worktree({
+    41: [
+      {
+        head,
+        activity: null,
+        status: "failed",
+        reason: "the reviewer was stopped at the time bound",
+        ownerNoted: true,
+        round: { number: 1, startedAt: sevenOhSix - 86_400, endedAt: sevenOhSix - 85_920, reviewer: { backend: "detached" } },
+      },
+      { head: laterHead, activity: null, status: "reviewing", host: { pid: 1000, startedAt: sevenOhSix } },
+    ],
+  });
+
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+
+  assert.deepEqual(rows.slice(1).map((row) => row[4]), ["07:06:02", "2026-10-04 07:06"]);
 });

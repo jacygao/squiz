@@ -177,7 +177,7 @@ function linesOf(
       record.head.slice(0, 7),
       record.activity === null ? NONE : record.activity.slice(-6),
       line.state,
-      line.started === undefined ? NONE : timeOfDay(line.started),
+      line.started === undefined ? NONE : startedShown(line.started, options.now),
       line.elapsed === undefined ? NONE : duration(line.elapsed),
       line.result,
       line.session,
@@ -209,7 +209,9 @@ function lineOf(episode: Episode, record: StateRecord, options: StatusOptions, p
       // The reviewer's start is the round's. Before the reviewer starts, the
       // host's start is the only time the record carries.
       const started = record.reviewer?.process.startedAt ?? record.host.startedAt;
-      const session = record.reviewer === undefined ? NONE : sessionOf(record.reviewer);
+      const { reviewer } = record;
+      const session =
+        reviewer === undefined ? NONE : sessionOf(reviewer, episode, roundOfSnapshot(reviewer.snapshot));
       const presence = options.presence(record.host);
       const times = [record.host.startedAt, started];
       if (presence.outcome === "gone") {
@@ -233,7 +235,7 @@ function lineOf(episode: Episode, record: StateRecord, options: StatusOptions, p
         started: round.startedAt,
         elapsed: round.endedAt - round.startedAt,
         result,
-        session: round.reviewer === undefined ? NONE : sessionOf(round.reviewer),
+        session: round.reviewer === undefined ? NONE : sessionOf(round.reviewer, episode, round.number),
         resume: resumeOf(episode, round.number, problems),
         times: [round.startedAt, round.endedAt],
       };
@@ -249,8 +251,20 @@ function reviewedResult(record: StateRecord & { readonly status: "reviewed" }): 
   return record.exitStatus === 2 ? open : `${open}, review closed`;
 }
 
-function sessionOf(place: ReviewerPlace): string {
-  return place.pane === undefined ? place.backend : `${place.backend} ${place.pane}`;
+/**
+ * The backend and the label its pane or window was opened under,
+ * `squiz-<number>-r<k>`. A person finds it by that label, never by the
+ * backend's own id. Where the round is not known, the backend alone.
+ */
+function sessionOf(place: ReviewerPlace, episode: Episode, round: number | undefined): string {
+  if (place.backend === "detached" || round === undefined) return place.backend;
+  return `${place.backend} squiz-${episode.id}-r${round}`;
+}
+
+/** The `k` of a running round, which its snapshot's path names as `rounds/<k>/tree`. */
+function roundOfSnapshot(snapshot: string): number | undefined {
+  const named = /(?:^|\/)rounds\/([1-9][0-9]*)\/tree\/?$/u.exec(snapshot);
+  return named === null ? undefined : Number(named[1]);
 }
 
 /**
@@ -279,9 +293,17 @@ function worktreeShown(worktree: string, main: string): string {
   return path;
 }
 
-function timeOfDay(seconds: number): string {
+/** The local time of day on the local day of `now`, and the date and minute on any other. */
+function startedShown(seconds: number, now: number): string {
   const at = new Date(seconds * 1_000);
-  return [at.getHours(), at.getMinutes(), at.getSeconds()].map(twoDigits).join(":");
+  const today = new Date(now * 1_000);
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate();
+  if (sameDay) return [at.getHours(), at.getMinutes(), at.getSeconds()].map(twoDigits).join(":");
+  const date = `${at.getFullYear()}-${twoDigits(at.getMonth() + 1)}-${twoDigits(at.getDate())}`;
+  return `${date} ${twoDigits(at.getHours())}:${twoDigits(at.getMinutes())}`;
 }
 
 function duration(seconds: number): string {
