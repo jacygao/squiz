@@ -317,7 +317,10 @@ Two parts of the design wait until the MVP ships, held with `milestone:M9`:
 
 ### Acceptance criteria
 
-All are met. A live run, recorded in
+All are met for the MVP. Gaps in them that the MVP does not need are held
+for after it, labelled `held` and `milestone:M9`; among them, the round host can
+exit just as a trigger queues a state (#412), and the round's branch lookup is
+not bounded by the 30 seconds before the review (#432). A live run, recorded in
 `docs/notes/a-subagent-works-a-thread-to-exit-0-through-the-skill-with-the-reviewer-in-a-herdr-pane.md`,
 showed a subagent whose brief did not name squiz load the skill, run
 `squiz review`, and work a planted finding from exit 2 to exit 0 with the
