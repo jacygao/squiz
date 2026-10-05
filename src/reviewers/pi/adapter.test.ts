@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import type { Depth } from "../../config/config.ts";
@@ -45,6 +48,24 @@ test("the adapter reads the report file, not pi's output", async () => {
   const run = await pi.parse(oneChunk(`${JSON.stringify(usage)}\n{"type":"finish"}\n`));
   assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [] });
   assert.equal(run.cost.tokens, 100);
+});
+
+test("the adapter resumes the session the reviewer kept, under the directory's name it is given", () => {
+  const directory = mkdtempSync(join(tmpdir(), "squiz-pi-resume-"));
+  try {
+    const header = { type: "session", version: 3, id: "0193f2c4", timestamp: "2026-10-04T10:50:44.689Z", cwd: "/tmp" };
+    writeFileSync(join(directory, "kept.jsonl"), `${JSON.stringify(header)}\n`);
+    assert.deepEqual(pi.resume?.(directory, ".squiz/41/rounds/2/session"), [
+      "pi",
+      "--session-dir",
+      ".squiz/41/rounds/2/session",
+      "--session",
+      "0193f2c4",
+    ]);
+    assert.equal(pi.resume?.(join(directory, "never-made"), "never-made"), undefined);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 async function* oneChunk(text: string): AsyncGenerator<string> {

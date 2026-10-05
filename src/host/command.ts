@@ -45,6 +45,12 @@ export async function hostCommand(args: readonly string[], directory: string): P
     return 0;
   }
 
-  await runHost({ worktree: worktree.path, pullRequest, round: { config, adapter: pi, charterFile } });
+  // The trigger that started the host ran in the coding agent's terminal, and
+  // its environment names the Herdr or tmux server the reviewer's pane opens on.
+  await runHost({
+    worktree: worktree.path,
+    pullRequest,
+    round: { config, adapter: pi, charterFile, sessionEnvironment: process.env },
+  });
   return 0;
 }

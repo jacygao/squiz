@@ -12,19 +12,20 @@
  */
 
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { defaultConfig, type Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import { type Adapter, type ParsedRun, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { startChild } from "../sessions/child.ts";
 import { identityOf, type ProcessIdentity } from "../sessions/process.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
@@ -100,6 +101,8 @@ type Hosted = {
   readonly notes: Readonly<Record<string, readonly NoteFields[]>>;
   /** How many notes each session has in delivered/. */
   readonly delivered: Readonly<Record<string, number>>;
+  /** Each round's resume.txt, by its round's number, where it wrote one. */
+  readonly resumes: Readonly<Record<string, string>>;
 };
 
 type Arrangement = {
@@ -119,6 +122,12 @@ type Arrangement = {
   /** Run before the host starts. */
   readonly before?: (fixture: Fixture) => void;
   readonly host?: Partial<Pick<HostSetup, "update">>;
+  /** What the reviewer runs, as a script for `/bin/sh -c`, with the state file as `$1`. It exits at once where none is given. */
+  readonly reviewer?: string;
+  /** What every round runs with, over what the fixture gives it. */
+  readonly round?: Partial<HostSetup["round"]>;
+  /** The adapter's resume, where it has one. */
+  readonly resume?: Adapter["resume"];
 };
 
 async function host(arranged: Arrangement): Promise<Hosted> {
@@ -189,7 +198,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         started += 1;
         return {
           command: "/bin/sh",
-          args: ["-c", "exit 0"],
+          args: ["-c", arranged.reviewer ?? "exit 0", "reviewer", episode.stateFile],
           directory: invocation.directory,
           stdin: "/dev/null",
           environment: {},
@@ -206,12 +215,13 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         };
       },
       grants: { read: ["read"], deep: ["read", "bash"] },
+      ...(arranged.resume === undefined ? {} : { resume: arranged.resume }),
     };
 
     const end = await runHost({
       worktree,
       pullRequest: PULL_REQUEST,
-      round: { config: { ...defaultConfig, timeout: 5, ...arranged.config }, adapter, charterFile },
+      round: { config: { ...defaultConfig, timeout: 5, ...arranged.config }, adapter, charterFile, ...arranged.round },
       ...arranged.host,
     });
 
@@ -230,6 +240,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       summaryHook: existsSync(join(binaries, "on-summary.out")) ? readFileSync(join(binaries, "on-summary.out"), "utf8") : "",
       notes: notesIn(episode),
       delivered: deliveredIn(episode),
+      resumes: resumesIn(episode),
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -262,6 +273,44 @@ function deliveredIn(episode: Episode): Record<string, number> {
     if (existsSync(moved)) delivered[session] = readdirSync(moved).length;
   }
   return delivered;
+}
+
+/**
+ * The environment of a tmux server of the test's own, reading no configuration
+ * and killed when the test ends. Nothing in it names the owner's tmux or Herdr.
+ */
+function privateTmux(t: TestContext): Record<string, string | undefined> {
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith("HERDR_") && !name.startsWith("TMUX")),
+  );
+  const socketName = `squiz-host-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+  const tmux = (...args: string[]): string => {
+    const result = spawnSync("tmux", ["-L", socketName, "-f", "/dev/null", ...args], {
+      encoding: "utf8",
+      env: environment,
+      timeout: 10_000,
+    });
+    assert.equal(result.status, 0, `tmux ${args.join(" ")} failed: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  tmux("new-session", "-d", "-s", "main");
+  const [socketPath = "", serverPid] = tmux("display", "-p", "-t", "main", "#{socket_path}\t#{pid}").split("\t");
+  t.after(() => {
+    spawnSync("tmux", ["-L", socketName, "kill-server"], { stdio: "ignore", timeout: 10_000 });
+    rmSync(socketPath, { force: true });
+  });
+  return { ...environment, TMUX: `${socketPath},${serverPid},0` };
+}
+
+function resumesIn(episode: Episode): Record<string, string> {
+  const directory = join(episode.directory, "rounds");
+  const resumes: Record<string, string> = {};
+  if (!existsSync(directory)) return resumes;
+  for (const round of readdirSync(directory)) {
+    const file = join(directory, round, "resume.txt");
+    if (existsSync(file)) resumes[round] = readFileSync(file, "utf8");
+  }
+  return resumes;
 }
 
 function git(directory: string, args: readonly string[]): void {
@@ -417,6 +466,81 @@ test("a finished round's record keeps its number, its times and where its review
   assert.equal(record.round?.number, 1);
   assert.deepEqual(record.round?.reviewer, { backend: "detached" });
   assert.ok((record.round?.startedAt ?? 0) >= before && (record.round?.endedAt ?? Infinity) <= after);
+});
+
+test("the reviewing record names the reviewer's session as soon as the reviewer starts", async (t) => {
+  const seen = mkdtempSync(join(tmpdir(), "squiz-host-seen-"));
+  t.after(() => rmSync(seen, { recursive: true, force: true }));
+  const before = Math.floor(Date.now() / 1_000);
+  // The reviewer copies the state file once it names a reviewer, and gives up
+  // after five seconds, so a record written only after it exits is never seen.
+  const ran = await host({
+    records: atHead,
+    reviewer: [
+      `echo $$ > '${join(seen, "pid")}'`,
+      "i=0",
+      'while [ $i -lt 100 ]; do',
+      `  if grep -q '"reviewer"' "$1"; then cp "$1" '${join(seen, "state.json")}'; exit 0; fi`,
+      "  sleep 0.05; i=$((i + 1))",
+      "done",
+    ].join("\n"),
+  });
+
+  assert.ok(existsSync(join(seen, "state.json")), `no reviewing record named the reviewer while it ran; the log says:\n${ran.log}`);
+  const [record] = (JSON.parse(readFileSync(join(seen, "state.json"), "utf8")) as EpisodeState).records ?? [];
+  assert.ok(record?.status === "reviewing" && record.reviewer !== undefined, `the record was ${JSON.stringify(record)}`);
+  const { reviewer } = record;
+  assert.equal(reviewer.backend, "detached");
+  assert.equal(reviewer.pane, undefined);
+  assert.equal(reviewer.process.pid, Number(readFileSync(join(seen, "pid"), "utf8").trim()));
+  assert.ok(reviewer.boundEndsAt >= before + 5, `the bound ends at ${reviewer.boundEndsAt}, under five seconds from ${before}`);
+  assert.match(reviewer.snapshot, /\.squiz\/142\/rounds\/1\/tree$/u);
+});
+
+test("a round writes the command that resumes its reviewer's session to its resume.txt", async () => {
+  const asked: string[] = [];
+  const ran = await host({
+    records: atHead,
+    resume: (sessionDirectory, spelled) => {
+      asked.push(sessionDirectory);
+      return ["pi", "--session-dir", spelled, "--session", "0193f2c4"];
+    },
+  });
+
+  assert.deepEqual(ran.resumes, { "1": "pi --session-dir .squiz/142/rounds/1/session --session 0193f2c4\n" });
+  assert.match(asked[0] ?? "", /^\/.*\/\.squiz\/142\/rounds\/1\/session$/u, "the session was looked for somewhere else");
+});
+
+test("the reviewer's tab opens in the Herdr workspace the state's record names", async () => {
+  const workspaces: (string | undefined)[] = [];
+  const ran = await host({
+    records: (fixture) => [{ ...queued(fixture.head()), herdrWorkspace: "w7" }],
+    round: {
+      sessionEnvironment: { HERDR_SOCKET_PATH: "/nowhere/herdr.sock" },
+      sessionBackends: {
+        herdr: (command) => {
+          workspaces.push(command.workspace);
+          return { outcome: "refused", reason: "a stand-in for Herdr" };
+        },
+        tmux: () => ({ outcome: "refused", reason: "not asked" }),
+        child: startChild,
+      },
+    },
+  });
+
+  assert.deepEqual(workspaces, ["w7"], `the log says:\n${ran.log}`);
+});
+
+const tmuxInstalled = spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
+
+test("a finished round's record keeps the tmux window its reviewer ran in", { skip: tmuxInstalled ? false : "tmux is not installed" }, async (t) => {
+  const environment = privateTmux(t);
+  const ran = await host({ records: atHead, reviewer: "sleep 1", round: { sessionEnvironment: environment } });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed", `recorded as ${JSON.stringify(record)}; the log says:\n${ran.log}`);
+  assert.equal(record.round?.reviewer.backend, "tmux");
+  assert.match(record.round?.reviewer.pane ?? "", /^@\d+$/u);
 });
 
 test("a state queued while a round runs is reviewed before the host exits", async () => {
@@ -890,7 +1014,7 @@ test("the note is written only once the result it points to is recorded", async 
     },
   });
 
-  assert.deepEqual(notesBeforeEachWrite, [0, 0], "a note was there before the result it points to was written");
+  assert.deepEqual(notesBeforeEachWrite, [0, 0, 0], "a note was there before the result it points to was written");
   assert.equal(ran.notes[MAIN.sessionId]?.length, 1);
 });
 
@@ -900,11 +1024,12 @@ test("a result that cannot be recorded writes no note", async () => {
     records: (fixture) => [queued(fixture.head(), null, MAIN)],
     findings: [[finding("The name says nothing.")]],
     host: {
-      // The first write is the reviewing record's, and the second the result's,
-      // which fails as a disk does: after the change has been worked out.
+      // The first write is the reviewing record's, the second the reviewer's
+      // session, and the third the result's, which fails as a disk does: after
+      // the change has been worked out.
       update: (episode, change, options) => {
         calls += 1;
-        if (calls !== 2) return updateState(episode, change, options);
+        if (calls !== 3) return updateState(episode, change, options);
         const read = readState(episode);
         if (read.outcome === "read") change(read.state);
         return { outcome: "failed", reason: "the disk said no" };

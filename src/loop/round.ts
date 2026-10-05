@@ -22,8 +22,8 @@
  * the decision this calls.
  */
 
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
@@ -44,6 +44,8 @@ import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
+import type { Backends, SessionPlace } from "../sessions/session.ts";
+import type { Environment } from "../sessions/tmux.ts";
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
 import { takeHostLock, type HostLock } from "../host/lock.ts";
@@ -63,11 +65,11 @@ import {
   type EpisodeState,
   type StateWrite,
 } from "./episode-state.ts";
-import { episodeAt, type Episode } from "./episode.ts";
+import { episodeAt, roundDirectory, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
 import { postFailure } from "./failure-comment.ts";
 import type { LeftNotReviewed, QueuedRecord, RoundEnd } from "./round-end.ts";
-import { sameState, type StateKey } from "./state-record.ts";
+import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } from "./state-record.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
 import { blockingReason } from "./reason.ts";
@@ -149,6 +151,20 @@ export type RoundSetup = {
   readonly endsOn?: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd;
   /** The clock every part of the round is measured on, for a test to move. */
   readonly now?: () => number;
+  /**
+   * Chooses where the reviewer runs: a Herdr pane where it names a Herdr
+   * server, a tmux window where it names a tmux server, and a child with no
+   * terminal otherwise. Without one the reviewer is a child.
+   */
+  readonly sessionEnvironment?: Environment;
+  /** What starts a session, where it is not the real backends. */
+  readonly sessionBackends?: Backends;
+  /** The Herdr workspace the reviewer's tab opens in, where the state's record names one. */
+  readonly workspace?: string;
+  /** Told the reviewer's session as soon as it has started, each time one does. */
+  readonly reviewerStarted?: (session: ReviewerSession) => void;
+  /** Told why a reviewer's pane could not be confirmed closed after it ended. */
+  readonly paneLeftOpen?: (reason: string) => void;
 };
 
 /** An episode's lock as its caller took it, and the pull request it was taken for. */
@@ -534,10 +550,12 @@ async function reviewOn(
     );
   }
 
-  const unmade = makeDirectories(episode);
+  const ordinal = state.rounds.length + 1;
+  const ownDirectory = roundDirectory(episode, ordinal);
+  const sessionDirectory = join(ownDirectory, "session");
+  const unmade = makeDirectories([sessionDirectory, episode.scratchDirectory]);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
-  const ordinal = state.rounds.length + 1;
   // The coding agent may edit its worktree while the review runs, so the reviewer
   // and both readings get a tree only the reviewer writes.
   const snapshot = addSnapshot(
@@ -577,15 +595,26 @@ async function reviewOn(
           { pullRequest, diff: fetched.diff, threads: handedOver },
           { depth: config.depth, command: config.test },
         ),
-        sessionDirectory: episode.sessionDirectory,
-        reportsFile: join(episode.directory, "rounds", String(ordinal), "reports.jsonl"),
+        sessionDirectory,
+        reportsFile: join(ownDirectory, "reports.jsonl"),
         scratchDirectory: episode.scratchDirectory,
         thinking: config.thinking,
         depth: config.depth,
         roundSpace,
+        // Whatever this says, each attempt asks the adapter for a line for every
+        // place the reviewer may run.
         terminal: "none",
       },
       seconds,
+      {
+        ...(setup.sessionEnvironment === undefined ? {} : { environment: setup.sessionEnvironment }),
+        ...(setup.sessionBackends === undefined ? {} : { backends: setup.sessionBackends }),
+        ...(setup.workspace === undefined ? {} : { workspace: setup.workspace }),
+        name: `squiz-${pullRequest.number}-r${ordinal}`,
+        started: (place, boundEndsAt) =>
+          setup.reviewerStarted?.({ ...placeOf(place), process: place.identity, boundEndsAt, snapshot: tree }),
+        ...(setup.paneLeftOpen === undefined ? {} : { paneLeftOpen: setup.paneLeftOpen }),
+      },
       clock,
     );
   } finally {
@@ -594,6 +623,7 @@ async function reviewOn(
     if (roundSpace !== undefined) discardRoundSpace(roundSpace);
   }
   const elapsedSeconds = Math.round((clock() - reviewStarted) / 100) / 10;
+  writeResume(setup.adapter, sessionDirectory, directory, join(ownDirectory, "resume.txt"));
 
   // Everything from here to the last post runs on the posting reserve, which
   // starts as the review ends.
@@ -884,16 +914,46 @@ function openedByReviewer(thread: ReviewThread): boolean {
   return readThread(thread).raised === "finding";
 }
 
+/** Where a session ran, as the state file records it. A child is detached and has no pane. */
+function placeOf(place: SessionPlace): ReviewerPlace {
+  switch (place.backend) {
+    case "herdr":
+      return { backend: "herdr", pane: place.pane };
+    case "tmux":
+      return { backend: "tmux", pane: place.window.id };
+    case "child":
+      return { backend: "detached" };
+  }
+}
+
 /**
- * The reviewer's session directory and its scratch space, or why they could not
- * be made.
+ * Write the command that resumes the reviewer's session to `file`, with its
+ * paths relative to `worktree`, which is where a person runs it from.
  *
- * Made here because the reviewer is started here: its CLI is told to write into
- * both and creates neither, and a scratch space that does not exist leaves the
- * reviewer's temporary files landing in the tree under review.
+ * Nothing is written where the adapter has no session to resume. A file that
+ * cannot be written leaves the round without one, which `squiz status` shows as
+ * a round with nothing to resume, and fails nothing.
  */
-function makeDirectories(episode: Episode): string | null {
-  for (const directory of [episode.sessionDirectory, episode.scratchDirectory]) {
+function writeResume(adapter: Adapter, sessionDirectory: string, worktree: string, file: string): void {
+  const line = adapter.resume?.(sessionDirectory, relative(worktree, sessionDirectory));
+  if (line === undefined) return;
+  try {
+    writeFileSync(file, `${line.join(" ")}\n`, "utf8");
+  } catch {
+    // The review stands without it.
+  }
+}
+
+/**
+ * The directories made, or why one could not be.
+ *
+ * The reviewer's session directory and its scratch space are made here because
+ * the reviewer is started here: its CLI is told to write into both and creates
+ * neither, and a scratch space that does not exist leaves the reviewer's
+ * temporary files landing in the tree under review.
+ */
+function makeDirectories(directories: readonly string[]): string | null {
+  for (const directory of directories) {
     try {
       mkdirSync(directory, { recursive: true });
     } catch (cause) {

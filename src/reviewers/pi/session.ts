@@ -33,14 +33,15 @@ export type Resume =
 type Header = { readonly id: string; readonly started: number };
 
 /**
- * How to resume the latest session kept in `sessionDirectory`.
+ * How to resume the latest session kept in `sessionDirectory`, with the
+ * directory written on the line as `spelled`.
  *
  * `pi` writes nothing until the first assistant message arrives, so a run
  * stopped before then has no session, and neither has a directory never made.
  * Run from the directory the reviewer ran in, the line resumes the session in
  * place. From anywhere else `pi` offers to fork the session instead.
  */
-export function resumeLine(sessionDirectory: string): Resume {
+export function resumeLine(sessionDirectory: string, spelled = sessionDirectory): Resume {
   let names: string[];
   try {
     names = readdirSync(sessionDirectory);
@@ -65,7 +66,7 @@ export function resumeLine(sessionDirectory: string): Resume {
     }
   }
   if (latest === undefined) return { kind: "none" };
-  const line = ["pi", "--session-dir", sessionDirectory, "--session", latest.id];
+  const line = ["pi", "--session-dir", spelled, "--session", latest.id];
   return { kind: "resumable", line };
 }
 

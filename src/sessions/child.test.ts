@@ -83,3 +83,16 @@ test("a program that cannot be run is a failure that started nothing", async () 
   assert.equal(started.outcome, "failed");
   assert.match(started.outcome === "failed" ? started.reason : "", /squiz-no-such-program/u);
 });
+
+// A command that fails at once can exit before `ps` reads it, more often the
+// busier the machine. What it said on its way out is the caller's to read.
+test("a child that exited before its identity was read still started, and what it said can be read", async () => {
+  const started = await startChild(
+    { program: "/bin/sh", arguments: ["-c", "echo no credential"], directory: tmpdir() },
+    process.env,
+    BOUND_MS,
+    () => ({ outcome: "gone" }),
+  );
+  assert.equal(started.outcome, "started", JSON.stringify(started));
+  assert.equal(await stdoutOf(started), "no credential\n");
+});

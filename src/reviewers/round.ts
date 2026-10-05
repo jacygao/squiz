@@ -13,17 +13,16 @@
  * Deciding whether another round happens is the caller's. This runs one.
  */
 
-import {
-  spawn,
-  type ChildProcess,
-  type ChildProcessByStdio,
-  type SpawnOptionsWithStdioTuple,
-  type StdioNull,
-  type StdioPipe,
-} from "node:child_process";
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
+
+import type { ChildProcessHandle } from "../sessions/child.ts";
+import { closeHerdrPane, insideHerdr } from "../sessions/herdr.ts";
+import { identityOf } from "../sessions/process.ts";
+import { startSession, type Backends, type LeftOpen, type SessionPlace } from "../sessions/session.ts";
+import { closeWindow, windowProcess, type Environment } from "../sessions/tmux.ts";
 
 import {
   type Adapter,
@@ -121,6 +120,43 @@ export type Round = { readonly refusals: number } & (
       readonly reason: string;
     } & RoundOutput));
 
+/** Where the reviewer may run, and who is told where it did. */
+export type Sessions = {
+  /**
+   * Chooses the backend: a Herdr pane where it names a Herdr server, a tmux
+   * window where it names a tmux server, and a child with no terminal otherwise.
+   * A child runs with it as its environment.
+   *
+   * Without one the reviewer is a child, run with this process's environment,
+   * so no caller opens a pane on a server it did not choose.
+   */
+  readonly environment?: Environment;
+  /** The tab's label or the window's name. */
+  readonly name: string;
+  /** The Herdr workspace the tab opens in. Without one, Herdr uses the focused workspace. */
+  readonly workspace?: string;
+  /**
+   * Told where each reviewer started, as soon as it has, with the moment its
+   * bound runs out in whole seconds since the epoch. A throw is ignored.
+   */
+  readonly started?: (place: SessionPlace, boundEndsAt: number) => void;
+  /** Told why a reviewer's pane could not be confirmed closed after it ended. */
+  readonly paneLeftOpen?: (reason: string) => void;
+  /** What starts a session, where it is not the real backends. */
+  readonly backends?: Backends;
+};
+
+type SessionsAt = Sessions & { readonly environment: Environment; readonly boundEndsAt: number };
+
+/**
+ * How long Herdr waits for a reviewer to say it is ready, on top of the bound
+ * on each program the start runs.
+ */
+const READY_MS = 15_000;
+
+/** Bounds each program run to start a session or close a pane. */
+const SESSION_BOUND_MS = 5_000;
+
 /**
  * Run one round, at most `seconds` of wall clock for the whole of it.
  *
@@ -132,9 +168,11 @@ export async function runRound(
   adapter: Adapter,
   handed: Invocation,
   seconds: number,
+  sessions: Sessions = { name: "squiz-reviewer" },
   now: () => number = Date.now,
 ): Promise<Round> {
   const bound = deadlineIn(seconds * 1_000, now);
+  const boundEndsAt = Math.ceil((now() + seconds * 1_000) / 1_000);
   // Absolute, so that the reviewer and the round name the same file whatever
   // directory either of them is in.
   const invocation = { ...handed, reportsFile: resolve(handed.directory, handed.reportsFile) };
@@ -160,7 +198,7 @@ export async function runRound(
     };
   }
 
-  const environment = environmentOf(invocation, scratch, confinement.environment);
+  const variables = variablesOf(invocation, scratch, confinement.environment);
 
   let spent = unspent;
   // Added up rather than replaced, unlike the reports below: each refusal is a
@@ -170,7 +208,11 @@ export async function runRound(
   for (let attempts = 1; ; attempts += 1) {
     let ran: Attempt;
     try {
-      ran = await attempt(adapter, invocation, environment, bound);
+      ran = await attempt(adapter, invocation, variables, bound, {
+        ...sessions,
+        environment: sessions.environment ?? withoutPanes(process.env),
+        boundEndsAt,
+      });
     } catch (cause) {
       // A throw here is this harness's own bug. The round is still a value.
       return {
@@ -224,21 +266,20 @@ export async function runRound(
 const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] });
 
 /**
- * The environment the reviewer runs in.
+ * What the round adds to the reviewer's environment, on every backend.
  *
  * `TMPDIR` is the scratch space, so a probe script cannot land in the tree under
  * review. The record's own variable is named here rather than by the adapter: it
  * is the harness's, and every shell the reviewer starts inherits it, so the line
  * the adapter delivers carries no path of its own.
  */
-function environmentOf(
+function variablesOf(
   invocation: Invocation,
   scratch: string,
   confinement: Readonly<Record<string, string>>,
-): NodeJS.ProcessEnv {
+): Readonly<Record<string, string>> {
   const space = invocation.roundSpace;
   return {
-    ...process.env,
     TMPDIR: scratch,
     ...confinement,
     ...(space === undefined
@@ -279,80 +320,81 @@ const COMPLAINT_LIMIT = 2_000;
 const FOLLOW_MS = 50;
 
 /**
- * One process, its report file read to the end or the process stopped at the
+ * One reviewer, its report file read to the end or the reviewer stopped at the
  * bound.
  *
- * Three things confine it, and none is conditional. It runs in the work tree
- * holding the change. `TMPDIR` is the scratch space, which exists before it
- * starts. Its stdin is `/dev/null`: with stdin inherited the reviewer blocks
- * forever and emits nothing, and a silent hang looks exactly like a reviewer
- * thinking.
+ * It runs in a pane where `sessions` offers one, and as a child with no terminal
+ * otherwise. Three things confine it, and none is conditional. It runs in the
+ * work tree holding the change. `TMPDIR` is the scratch space, which exists
+ * before it starts. A child's stdin is `/dev/null`: with stdin inherited the
+ * reviewer blocks forever and emits nothing, and a silent hang looks exactly
+ * like a reviewer thinking.
  *
  * Its output is not read. What it reported is in the report file, which is
- * emptied before it starts and read as it grows until the process is gone.
+ * emptied before it starts and read as it grows until the reviewer is gone. A
+ * pane is closed once it is, whatever the attempt came to.
  */
 async function attempt(
   adapter: Adapter,
   invocation: Invocation,
-  environment: NodeJS.ProcessEnv,
+  variables: Readonly<Record<string, string>>,
   bound: Deadline,
+  sessions: SessionsAt,
 ): Promise<Attempt> {
-  const line = adapter.argv(invocation);
-  if (line.stdin !== "/dev/null") {
-    return {
-      cost: unspent,
-      refusals: 0,
-      reported: nothingReported,
-      kind: "unstartable",
-      reason: `${line.command} was built to run in a terminal, and the round has none to give it`,
-    };
+  const unstartable = (reason: string): Attempt => ({
+    cost: unspent,
+    refusals: 0,
+    reported: nothingReported,
+    kind: "unstartable",
+    reason,
+  });
+  const detached = adapter.argv({ ...invocation, terminal: "none" });
+  if (detached.stdin !== "/dev/null") {
+    return unstartable(`${detached.command} was built to run in a terminal, and was asked for a line to run without one`);
   }
+  // Asked for only where a pane may open, so an adapter builds no line that nothing could run.
+  const inPane = offersPane(sessions.environment) ? adapter.argv({ ...invocation, terminal: "pane" }) : detached;
   const unprepared = emptied(invocation.reportsFile);
-  if (unprepared !== null) {
-    return {
-      cost: unspent,
-      refusals: 0,
-      reported: nothingReported,
-      kind: "unstartable",
-      reason: unprepared,
-    };
-  }
-  const options: SpawnOptionsWithStdioTuple<StdioNull, StdioNull, StdioPipe> = {
-    cwd: line.directory,
-    env: { ...environment, ...line.environment },
-    // The reviewer leads its own process group, so that stopping it stops the
-    // tools it started. At depth `read` the grant is the only thing keeping the
-    // reviewer off the code under review, and a tool outliving the round that
-    // launched it is outside the grant as much as outside the bound.
-    detached: true,
-    stdio: ["ignore", "ignore", "pipe"],
-  };
+  if (unprepared !== null) return unstartable(unprepared);
 
-  let child: ChildProcessByStdio<null, null, Readable>;
+  const start = await startSession(
+    {
+      name: sessions.name,
+      directory: detached.directory,
+      inPane: { program: inPane.command, arguments: inPane.args },
+      withoutTerminal: { program: detached.command, arguments: detached.args },
+      readyWithinMs: READY_MS,
+      ...(sessions.workspace === undefined ? {} : { workspace: sessions.workspace }),
+      variables: { ...variables, ...detached.environment, ...inPane.environment },
+    },
+    { environment: sessions.environment, boundMs: SESSION_BOUND_MS },
+    sessions.backends,
+  );
+  if (start.outcome === "failed") {
+    // A failed start may have run the reviewer, so it is stopped and its pane
+    // closed rather than another reviewer started beside it.
+    await stopFailedStart(start.leftOpen, sessions.environment, invocation.roundSpace);
+    const left = start.leftOpen === undefined ? undefined : closeLeftOpen(start.leftOpen, sessions.environment);
+    return unstartable(`the reviewer could not be started: ${start.reason}${left === undefined ? "" : `; ${left}`}`);
+  }
+  const { place, child } = start;
   try {
-    child = spawn(line.command, [...line.args], options);
-  } catch (cause) {
-    return {
-      cost: unspent,
-      refusals: 0,
-      reported: nothingReported,
-      kind: "unstartable",
-      reason: startFailed(line.command, cause),
-    };
+    sessions.started?.(place, sessions.boundEndsAt);
+  } catch {
+    // The caller's record of the reviewer is not the reviewer, which runs on.
   }
 
   // A startup failure never reaches the report file: the process exits non-zero
-  // having written nothing, and its only account of itself is here. Read as it
-  // arrives, because a pipe nobody drains fills and stops the process it was
-  // meant to be reading.
-  const complaint = drain(child.stderr);
-  const closing = ending(child);
+  // having written nothing, and a child's only account of itself is its stderr.
+  // Both pipes are read as they arrive, because a pipe nobody drains fills and
+  // stops the process writing to it. A reviewer in a pane writes to the pane.
+  const complaint = child === undefined ? (): string => "" : drain(child.stderr);
+  if (child !== undefined) discard(child.stdout);
+  const watching = new AbortController();
+  const exited = child === undefined ? exitOf(place.identity.pid, watching.signal) : exitOfChild(child);
   // The process has written everything it will once it has exited, so the file
   // is read once more then and that read is the last.
-  const exited = new Promise<void>((settle) => {
-    child.once("exit", () => settle());
-    child.once("error", () => settle());
-  });
+  const closing = child === undefined ? exited : ending(child);
   const abandoned = new AbortController();
 
   // The last the parse reported is the whole of what a killed round has, so it
@@ -365,24 +407,18 @@ async function attempt(
     broken: undefined,
     ...nothingReported,
   };
-  let startFailure: string | undefined;
-  let unstarted = false;
-  let over = false;
-  child.on("error", (cause) => {
-    // A process that never started emits no exit, so this is the only word that
-    // it is not running.
-    unstarted = true;
-    // Once the attempt is over the only signals left are this module's own, and
-    // a refused one says nothing about whether the reviewer started.
-    if (!over) startFailure = startFailed(line.command, cause);
-  });
 
-  // The reviewer leads the group, so its identifier names the group. What the
-  // round owns is the group rather than the one process in it that it started.
+  // The reviewer leads its group, in a pane as with no terminal, so its
+  // identifier names the group. What the round owns is the group rather than the
+  // one process in it that it started.
   const owned: Owned = {
-    child,
-    group: child.pid,
-    gone: () => hasStopped(child) || unstarted,
+    group: place.identity.pid,
+    gone: child === undefined ? () => !running(place.identity.pid) : () => hasStopped(child),
+    alone: (sent) => {
+      if (child === undefined) process.kill(place.identity.pid, sent);
+      else child.kill(sent);
+    },
+    ...(child === undefined ? { groupRuns: () => groupHasLiving(place.identity.pid) } : {}),
     space: invocation.roundSpace,
   };
 
@@ -415,51 +451,52 @@ async function attempt(
     cancel = bound.whenPassed(() => settle("expired"));
   });
 
-  const ended = await Promise.race([parsing, expiry]);
-  cancel();
+  try {
+    const ended = await Promise.race([parsing, expiry]);
+    cancel();
 
-  if (ended === "expired") {
-    over = true;
+    if (ended === "expired") {
+      await stop(owned);
+      child?.stderr.destroy();
+      // What the reviewer wrote between the last read and the stop is part of
+      // what it reported, a finish included. A file that takes longer than the
+      // grace to read is left where the read had got to.
+      await within(parsing.then(() => {}), GRACE_MS);
+      abandoned.abort();
+      return atTheBound(progress);
+    }
+
+    // The reviewer is stopped before its account is read, and whatever the
+    // account turns out to be. One still running would never close its output, so
+    // there would be nothing to wait for; one already gone is not signalled at
+    // all; and no reviewer outlives the round that started it.
     await stop(owned);
-    child.stderr.destroy();
-    // What the reviewer wrote between the last read and the stop is part of
-    // what it reported, a finish included. A file that takes longer than the
-    // grace to read is left where the read had got to.
-    await within(parsing.then(() => {}), GRACE_MS);
-    abandoned.abort();
-    return atTheBound(progress);
-  }
+    // A child's exit status and the last of its stderr are both there only once
+    // its output has closed.
+    await within(closing, GRACE_MS);
+    if (child === undefined || (ended.kind !== "unparsed" && ended.kind !== "incomplete")) return ended;
 
-  // The reviewer is stopped before its account is read, and whatever the
-  // account turns out to be. One still running would never close its output, so
-  // there would be nothing to wait for; one already gone is not signalled at
-  // all; and no reviewer outlives the round that started it.
-  await stop(owned);
-  // Its exit status and the last of stderr are both there only once its output
-  // has closed. A spawn that failed reports itself here too, rather than an
-  // empty stream being read as a reviewer that ran and said nothing.
-  await within(closing, GRACE_MS);
-  const failure = startFailure;
-  over = true;
-  if (failure !== undefined) {
+    // A run that completed a message explained itself in the report file, and
+    // stderr would only say the same thing a second way.
+    const said = complaint();
+    if (ended.cost.messages > 0 || said === "") return ended;
     return {
-      cost: ended.cost,
-      refusals: ended.refusals,
-      reported: ended.reported,
-      kind: "unstartable",
-      reason: failure,
+      ...ended,
+      reason: `${ended.reason}: ${endedAs(detached.command, child)}, and said: ${said}`,
     };
+  } finally {
+    watching.abort();
+    // The reviewer and its groups are stopped by now. Closing the pane takes it
+    // off the person's screen, and is not relied on to stop anything.
+    const left = closePlace(place, sessions.environment);
+    if (left !== undefined) {
+      try {
+        sessions.paneLeftOpen?.(left);
+      } catch {
+        // Nothing more to do with a pane that would not close.
+      }
+    }
   }
-  if (ended.kind !== "unparsed" && ended.kind !== "incomplete") return ended;
-
-  // A run that completed a message explained itself in the report file, and
-  // stderr would only say the same thing a second way.
-  const said = complaint();
-  if (ended.cost.messages > 0 || said === "") return ended;
-  return {
-    ...ended,
-    reason: `${ended.reason}: ${endedAs(line.command, child)}, and said: ${said}`,
-  };
 }
 
 /**
@@ -566,14 +603,17 @@ const POLL_MS = 25;
 
 /** What one round owns: the reviewer, its own group, and the groups its shells led. */
 type Owned = {
-  readonly child: ChildProcess;
-  /**
-   * The group's identifier, which is the reviewer's own. Absent where the
-   * reviewer never got as far as having one.
-   */
+  /** The group's identifier, which is the reviewer's own. */
   readonly group: number | undefined;
-  /** Whether the reviewer itself is gone, including where it never started. */
+  /** Whether the reviewer itself is gone. */
   readonly gone: () => boolean;
+  /** Send the signal to the reviewer alone. May throw. */
+  readonly alone: (sent: NodeJS.Signals) => void;
+  /**
+   * Whether anything is still running in the reviewer's group, where the
+   * group's own answer would count a zombie the round cannot reap.
+   */
+  readonly groupRuns?: () => boolean;
   /**
    * Where the shells the reviewer started recorded the groups they lead. Absent
    * at a depth granting no shell, where nothing detaches and nothing records.
@@ -633,6 +673,7 @@ async function stopReviewer(owned: Owned): Promise<void> {
 function groupRuns(owned: Owned): boolean {
   const { group } = owned;
   if (group === undefined) return false;
+  if (owned.groupRuns !== undefined) return owned.groupRuns();
   try {
     // Signal 0 asks whether the group could be signalled, and sends nothing.
     process.kill(-group, 0);
@@ -679,7 +720,7 @@ function signal(owned: Owned, sent: NodeJS.Signals): void {
     }
   }
   try {
-    owned.child.kill(sent);
+    owned.alone(sent);
   } catch {
     // Nothing to do with it: the wait below is what bounds this either way.
   }
@@ -732,8 +773,146 @@ function plus(total: RoundCost, more: RoundCost): RoundCost {
   return total.floor === true || more.floor === true ? { ...sum, floor: true } : sum;
 }
 
-function startFailed(command: string, cause: unknown): string {
-  return `the reviewer ${command} could not be started: ${reasonFor(cause)}`;
+/** `environment` with nothing in it that names a Herdr or tmux server. */
+function withoutPanes(environment: NodeJS.ProcessEnv): Environment {
+  const { HERDR_SOCKET_PATH: _herdr, TMUX: _tmux, ...rest } = environment;
+  return rest;
+}
+
+/** Whether a session started in `environment` may open a pane. */
+function offersPane(environment: Environment): boolean {
+  return insideHerdr(environment) || (environment["TMUX"] ?? "") !== "";
+}
+
+/**
+ * Whether the process holding `pid` is running, where a zombie is not.
+ *
+ * A reviewer in a pane is the pane server's child, and the server reaps it when
+ * it gets to it. Until then it is a zombie that holds its pid and runs nothing,
+ * which tmux on Linux has been seen to leave for seconds. A `ps` that could not
+ * tell is read as running, so nothing is taken for stopped that may not be.
+ */
+function running(pid: number): boolean {
+  try {
+    // Signal 0 asks whether the process could be signalled, and sends nothing.
+    process.kill(pid, 0);
+  } catch (cause) {
+    if (!refused(cause)) return false;
+  }
+  return identityOf(pid, SESSION_BOUND_MS).outcome !== "gone";
+}
+
+/**
+ * Whether anything but a zombie is left in `group`.
+ *
+ * A group whose only member is a zombie leader runs nothing, though the system
+ * still answers for it. A `ps` that could not tell is read as yes.
+ */
+function groupHasLiving(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+  } catch (cause) {
+    if (!refused(cause)) return false;
+  }
+  const listed = spawnSync("ps", ["-A", "-o", "pgid=,stat="], { encoding: "utf8", timeout: SESSION_BOUND_MS });
+  if (listed.error !== undefined || listed.status !== 0) return true;
+  return listed.stdout.split("\n").some((row) => {
+    const [pgid, stat] = row.trim().split(/\s+/u);
+    return Number(pgid) === group && stat !== undefined && !stat.startsWith("Z");
+  });
+}
+
+/** How often a reviewer in a pane is looked for, each look being a `ps`. */
+const PANE_POLL_MS = 250;
+
+/**
+ * Resolves once `pid` runs nothing, or once `abandoned` is.
+ *
+ * A reviewer in a pane is not this process's child, so its exit arrives as no
+ * event and is looked for instead.
+ */
+function exitOf(pid: number, abandoned: AbortSignal): Promise<void> {
+  return new Promise((settle) => {
+    const look = (): void => {
+      if (abandoned.aborted || !running(pid)) {
+        settle();
+        return;
+      }
+      setTimeout(look, PANE_POLL_MS);
+    };
+    look();
+  });
+}
+
+/** Resolves once the child has exited, however it ended. */
+function exitOfChild(child: ChildProcessHandle): Promise<void> {
+  return new Promise((settle) => {
+    if (hasStopped(child)) settle();
+    child.once("exit", () => settle());
+    child.once("error", () => settle());
+  });
+}
+
+/** Read the stream to its end and keep none of it. */
+function discard(stream: Readable): void {
+  stream.on("error", () => {});
+  stream.resume();
+}
+
+/**
+ * Close the pane the reviewer ran in, and say why where it could not be
+ * confirmed closed. A child has no pane.
+ *
+ * tmux has closed a window whose command exited, and the close then finds it
+ * gone. Herdr returns a pane to its shell instead, so its close is what removes it.
+ */
+function closePlace(place: SessionPlace, environment: Environment): string | undefined {
+  if (place.backend === "child") return undefined;
+  return closeLeftOpen(place, environment);
+}
+
+/**
+ * Stop whatever a failed start may have left running, as a reviewer is stopped
+ * at the bound: its group, then the groups its shells recorded.
+ *
+ * The recorded groups are stopped whether or not a pane was left open. A shell
+ * the reviewer detached leads a session of its own, which no pane's close
+ * reaches, and a start that failed after the reviewer ran may have closed its
+ * pane already.
+ *
+ * tmux closes a window with one `SIGHUP`, which a command may ignore, so the
+ * window's command is found from tmux and its group signalled first. Herdr's
+ * own close escalates to `SIGKILL` across the pane's shell session, which holds
+ * the command, so a Herdr pane has only its recorded groups to stop here.
+ */
+async function stopFailedStart(
+  left: LeftOpen | undefined,
+  environment: Environment,
+  space: RoundSpace | undefined,
+): Promise<void> {
+  const pid = left?.backend === "tmux" ? windowProcess(left.window, environment, SESSION_BOUND_MS) : undefined;
+  if (pid === undefined) {
+    if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
+    return;
+  }
+  await stop({
+    group: pid,
+    gone: () => !running(pid),
+    alone: (sent) => process.kill(pid, sent),
+    groupRuns: () => groupHasLiving(pid),
+    space,
+  });
+}
+
+function closeLeftOpen(left: LeftOpen, environment: Environment): string | undefined {
+  if (left.backend === "herdr") {
+    const closed = closeHerdrPane(left.pane, { environment, boundMs: SESSION_BOUND_MS });
+    return closed.outcome === "closed" ? undefined : `its pane ${left.pane} could not be closed: ${closed.reason}`;
+  }
+  const closed = closeWindow(left.window, environment, SESSION_BOUND_MS);
+  if (closed.outcome === "closed") return undefined;
+  const why = closed.outcome === "open" ? "tmux still has it" : closed.reason;
+  return `its window ${left.window.id} could not be closed: ${why}`;
 }
 
 function reasonFor(cause: unknown): string {

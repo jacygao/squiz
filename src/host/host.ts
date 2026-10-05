@@ -56,8 +56,9 @@ const STATE_WAIT_MS = 5_000;
 
 const ALREADY_CLOSED = "the episode had closed before a round took this state";
 
-// The reviewer is the round's child in print mode, in no pane.
-const REVIEWER: ReviewerPlace = { backend: "detached" };
+// A reviewed record must name where its reviewer ran. This stands in only where
+// a round reviewed without saying where its reviewer started, which is a defect.
+const UNREPORTED: ReviewerPlace = { backend: "detached" };
 
 export type HostSetup = {
   /** The worktree whose episode the host serves. */
@@ -183,11 +184,25 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     log(`round ${round.number}: reviewing ${named(round.record)}`);
     const { config } = setup.round;
     let ended: RoundEnd | undefined;
+    let reviewer: ReviewerPlace | undefined;
     const conclusion = await runRound({
       ...setup.round,
       worktree: episode.worktree,
       held: { pullRequest: Number(episode.id), lock },
       state: { head: round.record.head, activity: round.record.activity },
+      ...(round.record.herdrWorkspace === undefined ? {} : { workspace: round.record.herdrWorkspace }),
+      reviewerStarted: (session) => {
+        reviewer = session.pane === undefined ? { backend: session.backend } : { backend: session.backend, pane: session.pane };
+        const noted = write((state) => {
+          const record = (state.records ?? []).find((held) => sameState(held, round.record));
+          if (record?.status !== "reviewing") return state;
+          return withRecords(state, [{ ...record, reviewer: session }]);
+        });
+        // The review goes on without it. The record is how a person or a later
+        // recovery finds the reviewer, and the reviewer runs either way.
+        if (noted.outcome === "failed") log(`round ${round.number}: the reviewer's session could not be recorded: ${noted.reason}`);
+      },
+      paneLeftOpen: (reason) => log(`round ${round.number}: the reviewer's pane was left open: ${reason}`),
       endsOn: (tally, queued) => {
         ended = decideRoundEnd(
           { ...tally, state: keyOf(round.record) },
@@ -200,11 +215,13 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
 
     // Recording the result would make the worktree's directory again.
     if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
-    const result = resultOf(conclusion, ended, round.record, {
-      number: round.number,
-      startedAt,
-      endedAt: nowSeconds(),
-    });
+    const result = resultOf(
+      conclusion,
+      ended,
+      round.record,
+      { number: round.number, startedAt, endedAt: nowSeconds() },
+      reviewer,
+    );
     let written: readonly Recorded[] = [];
     const recorded = write((state) => {
       written = result.records(state);
@@ -276,6 +293,7 @@ function resultOf(
   ended: RoundEnd | undefined,
   taken: QueuedRecord,
   timing: Timing,
+  reviewer: ReviewerPlace | undefined,
 ): Result {
   const key = keyOf(taken);
   switch (conclusion.outcome) {
@@ -290,7 +308,7 @@ function resultOf(
           line: `${named(taken)} not reviewed: ${reason}`,
         };
       }
-      const round = { ...timing, reviewer: REVIEWER };
+      const round = { ...timing, reviewer: reviewer ?? UNREPORTED };
       const reviewed: Recorded = {
         record: { ...ended.record, round, ...reportOf(conclusion, ended) },
         name: taken.head.slice(0, 7),
@@ -317,10 +335,7 @@ function resultOf(
     case "no-pull-request":
     case "round-running": {
       const reason = failureOf(conclusion);
-      // A conclusion carries what the readings around the reviewer found only
-      // where a reviewer ran.
-      const ran = conclusion.outcome === "failed" && conclusion.confinement !== undefined;
-      const round = ran ? { ...timing, reviewer: REVIEWER } : timing;
+      const round = reviewer === undefined ? timing : { ...timing, reviewer };
       const lines = conclusion.outcome === "failed" ? failureLinesOf(conclusion) : [];
       const failed = { ...failedRecord(key, reason), round, ...(lines.length === 0 ? {} : { lines }) };
       return { records: () => inOrder([failed]), line: `${named(taken)} failed: ${reason}` };
