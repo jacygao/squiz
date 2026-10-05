@@ -780,7 +780,7 @@ it.** The round host starts it in the first place that applies:
 | Neither | As a child of the round host, with no terminal |
 
 The command line is the one the adapter built: `pi`'s, or the Copilot adapter's
-runner, which starts Copilot. Below, "the reviewer" is that command.
+shell line, which starts Copilot. Below, "the reviewer" is that command.
 
 **In Herdr, the start returns once the reviewer is running, and the round's
 bound is all that limits the review.** `herdr pane run` types a line and returns
@@ -848,7 +848,7 @@ the pane. It reads the reviewer's group from the backend while `pi` runs:
 
 | Backend | Where the reviewer's group comes from |
 |---|---|
-| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is the one the adapter built, `pi` or the Copilot adapter's runner, so this is that command's own pid and leads its group. |
+| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is the one the adapter built, `pi` or the `sh` of the Copilot adapter's line, so this is that command's own pid and leads its group. |
 | Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold the reviewer. |
 
 A pane close is not relied on to stop anything. tmux's `kill-window` sends one
@@ -1058,8 +1058,7 @@ flags for its CLI. The adapter must not choose for itself.
 an extension the CLI loads, or a server it starts. Each is the adapter's own, it
 is named on the command line `argv` builds, and the names it registers are in
 `grants`. Nothing above the adapter knows it exists. The `pi` adapter ships an
-extension, and the Copilot adapter ships a server and the runner that starts
-Copilot.
+extension, and the Copilot adapter ships a server.
 
 **Every reporting call is checked by the harness's own report checks, whatever
 serves it.** They decide what a report must carry, and refuse one the harness
@@ -1075,11 +1074,8 @@ so does the run's cost.** An adapter whose CLI has no way to report a finding
 before the run ends reports them all at the end, which is a working adapter whose
 rounds keep nothing when they are killed.
 
-**A round's cost is optional.** An adapter whose CLI reports its cost only once
-the run is over, as Copilot does, records a cost only for a run that ended by
-itself. A run the round stopped has no cost at all, rather than a floor. Such an
-adapter says so as part of the contract, and the round then drops the cost of
-any attempt it stopped instead of marking it a floor.
+An adapter whose CLI reports its cost only once the run is over writes the cost
+into the file then. A run stopped before that writes none, and has no cost.
 
 **A reviewer CLI must exit on `SIGTERM`, and so must every process it starts.**
 That is what the time bound rests on: the round signals the reviewer's process
@@ -1291,37 +1287,66 @@ from it is the last part of this section.
 
 #### The command line
 
-The line the round starts is the adapter's runner, which starts Copilot:
+The line the round starts is one shell line, which `argv` builds:
 
 ```bash
-<node> <runner> <charter-file> .squiz/<number>/rounds/<k>/prompt.md \
-       .squiz/<number>/rounds/<k>/session/usage.json -- \
-  copilot --no-ask-user --allow-all-tools \
-          --available-tools=view,grep,glob,squiz-report_finding,squiz-report_verdict,squiz-finish_review \
-          --no-custom-instructions \
-          --disable-builtin-mcps \
-          --additional-mcp-config '{"mcpServers":{"squiz":{"type":"local","command":"<node>","args":["<server>"],"env":{"SQUIZ_REPORTS":"<reports-file>"},"tools":["*"]}}}' \
-          --reasoning-effort medium
+sh -c 'copilot -p "$(cat .squiz/<number>/rounds/<k>/prompt.md)" \
+         --no-ask-user --allow-all-tools \
+         --available-tools=view,grep,glob,squiz-report_finding,squiz-report_verdict,squiz-finish_review \
+         --no-custom-instructions \
+         --disable-builtin-mcps \
+         --additional-mcp-config "$0" \
+         --allow-all-mcp-server-instructions \
+         --reasoning-effort medium \
+         --usage-output-file .squiz/<number>/rounds/<k>/session/usage.json \
+       && printf "{\"type\":\"usage\",\"usage\":%s}\n" "$(tr -d "\n" < .squiz/<number>/rounds/<k>/session/usage.json)" \
+          >> <reports-file>' \
+  '{"mcpServers":{"squiz":{"type":"local","command":"<node>","args":["<server>"],"env":{"SQUIZ_REPORTS":"<reports-file>","SQUIZ_CHARTER":"<charter-file>"},"tools":["*"]}}}'
 ```
 
-`<node>` is the Node the harness runs on, and `<runner>` and `<server>` are the
-two files the adapter ships, by absolute path. The environment adds
-`COPILOT_HOME`, pointing at the round's session directory,
-`.squiz/<number>/rounds/<k>/session/`, which `confine` creates empty.
+The line is shown wrapped. As `argv` builds it, the script is one argument with
+no newline in it, every path is absolute, and the MCP configuration travels as
+the script's `$0`, so its quotes need no escaping inside the script. `<node>` is
+the Node the harness runs on, and `<server>` is the reporting server the adapter
+ships, by absolute path.
 
-**The runner starts Copilot with two more arguments**:
-`--usage-output-file` naming the usage file, and `-p` carrying the charter and
-then the task prompt, as one argument. Copilot runs as the runner's child, in
-the runner's process group and on the runner's standard input and output, and
-with `COPILOT_ALLOW_ALL` taken out of its environment. Because the runner hands
-Copilot the prompt itself, no newline from the charter or the prompt reaches the
-line a Herdr pane's shell reads.
+The environment adds three variables:
+
+- `COPILOT_HOME`, pointing at the round's session directory,
+  `.squiz/<number>/rounds/<k>/session/`, which `confine` creates empty;
+- `COPILOT_ALLOW_ALL`, set to the empty string, which Copilot reads as off;
+- `COPILOT_MODEL`, the user's default model, where the user has one
+  (Keeping the project and the user out).
+
+**The task prompt is read from its file by the shell, not carried on the line.**
+`-p` takes the prompt as one argument, which the shell builds with `cat` as
+Copilot starts. The quotes around `$(…)` keep it one word and expand nothing
+inside it. No newline from the prompt reaches the line a Herdr pane's shell
+reads.
+
+**The charter reaches Copilot's system prompt through the reporting server.**
+The server reads the charter file `SQUIZ_CHARTER` names, and returns it as the
+`instructions` of its answer to `initialize`. Copilot puts a server's
+initialization instructions into the system prompt for the servers it
+allowlists, and for every server under `--allow-all-mcp-server-instructions`,
+which the adapter passes. Two fallbacks stand behind it, in order:
+
+1. A custom agent in the adapter's `COPILOT_HOME` whose instructions are the
+   charter, chosen with `--agent`.
+2. The charter ahead of the task prompt in the first message, as
+   `"$(cat <charter-file> <prompt-file>)"`.
+
+**The usage reaches the report file only where Copilot exits 0 by itself.**
+`&&` appends it as one usage line, written by one `printf`, with the file's
+newlines taken out so that it is one line of JSON. Copilot has stopped the
+reporting server by then, so nothing else is writing the file.
 
 **Copilot runs with `-p` in a pane and detached alike.** In a pane it prints
 each call and its answer as text, then its usage, and exits by itself once the
 reviewer's last message is written. `-i` is never used: it waits at its prompt
 once the work is done, and no flag or extension ends it. Detached, the round
-hands the runner `/dev/null` as standard input, as it does `pi`.
+hands the shell `/dev/null` as standard input, as it does `pi`, and Copilot
+inherits it.
 
 | Flag | What it does for the round |
 |---|---|
@@ -1330,6 +1355,8 @@ hands the runner `/dev/null` as standard input, as it does `pi`.
 | `--no-custom-instructions` | Keeps the tree's `AGENTS.md`, `.github/copilot-instructions.md` and `.github/instructions/` out of the system prompt. These load whether or not the folder is trusted. |
 | `--disable-builtin-mcps` | The GitHub MCP server is not started for a reviewer that has no GitHub access of its own. |
 | `--additional-mcp-config` | Starts the reporting server. |
+| `--allow-all-mcp-server-instructions` | Puts the reporting server's instructions, the charter, into the system prompt. |
+| `--usage-output-file` | Where Copilot writes the run's usage as it exits. |
 | `--reasoning-effort` | The thinking level, on every command line. |
 
 The tree's `AGENTS.md` still reaches the reviewer, by the charter's instruction
@@ -1340,9 +1367,12 @@ to read it, which it does with `view`.
 **The reviewer runs on the user's default model.** The adapter passes no
 `--model`. Copilot keeps the user's default as `model` in the user's own
 `settings.json`, under `~/.copilot/`, or under the `COPILOT_HOME` the user set.
-`confine` copies that one setting into a `settings.json` of its own in the
-adapter's `COPILOT_HOME`, and nothing else from the file. Where the user set no
-`model`, it writes none, and the round runs on whatever Copilot falls back to.
+`confine` reads that one setting and returns it as `COPILOT_MODEL`, which
+`copilot help environment` lists as setting the model. Nothing is written into
+the adapter's `COPILOT_HOME` for it. Where the round host's own environment
+already carries `COPILOT_MODEL`, that is the user's default and `confine` leaves
+it. Where the user has neither, the round runs on whatever Copilot falls back
+to. The later `model` setting maps to the same variable.
 
 #### Keeping the project and the user out
 
@@ -1355,8 +1385,10 @@ nothing, and none of the tree's hooks or MCP servers runs. The credential is in
 the system's credential store rather than in `COPILOT_HOME`, so the reviewer
 still signs in.
 
-`COPILOT_ALLOW_ALL` set to `true` trusts the working directory whatever
-`COPILOT_HOME` holds, which is why the runner takes it out.
+`COPILOT_ALLOW_ALL` set to exactly `true` trusts the working directory whatever
+`COPILOT_HOME` holds. `copilot help environment` says an empty value turns it
+off, so the adapter sets it to the empty string rather than leaving whatever the
+round host inherited.
 
 `-p` never opens the folder-trust dialog, so no answer to it is ever needed.
 `--add-dir` is never passed, because it loads the skills and agents of the
@@ -1390,7 +1422,8 @@ Nothing is refused by pattern, so the run's refusals are always zero.
 
 **The three reporting calls are served by an MCP server the adapter ships.**
 Copilot starts it from `--additional-mcp-config` and talks to it over standard
-input and output, in newline-delimited JSON-RPC. The server lists the three calls
+input and output, in newline-delimited JSON-RPC. Its answer to `initialize`
+carries the charter as its `instructions`. The server lists the three calls
 with the schemas the report checks declare, and it answers each call as `pi`'s
 extension does. It writes the same lines to the report file that
 `SQUIZ_REPORTS` names, so the round reads the file as it reads `pi`'s.
@@ -1417,9 +1450,8 @@ or not the reviewer finished its review. The finish in the report file is what
 says it did. A run that exits with no finish recorded is a review that stopped
 without finishing, as § 7 sets out, unless it reached no model at all.
 
-**The runner records what the run spent once Copilot has exited.** It reads the
-usage file Copilot wrote and appends it whole to the report file as one usage
-line:
+**The shell records what the run spent once Copilot has exited 0.** It appends
+the usage file Copilot wrote to the report file, whole, as one usage line:
 
 ```json
 {"type":"usage","usage":{"totalNanoAiu":535970000,"modelMetrics":{"gpt-5-mini":{"requests":{"count":5,"cost":0},"usage":{"inputTokens":60586,"outputTokens":521,"cacheReadTokens":48128,"cacheWriteTokens":0,"reasoningTokens":64}}}, …}}
@@ -1438,11 +1470,12 @@ is there. A usage line whose `usage` carries no token counts the read can sum is
 a plan that reports no usable cost: the round records no cost for it, and reads
 the rest of the line as the table below does.
 
-Where Copilot could not be started at all, the runner appends a usage line
-carrying an `errorMessage` that names `copilot` and says why, with no `usage`,
-and exits 127. That line counts no request and is read as the run completing no
-message, with that reason. Where Copilot exited and wrote no usage file, the
-runner appends nothing.
+Where Copilot could not be started at all, the shell exits 127 having written
+nothing to the report file, and its stderr says `copilot` was not found.
+Detached, the round adds that stderr to the reason, as it does for any reviewer
+whose run completed no message. In a pane, stderr is the screen, and the reason
+names no cause. Where Copilot exits non-zero, or writes no usage file, nothing is
+appended.
 
 **What the read concludes:**
 
@@ -1450,7 +1483,7 @@ runner appends nothing.
 |---|---|
 | A finish | Reviewed |
 | No finish, and a usage line counting at least one request | Stopped without finishing |
-| No finish, and no usage line or one counting no request | Completed no message, with the `errorMessage` where there is one |
+| No finish, and no usage line or one counting no request | Completed no message |
 
 **A Copilot round records a cost only where Copilot ended by itself and its
 usage line carried token counts.** That cost is Copilot's own total, and is never
@@ -1460,18 +1493,24 @@ figure.
 
 #### Stopping
 
-The round stops a Copilot reviewer as it stops any other: `SIGTERM` to the
-reviewer's group, which is the runner's, then `SIGKILL` after the grace for
-whatever is left.
+**`sh` leads the reviewer's group.** It is the tmux window's command, the
+program Herdr's gate becomes, and the child the round host starts detached.
+Copilot is its child, and the reporting server is Copilot's, all in that group.
+Nothing on the line traps a signal.
 
-- **Copilot exits on `SIGTERM` at once, and exits 0.** Before it exits it writes
-  the usage file and stops the reporting server.
-- **The runner does not exit on `SIGTERM` or `SIGHUP`.** It waits for Copilot,
-  appends the usage line, and then exits, inside the grace.
-- **After `SIGKILL` nothing is written.** Copilot writes no usage file, and the
-  runner is gone.
-- **A round stopped either way records no cost.** The round stopped it, so it
-  drops whatever usage line arrived, as Adapters sets out.
+The round stops a Copilot reviewer as it stops any other: `SIGTERM` to that
+group, then `SIGKILL` after the grace for whatever is left.
+
+- **`sh` exits on `SIGTERM`**, which it does not trap, so the append after `&&`
+  never runs.
+- **Copilot exits on `SIGTERM` at once, and exits 0.** It writes its usage file
+  and stops the reporting server as it goes. Nothing reads that file.
+- **The reporting server exits on the `SIGTERM` that reaches the group.**
+- **After `SIGKILL` nothing is written**, by Copilot or by `sh`.
+
+So a round the round stopped, either way, leaves no usage line, and records no
+cost. At `read` Copilot starts no shell, so nothing it started leaves the
+group.
 
 #### Resuming
 
@@ -1490,20 +1529,30 @@ The pane prints the same identifier on its `Resume` line before it closes.
 
 These were not measured:
 
-- **Whether Copilot reads the copied `model` from the adapter's
-  `COPILOT_HOME`**, and what it falls back to where there is none. § 2 requires
-  the reviewer to run a different model from the coding agent, and nothing here
-  makes sure of it.
+- **Whether `COPILOT_MODEL` chooses the reviewer's model** under the adapter's
+  `COPILOT_HOME`, and what Copilot falls back to where it is not set. § 2
+  requires the reviewer to run a different model from the coding agent, and
+  nothing here makes sure of it.
+- **Whether an empty `COPILOT_ALLOW_ALL` turns trust off**, as `copilot help
+  environment` says, and whether an empty value survives a tmux window's or
+  Herdr pane's command line rather than being dropped. Only `true` was run.
+- **Whether the charter reaches the system prompt by the server's
+  `instructions`** under `--allow-all-mcp-server-instructions`, then by a custom
+  agent chosen with `--agent`. Neither route was run, and the first message is
+  what is left where both fail. Whether a charter in the first message holds the
+  reviewer as one in the system prompt does was not measured either.
+- **Whether Copilot stays in `sh`'s process group.** In every run measured,
+  Copilot was the pane's own command and led its group. Started by `sh`, a
+  Copilot that made a group of its own would be outside the round's signal.
+- **Whether the usage file is one line or several.** The shell takes its
+  newlines out either way.
 - **Whether every model takes every `--reasoning-effort` level**, and what
   Copilot does with one a model does not.
-- **Whether a charter carried in the first message holds the reviewer as one
-  appended to the system prompt does.** Copilot has no flag that appends a file
-  to its system prompt.
 - **A prompt the size of one argument.** Linux limits a single argument to
   128 KiB, and a prompt carrying many threads can be longer.
-- **What a run that reached no model reports**: whether it writes a usage file,
-  and where Copilot puts the reason. Until that is measured, such a run is read
-  as completing no message, without the reason.
+- **What a run that reached no model reports**: its exit status, whether it
+  writes a usage file, and where Copilot puts the reason. Until that is
+  measured, such a run is read as completing no message, without the reason.
 - **Whether `reasoningTokens` is part of `outputTokens`**, as it is in `pi`.
 - **Whether the resume line resumes from the coding agent's worktree**, after
   the snapshot is gone, and whether it opens the folder-trust dialog there.
@@ -2310,7 +2359,7 @@ nothing retries one.
 
 | Failure | Behaviour |
 |---|---|
-| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. A missing Copilot arrives through the Copilot adapter's runner, as a run that completed no message with a reason naming `copilot`, and is reported as a setup problem by the row below. |
+| The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. This recurs every round until someone fixes it, so it is reported as a setup problem rather than as a bad round. A missing Copilot arrives instead as a Copilot adapter run that completed no message, because the line the round starts is `sh`, and is reported as a setup problem by the row below. Detached, its reason carries `sh`'s complaint that `copilot` was not found; in a pane it names no cause. |
 | The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. The failure comment and stderr carry the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. |
 | The reviewer's output cannot be read, and no retry recovers it | Exit 1, and what the reviewer reported before its output stopped being readable is posted. The failure comment and stderr say the review did not run. A retry whose output cannot be read either and a first attempt that left no time for a retry both arrive here. |
 | The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. |
@@ -2618,7 +2667,7 @@ until something asks.
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review` |
 | **P1** | `squiz init` | Adds the review section to `AGENTS.md`, for coding agents other than Claude Code |
-| **P1** | A second reviewer adapter | The Copilot adapter: its runner, the reporting server, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
+| **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server and the charter it serves, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
@@ -2703,8 +2752,9 @@ These remain open:
 - **`--max-ai-credits`.** Copilot's own cap on a session's credits was not
   tried.
 - **The rest of the Copilot adapter's open questions**, listed at the end of
-  § 4 The Copilot adapter: the copied model, effort levels per model, the
-  charter in the first message, the size of one argument, a run that reaches
+  § 4 The Copilot adapter: the model, the empty `COPILOT_ALLOW_ALL`, the
+  charter's route to the system prompt, Copilot's group under `sh`, effort
+  levels per model, the size of one argument, a run that reaches
   no model, `reasoningTokens`, resuming, and a detached run.
 - **GitHub Copilot CLI, as a coding agent.** Its documentation lists `agentStop`
   and `subagentStop` hooks. Whether they fire, whether `subagentStop` names the
