@@ -1,9 +1,10 @@
 /**
  * The entry point `bin/squiz` execs. Every command dispatches from here, and
  * the dispatch itself runs under the top-level trap. Every command but
- * `squiz review` exits 0 whatever it is handed, so nothing stops the coding
- * agent finishing its turn. `squiz review` exits with the status its result
- * gives, and 1 where it could not run.
+ * `squiz review` and `squiz init` exits 0 whatever it is handed, so nothing
+ * stops the coding agent finishing its turn. `squiz review` exits with the
+ * status its result gives, and 1 where it could not run. `squiz init` is run by
+ * a person, and exits 1 where it could not add the section.
  *
  * stdout carries the answer to a command and nothing else. Everything that is
  * not an answer — a failure, a usage line, a branch with no pull request — goes
@@ -19,14 +20,15 @@ import { listReviewThreads } from "./github/threads.ts";
 import { currentBranch } from "./hook/branch.ts";
 import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";
-import { runUnderTrap, type HookExit } from "./hook/trap.ts";
+import { runUnderTrap, type HookExit, type Trapped } from "./hook/trap.ts";
 import { hostCommand } from "./host/command.ts";
+import { squizInit } from "./review/init.ts";
 import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
-const commands = ["hook", "threads", "reply", "status", "host", "review"];
+const commands = ["hook", "threads", "reply", "status", "host", "review", "init"];
 
 const numberSpelling = /^[1-9][0-9]*$/u;
 
@@ -52,6 +54,12 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
   }
   if (command === "host") {
     return hostCommand(argv.slice(1), process.cwd());
+  }
+  if (command === "init") {
+    const printed = squizInit(process.cwd());
+    process.stdout.write(printed.stdout);
+    process.stderr.write(printed.stderr);
+    return printed.exit;
   }
 
   // Exit 2 is how a round blocks the coding agent's turn, and a name the binary
@@ -175,9 +183,16 @@ function postReply(args: readonly string[]): HookExit {
   return 0;
 }
 
+/** How a throw ends `command`: at exit 1 where the status is read, and as the hook's otherwise. */
+function trappedFor(command: string | undefined): Trapped | undefined {
+  if (command === "review") return { exit: 1, failed: "the review failed" };
+  if (command === "init") return { exit: 1, failed: "squiz init failed" };
+  return undefined;
+}
+
 // The dispatch runs only where this file is the process's entry point, so that
 // importing it runs no command.
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  await runUnderTrap(() => dispatch(argv), argv[0] === "review" ? { exit: 1, failed: "the review failed" } : undefined);
+  await runUnderTrap(() => dispatch(argv), trappedFor(argv[0]));
 }
