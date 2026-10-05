@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { callGraphql, callRest, runGh } from "./gh.ts";
+import { boundOf, callGraphql, callRest, runGh } from "./gh.ts";
 
 type FakeGh = {
   readonly stdout?: string;
@@ -414,6 +414,12 @@ test("a gh that hangs is abandoned at the bound and GitHub is unreachable", asyn
     Date.now() - started < 10_000,
     "the call must be abandoned at its bound rather than waiting gh out",
   );
+});
+
+test("no call is given more than thirty seconds, however long its caller asks for or has left", () => {
+  assert.equal(boundOf(60_000, undefined), 30_000);
+  assert.equal(boundOf(undefined, 45_000), 30_000);
+  assert.equal(boundOf(undefined, undefined), 30_000);
 });
 
 /**

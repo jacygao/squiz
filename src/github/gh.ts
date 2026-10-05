@@ -13,9 +13,9 @@ import type { Deadline } from "../reviewers/deadline.ts";
 /**
  * The ceiling on one call to GitHub, in milliseconds.
  *
- * Not a budget a project chooses but a guard on the one deadline the harness
- * does not own: a call that hangs spends the two minutes a round has left for
- * posting, and then the runtime's kill of the hook.
+ * Not a budget a project chooses but a guard on the part of a round the call
+ * runs in: a call that hangs spends the time belonging to every other call in
+ * that part.
  */
 const CALL_CEILING_MS = 30_000;
 
@@ -271,7 +271,7 @@ function classify(result: SpawnSyncReturns<string>, boundMs: number): Completed 
  * A `timeout` of zero turns spawnSync's timeout off altogether, so zero and
  * anything that is not a positive number fall back to the ceiling.
  */
-function boundOf(asked: number | undefined, left: number | undefined): number {
+export function boundOf(asked: number | undefined, left: number | undefined): number {
   let bound = CALL_CEILING_MS;
   if (asked !== undefined && Number.isFinite(asked) && asked > 0) bound = Math.min(bound, asked);
   if (left !== undefined) bound = Math.min(bound, left);

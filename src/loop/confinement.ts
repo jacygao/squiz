@@ -313,9 +313,8 @@ export type BeforeTheReviewer = {
  * take the reading of `tree`, the reviewer's snapshot, that the reviewer will be
  * compared against.
  *
- * `until` is the moment all of that has to be inside. What it spends comes off
- * the reviewer's own bound, so a slow phase shortens the review rather than
- * pushing the round past its window.
+ * `until` is the moment all of that has to be inside, which is the end of the
+ * part of the round before the review.
  *
  * Never throws. A marker that was not written, a tree that is shared and a
  * reading that failed are each carried rather than raised, and none of them stops
@@ -369,8 +368,9 @@ export function readBeforeReviewer(
  * the two readings establish.
  *
  * Reached on every path the reviewer can end on, the time bound included.
- * `until` is the round's own window: nothing is started here where too little of
- * it is left, because what this phase spends comes off the posting that follows.
+ * `until` is the round's posting reserve: nothing is started here where too
+ * little of it is left, because what this phase spends comes off the posting
+ * that follows.
  *
  * Never throws.
  */

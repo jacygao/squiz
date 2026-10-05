@@ -68,7 +68,7 @@ const GRACE_MS = 2_000;
  * nothing posted. A reading cut short at this leaves the groups it covered alone,
  * which is the same answer a machine without `ps` gets.
  *
- * This and four times the grace together are what the margin left for posting has
+ * This and four times the grace together are what the posting reserve has
  * to cover.
  */
 const INSPECTION_MS = 5_000;
@@ -128,14 +128,15 @@ export type Round = { readonly refusals: number } & (
  *
  * The bound belongs to the round rather than to each attempt, so the retry runs
  * on what the first attempt left and a round that was killed is not tried
- * again.
+ * again. `now` is the clock the bound is read from.
  */
 export async function runRound(
   adapter: Adapter,
   handed: Invocation,
   seconds: number,
+  now: () => number = Date.now,
 ): Promise<Round> {
-  const bound = deadlineIn(seconds * 1_000);
+  const bound = deadlineIn(seconds * 1_000, now);
   // Absolute, so that the reviewer and the round name the same file whatever
   // directory either of them is in.
   const invocation = { ...handed, reportsFile: resolve(handed.directory, handed.reportsFile) };

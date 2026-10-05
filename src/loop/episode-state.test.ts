@@ -52,12 +52,12 @@ test("state written comes back as it was written", (t) => {
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
-test("how long each round ran, and the bound that cut one short, come back as written", (t) => {
+test("how long each round ran and posted, and the bound that cut one short, come back as written", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
     rounds: [
       { ...firstRound, elapsedSeconds: 41.3 },
-      { ...secondRound, elapsedSeconds: 480.2, cutShortAtSeconds: 480 },
+      { ...secondRound, elapsedSeconds: 480.2, cutShortAtSeconds: 480, postingSeconds: 4.3 },
     ],
     spentOutsideRounds: unspent,
   };
@@ -158,7 +158,7 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "confinement": {"shared": {}}}`,
   `{"rounds": [], "confinement": {"uncompared": [null]}}`,
   `{"rounds": [], "confinement": {"unestablished": 1}}`,
-  // How long a round ran, and the bound that cut it short, are the measurements a
+  // How long a round ran and posted, and the bound that cut it short, are the measurements a
   // later reading takes from this file. A figure that is there and cannot be read
   // would be a measurement nobody took.
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": "12"}]}`,
@@ -166,6 +166,8 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 0}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 2.5}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": true}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": "4"}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": -1}]}`,
   // A record dropped on reading is a state with no record, which a trigger queues
   // again, or a queued state that no round host ever takes.
   `{"rounds": [], "records": {}}`,
