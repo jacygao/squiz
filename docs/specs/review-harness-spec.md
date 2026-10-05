@@ -1083,8 +1083,8 @@ against a non-zero token count. The adapter returns the token count alongside th
 cost, which is what tells that case apart from a round that cost nothing.
 
 **A round's cost is marked a floor wherever the run's end cannot confirm it as
-a total.** A floor is at least what the round spent, and may be less. Two
-ends cannot confirm it:
+a total.** A floor is at least what the round spent, and may be less. Three
+things leave it unconfirmed:
 
 - **The file's last line is not a message's usage.** Every run ends on an
   assistant message, so a file ending on a report, a refusal or the finish is
