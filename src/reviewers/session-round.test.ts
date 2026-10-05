@@ -17,6 +17,7 @@ import { after, before, describe, test, type TestContext } from "node:test";
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import { startChild } from "../sessions/child.ts";
 import { closeHerdrPane, startInHerdrPane } from "../sessions/herdr.ts";
+import { identityOf } from "../sessions/process.ts";
 import { openWindow } from "../sessions/tmux.ts";
 import type { Adapter, Invocation } from "./adapter.ts";
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
@@ -203,13 +204,13 @@ function privateTmux(t: TestContext): TmuxServer {
 
 const tmuxInstalled = spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
 
+/**
+ * Whether `pid` runs anything. A killed reviewer is the pane server's zombie
+ * until the server reaps it, which tmux on Linux can leave for seconds, and a
+ * zombie runs nothing.
+ */
 function running(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (cause) {
-    return cause instanceof Error && "code" in cause && cause.code === "EPERM";
-  }
+  return identityOf(pid, 5_000).outcome !== "gone";
 }
 
 async function eventually(done: () => boolean, ms: number): Promise<boolean> {

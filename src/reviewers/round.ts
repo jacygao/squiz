@@ -13,13 +13,14 @@
  * Deciding whether another round happens is the caller's. This runs one.
  */
 
-import type { ChildProcess } from "node:child_process";
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 
 import type { ChildProcessHandle } from "../sessions/child.ts";
 import { closeHerdrPane, insideHerdr } from "../sessions/herdr.ts";
+import { identityOf } from "../sessions/process.ts";
 import { startSession, type Backends, type LeftOpen, type SessionPlace } from "../sessions/session.ts";
 import { closeWindow, windowProcess, type Environment } from "../sessions/tmux.ts";
 
@@ -412,11 +413,12 @@ async function attempt(
   // one process in it that it started.
   const owned: Owned = {
     group: place.identity.pid,
-    gone: child === undefined ? () => !exists(place.identity.pid) : () => hasStopped(child),
+    gone: child === undefined ? () => !running(place.identity.pid) : () => hasStopped(child),
     alone: (sent) => {
       if (child === undefined) process.kill(place.identity.pid, sent);
       else child.kill(sent);
     },
+    ...(child === undefined ? { groupRuns: () => groupHasLiving(place.identity.pid) } : {}),
     space: invocation.roundSpace,
   };
 
@@ -608,6 +610,11 @@ type Owned = {
   /** Send the signal to the reviewer alone. May throw. */
   readonly alone: (sent: NodeJS.Signals) => void;
   /**
+   * Whether anything is still running in the reviewer's group, where the
+   * group's own answer would count a zombie the round cannot reap.
+   */
+  readonly groupRuns?: () => boolean;
+  /**
    * Where the shells the reviewer started recorded the groups they lead. Absent
    * at a depth granting no shell, where nothing detaches and nothing records.
    */
@@ -666,6 +673,7 @@ async function stopReviewer(owned: Owned): Promise<void> {
 function groupRuns(owned: Owned): boolean {
   const { group } = owned;
   if (group === undefined) return false;
+  if (owned.groupRuns !== undefined) return owned.groupRuns();
   try {
     // Signal 0 asks whether the group could be signalled, and sends nothing.
     process.kill(-group, 0);
@@ -776,19 +784,49 @@ function offersPane(environment: Environment): boolean {
   return insideHerdr(environment) || (environment["TMUX"] ?? "") !== "";
 }
 
-/** Whether a process holds `pid`, a zombie included. */
-function exists(pid: number): boolean {
+/**
+ * Whether the process holding `pid` is running, where a zombie is not.
+ *
+ * A reviewer in a pane is the pane server's child, and the server reaps it when
+ * it gets to it. Until then it is a zombie that holds its pid and runs nothing,
+ * which tmux on Linux has been seen to leave for seconds. A `ps` that could not
+ * tell is read as running, so nothing is taken for stopped that may not be.
+ */
+function running(pid: number): boolean {
   try {
     // Signal 0 asks whether the process could be signalled, and sends nothing.
     process.kill(pid, 0);
-    return true;
   } catch (cause) {
-    return refused(cause);
+    if (!refused(cause)) return false;
   }
+  return identityOf(pid, SESSION_BOUND_MS).outcome !== "gone";
 }
 
 /**
- * Resolves once nothing holds `pid`, or once `abandoned` is.
+ * Whether anything but a zombie is left in `group`.
+ *
+ * A group whose only member is a zombie leader runs nothing, though the system
+ * still answers for it. A `ps` that could not tell is read as yes.
+ */
+function groupHasLiving(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+  } catch (cause) {
+    if (!refused(cause)) return false;
+  }
+  const listed = spawnSync("ps", ["-A", "-o", "pgid=,stat="], { encoding: "utf8", timeout: SESSION_BOUND_MS });
+  if (listed.error !== undefined || listed.status !== 0) return true;
+  return listed.stdout.split("\n").some((row) => {
+    const [pgid, stat] = row.trim().split(/\s+/u);
+    return Number(pgid) === group && stat !== undefined && !stat.startsWith("Z");
+  });
+}
+
+/** How often a reviewer in a pane is looked for, each look being a `ps`. */
+const PANE_POLL_MS = 250;
+
+/**
+ * Resolves once `pid` runs nothing, or once `abandoned` is.
  *
  * A reviewer in a pane is not this process's child, so its exit arrives as no
  * event and is looked for instead.
@@ -796,11 +834,11 @@ function exists(pid: number): boolean {
 function exitOf(pid: number, abandoned: AbortSignal): Promise<void> {
   return new Promise((settle) => {
     const look = (): void => {
-      if (abandoned.aborted || !exists(pid)) {
+      if (abandoned.aborted || !running(pid)) {
         settle();
         return;
       }
-      setTimeout(look, FOLLOW_MS);
+      setTimeout(look, PANE_POLL_MS);
     };
     look();
   });
@@ -857,7 +895,13 @@ async function stopFailedStart(
     if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
     return;
   }
-  await stop({ group: pid, gone: () => !exists(pid), alone: (sent) => process.kill(pid, sent), space });
+  await stop({
+    group: pid,
+    gone: () => !running(pid),
+    alone: (sent) => process.kill(pid, sent),
+    groupRuns: () => groupHasLiving(pid),
+    space,
+  });
 }
 
 function closeLeftOpen(left: LeftOpen, environment: Environment): string | undefined {
