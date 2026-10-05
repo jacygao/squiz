@@ -56,7 +56,10 @@ export type UsageLine = {
 /** The reviewer called `finish_review`. */
 export type FinishLine = { readonly type: "finish" };
 
-export type Line = ReportLine | RefusedLine | UsageLine | FinishLine;
+/** The reviewer's agent settled with no finish recorded. */
+export type UnfinishedLine = { readonly type: "unfinished" };
+
+export type Line = ReportLine | RefusedLine | UsageLine | FinishLine | UnfinishedLine;
 
 export type ReportFile = {
   /** Append the line. Throws where the file cannot be written. */

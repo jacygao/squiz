@@ -1,12 +1,12 @@
 /**
  * The extension `pi` loads: the calls the reviewer reports each finding
- * through, and the handler that refuses the calls which would change what the
- * coding agent commits.
+ * through, the handler that refuses the calls which would change what the
+ * coding agent commits, and the end of the review.
  *
  * Nothing in the harness imports this. `pi` loads it from the path on the
  * command line, compiles it and the modules it imports, and runs the default
  * export once with its own API. So the types here describe as much of that API
- * as the three calls and the two subscriptions use, structurally: the package is
+ * as the three calls and the handlers use, structurally: the package is
  * not a dependency of this one and nothing here may make it one.
  *
  * A report that is not one the harness could compose a comment or a mutation
@@ -31,6 +31,13 @@
  *   written then is lost, and the file cannot say so: it is the file that
  *   refused the write. So a finish in the file does not prove the usage after
  *   it is complete.
+ *
+ * Interactive `pi` waits for input once its agent settles, so the extension
+ * ends it: once the finish is recorded, or, where the agent settles with no
+ * finish recorded, once it has recorded an unfinished end. An unfinished end
+ * that cannot be recorded throws for `pi` to show and ends it all the same,
+ * since a run with no finish is unfinished whether or not the file says so.
+ * Print-mode `pi` exits on its own and ignores the request.
  *
  * Where no file is named, nothing is written and every call answers as it would
  * with one.
@@ -71,26 +78,42 @@ type ToolDefinition = {
   readonly promptSnippet?: string;
   readonly promptGuidelines?: readonly string[];
   readonly parameters: unknown;
-  readonly execute: (toolCallId: string, params: unknown) => Promise<ToolResult>;
+  readonly execute: (
+    toolCallId: string,
+    params: unknown,
+    signal?: AbortSignal,
+    onUpdate?: unknown,
+    ctx?: Context,
+  ) => Promise<ToolResult>;
+};
+
+/** As much of the context `pi` hands a call and a handler as the extension uses. */
+export type Context = {
+  /** End `pi`. While the agent runs, `pi` waits until it is idle, so the closing message is written first. */
+  readonly shutdown: () => void;
 };
 
 /** A message `pi` finished, whoever it was from. Only an assistant's is recorded. */
 export type MessageEnd = { readonly type: "message_end"; readonly message: unknown };
 
-/** As much of `pi`'s extension API as the three calls and the two handlers need. */
+/** As much of `pi`'s extension API as the three calls and the handlers need. */
 export type Registrar = {
   readonly registerTool: (tool: ToolDefinition) => void;
   /**
    * Subscribe to an event.
    *
-   * `pi` passes a second argument neither handler reads. It takes a handler
-   * that answers nothing as one that objects to nothing, and one that answers
-   * nothing at the end of a message as one that leaves the message as it was.
+   * `pi` passes every handler the context as a second argument. It takes a
+   * handler that answers nothing as one that objects to nothing, and one that
+   * answers nothing at the end of a message as one that leaves the message as
+   * it was.
    */
   readonly on: {
     (event: "tool_call", handler: (call: ToolCall) => Refusal | undefined): void;
     (event: "message_end", handler: (event: MessageEnd) => void): void;
-    (event: "agent_settled" | "session_shutdown", handler: () => void): void;
+    (
+      event: "agent_settled" | "session_shutdown",
+      handler: (event: unknown, ctx: Context) => void,
+    ): void;
   };
 };
 
@@ -163,17 +186,19 @@ export default function reportAsYouGo(pi: Registrar): void {
 }
 
 /**
- * Register the three calls and subscribe the two handlers, recording into the
+ * Register the three calls and subscribe the handlers, recording into the
  * file at `reports`, or nowhere where it is not given.
  *
  * The threads already ruled on are held here, so that a second ruling on one
  * thread is refused while the reviewer can still decide which of the two it
- * meant. The usage the file refused is held until it can be written. Nothing
+ * meant. The usage the file refused is held until it can be written, and
+ * whether the finish was recorded is held until the agent settles. Nothing
  * else is held: a report is answered and gone.
  */
 export function reportInto(pi: Registrar, reports: string | undefined): void {
   const file = keepingLostUsage(reportFileAt(reports));
   const ruled = new Set<string>();
+  let finished = false;
 
   // `pi` runs a tool the moment no handler objects, so a subscription that goes
   // missing takes the whole refusal with it and says nothing.
@@ -194,7 +219,15 @@ export function reportInto(pi: Registrar, reports: string | undefined): void {
 
   // The closing message arrives after the finish, so its usage has no later
   // line to be written ahead of. A throw here is shown like any other.
-  pi.on("agent_settled", file.flush);
+  pi.on("agent_settled", (_event, ctx) => {
+    // `pi` settles after a finished review's closing message too.
+    if (finished) return file.flush();
+    try {
+      file.record({ type: "unfinished" });
+    } finally {
+      ctx.shutdown();
+    }
+  });
   pi.on("session_shutdown", file.flush);
 
   pi.registerTool({
@@ -263,13 +296,15 @@ export function reportInto(pi: Registrar, reports: string | undefined): void {
       `Use ${FINISH_REVIEW} as the last action of the review, including where there was nothing to report.`,
     ],
     parameters: finishParameters,
-    execute: async () => {
+    execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
       const unrecorded = failureOf(() => file.record({ type: "finish" }));
       if (unrecorded !== undefined) {
         throw new Error(
           `the finish could not be recorded, so the review is not finished (${unrecorded}). Call ${FINISH_REVIEW} again.`,
         );
       }
+      finished = true;
+      ctx?.shutdown();
       return { content: [{ type: "text", text: "The review is complete." }], details: {} };
     },
   });
