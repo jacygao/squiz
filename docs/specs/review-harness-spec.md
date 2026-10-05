@@ -1492,6 +1492,9 @@ These were not measured:
   and where Copilot puts the reason. Until that is measured, such a run is read
   as completing no message, without the reason.
 - **Whether `reasoningTokens` is part of `outputTokens`**, as it is in `pi`.
+- **Whether the totals Copilot writes on `SIGTERM` count a request it abandoned
+  mid-flight.** Until that is measured, a round the time bound stopped records
+  them as a floor, as it records every stopped round's cost.
 - **Whether the resume line resumes from the coding agent's worktree**, after
   the snapshot is gone, and whether it opens the folder-trust dialog there.
 - **Copilot detached with `/dev/null` as standard input, and Copilot in a Herdr
