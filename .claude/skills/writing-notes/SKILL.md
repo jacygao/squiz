@@ -18,11 +18,11 @@ several subagents at once, and a shared index would conflict every time.
 
 ```markdown
 ---
-settles: "§ 8 — whether pi reports cost during a run"
-issue: 12
-recorded: 2026-09-06
-versions: { pi: 0.84.2 }
-recheck-when: pi upgrades
+settles: "§ 4 — whether pi reports cost during a run, and how a round's cost is summed; § 7 — the cost a killed round records"
+issue: [12, 21]
+recorded: 2026-09-12
+versions: { pi: "0.84.2, 0.85.1", node: 24.15.0 }
+recheck-when: pi upgrades, or an unmeasured API path is configured
 ---
 
 # <the verdict, as the title>
