@@ -1,6 +1,6 @@
 /**
- * One round, composed: gate on the episode and on the pull request, run the
- * reviewer, post what it found, apply what it ruled, post the episode's summary
+ * One round, composed: gate on the pull request and on the episode it keys, run
+ * the reviewer, post what it found, apply what it ruled, post the episode's summary
  * where the round closed it or the failure comment where it failed, and return
  * what the round concluded.
  *
@@ -40,6 +40,7 @@ import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
+import { takeHostLock, type HostLock } from "../host/lock.ts";
 import {
   evidenceWith,
   headMovedIn,
@@ -56,7 +57,7 @@ import {
   type EpisodeState,
   type StateWrite,
 } from "./episode-state.ts";
-import type { Episode } from "./episode.ts";
+import { episodeAt, type Episode } from "./episode.ts";
 import { postFailure } from "./failure-comment.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
@@ -70,14 +71,18 @@ import {
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 import { HOOK_CEILING_MS, POSTING_MARGIN_MS, PRE_REVIEW_MARGIN_MS } from "./window.ts";
 
+// Each `ps` run that tells whether a lock's holder is still running. Its own
+// bound rather than the round's, because a round that cannot tell runs nothing.
+const LOCK_BOUND_MS = 5_000;
+
 /** What one round needs to run. */
 export type RoundSetup = {
   /**
-   * The episode this round belongs to. Its worktree is where git and `gh` are
-   * asked from and where the reviewer runs; its own directory is where the
-   * round's state, the reviewer's session and its scratch space live.
+   * The git work tree the round reviews: where git and `gh` are asked from, where
+   * the reviewer runs, and where the episode of the pull request it finds keeps
+   * the round's state, the reviewer's session and its scratch space.
    */
-  readonly episode: Episode;
+  readonly worktree: string;
   readonly config: Config;
   /** The reviewer CLI this project runs. */
   readonly adapter: Adapter;
@@ -171,6 +176,11 @@ export type RoundConclusion =
    * not post one said so.
    */
   | { readonly outcome: "episode-over" }
+  /**
+   * Another round of the episode holds its lock, so this firing ran nothing and
+   * posted nothing.
+   */
+  | { readonly outcome: "round-running"; readonly pullRequest: number }
   /** Another round. The coding agent is handed the open threads, with this reason. */
   | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount & AroundTheReviewer)
   /** This round ended the episode, for the reason the decision gave. */
@@ -229,8 +239,9 @@ export type RoundConclusion =
  * Never throws, whatever git, `gh`, the filesystem or the reviewer does.
  */
 export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
+  const opened: Opened = {};
   try {
-    return await round(setup);
+    return await round(setup, opened);
   } catch (cause) {
     // A throw here is this harness's own defect. The round is still a value.
     return failed("harness", `the round could not be run: ${reasonFor(cause)}`);
@@ -238,16 +249,29 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
     // Every path the round ends on comes through here, a throw included. A marker
     // left behind already reads as no round in flight, so clearing it keeps them
     // from piling up in a worktree rather than making any answer right.
-    clearRoundRunning(setup.episode);
+    if (opened.held !== undefined) {
+      clearRoundRunning(opened.held.episode);
+      // A lock this round could not remove names a process that is about to
+      // exit, and the next round takes over a lock whose holder has gone.
+      opened.held.lock.release();
+    }
   }
 }
+
+/**
+ * The episode the round holds, once the gate has found the pull request that
+ * keys it and the round has taken its lock.
+ *
+ * Nothing is set for an episode whose lock another round holds. Its marker is
+ * that round's, and clearing it would hide a round still in flight.
+ */
+type Opened = { held?: { readonly episode: Episode; readonly lock: HostLock } };
 
 /** A step's answer, or the conclusion the round ended on instead of one. */
 type Step<T> = { readonly step: T } | { readonly ended: RoundConclusion };
 
-async function round(setup: RoundSetup): Promise<RoundConclusion> {
-  const { episode, config } = setup;
-  const directory = episode.worktree;
+async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion> {
+  const directory = setup.worktree;
 
   // The round's whole window, measured from here. Every phase of the round is
   // bounded by what is left of this one moment rather than by an allowance handed
@@ -270,19 +294,33 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
     ),
   };
 
+  // The pull request comes first, because its number is the episode's key. A
+  // branch with no pull request ends here, with no episode opened.
+  const gated = gate(preReview);
+  if ("ended" in gated) return gated.ended;
+  const pullRequest = gated.step;
+
+  const keyed = keyedBy(directory, pullRequest);
+  if ("ended" in keyed) return keyed.ended;
+  const episode = keyed.step;
+
+  // Two subagents that stop at once in one worktree fire on one pull request.
+  // Everything from the state read to the last post is one round's, because two
+  // rounds that each read the state before the other wrote would both pass the
+  // cap, both review, and keep only one of their costs.
+  const locked = lockOf(episode, pullRequest.number);
+  if ("ended" in locked) return locked.ended;
+  opened.held = { episode, lock: locked.step };
+
   const stateRead = openState(episode);
   if ("ended" in stateRead) return stateRead.ended;
   const onFile = stateRead.step;
 
-  // An episode that reported its close is over, and nothing here is read before
-  // this. The bounds are the wrong question: a cap raised between firings would
-  // let a closed episode review again, and it would post a second comment for one
-  // episode. A firing of one asks GitHub nothing at all.
+  // An episode that reported its close is over, and nothing but the lookup that
+  // found its key is asked before this. The bounds are the wrong question: a cap
+  // raised between firings would let a closed episode review again, and it would
+  // post a second comment for one episode.
   if (onFile?.closeReported === true) return { outcome: "episode-over" };
-
-  const gated = gate(preReview);
-  if ("ended" in gated) return gated.ended;
-  const pullRequest = gated.step;
 
   // One posting reserve for the round, made the first time anything asks for it.
   // The failure comment goes up under the deadline the salvaged findings ran
@@ -293,6 +331,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
 
   const concluded = await reviewOn(pullRequest, onFile, {
     setup,
+    episode,
     window,
     beforePosting,
     preReview,
@@ -311,6 +350,7 @@ async function round(setup: RoundSetup): Promise<RoundConclusion> {
 /** What the part of a round after the gate runs with. */
 type AfterTheGate = {
   readonly setup: RoundSetup;
+  readonly episode: Episode;
   readonly window: Deadline;
   /** The moment the review has to be over by. */
   readonly beforePosting: Deadline;
@@ -323,9 +363,9 @@ type AfterTheGate = {
 async function reviewOn(
   pullRequest: PullRequest,
   onFile: EpisodeState | null,
-  { setup, window, beforePosting, preReview, posting: reserve }: AfterTheGate,
+  { setup, episode, window, beforePosting, preReview, posting: reserve }: AfterTheGate,
 ): Promise<RoundConclusion> {
-  const { episode, config } = setup;
+  const { config } = setup;
   const directory = episode.worktree;
   const state = orEmpty(onFile);
 
@@ -504,11 +544,50 @@ function gate(call: GhCall): Step<PullRequest> {
 }
 
 /**
+ * The episode's lock, taken, or the conclusion the round ended on where another
+ * round holds it or nothing could tell.
+ *
+ * A holder that might still be running is never taken for gone, so a lock that
+ * cannot be read runs no review either.
+ */
+function lockOf(episode: Episode, pullRequest: number): Step<HostLock> {
+  const taking = takeHostLock(episode.directory, { boundMs: LOCK_BOUND_MS });
+  switch (taking.outcome) {
+    case "taken":
+      return { step: taking.lock };
+    case "held":
+      return { ended: { outcome: "round-running", pullRequest } };
+    case "unknown":
+      return {
+        ended: failed(
+          "harness",
+          `no review ran: whether a round is already running on PR #${pullRequest} could not be told: ${taking.reason}`,
+        ),
+      };
+  }
+}
+
+/**
+ * The episode `pullRequest` keys in `worktree`, or the conclusion the round ended
+ * on where its number is no key.
+ *
+ * The gate reads any positive whole number as a pull request's number, and the
+ * episode refuses one too large to be spelled exactly. Nothing is opened then.
+ */
+function keyedBy(worktree: string, pullRequest: PullRequest): Step<Episode> {
+  try {
+    return { step: episodeAt(worktree, pullRequest.number) };
+  } catch (cause) {
+    return { ended: failed("harness", `no review ran: ${reasonFor(cause)}`) };
+  }
+}
+
+/**
  * What the episode's state file holds as this round starts, `null` where the
  * episode has none, or the conclusion the round ended on instead.
  *
- * Read before anything else the round does, because this file is what says the
- * episode is over.
+ * Read before anything else the round does once it has found its pull request,
+ * because this file is what says the episode is over.
  *
  * A file that will not read back ends the round before the reviewer runs. The
  * round count is the only bound on the loop, and a round that reviewed on a count

@@ -44,11 +44,8 @@ const BRANCH = "review-me";
 const PULL_REQUEST = 142;
 const HEAD_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
 
-/** The subagent id the episode keys on, which is hexadecimal as every real one is. */
-const AGENT_ID = "ab12cd34";
-
-/** A second episode's id, for the worktree a round does not have to itself. */
-const OTHER_AGENT_ID = "ef56ab78";
+/** A second pull request, whose episode is in the worktree a round does not have to itself. */
+const OTHER_PULL_REQUEST = 143;
 
 /** The file under review, tracked and committed, which is what a reviewer's write shows up in. */
 const TRACKED = "src/ui/card.ts";
@@ -123,13 +120,15 @@ type Setup = {
   readonly lockStateAfter?: Kind;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
-  /** An episode of the same worktree that has run a round and not closed. */
-  readonly sharedWith?: string;
+  /** The pull request of an episode of the same worktree that has run a round and not closed. */
+  readonly sharedWith?: number;
   /**
    * A directory where the round's marker goes, so that marking the round fails
    * and every other write the round makes lands.
    */
   readonly blockMarker?: boolean;
+  /** What the episode's lock holds before the round starts, where it is there. */
+  readonly lockSource?: string;
   readonly marginMs?: number;
   readonly windowMs?: number;
   /** Whether a failed round posts its failure comment, where the caller says. */
@@ -144,6 +143,11 @@ type Setup = {
    * all: whatever it supplies the composer is what the composer renders.
    */
   readonly andThen?: readonly Later[];
+  /**
+   * Rounds started together against the one episode, each running `reviewer`,
+   * as two subagents stopping at once in one worktree start them.
+   */
+  readonly overlapping?: number;
 };
 
 /** One round after the first: what happened before it, and the reviewer it runs. */
@@ -190,6 +194,10 @@ type Ran = {
   readonly stateSource: string | null;
   /** How long the round itself took, with the fixture's own setup left out. */
   readonly elapsedMs: number;
+  /** Whether the episode's lock was still there once the rounds had ended. */
+  readonly lockLeft: boolean;
+  /** What `.squiz/` holds once the rounds have ended, empty where it is not there. */
+  readonly episodesLeft: readonly string[];
 };
 
 const ANSWER_COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
@@ -371,7 +379,7 @@ function writesThenHangs(cost: RoundCost): Reviewer {
 function writesThenLocksTheState(): Reviewer {
   return {
     command: "/bin/sh",
-    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; chmod 500 .squiz/${AGENT_ID}`],
+    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; chmod 500 .squiz/${PULL_REQUEST}`],
     parse: reviews({}).parse,
   };
 }
@@ -430,7 +438,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     git(worktree, ["commit", "--quiet", "--message", "the change under review"]);
     if (setup.detached === true) git(worktree, ["checkout", "--quiet", "--detach", "HEAD"]);
 
-    const episode = episodeAt(worktree, AGENT_ID);
+    const episode = episodeAt(worktree, PULL_REQUEST);
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
     await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {}, {
@@ -461,6 +469,10 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     }
     const marker = join(episode.directory, "running.json");
     if (setup.blockMarker === true) mkdirSync(join(marker, "occupied"), { recursive: true });
+    if (setup.lockSource !== undefined) {
+      mkdirSync(episode.directory, { recursive: true });
+      writeFileSync(join(episode.directory, "host.lock"), setup.lockSource, "utf8");
+    }
 
     const invocations: Invocation[] = [];
     const directoriesReady: boolean[] = [];
@@ -497,19 +509,22 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     const conclusions: RoundConclusion[] = [];
     const started = Date.now();
-    for (running = 0; running < reviewers.length; running += 1) {
+    const roundSetup = {
+      worktree,
+      config: { ...defaultConfig, timeout: 5, ...setup.config },
+      adapter,
+      charterFile,
+      ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
+      ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
+      ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
+    };
+    if (setup.overlapping !== undefined) {
+      const together = Array.from({ length: setup.overlapping }, () => runRound(roundSetup));
+      conclusions.push(...(await Promise.all(together)));
+    }
+    for (running = 0; setup.overlapping === undefined && running < reviewers.length; running += 1) {
       laterRounds[running - 1]?.before?.(worktree);
-      conclusions.push(
-        await runRound({
-          episode,
-          config: { ...defaultConfig, timeout: 5, ...setup.config },
-          adapter,
-          charterFile,
-          ...(setup.marginMs === undefined ? {} : { marginMs: setup.marginMs }),
-          ...(setup.windowMs === undefined ? {} : { windowMs: setup.windowMs }),
-          ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
-        }),
-      );
+      conclusions.push(await runRound(roundSetup));
     }
     const elapsedMs = Date.now() - started;
 
@@ -517,6 +532,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       ? readFileSync(episode.stateFile, "utf8")
       : null;
     const kinds = lines(join(binaries, "kinds")) as readonly Kind[];
+    const episodes = join(worktree, ".squiz");
     return {
       conclusion: conclusions.at(-1) ?? assert.fail("the fixture ran no round at all"),
       conclusions,
@@ -534,6 +550,8 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       state: stateIn(stateSource),
       stateSource,
       elapsedMs,
+      episodesLeft: existsSync(episodes) ? readdirSync(episodes) : [],
+      lockLeft: existsSync(join(episode.directory, "host.lock")),
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -955,8 +973,8 @@ test("a round at `deep` records its shells' groups, and one at `read` records no
 });
 
 /**
- * A second coding agent on the same branch is a second episode, and its state
- * file is new while the pull request is not.
+ * A new worktree on the same branch starts a second episode of the pull request,
+ * and its state file is new while the pull request is not.
  *
  * No round is recorded here, so this is that episode's first round. The threads
  * the earlier episode left are still on the pull request, and a round handed none
@@ -1340,7 +1358,7 @@ test("a round the reviewer failed posts no summary", async () => {
  * Two episodes on one pull request each post their own comment, and neither
  * touches what is already there.
  *
- * A second coding agent on the same branch is a second episode: its state file is
+ * A new worktree on the same branch is a second episode: its state file is
  * new and the pull request is not. Posting is a create addressed to the pull
  * request's comment collection rather than to any comment of its own, so the
  * comments accumulate as the history of the review passes.
@@ -1692,6 +1710,7 @@ test("a branch with no pull request runs nothing, and names the branch and where
   assert.deepEqual(ran.kinds, ["prlist"]);
   assert.equal(ran.invocations.length, 0);
   assert.equal(ran.stateSource, null);
+  assert.deepEqual(ran.episodesLeft, [], "an episode was opened with no pull request to key it");
 });
 
 test("a detached HEAD is no branch, so the round ends before gh is asked", async () => {
@@ -1705,6 +1724,34 @@ test("a detached HEAD is no branch, so the round ends before gh is asked", async
   assert.equal(ran.conclusion.branch, null, "a detached HEAD names no branch");
   assert.match(ran.conclusion.directory, /\/tree$/u, "the worktree the gate asked git in");
   assert.deepEqual(ran.kinds, []);
+  assert.deepEqual(ran.episodesLeft, [], "an episode was opened with no pull request to key it");
+});
+
+test("the episode a round opens is keyed by the number of the pull request it found", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.deepEqual(ran.episodesLeft, [String(PULL_REQUEST)]);
+  assert.equal(ran.state?.rounds.length, 1, "the round recorded nothing under the pull request's number");
+});
+
+test("a pull request number no JavaScript number holds exactly opens no episode", async () => {
+  // GitHub's answer is the one thing the key comes from, and a number past the
+  // exact range would be spelled as some other pull request's.
+  const ran = await runInFixture({
+    answers: { prlist: PR_LIST.replace(`"number":${PULL_REQUEST}`, '"number":1e300') },
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /^no review ran: 1e\+300 is no pull request's number/u);
+  assert.equal(ran.invocations.length, 0);
+  assert.deepEqual(ran.kinds, ["prlist"]);
+  assert.deepEqual(ran.episodesLeft, []);
 });
 
 test("a gh that could not answer the gate is a failure the round names", async () => {
@@ -2062,7 +2109,60 @@ test("a firing after the episode reported its close reviews nothing and posts no
   });
 
   assert.deepEqual(again.conclusion, { outcome: "episode-over" });
-  assert.deepEqual(again.kinds, [], "an episode that is over asks GitHub nothing at all");
+  assert.deepEqual(
+    again.kinds,
+    ["prlist"],
+    "an episode that is over asks GitHub which pull request keys it, and nothing else",
+  );
+});
+
+/**
+ * Two rounds of one episode that overlap run one review between them.
+ *
+ * Two subagents that stop at once in one worktree fire on one pull request, so
+ * their rounds share one episode. Each would read the state before the other
+ * recorded anything, pass the cap, start a reviewer and post a summary, and the
+ * later write would drop the earlier round's cost.
+ */
+test("two overlapping rounds of one episode run one review, post one summary and record its cost", async () => {
+  const ran = await runInFixture({
+    overlapping: 2,
+    config: { rounds: 1 },
+    answers: POSTING,
+    // Slow enough that the second round starts while the first is reviewing.
+    reviewer: { command: "/bin/sh", args: ["-c", "sleep 1"], parse: reviews({}).parse },
+  });
+
+  assert.equal(ran.invocations.length, 1, "both rounds started a reviewer");
+  const summaries = ran.calls.filter((call) => call.kind === "summary");
+  assert.equal(summaries.length, 1, "both rounds posted a summary");
+  assert.deepEqual(
+    ran.conclusions.map((conclusion) => conclusion.outcome).sort(),
+    ["close", "round-running"],
+  );
+  assert.deepEqual(ran.state?.rounds.map((round) => round.tokens), [ANSWER_COST.tokens]);
+  assert.equal(ran.lockLeft, false, "the lock outlived the round");
+});
+
+/**
+ * A lock whose holder cannot be told running or gone is never taken for free.
+ * Something made it, and nothing says that something has stopped.
+ */
+test("a lock nobody can read runs no review, and says why", async () => {
+  const ran = await runInFixture({
+    lockSource: "not a holder\n",
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(
+    ran.conclusion.reason,
+    /^no review ran: whether a round is already running on PR #142 could not be told: .*names no pid and start time/u,
+  );
+  assert.equal(ran.invocations.length, 0, "a reviewer ran beside a holder nobody could rule out");
+  assert.deepEqual(ran.kinds, ["prlist"]);
 });
 
 /**
@@ -2100,7 +2200,7 @@ test("a firing after an episode closed below its cap reviews nothing, whatever t
 
   assert.deepEqual(again.conclusion, { outcome: "episode-over" });
   assert.equal(again.invocations.length, 0, "a closed episode must not be billed for another round");
-  assert.deepEqual(again.kinds, []);
+  assert.deepEqual(again.kinds, ["prlist"]);
   assert.deepEqual(
     again.state?.rounds,
     closed.state?.rounds,
@@ -2138,7 +2238,7 @@ test("a close that reported its missing summary records itself, and is not repor
   });
 
   assert.deepEqual(again.conclusion, { outcome: "episode-over" });
-  assert.deepEqual(again.kinds, []);
+  assert.deepEqual(again.kinds, ["prlist"]);
 });
 
 /**
@@ -2381,7 +2481,7 @@ test("a round killed at its bound takes the reading after the reviewer all the s
 
 test("a worktree shared with another live episode takes no comparison, and the round still runs", async () => {
   const ran = await runInFixture({
-    sharedWith: OTHER_AGENT_ID,
+    sharedWith: OTHER_PULL_REQUEST,
     answers: POSTING,
     reviewer: writesThenReviews([finding("The flag is never read")]),
   });
@@ -2393,7 +2493,7 @@ test("a worktree shared with another live episode takes no comparison, and the r
     confinement?.otherEpisodes.outcome === "shared"
       ? confinement.otherEpisodes.episodes.map((other) => other.id)
       : [],
-    [OTHER_AGENT_ID],
+    [String(OTHER_PULL_REQUEST)],
     "the episodes that shared the worktree are what the summary names in place of a comparison",
   );
   assert.equal(
@@ -2523,8 +2623,8 @@ function summaryBody(ran: Ran): string {
 }
 
 /** Another episode of the worktree reports its close, which leaves it no longer live. */
-function closeEpisode(worktree: string, agentId: string): void {
-  const other = episodeAt(worktree, agentId);
+function closeEpisode(worktree: string, pullRequest: number): void {
+  const other = episodeAt(worktree, pullRequest);
   const read = readState(other);
   assert.equal(read.outcome, "read", "the fixture's other episode must have a state file");
   const written = writeState(other, {
@@ -2674,12 +2774,12 @@ test("a reviewer that switched to a branch with no pull request is named in the 
  */
 test("a worktree the first round shared is named in the comment the closing round posts", async () => {
   const ran = await runInFixture({
-    sharedWith: OTHER_AGENT_ID,
+    sharedWith: OTHER_PULL_REQUEST,
     answers: TWO_ROUNDS,
     sequences: THREADS_OF_TWO_ROUNDS,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
     andThen: [
-      { before: (worktree) => closeEpisode(worktree, OTHER_AGENT_ID), reviewer: FIXES_IT },
+      { before: (worktree) => closeEpisode(worktree, OTHER_PULL_REQUEST), reviewer: FIXES_IT },
     ],
   });
 
@@ -2706,8 +2806,8 @@ test("a worktree the first round shared is named in the comment the closing roun
       "**Notes**",
       "",
       "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        ` the worktree is shared with live episode ${OTHER_AGENT_ID}`,
-      `- Another episode was in the worktree while the reviewer ran: ${OTHER_AGENT_ID}`,
+        ` the worktree is shared with live episode ${OTHER_PULL_REQUEST}`,
+      `- Another episode was in the worktree while the reviewer ran: ${OTHER_PULL_REQUEST}`,
     ].join("\n"),
   );
 });

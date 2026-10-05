@@ -2,8 +2,9 @@
  * The `SubagentStop` payload, as the runtime writes it to the hook's stdin.
  *
  * One field is read from it. `agent_id` is the subagent's own: the same string
- * every time that subagent stops, and different for every subagent. It is the
- * episode's key.
+ * every time that subagent stops, and different for every subagent. It names the
+ * subagent and keys nothing. An episode is keyed by its pull request, which two
+ * subagents can share.
  *
  * Three other fields look usable and are not. `prompt_id` is per user turn in
  * the parent session, so it is one string for every subagent running under that
@@ -79,7 +80,7 @@ export function readPayload(text: string): PayloadRead {
 
   const agentId: unknown = (parsed as Readonly<Record<string, unknown>>)["agent_id"];
   if (typeof agentId !== "string" || agentId === "") {
-    return unreadable('the payload carries no "agent_id", which is the episode\'s key');
+    return unreadable('the payload carries no "agent_id", which names the subagent that stopped');
   }
   return { outcome: "read", payload: { agentId } };
 }

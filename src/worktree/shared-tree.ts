@@ -68,7 +68,7 @@ import {
 import { dirname, join } from "node:path";
 
 import { readState } from "../loop/episode-state.ts";
-import { episodeAt, episodeNamed, type Episode } from "../loop/episode.ts";
+import { episodeNamed, type Episode } from "../loop/episode.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { worktreeToplevel } from "./toplevel.ts";
 
@@ -113,7 +113,7 @@ const MARKER_BOUND_MS = 5_000;
 
 /**
  * The live episodes of the worktree holding `directory`, other than the one
- * `agentId` keys.
+ * whose directory `id` names.
  *
  * `until` bounds the whole lookup, git and every ps under it alike. A lookup cut
  * short at it is `unknown`, carrying what it was doing when the time went, and
@@ -124,7 +124,7 @@ const MARKER_BOUND_MS = 5_000;
  */
 export function otherLiveEpisodes(
   directory: string,
-  agentId: string,
+  id: string,
   until: Deadline,
 ): OtherEpisodes {
   const toplevel = worktreeToplevel(directory, until);
@@ -132,13 +132,11 @@ export function otherLiveEpisodes(
     return { outcome: "unknown", reason: `the worktree could not be resolved: ${toplevel.reason}` };
   }
 
-  let mine: Episode;
-  try {
-    mine = episodeAt(toplevel.path, agentId);
-  } catch (cause) {
-    // Without our own directory name there is no leaving ourselves out, and an
-    // episode that counted itself would call every tree it ran in shared.
-    return { outcome: "unknown", reason: reasonFor(cause) };
+  const mine = episodeNamed(toplevel.path, id);
+  // Without our own directory name there is no leaving ourselves out, and an
+  // episode that counted itself would call every tree it ran in shared.
+  if (mine === undefined) {
+    return { outcome: "unknown", reason: `${JSON.stringify(id)} names no episode` };
   }
 
   // The episode module owns the layout inside a worktree, so where the episodes

@@ -17,7 +17,6 @@
 import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../config/config.ts";
-import { episodeAt } from "../loop/episode.ts";
 import { failureReport } from "../loop/failure-comment.ts";
 import {
   runRound,
@@ -97,13 +96,15 @@ export function failureIn(conclusion: RoundConclusion): readonly string[] {
     case "block":
     case "no-pull-request":
     case "episode-over":
+    case "round-running":
       return [];
   }
 }
 
 /**
- * The one line a pass for want of a pull request is reported as, or `null` for
- * every other conclusion.
+ * The one line a pass that reviewed nothing is reported as, or `null` for every
+ * other conclusion. A pass is for want of a pull request, or because another
+ * round of the episode is running.
  *
  * Not a failure, and still said. A branch with no pull request and a subagent
  * whose hook fired in a tree it never worked in both reach the gate as a branch
@@ -111,6 +112,9 @@ export function failureIn(conclusion: RoundConclusion): readonly string[] {
  * things that tell them apart.
  */
 export function unreviewedIn(conclusion: RoundConclusion): string | null {
+  if (conclusion.outcome === "round-running") {
+    return `no review ran: a round is already running on PR #${conclusion.pullRequest}`;
+  }
   if (conclusion.outcome !== "no-pull-request") return null;
   const directory = quoted(conclusion.directory);
   if (conclusion.branch === null) {
@@ -293,11 +297,13 @@ function unreportedBy(round: RoundAccount): string | null {
  * What one firing came to, before anything is written and before an exit code
  * is chosen.
  *
- * The payload, the worktree, the episode key and the settings are read in turn,
- * and a firing that loses any of them runs no round at all. A payload that
- * cannot be read is not a round that found nothing: nothing about the firing is
- * known, the episode least of all, and half an episode is not something to
- * review against.
+ * The payload, the worktree and the settings are read in turn, and a firing that
+ * loses any of them runs no round at all. A payload that cannot be read is not a
+ * round that found nothing: nothing about the firing is known, and half a firing
+ * is not something to review against.
+ *
+ * The episode is not opened here. Its key is the number of the pull request the
+ * round finds, so the round opens it once it has found one.
  */
 async function concluded(firing: Firing): Promise<RoundConclusion> {
   const read = await readPayloadFrom(firing.stdin);
@@ -311,14 +317,13 @@ async function concluded(firing: Firing): Promise<RoundConclusion> {
   let setup: RoundSetup;
   try {
     setup = {
-      episode: episodeAt(worktree.path, read.payload.agentId),
+      worktree: worktree.path,
       config: loadConfig(worktree.path),
       adapter: pi,
       charterFile,
     };
   } catch (cause) {
-    // The episode's key arrives in a payload and the settings arrive in a file.
-    // Each refuses a value it cannot use by throwing.
+    // The settings refuse a value they cannot use by throwing.
     return harness(`no review ran: ${reasonFor(cause)}`);
   }
 

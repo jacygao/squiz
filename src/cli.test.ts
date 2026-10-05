@@ -30,7 +30,7 @@ const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squ
 /**
  * One firing, as the runtime writes it to the hook's stdin.
  *
- * Only the subagent's id is read from it, and the episode is keyed on that.
+ * Only the subagent's id is read from it.
  */
 const PAYLOAD = JSON.stringify({
   hook_event_name: "SubagentStop",

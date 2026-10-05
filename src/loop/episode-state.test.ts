@@ -14,7 +14,7 @@ import {
 } from "./episode-state.ts";
 import { type Episode, episodeAt } from "./episode.ts";
 
-const agentId = "a1e3196c5ad0f2410";
+const pullRequest = 41;
 
 const firstRound: RoundCost = { dollars: 0.0031744240000000003, tokens: 6697, messages: 2 };
 const secondRound: RoundCost = { dollars: 0.0142, tokens: 21043, messages: 7 };
@@ -23,7 +23,7 @@ const secondRound: RoundCost = { dollars: 0.0142, tokens: 21043, messages: 7 };
 function episodeIn(t: TestContext): Episode {
   const worktree = mkdtempSync(join(tmpdir(), "squiz-episode-"));
   t.after(() => rmSync(worktree, { recursive: true, force: true }));
-  return episodeAt(worktree, agentId);
+  return episodeAt(worktree, pullRequest);
 }
 
 /** The reason the state file `contents` came back unreadable. */
