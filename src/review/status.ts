@@ -211,7 +211,7 @@ function lineOf(episode: Episode, record: StateRecord, options: StatusOptions, p
       const started = record.reviewer?.process.startedAt ?? record.host.startedAt;
       const { reviewer } = record;
       const session =
-        reviewer === undefined ? NONE : sessionOf(reviewer, episode, roundOfSnapshot(reviewer.snapshot));
+        reviewer === undefined ? NONE : sessionOf(reviewer, episode, record.round?.number);
       const presence = options.presence(record.host);
       const times = [record.host.startedAt, started];
       if (presence.outcome === "gone") {
@@ -260,13 +260,6 @@ function sessionOf(place: ReviewerPlace, episode: Episode, round: number | undef
   if (place.backend === "detached" || round === undefined) return place.backend;
   return `${place.backend} squiz-${episode.id}-r${round}`;
 }
-
-/** The `k` of a running round, which its snapshot's path names as `rounds/<k>/tree`. */
-function roundOfSnapshot(snapshot: string): number | undefined {
-  const named = /(?:^|\/)rounds\/([1-9][0-9]*)\/tree\/?$/u.exec(snapshot);
-  return named === null ? undefined : Number(named[1]);
-}
-
 /**
  * The command in the round's `resume.txt`, or `—` where it has none.
  *

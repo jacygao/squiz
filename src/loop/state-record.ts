@@ -52,6 +52,12 @@ export type ReviewerSession = ReviewerPlace & {
   readonly snapshot: string;
 };
 
+/** A round that has started. */
+export type StartedRound = {
+  /** The `k` that names the round's directory, `rounds/<k>/`, and its reviewer's label, `squiz-<number>-r<k>`. */
+  readonly number: number;
+};
+
 /**
  * The round that reached a finished record, as `squiz status` prints it.
  *
@@ -59,9 +65,7 @@ export type ReviewerSession = ReviewerPlace & {
  * nothing is known of which round reached it, when that round ran, or where
  * its reviewer was.
  */
-export type FinishedRound = {
-  /** The `k` that names the round's directory, `rounds/<k>/`, where its resume command is. */
-  readonly number: number;
+export type FinishedRound = StartedRound & {
   /** In whole seconds since the epoch, as is `endedAt`. */
   readonly startedAt: number;
   readonly endedAt: number;
@@ -88,6 +92,11 @@ export type StateRecord = Shared &
     | {
         readonly status: "reviewing";
         readonly host: ProcessIdentity;
+        /**
+         * The round under way, kept from the moment it starts. Absent only on a
+         * record written before reviewing records kept it.
+         */
+        readonly round?: StartedRound;
         /** Absent until the reviewer's session has started. */
         readonly reviewer?: ReviewerSession;
       }
@@ -224,12 +233,11 @@ function ownerFrom(found: unknown): ReadOwner {
 type ReadRound = { readonly round: FinishedRound | undefined } | { readonly problem: string };
 
 function roundFrom(found: unknown): ReadRound {
-  if (found === undefined) return { round: undefined };
-  if (!isObject(found)) return { problem: `has "round" as ${render(found)}` };
-  const number = found["number"];
-  if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
-    return { problem: `has "round.number" as ${render(number)} rather than a whole number from 1` };
-  }
+  const started = startedRoundFrom(found);
+  if ("problem" in started) return started;
+  // Narrows `found` as well: a round that read is an object.
+  if (started.round === undefined || !isObject(found)) return { round: undefined };
+  const { number } = started.round;
   const startedAt = found["startedAt"];
   if (!isWholeSeconds(startedAt)) return { problem: `has "round.startedAt" as ${render(startedAt)}` };
   const endedAt = found["endedAt"];
@@ -241,6 +249,18 @@ function roundFrom(found: unknown): ReadRound {
   const reviewer = placeFrom(found["reviewer"], "round.reviewer");
   if ("problem" in reviewer) return reviewer;
   return { round: { number, startedAt, endedAt, reviewer: reviewer.place } };
+}
+
+type ReadStartedRound = { readonly round: StartedRound | undefined } | { readonly problem: string };
+
+function startedRoundFrom(found: unknown): ReadStartedRound {
+  if (found === undefined) return { round: undefined };
+  if (!isObject(found)) return { problem: `has "round" as ${render(found)}` };
+  const number = found["number"];
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
+    return { problem: `has "round.number" as ${render(number)} rather than a whole number from 1` };
+  }
+  return { round: { number } };
 }
 
 type ReadPlace = { readonly place: ReviewerPlace } | { readonly problem: string };
@@ -264,9 +284,12 @@ function placeFrom(found: unknown, field: string): ReadPlace {
 function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadRecord {
   const host = identityFrom(entry["host"]);
   if (host === undefined) return { problem: `has "host" as ${render(entry["host"])}` };
+  const round = startedRoundFrom(entry["round"]);
+  if ("problem" in round) return round;
+  const under = { ...shared, status: "reviewing" as const, host, ...(round.round === undefined ? {} : { round: round.round }) };
 
   const found = entry["reviewer"];
-  if (found === undefined) return { record: { ...shared, status: "reviewing", host } };
+  if (found === undefined) return { record: under };
   if (!isObject(found)) return { problem: `has "reviewer" as ${render(found)}` };
   const place = placeFrom(found, "reviewer");
   if ("problem" in place) return place;
@@ -283,7 +306,7 @@ function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadReco
     boundEndsAt,
     snapshot,
   };
-  return { record: { ...shared, status: "reviewing", host, reviewer } };
+  return { record: { ...under, reviewer } };
 }
 
 function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecord {

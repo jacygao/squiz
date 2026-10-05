@@ -173,6 +173,7 @@ test("elapsed is the time so far while a review runs, and — where a record kee
         activity: null,
         status: "reviewing",
         host: { pid: 600, startedAt: sevenOhSix - 30 },
+        round: { number: 3 },
         reviewer: {
           backend: "herdr",
           pane: "w2-p3",
@@ -348,7 +349,7 @@ test("session is the label squiz-<number>-r<k>, never the backend's own id, and 
         activity: null,
         status: "reviewing",
         host: { pid: 900, startedAt: sevenOhSix - 300 },
-        // A snapshot that does not stand at rounds/<k>/tree names no round.
+        round: { number: 3 },
         reviewer: {
           backend: "tmux",
           pane: "@15",
@@ -357,12 +358,27 @@ test("session is the label squiz-<number>-r<k>, never the backend's own id, and 
           snapshot: "/somewhere/else",
         },
       },
+      // Written before reviewing records kept the round's number. Its snapshot's
+      // path is not read for one.
+      {
+        head: otherHead,
+        activity: null,
+        status: "reviewing",
+        host: { pid: 902, startedAt: sevenOhSix - 200 },
+        reviewer: {
+          backend: "herdr",
+          pane: "w2-p3",
+          process: { pid: 903, startedAt: sevenOhSix },
+          boundEndsAt: sevenOhSix + 480,
+          snapshot: "/work/.squiz/41/rounds/4/tree",
+        },
+      },
     ],
   });
 
   const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
 
-  assert.deepEqual(rows.slice(1).map((row) => row[7]), ["tmux", "tmux squiz-41-r2", "—"]);
+  assert.deepEqual(rows.slice(1).map((row) => row[7]), ["herdr", "tmux squiz-41-r3", "tmux squiz-41-r2", "—"]);
 });
 
 test("started is the time of day for a review started today, and the date and time otherwise", () => {

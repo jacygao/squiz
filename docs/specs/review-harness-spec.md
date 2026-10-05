@@ -220,7 +220,7 @@ Each record is in one of five states:
 | State | What it records |
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
-| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
+| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
 | Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. `squiz status` prints the round's times, and labels its Session from the backend and `k` (§ 6). |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, and why. |
@@ -1801,9 +1801,10 @@ Each column holds:
   state not reviewed, why not. For a reviewed state, how many of the reviewer's
   threads it left open, and "review closed" where it closed the episode.
 - **Session:** the backend and the label of the reviewer's tab or window,
-  `squiz-<number>-r<k>` as § 4 The reviewer session opens it. A running round's
-  `k` is the one its snapshot's path names, `rounds/<k>/tree`. A detached
-  reviewer is `detached`, and a state with no reviewer started is `—`.
+  `squiz-<number>-r<k>` as § 4 The reviewer session opens it, with `k` the
+  round's number its record keeps. A record that keeps no `k` shows the backend
+  alone. A detached reviewer is `detached`, and a state with no reviewer
+  started is `—`.
 - **Worktree:** the worktree's path relative to the main worktree, `.` for the
   main worktree itself.
 - **Resume:** the content of the round's `rounds/<k>/resume.txt` once the round
