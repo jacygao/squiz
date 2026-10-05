@@ -1,12 +1,12 @@
 # Milestones
 
-**Version:** 0.24 (draft)
+**Version:** 0.25 (draft)
 **Status:** For review
 **Owner:** TBD
 
 ---
 
-Twelve milestones for building squiz, in the order they are done. Each ends in
+Thirteen milestones for building squiz, in the order they are done. Each ends in
 something that can be run or seen, never in a module written.
 
 | Order | Milestone | State |
@@ -20,12 +20,13 @@ something that can be run or seen, never in a module written.
 | 7 | M6 — The summary comment | Done |
 | 8 | M7 — The reviewer as a detached session | Done |
 | 9 | M10 — The subagent-era workarounds removed | |
-| 10 | M11 — Depth `deep` | |
-| 11 | M8 — Episode boundaries | |
-| 12 | M9 — Install and dogfood | |
+| 10 | M12 — Copilot as the reviewer | Its spike runs alongside M10 |
+| 11 | M11 — Depth `deep` | |
+| 12 | M8 — Episode boundaries | |
+| 13 | M9 — Install and dogfood | |
 
-**A milestone's number names it, and the table places it.** M10 and M11 come
-before M8 and M9 in the order.
+**A milestone's number names it, and the table places it.** M10, M12 and M11
+come before M8 and M9 in the order.
 
 **From M7, squiz runs its reviewer as a session of its own, instead of inside a
 subagent's hook or shell call.** The review itself stays as it is: findings as
@@ -44,7 +45,9 @@ come after M9.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
-planned once M9 closes.
+planned once M9 closes. M12 is the exception: it brings forward the P2 entry
+"a second reviewer adapter", for GitHub Copilot, because the owner reviews with
+Copilot already.
 
 ## M0 — Prerequisites spike
 
@@ -498,6 +501,50 @@ stay.
 | #113 | Accept depth `deep` | Reassigned to M11 |
 | #244 | Name the reviewer's refused calls in the summary's Notes | Held until M9's dogfooding shows a refused call |
 | #293 | Check the DeepSeek balance the reviewer runs on | Needs a person, and depends on nothing here |
+
+## M12 — Copilot as the reviewer
+
+A second reviewer adapter, for the GitHub Copilot CLI, beside `pi`. A project
+chooses its reviewer in `.squiz.json`, and `pi` stays the default. Nothing above
+the adapter changes: the round, the threads, the verdicts and the summary are
+the same whichever CLI reviews.
+
+### Spike
+
+Run alongside M10, before anything here is built. Its findings go in
+`docs/notes/`, and decide what the rest of M12 builds:
+
+- **Cost.** What the CLI's JSON output reports for each model call: tokens,
+  premium requests, or neither. The token bound and the summary's spend line are
+  built on tokens.
+- **Ending in a pane.** Whether `copilot -i` exits once the review is finished,
+  or waits for input as an interactive `pi` does until its extension shuts it
+  down.
+- **The project's own settings.** Whether a project's Copilot settings,
+  instructions, skills, hooks or MCP servers reach the reviewer, and the flags
+  that keep them out, as `--no-approve` does for `pi`.
+- **Refusals.** What `--deny-tool` patterns match for shell commands, and whether
+  a refused call reaches the model as that call's error.
+- **Reporting calls.** Whether a tool an MCP server registers is validated against
+  its schema before it runs, as `pi` validates an extension's.
+- **Stopping.** Whether the CLI and every process it starts exit on `SIGTERM`.
+
+### Acceptance criteria
+
+- [ ] The spike's findings, in `docs/notes/`.
+- [ ] The three reporting calls are served to Copilot by an MCP server, which
+      shares the report checks and the report file with `pi`'s extension.
+- [ ] A Copilot adapter builds the command line, grants the reading tools and the
+      reporting calls, refuses the calls that would change what the coding agent
+      commits, and reads the round back from the report file.
+- [ ] `.squiz.json` takes `reviewer`, `pi` or `copilot`, defaulting to `pi`.
+- [ ] A round reviewed by Copilot records a cost and is held to the token bound,
+      or the harness specification says how it is bounded instead, as the spike
+      settles.
+- [ ] The harness specification describes the Copilot adapter under § 4
+      Adapters, and What ships lists the second reviewer adapter as P1.
+- [ ] A live run: a pull request reviewed by Copilot, with a finding worked to
+      exit 0 or 3.
 
 ## M11 — Depth `deep`
 
