@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 
-import { failureLine } from "../hook/report.ts";
+import { failureLine, oneLine } from "../hook/report.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { episodeNamed, type Episode } from "../loop/episode.ts";
 import { readState } from "../loop/episode-state.ts";
@@ -64,7 +64,7 @@ const NONE = "—";
  * `directory`. Never throws.
  */
 export function squizStatus(directory: string): { readonly stdout: string; readonly stderr: string } {
-  const listed = runGit(directory, ["worktree", "list", "--porcelain"], {
+  const listed = runGit(directory, ["worktree", "list", "--porcelain", "-z"], {
     until: deadlineIn(GIT_BOUND_MS),
   });
   if (!listed.ran) {
@@ -83,12 +83,19 @@ export function squizStatus(directory: string): { readonly stdout: string; reado
 /** The worktree paths in `git worktree list --porcelain` output, the main one first. */
 export function worktreesIn(porcelain: string): string[] {
   const paths: string[] = [];
-  for (const stanza of porcelain.split(/\n\n+/u)) {
-    const lines = stanza.split("\n");
-    const path = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
-    // A bare repository has no files checked out, so no episode can live in it.
-    if (path === undefined || path === "" || lines.includes("bare")) continue;
-    paths.push(path);
+  let path: string | undefined;
+  let bare = false;
+  // `-z` ends every field with a NUL, so a path may hold a newline, and an empty
+  // field ends a worktree's stanza.
+  for (const field of porcelain.split("\0")) {
+    if (field.startsWith("worktree ")) path = field.slice("worktree ".length);
+    else if (field === "bare") bare = true;
+    else if (field === "") {
+      // A bare repository has no files checked out, so no episode can live in it.
+      if (path !== undefined && path !== "" && !bare) paths.push(path);
+      path = undefined;
+      bare = false;
+    }
   }
   return paths;
 }
@@ -144,7 +151,9 @@ export function composeStatus(collected: Collected): { readonly stdout: string; 
   const ordered = [...collected.episodes].sort(newestFirst);
   const rows = ordered.flatMap((episode) => episode.rows);
   if (rows.length === 0) {
-    return { stdout: "No review is recorded in any worktree of this repository.\n", stderr };
+    // With anything unread, no rows is not no reviews, and stdout says nothing.
+    const none = collected.problems.length === 0 ? "No review is recorded in any worktree of this repository.\n" : "";
+    return { stdout: none, stderr };
   }
   return { stdout: table([HEADER, ...rows]), stderr };
 }
@@ -311,7 +320,9 @@ function twoDigits(value: number): string {
 }
 
 /** Each column as wide as its widest cell, two spaces apart, the last unpadded. */
-function table(rows: readonly Row[]): string {
+function table(given: readonly Row[]): string {
+  // A cell is one line, so a reason with line breaks in it cannot split a state's line.
+  const rows = given.map((row) => row.map(oneLine));
   const widths = HEADER.map((_, column) => Math.max(...rows.map((row) => [...row[column]!].length)));
   return rows
     .map((row) =>

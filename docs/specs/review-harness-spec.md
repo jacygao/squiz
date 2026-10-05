@@ -1820,10 +1820,21 @@ carries no time:
 Within an episode, the newest state comes first, in the reverse of the order the
 state file keeps them.
 
+Every cell is one line. A line break in a reason, with the whitespace around it,
+is printed as one space, so each state keeps its one line.
+
 A state file that cannot be read gets a line of its own on stderr, naming the
 pull request, the worktree and what was wrong, and every other worktree is still
 listed. A worktree git lists that is gone from disk holds no records and prints
-nothing.
+nothing. Where nothing is recorded anywhere, stdout says so:
+
+```
+No review is recorded in any worktree of this repository.
+```
+
+That line is printed only where every state file was read. Where one could not
+be and no other state was listed, stdout is empty, so an unread record is never
+taken for none.
 
 ### `squiz init`
 

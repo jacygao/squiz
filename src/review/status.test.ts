@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,7 @@ import type { Presence, ProcessIdentity } from "../sessions/process.ts";
 import { episodeAt } from "../loop/episode.ts";
 import { writeState } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
-import { collectStatus, composeStatus, worktreesIn } from "./status.ts";
+import { collectStatus, composeStatus, squizStatus, worktreesIn } from "./status.ts";
 
 // Started is printed in local time, and these tests fix what local time is.
 process.env["TZ"] = "UTC";
@@ -64,6 +65,8 @@ function rowsOf(stdout: string): string[][] {
 }
 
 test("worktreesIn reads every worktree git lists, and no bare repository", () => {
+  // As `--porcelain -z` writes it: every field ends in a NUL, and an empty field
+  // ends the stanza.
   const porcelain = [
     "worktree /work/squiz",
     "HEAD 37ef921aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -77,7 +80,9 @@ test("worktreesIn reads every worktree git lists, and no bare repository", () =>
     "detached",
     "prunable gitdir file points to non-existent location",
     "",
-  ].join("\n");
+  ]
+    .map((field) => `${field}\0`)
+    .join("");
 
   assert.deepEqual(worktreesIn(porcelain), ["/work/squiz", "/work/squiz/.claude/worktrees/agent-a5336e10"]);
 });
@@ -399,4 +404,61 @@ test("started is the time of day for a review started today, and the date and ti
   const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
 
   assert.deepEqual(rows.slice(1).map((row) => row[4]), ["07:06:02", "2026-10-04 07:06"]);
+});
+
+function git(directory: string, args: readonly string[]): void {
+  const result = spawnSync("git", args, { cwd: directory, encoding: "utf8", timeout: 30_000 });
+  assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+}
+
+test("a worktree whose directory name holds a newline is listed whole", () => {
+  made += 1;
+  const repository = join(scratch, `repo-${made}`);
+  mkdirSync(repository);
+  git(repository, ["init", "--quiet", "--initial-branch", "main"]);
+  git(repository, ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "x"]);
+  const linked = join(scratch, `linked-${made}\nsecond line`);
+  git(repository, ["worktree", "add", "--quiet", "--detach", linked]);
+  const written = writeState(episodeAt(linked, 41), {
+    rounds: [],
+    spentOutsideRounds: unspent,
+    records: [{ head, activity: null, status: "queued" }],
+  });
+  assert.deepEqual(written, { outcome: "written" });
+
+  const printed = squizStatus(repository);
+
+  assert.equal(printed.stderr, "");
+  assert.deepEqual(rowsOf(printed.stdout).slice(1).map((row) => `${row[0]} ${row[3]}`), ["#41 queued"]);
+});
+
+test("a state file that cannot be read leaves stdout empty rather than saying no review is recorded", () => {
+  const bad = worktree({});
+  mkdirSync(join(bad, ".squiz", "50"), { recursive: true });
+  writeFileSync(join(bad, ".squiz", "50", "state.json"), "{ not json", "utf8");
+
+  const printed = composeStatus(collectStatus([bad], { main: scratch, presence: running, now }));
+
+  assert.equal(printed.stdout, "", "a coordinator reading no reviews here would stop waiting on one it could not see");
+  assert.match(printed.stderr, /^squiz: the reviews of #50 in /u);
+});
+
+test("a reason that runs over several lines is printed on the state's one line", () => {
+  const root = worktree({
+    38: [
+      {
+        head,
+        activity: null,
+        status: "failed",
+        reason: "the provider refused the request:\n  HTTP 529 overloaded",
+        ownerNoted: true,
+      },
+    ],
+  });
+
+  const printed = composeStatus(collectStatus([root], { main: scratch, presence: running, now }));
+  const lines = printed.stdout.trimEnd().split("\n");
+
+  assert.equal(lines.length, 2, "the header and one line for the one state");
+  assert.equal(rowsOf(printed.stdout)[1]?.[6], "the provider refused the request: HTTP 529 overloaded");
 });

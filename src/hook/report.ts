@@ -14,16 +14,18 @@ import { writeToStderr } from "./stderr.ts";
 // do.
 const UNNAMED = "the hook failed for a reason it could not name";
 
-/**
- * The exact bytes of the pointer for `reason`, newline included.
- *
- * A line break, with the whitespace around it, becomes one space, so a reason
- * that arrived with line breaks in it still leaves as one line. Whitespace
- * within a line is left alone, because a reason can carry a path.
- */
+/** The exact bytes of the pointer for `reason`, flattened to one line, newline included. */
 export function failureLine(reason: string): string {
-  const flattened = reason.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim();
+  const flattened = oneLine(reason);
   return `squiz: ${flattened === "" ? UNNAMED : flattened}\n`;
+}
+
+/**
+ * `text` as one line. A line break, with the whitespace around it, becomes one
+ * space. Whitespace within a line is left alone, because text can carry a path.
+ */
+export function oneLine(text: string): string {
+  return text.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim();
 }
 
 /** Write the failure pointer for `reason` to stderr, and nothing else anywhere. */
