@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { HOOK_CEILING_MS } from "./loop/window.ts";
-
 function readJson(relative: string): unknown {
   const path = fileURLToPath(new URL(relative, import.meta.url));
   return JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -19,7 +17,7 @@ const manifest = readJson("../.claude-plugin/plugin.json") as {
 const registration = readJson("../hooks/hooks.json") as {
   hooks?: Record<
     string,
-    { hooks?: { type?: string; command?: string; timeout?: number }[] }[]
+    { hooks?: { type?: string; command?: string; asyncRewake?: boolean; timeout?: number }[] }[]
   >;
 };
 
@@ -36,26 +34,19 @@ test("the manifest's version is the package's", () => {
   assert.equal(manifest.version, packageVersion);
 });
 
-test("SubagentStop runs the binary through the plugin root", () => {
-  // The bare name does not resolve here. A hook runs under a shell whose PATH
-  // is the user's, without the plugin's bin/ in it, and the runtime supplies
-  // the root instead.
-  const registered = registration.hooks?.["SubagentStop"] ?? [];
-  const commands = registered.flatMap((matcher) => matcher.hooks ?? []);
+function commandsOn(event: string): readonly unknown[] {
+  return (registration.hooks?.[event] ?? []).flatMap((matcher) => matcher.hooks ?? []);
+}
 
-  assert.deepEqual(
-    commands,
-    [
-      {
-        type: "command",
-        command: "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook",
-        // The ceiling the round divides into shares, declared here in seconds.
-        // Nothing at runtime can read it back out of this file, so a second
-        // number here is one the round would go on budgeting against after
-        // someone had changed it.
-        timeout: HOOK_CEILING_MS / 1_000,
-      },
-    ],
-    "the registration goes through the root the runtime gives it, never an install path",
-  );
+// The bare name does not resolve in either. A hook runs under a shell whose PATH
+// is the user's, without the plugin's bin/ in it, and the runtime supplies the
+// root instead.
+const command = "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook";
+
+test("Stop runs the binary through the plugin root, in the background, for as long as a day", () => {
+  assert.deepEqual(commandsOn("Stop"), [{ type: "command", command, asyncRewake: true, timeout: 86_400 }]);
+});
+
+test("SubagentStop runs the binary through the plugin root, under the runtime's own timeout", () => {
+  assert.deepEqual(commandsOn("SubagentStop"), [{ type: "command", command }]);
 });
