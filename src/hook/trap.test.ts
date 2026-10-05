@@ -141,30 +141,6 @@ test("a round that fails nothing writes nothing", async () => {
   assert.equal(run.stdout, "");
 });
 
-test("a round that blocks keeps its exit 2, and no failure pointer joins its reason", async () => {
-  // The other of the hook's two stderr channels. It is the round's own text, it is
-  // several lines, and the trap neither writes it nor interferes with it.
-  const reason = [
-    "Squiz reviewed the change on this branch and left 3 comments on PR #6.",
-    "",
-    "  gh pr view 6 --comments",
-    "",
-    "Address what applies, reply on anything you disagree with, then finish.",
-    "",
-  ].join("\n");
-
-  const run = await runInChild(
-    hook(`() => {
-      process.stderr.write(${JSON.stringify(reason)});
-      return 2;
-    }`),
-  );
-
-  assert.equal(run.code, 2);
-  assert.equal(run.stderr, reason);
-  assert.equal(run.stdout, "");
-});
-
 test("a failure the round handles itself goes out through the same one line", async () => {
   // How a failure the caller saw coming is reported: report, then
   // exit 0 on its own terms rather than by throwing.

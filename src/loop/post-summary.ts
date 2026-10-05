@@ -3,9 +3,9 @@
  * posted once.
  *
  * **The comment is the episode's close and not a round's.** Only a round that
- * closed the episode reaches here. A round that blocks posts nothing, or the pull
- * request would carry a report of the review for every round while it was still
- * going on.
+ * closed the episode reaches here. A round that leaves threads open posts
+ * nothing, or the pull request would carry a report of the review for every
+ * round while it was still going on.
  *
  * Posting is a create and never an edit. Whatever this sends is permanent for the
  * episode, and a second episode on the same pull request adds a second comment
@@ -76,10 +76,10 @@ export type ClosingRound = {
    * What every round of the episode established about the worktree its reviewer
    * ran in, read from the episode's state file.
    *
-   * The episode's and not this round's. A round that blocks posts no comment, so
-   * what its readings found reaches a person through this or not at all, and a
-   * close composed from the closing round's own readings would report the
-   * worktree of one round as the worktree of the whole episode.
+   * The episode's and not this round's. A round that leaves threads open posts
+   * no comment, so what its readings found reaches a person through this or not
+   * at all, and a close composed from the closing round's own readings would
+   * report the worktree of one round as the worktree of the whole episode.
    */
   readonly confinement: ConfinementEvidence;
   /**
