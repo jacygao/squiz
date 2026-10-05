@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — how a Copilot reviewer in a pane is started and how it ends; § 8 — the Copilot counterpart of the prerequisite on an interactive reviewer in a pane"
+settles: "§ 4 — how a Copilot reviewer in a pane is started and how it ends"
 issue: 458
 recorded: 2026-10-06
 versions: { copilot: 1.0.91, model: gpt-5-mini, tmux: 3.7b, macos: 26.6.2 }

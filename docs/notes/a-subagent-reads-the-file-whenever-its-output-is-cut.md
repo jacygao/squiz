@@ -1,5 +1,5 @@
 ---
-settles: "§ 8 — whether a subagent handed a long exit-2 output works every thread; § 9 — whether the skill's text needs more to make it read the file; § 2 — when Claude Code cuts a command's output"
+settles: "§ 6 — whether a subagent handed a long exit-2 output works every thread; § 9 — whether the skill's text needs more to make it read the file; § 2 — when Claude Code cuts a command's output"
 issue: 303
 recorded: 2026-10-04
 versions: { claude-code: 2.1.289, coding-agent: claude-opus-5-5 }

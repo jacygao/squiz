@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether the socket wake reaches a subagent's parent; § 8 — the prerequisite on the socket wake"
+settles: "§ 3 — whether the socket wake reaches a subagent's parent"
 issue: 301
 recorded: 2026-10-04
 versions: { claude-code: 2.1.289, tmux: 3.7b, macos: 26.6.2 }
