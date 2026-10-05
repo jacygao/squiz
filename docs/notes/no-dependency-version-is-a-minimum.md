@@ -56,9 +56,11 @@ records:
   `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`.
 - **What does not outlive Claude Code stopping a command or a hook:** a plain
   `&`, `setsid` alone, `nohup … & disown`, and `( nohup … & )`. Each stays in
-  the command's process tree or its process group. Recorded against Claude Code
-  2.1.288 on macOS *(unverified: carried over from the specification, with no
-  run of its own in this repository)*.
+  the command's process tree or its process group. The plain `&` is recorded in
+  `a-pane-outlives-the-call-that-made-it-and-both-wakes-reach-an-idle-session.md`.
+  The other three were recorded against Claude Code 2.1.288 on macOS
+  *(unverified: carried over from the specification, with no run of their own in
+  this repository)*.
 
 ## Limits
 

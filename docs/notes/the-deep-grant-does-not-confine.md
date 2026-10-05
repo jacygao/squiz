@@ -44,9 +44,9 @@ the tests.
 and § 8 What ships has `deep` ship with the tracked-file comparison or not at
 all.
 
-Also for you: **§ 2's Verified against table records `pi` 0.74.2.** Everything
-here is 0.84.2, and where the two differ was not checked. 2026-10-05: § 2
-Verified against now records 0.84.2.
+Also for you: **The recorded `pi` version was 0.74.2.** Everything
+here is 0.84.2, and where the two differ was not checked. 2026-10-05: the recorded
+version is now 0.84.2, in `no-dependency-version-is-a-minimum.md`.
 
 ## Reference
 
