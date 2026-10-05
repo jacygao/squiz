@@ -11,7 +11,8 @@
  *   second and can be changed.
  * - **Delivery is the move into `delivered/`.** A rename succeeds for exactly one
  *   of the processes that race for it, so whoever moves the note delivers it, and
- *   every other is told it lost.
+ *   every other is told it lost. A delivery that then does not reach the
+ *   session moves the note back to waiting.
  * - **A value stays on its line.** A backslash, a line feed and a carriage return
  *   in it are written as `\\`, `\n` and `\r`, and read back as themselves.
  *
@@ -42,6 +43,8 @@ export type Delivery =
   | { readonly outcome: "delivered" }
   | { readonly outcome: "lost" }
   | { readonly outcome: "failed"; readonly reason: string };
+
+export type Release = { readonly outcome: "released" } | { readonly outcome: "failed"; readonly reason: string };
 
 // Starting with a letter or digit rules out `.`, `..` and hidden names.
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
@@ -134,6 +137,19 @@ export function deliverNote(directory: string, sessionId: string, name: string):
     return { outcome: "failed", reason: `${name} was not moved into delivered/: ${describe(error)}` };
   }
   return { outcome: "delivered" };
+}
+
+/** Move the note `name` for `sessionId` out of `delivered/` and back to waiting. */
+export function releaseNote(directory: string, sessionId: string, name: string): Release {
+  if (!SESSION_ID.test(sessionId)) return { outcome: "failed", reason: `${JSON.stringify(sessionId)} is no session id` };
+  if (!NOTE_NAME.test(name)) return { outcome: "failed", reason: `${JSON.stringify(name)} is no note's name` };
+  const session = join(directory, sessionId);
+  try {
+    renameSync(join(session, "delivered", name), join(session, name));
+  } catch (error) {
+    return { outcome: "failed", reason: `${name} was not moved back out of delivered/: ${describe(error)}` };
+  }
+  return { outcome: "released" };
 }
 
 // The sequence orders notes this process writes within one millisecond, and
