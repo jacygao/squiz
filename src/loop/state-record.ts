@@ -79,6 +79,22 @@ export type ReviewedRound = FinishedRound & { readonly reviewer: ReviewerPlace }
 /** A `squiz review` exit status a round can end on. */
 export type ReviewedExit = 0 | 2 | 3;
 
+/** What closed an episode with threads still open. */
+export type ClosingBound = "round cap" | "token bound";
+
+/**
+ * What a reviewed round did beside its result, as `squiz review` prints it.
+ * Each is absent on a record written before records kept it.
+ */
+export type RoundReport = {
+  /** How many threads the round's findings opened. */
+  readonly newFindings?: number;
+  /** The move of `HEAD` the round's comparison found, as "from … to …". */
+  readonly moved?: string;
+  /** What failed without changing the round's outcome, a line each. */
+  readonly problems?: readonly string[];
+};
+
 type Shared = StateKey & {
   /** Absent where no trigger knew it, as for every state `squiz review` queued. */
   readonly owner?: Owner;
@@ -100,12 +116,14 @@ export type StateRecord = Shared &
         /** Absent until the reviewer's session has started. */
         readonly reviewer?: ReviewerSession;
       }
-    | ({ readonly status: "reviewed"; readonly round?: ReviewedRound } & (
+    | ({ readonly status: "reviewed"; readonly round?: ReviewedRound } & RoundReport & (
         | {
             readonly result: "exited";
             readonly exitStatus: ReviewedExit;
             /** The node ids of the reviewer's threads the round left open. */
             readonly openThreads: readonly string[];
+            /** The bound that closed the episode with threads open, on a round that exited 3. */
+            readonly closedAt?: ClosingBound;
           }
         | {
             // Nothing was left open, and a later state was queued behind this one,
@@ -118,6 +136,11 @@ export type StateRecord = Shared &
         readonly reason: string;
         readonly ownerNoted: boolean;
         readonly round?: FinishedRound;
+        /**
+         * What `squiz review` prints on stderr after the reason: what else the
+         * round established, and where its failure comment went.
+         */
+        readonly lines?: readonly string[];
       }
     | {
         readonly status: "not reviewed";
@@ -194,7 +217,9 @@ export function recordFrom(entry: unknown): ReadRecord {
       const round = roundFrom(entry["round"]);
       if ("problem" in round) return round;
       const kept = round.round === undefined ? {} : { round: round.round };
-      return { record: { ...shared, status, reason, ownerNoted: noted, ...kept } };
+      const lines = entry["lines"];
+      if (lines !== undefined && !isLines(lines)) return { problem: `has "lines" as ${render(lines)} rather than an array of lines` };
+      return { record: { ...shared, status, reason, ownerNoted: noted, ...kept, ...(lines === undefined ? {} : { lines }) } };
     }
     case "not reviewed": {
       const reason = entry["reason"];
@@ -313,12 +338,15 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
   const read = roundFrom(entry["round"]);
   if ("problem" in read) return read;
   const { round } = read;
-  let kept: { round?: ReviewedRound } = {};
+  let kept: { round?: ReviewedRound } & RoundReport = {};
   if (round !== undefined) {
     const { reviewer } = round;
     if (reviewer === undefined) return { problem: "is reviewed, and has a round with no reviewer" };
     kept = { round: { ...round, reviewer } };
   }
+  const report = reportFrom(entry);
+  if ("problem" in report) return report;
+  kept = { ...kept, ...report.report };
   const result = entry["result"];
   const exitStatus = entry["exitStatus"];
   if (result === "clean, episode open") {
@@ -336,7 +364,38 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
   if (!Array.isArray(openThreads) || !openThreads.every(isText)) {
     return { problem: `has "openThreads" as ${render(openThreads)} rather than an array of thread ids` };
   }
-  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...kept } };
+  const closedAt = entry["closedAt"];
+  if (closedAt !== undefined && closedAt !== "round cap" && closedAt !== "token bound") {
+    return { problem: `has "closedAt" as ${render(closedAt)} rather than "round cap" or "token bound"` };
+  }
+  const bound: { closedAt?: ClosingBound } = closedAt === undefined ? {} : { closedAt };
+  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
+}
+
+type ReadReport = { readonly report: RoundReport } | { readonly problem: string };
+
+function reportFrom(entry: Record<string, unknown>): ReadReport {
+  const newFindings = entry["newFindings"];
+  if (newFindings !== undefined && !(typeof newFindings === "number" && Number.isInteger(newFindings) && newFindings >= 0)) {
+    return { problem: `has "newFindings" as ${render(newFindings)} rather than a whole number` };
+  }
+  const moved = entry["moved"];
+  if (moved !== undefined && !isText(moved)) return { problem: `has "moved" as ${render(moved)}` };
+  const problems = entry["problems"];
+  if (problems !== undefined && !isLines(problems)) {
+    return { problem: `has "problems" as ${render(problems)} rather than an array of lines` };
+  }
+  return {
+    report: {
+      ...(newFindings === undefined ? {} : { newFindings }),
+      ...(moved === undefined ? {} : { moved }),
+      ...(problems === undefined ? {} : { problems }),
+    },
+  };
+}
+
+function isLines(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(isText);
 }
 
 function identityFrom(found: unknown): ProcessIdentity | undefined {

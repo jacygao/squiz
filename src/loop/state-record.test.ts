@@ -96,6 +96,29 @@ const everyState: readonly StateRecord[] = [
     ownerNoted: false,
     round: { number: 4, startedAt: 1_791_000_000, endedAt: 1_791_000_002 },
   },
+  // What `squiz review` prints for a round: its new findings, the bound that
+  // closed it, a move of `HEAD`, and what failed without changing its outcome.
+  {
+    head,
+    activity: reply,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 3,
+    openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
+    newFindings: 2,
+    closedAt: "token bound",
+    moved: "from a detached HEAD at 3f9c2e0 to a detached HEAD at 8d21a4f",
+    problems: ["the round closed the episode on PR #41 having failed to post the episode's summary: GitHub answered 502"],
+  },
+  { head, activity: reply, status: "reviewed", result: "clean, episode open", newFindings: 0 },
+  {
+    head,
+    activity: reply,
+    status: "failed",
+    reason: "the reviewer was stopped at the time bound",
+    ownerNoted: false,
+    lines: ["the failure is posted on PR #41"],
+  },
   // Written before records kept the round, as the next two are.
   { head, activity: null, status: "reviewed", result: "clean, episode open" },
   { head, activity: null, status: "failed", reason: "the round host died", ownerNoted: false },
@@ -215,6 +238,12 @@ const malformed: readonly [string, unknown][] = [
     "an exited round's reviewer on an unknown backend",
     { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "screen", pane: "1" } } },
   ],
+  ["new findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: -1 }],
+  ["new findings counted with a fraction", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1.5 }],
+  ["a close at a bound that is neither", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "deadline" }],
+  ["a move of HEAD that is not a string", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], moved: 1 }],
+  ["problems that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
+  ["failure lines that are not strings", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, lines: "posted" }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.
   ["a failed record not saying whether its owner was noted", { head, activity: null, status: "failed", reason: "r" }],

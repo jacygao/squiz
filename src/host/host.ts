@@ -22,11 +22,21 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { headMovedIn } from "../loop/confinement.ts";
+import { failureReport } from "../loop/failure-comment.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { decideRoundEnd, namedStates, type QueuedRecord, type RoundEnd } from "../loop/round-end.ts";
 import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
-import { putRecord, sameState, type ReviewerPlace, type StateKey, type StateRecord } from "../loop/state-record.ts";
+import {
+  putRecord,
+  sameState,
+  type ClosingBound,
+  type ReviewerPlace,
+  type RoundReport,
+  type StateKey,
+  type StateRecord,
+} from "../loop/state-record.ts";
 import { updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
@@ -265,7 +275,10 @@ function resultOf(
         };
       }
       const round = { ...timing, reviewer: REVIEWER };
-      const reviewed: Recorded = { record: { ...ended.record, round }, name: taken.head.slice(0, 7) };
+      const reviewed: Recorded = {
+        record: { ...ended.record, round, ...reportOf(conclusion, ended) },
+        name: taken.head.slice(0, 7),
+      };
       const left = ended.outcome === "closed" ? ended.leftNotReviewed : null;
       const behind = left === null ? [] : inOrder(left.states, left.after);
       return {
@@ -290,9 +303,46 @@ function resultOf(
       // where a reviewer ran.
       const ran = conclusion.outcome === "failed" && conclusion.confinement !== undefined;
       const round = ran ? { ...timing, reviewer: REVIEWER } : timing;
-      return { records: () => inOrder([{ ...failedRecord(key, reason), round }]), line: `${named(taken)} failed: ${reason}` };
+      const lines = conclusion.outcome === "failed" ? failureLinesOf(conclusion) : [];
+      const failed = { ...failedRecord(key, reason), round, ...(lines.length === 0 ? {} : { lines }) };
+      return { records: () => inOrder([failed]), line: `${named(taken)} failed: ${reason}` };
     }
   }
+}
+
+/** What a round that reviewed did beside its result, as `squiz review` prints it. */
+function reportOf(
+  conclusion: Extract<RoundConclusion, { readonly outcome: "block" | "clean, episode open" | "close" }>,
+  ended: RoundEnd,
+): RoundReport & { readonly closedAt?: ClosingBound } {
+  const moved = conclusion.confinement === undefined ? undefined : headMovedIn(conclusion.confinement);
+  const summary = conclusion.outcome === "close" ? conclusion.summary : undefined;
+  const problems =
+    summary === undefined || summary.outcome === "posted"
+      ? []
+      : [`the review of PR #${conclusion.pullRequest} closed without its summary: ${summary.reason}`];
+  // Only a close that left threads open is printed with its bound.
+  const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
+  return {
+    newFindings: conclusion.posted.length,
+    ...(moved === undefined ? {} : { moved }),
+    ...(problems.length === 0 ? {} : { problems }),
+    ...(bound === "round-cap" ? { closedAt: "round cap" } : bound === "token-bound" ? { closedAt: "token bound" } : {}),
+  };
+}
+
+/** What a failed round's comment lists after its reason, then where the comment went. */
+function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>): readonly string[] {
+  const comment = conclusion.failureComment;
+  const went =
+    comment === undefined
+      ? []
+      : [
+          comment.posting.outcome === "posted"
+            ? `the failure is posted on PR #${comment.pullRequest}`
+            : `the failure could not be posted on PR #${comment.pullRequest}: ${comment.posting.reason}`,
+        ];
+  return [...failureReport(conclusion).established, ...went];
 }
 
 /** Why a round that reviewed nothing for its state failed. */

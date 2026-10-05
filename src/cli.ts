@@ -1,8 +1,9 @@
 /**
  * The entry point `bin/squiz` execs. Every command dispatches from here, and
- * the dispatch itself runs under the top-level trap, so nothing the binary is
- * handed can end the process non-zero and stop the coding agent finishing its
- * turn.
+ * the dispatch itself runs under the top-level trap. Every command but
+ * `squiz review` exits 0 whatever it is handed, so nothing stops the coding
+ * agent finishing its turn. `squiz review` exits with the status its result
+ * gives, and 1 where it could not run.
  *
  * stdout carries the answer to a command and nothing else. Everything that is
  * not an answer — a failure, a usage line, a branch with no pull request — goes
@@ -20,14 +21,20 @@ import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";
 import { runUnderTrap, type HookExit } from "./hook/trap.ts";
 import { hostCommand } from "./host/command.ts";
+import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
-const commands = ["hook", "threads", "reply", "status", "host"];
+const commands = ["hook", "threads", "reply", "status", "host", "review"];
 
-function dispatch(argv: readonly string[]): HookExit | Promise<HookExit> {
+const numberSpelling = /^[1-9][0-9]*$/u;
+
+function dispatch(argv: readonly string[]): number | Promise<number> {
   const command = argv[0];
+  if (command === "review") {
+    return review(argv.slice(1));
+  }
   if (command === "hook") {
     return runHook({ stdin: process.stdin, directory: process.cwd() });
   }
@@ -52,6 +59,25 @@ function dispatch(argv: readonly string[]): HookExit | Promise<HookExit> {
   const named = command === undefined ? "no command" : `no command ${JSON.stringify(command)}`;
   reportFailure(`${named}. The commands are: ${commands.join(", ")}`);
   return 0;
+}
+
+/**
+ * Review the pull request `args` names, wait for the round, and exit as its
+ * result says. Unlike the hook's, every status here is the coding agent's to
+ * read, so a review that could not run exits 1.
+ */
+async function review(args: readonly string[]): Promise<number> {
+  const named = args[0] ?? "";
+  const pullRequest = Number(named);
+  if (args.length !== 1 || !numberSpelling.test(named) || !Number.isSafeInteger(pullRequest)) {
+    reportFailure("no review ran: squiz review <number>, where <number> is the pull request's");
+    return 1;
+  }
+
+  const printed = await runReview({ directory: process.cwd(), pullRequest, environment: process.env });
+  process.stdout.write(printed.stdout);
+  process.stderr.write(printed.stderr);
+  return printed.exit;
 }
 
 /** The pull request a command works against, or why it has none to work against. */
@@ -152,5 +178,6 @@ function postReply(args: readonly string[]): HookExit {
 // The dispatch runs only where this file is the process's entry point, so that
 // importing it runs no command.
 if (import.meta.main) {
-  await runUnderTrap(() => dispatch(process.argv.slice(2)));
+  const argv = process.argv.slice(2);
+  await runUnderTrap(() => dispatch(argv), argv[0] === "review" ? { exit: 1, failed: "the review failed" } : undefined);
 }

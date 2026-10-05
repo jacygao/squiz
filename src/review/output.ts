@@ -100,7 +100,8 @@ type Failed = About & {
   readonly reason: string;
   /** What else the round established, each an item of the failure comment's list. */
   readonly items: readonly string[];
-  readonly comment: { readonly posted: true } | { readonly posted: false; readonly reason: string };
+  /** Absent where the items already say where the comment went, or none was attempted. */
+  readonly comment?: { readonly posted: true } | { readonly posted: false; readonly reason: string };
 };
 
 /** A run that failed before any round, exit 1. */
@@ -270,10 +271,16 @@ function closedBlocks(result: AlreadyClosed): readonly string[] {
 
 /** The reason the failure comment gives, each item it lists, then where it went. */
 function failedLines(result: Failed): string {
-  const went = result.comment.posted
-    ? `the failure is posted on PR #${result.pullRequest}`
-    : `the failure could not be posted on PR #${result.pullRequest}: ${result.comment.reason}`;
-  return [`review failed: ${result.reason}`, ...result.items, went].map(failureLine).join("");
+  const { comment } = result;
+  const went =
+    comment === undefined
+      ? []
+      : [
+          comment.posted
+            ? `the failure is posted on PR #${result.pullRequest}`
+            : `the failure could not be posted on PR #${result.pullRequest}: ${comment.reason}`,
+        ];
+  return [`review failed: ${result.reason}`, ...result.items, ...went].map(failureLine).join("");
 }
 
 function unpostedLine(result: Unposted): string {
