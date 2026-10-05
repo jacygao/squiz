@@ -19,10 +19,11 @@ import { currentBranch } from "./hook/branch.ts";
 import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";
 import { runUnderTrap, type HookExit } from "./hook/trap.ts";
+import { squizStatus } from "./review/status.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
-const commands = ["hook", "threads", "reply"];
+const commands = ["hook", "threads", "reply", "status"];
 
 function dispatch(argv: readonly string[]): HookExit | Promise<HookExit> {
   const command = argv[0];
@@ -34,6 +35,12 @@ function dispatch(argv: readonly string[]): HookExit | Promise<HookExit> {
   }
   if (command === "reply") {
     return postReply(argv.slice(1));
+  }
+  if (command === "status") {
+    const printed = squizStatus(process.cwd());
+    process.stdout.write(printed.stdout);
+    process.stderr.write(printed.stderr);
+    return 0;
   }
 
   // Exit 2 is how a round blocks the coding agent's turn, and a name the binary

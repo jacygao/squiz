@@ -24,12 +24,15 @@ const owner = {
 /** One record in each of the five states, each carrying all § 3 gives it. */
 const everyState: readonly StateRecord[] = [
   { head, activity: null, status: "queued", owner, herdrWorkspace: "w2" },
+  { head, activity: reply, status: "reviewing", host: { pid: 4012, startedAt: 1_791_000_000 }, round: { number: 3 } },
+  // Written before reviewing records kept the round's number.
   { head, activity: reply, status: "reviewing", host: { pid: 4012, startedAt: 1_791_000_000 } },
   {
     head,
     activity: reply,
     status: "reviewing",
     host: { pid: 4012, startedAt: 1_791_000_000 },
+    round: { number: 3 },
     reviewer: {
       backend: "tmux",
       pane: "@14",
@@ -43,6 +46,7 @@ const everyState: readonly StateRecord[] = [
     activity: null,
     status: "reviewing",
     host: { pid: 4012, startedAt: 1_791_000_000 },
+    round: { number: 3 },
     reviewer: {
       backend: "detached",
       process: { pid: 4101, startedAt: 1_791_000_004 },
@@ -110,8 +114,8 @@ function roundShape(round: FinishedRound | undefined): string {
 
 for (const record of everyState) {
   const shape =
-    record.status === "reviewing" && record.reviewer !== undefined
-      ? `reviewing by a ${record.reviewer.backend} reviewer`
+    record.status === "reviewing"
+      ? `reviewing ${record.round === undefined ? "with no round number" : `round ${record.round.number}`}${record.reviewer === undefined ? "" : ` by a ${record.reviewer.backend} reviewer`}`
       : record.status === "reviewed" || record.status === "failed"
         ? `${record.status === "reviewed" ? `reviewed (${record.result})` : "failed"} ${roundShape(record.round)}`
         : record.status;
@@ -145,6 +149,12 @@ const malformed: readonly [string, unknown][] = [
   ["a reviewing record with no host", { head, activity: null, status: "reviewing" }],
   ["a host with no start time", { head, activity: null, status: "reviewing", host: { pid: 4012 } }],
   ["a host whose pid is zero", { head, activity: null, status: "reviewing", host: { pid: 0, startedAt: 1 } }],
+  // Status labels the reviewer's tab by this number, so a wrong one names another round's.
+  ["a reviewing round that is not an object", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: 3 }],
+  ["a reviewing round with no number", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: {} }],
+  ["a reviewing round numbered zero", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 0 } }],
+  ["a reviewing round numbered with a fraction", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 2.5 } }],
+  ["a reviewing round numbered with a string", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: "3" } }],
   [
     "a reviewer on an unknown backend",
     { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, reviewer: { backend: "screen", pane: "1", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },

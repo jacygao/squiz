@@ -232,8 +232,8 @@ Each record is in one of five states:
 | State | What it records |
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
-| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window, which `squiz status` prints. |
+| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. `squiz status` prints the round's times, and labels its Session from the backend and `k` (§ 6). |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, and why. |
 
@@ -1780,26 +1780,73 @@ back from the pull request, so the coding agent can check each one there.
 
 ### `squiz status`
 
-`squiz status` lists every review recorded in any worktree of the repository, one
-line per pull request state, newest first. Replies is the latest activity the
-state was read with, as the last characters of its identifier, or `—` for none.
-Session is where the round's reviewer runs or ran. Resume is the command that
-resumes the reviewer's session once its round is over. It is read by a person
-watching the reviews, and by a coordinator deciding whether to wait. It starts
-nothing and asks nothing of GitHub.
+`squiz status` lists every review recorded in any worktree of the repository,
+one line per pull request state, newest first. A person reads it to watch the
+reviews, and a coordinator reads it to decide whether to wait. It starts nothing
+and asks nothing of GitHub.
 
 ```
-PR    Commit   Replies  State      Started   Elapsed  Result                                      Session           Worktree                          Resume
-#41   9e01b2c  OmQx7a   queued     —         —        —                                           —                 .claude/worktrees/agent-a5336e10  —
-#41   8d21a4f  OmQx7a   reviewing  07:13:05  3m 12s   —                                           tmux squiz-41-r3  .claude/worktrees/agent-a5336e10  —
-#41   3f9c2e0  OmQx7a   reviewed   07:06:02  2m 40s   1 thread open                               tmux squiz-41-r2  .claude/worktrees/agent-a5336e10  pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
-#38   a1b2c3d  —        failed     06:40:02  8m 00s   the reviewer was stopped at the time bound  detached          .claude/worktrees/agent-a077fff7  pi --session-dir .squiz/38/rounds/1/session --session 0193f1a0-2c4b-7e9d-8f3a-1b6c5d7e9f02
+PR    Commit   Replies  State      Started           Elapsed  Result                                      Session           Worktree                          Resume
+#41   9e01b2c  OmQx7a   queued     —                 —        —                                           —                 .claude/worktrees/agent-a5336e10  —
+#41   8d21a4f  OmQx7a   reviewing  07:13:05          3m 12s   —                                           tmux squiz-41-r3  .claude/worktrees/agent-a5336e10  —
+#41   3f9c2e0  OmQx7a   reviewed   07:06:02          2m 40s   1 thread open                               tmux squiz-41-r2  .claude/worktrees/agent-a5336e10  pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
+#38   a1b2c3d  —        failed     2026-10-04 06:40  8m 00s   the reviewer was stopped at the time bound  detached          .claude/worktrees/agent-a077fff7  pi --session-dir .squiz/38/rounds/1/session --session 0193f1a0-2c4b-7e9d-8f3a-1b6c5d7e9f02
 ```
 
-Elapsed is the time so far for a review that is running, and the time it took for
-one that finished. A reviewing record whose round host has gone is listed as
-`killed` until a recovery records it failed. A state the episode closed before reviewing is listed as `not reviewed`. The result of a review that failed is the reason its failure comment
-gives.
+Each column holds:
+
+- **Replies:** the latest activity the state was read with, as the last six
+  characters of its identifier, or `—` for none.
+- **State:** the record's state, with two readings of a reviewing record. One
+  whose round host has gone, by its pid and start time, is `killed` until a
+  recovery records it failed. One whose host cannot be told running or gone is
+  `reviewing`, and its Result is "the round host could not be checked:", then
+  why. A state the episode closed before reviewing is `not reviewed`.
+- **Started:** when the round started, in local time. A round started today
+  shows the time of day, and one started on another day shows the date and the
+  minute. A reviewing record shows its reviewer's start once the reviewer has
+  started, and its round host's start before then.
+- **Elapsed:** the time so far for a review that is running, and the time from
+  start to end for one that finished. A killed review, and a record kept before
+  records held the round's times, show `—`.
+- **Result:** for a failed state, the reason its failure comment gives. For a
+  state not reviewed, why not. For a reviewed state, how many of the reviewer's
+  threads it left open, and "review closed" where it closed the episode.
+- **Session:** the backend and the label of the reviewer's tab or window,
+  `squiz-<number>-r<k>` as § 4 The reviewer session opens it, with `k` the
+  round's number its record keeps. A record that keeps no `k` shows the backend
+  alone. A detached reviewer is `detached`, and a state with no reviewer
+  started is `—`.
+- **Worktree:** the worktree's path relative to the main worktree, `.` for the
+  main worktree itself.
+- **Resume:** the content of the round's `rounds/<k>/resume.txt` once the round
+  is over, or `—`.
+
+The order is newest first by what the records carry, because a queued record
+carries no time:
+
+1. Episodes with a state queued or under review come first.
+2. Then episodes by the latest start or end time any of their records carries.
+3. Then by the higher pull request number.
+
+Within an episode, the newest state comes first, in the reverse of the order the
+state file keeps them.
+
+Every cell is one line. A line break in a reason, with the whitespace around it,
+is printed as one space, so each state keeps its one line.
+
+A state file that cannot be read gets a line of its own on stderr, naming the
+pull request, the worktree and what was wrong, and every other worktree is still
+listed. A worktree git lists that is gone from disk holds no records and prints
+nothing. Where nothing is recorded anywhere, stdout says so:
+
+```
+No review is recorded in any worktree of this repository.
+```
+
+That line is printed only where every state file was read. Where one could not
+be and no other state was listed, stdout is empty, so an unread record is never
+taken for none.
 
 ### `squiz init`
 
