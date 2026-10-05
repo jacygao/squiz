@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.25 (draft)
+**Version:** 0.26 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -465,7 +465,7 @@ stay.
 - [ ] **`src/` and the tests are audited against M7's design.** Every
       implementation the reviewer sessions make redundant is removed, and the
       pull request lists each removed piece. Nothing redundant is left behind.
-      The harness specification names these:
+      The pieces to remove are these:
   - **The hook-path timing and windows.** The 600-second window a hook's round
     ran in, its 540-second reviewer cap and the per-path `timeout` cap, in
     `src/loop/window.ts`, and the hook's registration test.
