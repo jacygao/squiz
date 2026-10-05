@@ -56,9 +56,12 @@ export type ReviewerSession = ReviewerPlace & {
  * The round that reached a finished record, as `squiz status` prints it.
  *
  * A finished record without one was written before records kept it, and
- * nothing is known of when its round ran or where its reviewer was.
+ * nothing is known of which round reached it, when that round ran, or where
+ * its reviewer was.
  */
 export type FinishedRound = {
+  /** The `k` that names the round's directory, `rounds/<k>/`, where its resume command is. */
+  readonly number: number;
   /** In whole seconds since the epoch, as is `endedAt`. */
   readonly startedAt: number;
   readonly endedAt: number;
@@ -223,6 +226,10 @@ type ReadRound = { readonly round: FinishedRound | undefined } | { readonly prob
 function roundFrom(found: unknown): ReadRound {
   if (found === undefined) return { round: undefined };
   if (!isObject(found)) return { problem: `has "round" as ${render(found)}` };
+  const number = found["number"];
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
+    return { problem: `has "round.number" as ${render(number)} rather than a whole number from 1` };
+  }
   const startedAt = found["startedAt"];
   if (!isWholeSeconds(startedAt)) return { problem: `has "round.startedAt" as ${render(startedAt)}` };
   const endedAt = found["endedAt"];
@@ -230,10 +237,10 @@ function roundFrom(found: unknown): ReadRound {
   if (endedAt < startedAt) {
     return { problem: `has a round that ended at ${endedAt}, before it started at ${startedAt}` };
   }
-  if (found["reviewer"] === undefined) return { round: { startedAt, endedAt } };
+  if (found["reviewer"] === undefined) return { round: { number, startedAt, endedAt } };
   const reviewer = placeFrom(found["reviewer"], "round.reviewer");
   if ("problem" in reviewer) return reviewer;
-  return { round: { startedAt, endedAt, reviewer: reviewer.place } };
+  return { round: { number, startedAt, endedAt, reviewer: reviewer.place } };
 }
 
 type ReadPlace = { readonly place: ReviewerPlace } | { readonly problem: string };
