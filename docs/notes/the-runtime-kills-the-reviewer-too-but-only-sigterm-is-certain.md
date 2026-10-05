@@ -93,6 +93,10 @@ the reviewer (§ 3 The round host).
   runtime has killed the hook, and an adapter for a reviewer that ignores the
   signal cannot be made safe from inside this harness.
 
+2026-10-05: the first three are moot, since no round runs inside a hook and
+§ 7 The review budget bounds the round itself. The fourth is settled as
+recommended: § 4 Adapters requires a reviewer CLI that exits on `SIGTERM`.
+
 ## Reference
 
 ### What ends a round at 600 seconds

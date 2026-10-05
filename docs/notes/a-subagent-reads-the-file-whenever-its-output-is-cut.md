@@ -51,6 +51,8 @@ recheck-when: Claude Code changes how it cuts or persists a Bash call's output, 
   Recommended: correct § 2 to these three, and leave § 6's first line and
   `review.txt` as they are, since every case above is covered by them.
 
+  2026-10-05: settled as recommended. § 2 Verified against now states all three.
+
 ## Reference
 
 ### What the subagent was shown, by case

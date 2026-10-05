@@ -96,6 +96,9 @@ recheck-when: the coding agent's model changes, pi upgrades, or § 3's blocking 
   parser that reads a headline off a thread is being built for the summary
   comment anyway.
 
+  2026-10-05: settled as recommended. § 6 The `squiz` binary gives each line
+  the severity and headline of the finding.
+
 ## Reference
 
 The episode ran against pull request #185, from a session started with

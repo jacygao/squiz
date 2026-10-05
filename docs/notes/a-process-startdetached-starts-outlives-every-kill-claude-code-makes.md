@@ -45,6 +45,9 @@ to pid 1 and leading a process group of its own.
   measured in § 8, and run the same stand-in on Linux the first time a Linux
   machine with Claude Code is to hand.
 
+  2026-10-05: § 8 Prerequisites now lists Linux as open, because the detach and
+  pane probes ran on macOS alone.
+
 ## Reference
 
 ### Per run

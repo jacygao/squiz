@@ -79,6 +79,9 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   a sentence in the skill may not help. Recommendation: rely on the margin, and
   measure any added sentence against a moved command before shipping it.
 
+  2026-10-05: § 9's text now tells the agent to wait for a moved command to
+  finish and read its output before doing anything else.
+
 ## Reference
 
 ### What a subagent is told when its command is moved

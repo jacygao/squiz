@@ -82,6 +82,9 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   findings, since a reviewer that reports in prose now returns nothing at all
   rather than something the harness could still parse.
 
+  2026-10-05: settled by a live run, which
+  `the-reviewer-reports-through-the-calls-and-writes-no-prose.md` records.
+
 ## Reference
 
 The flags, exactly: `--extension <path>` (repeatable, `-e`), and

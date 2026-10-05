@@ -40,8 +40,13 @@ Recommended: promote the comparison to P0. It is the only mechanism between a
 alternative of dropping the shell, which costs the reviewer the ability to run
 the tests.
 
+2026-10-05: settled another way. § 9 Configuration makes `read` the default,
+and § 8 What ships has `deep` ship with the tracked-file comparison or not at
+all.
+
 Also for you: **§ 2's Verified against table records `pi` 0.74.2.** Everything
-here is 0.84.2, and where the two differ was not checked.
+here is 0.84.2, and where the two differ was not checked. 2026-10-05: § 2
+Verified against now records 0.84.2.
 
 ## Reference
 

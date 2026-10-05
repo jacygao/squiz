@@ -97,6 +97,9 @@ session is reached by nothing here.
   other than group, such as an environment marker or the scratch directory as a
   working directory, and that is a design of its own.
 
+  2026-10-05: settled as recommended. § 4 The reviewer session states the gap,
+  and says nothing in this version detects it.
+
 ## Reference
 
 ### What reached what
