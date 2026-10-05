@@ -10,6 +10,8 @@
 
 import { spawnSync } from "node:child_process";
 
+import type { Deadline } from "../reviewers/deadline.ts";
+
 /** What asking git established. `failed` carries the line the caller reports. */
 export type BranchLookup =
   | { readonly outcome: "branch"; readonly name: string }
@@ -28,16 +30,25 @@ const DETACHED = 1;
  * `rev-parse` prints the literal `HEAD` for a detached HEAD, and a caller
  * cannot tell that from a branch of that name.
  *
+ * `until` bounds the call: git is killed at it, and the answer is a `failed`
+ * that says the time ran out. Without one the call runs as long as git does.
+ *
  * Never throws. A git that is missing or that failed comes back as `failed`,
  * carrying the reason as a single line.
  */
-export function currentBranch(directory: string): BranchLookup {
+export function currentBranch(directory: string, until?: Deadline): BranchLookup {
+  if (until?.passed() === true) return failed(RAN_OUT);
+
   const result = spawnSync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
     cwd: directory,
     encoding: "utf8",
+    // A timeout of zero is no timeout at all, so a deadline with nothing left
+    // still bounds the call.
+    ...(until === undefined ? {} : { timeout: Math.max(1, until.remaining()) }),
   });
 
   if (result.error !== undefined) {
+    if ("code" in result.error && result.error.code === "ETIMEDOUT") return failed(RAN_OUT);
     return failed(`git could not be run: ${result.error.message}`);
   }
   if (result.status === DETACHED) return { outcome: "detached" };
@@ -53,6 +64,9 @@ export function currentBranch(directory: string): BranchLookup {
   if (name === "") return failed("git named no branch and gave no reason");
   return { outcome: "branch", name };
 }
+
+/** What a call killed at its bound says, which is never a detached HEAD. */
+const RAN_OUT = "git ran out of the time it was given";
 
 function failed(reason: string): BranchLookup {
   return { outcome: "failed", reason };
