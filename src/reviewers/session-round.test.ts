@@ -72,9 +72,6 @@ function usage(stopReason: string, spend: number): string {
  * does once it settles. It exits a moment after the finish only because the
  * extension's shutdown makes the real one do so. A round that reached its bound
  * here did not see the reviewer exit.
- *
- * A reviewer that exits before Herdr has read the pane's foreground group is a
- * start that failed, so the review in Herdr takes longer than Herdr's start.
  */
 function finishingInAPane(noteFile: string, reviewingMs = 0): string {
   return [
@@ -467,6 +464,26 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
 
     const round = await runRound(
       adapterOf({ inPane: finishingInAPane(noteFile, 5_000), detached: "process.exit(3)" }, "pi"),
+      invocationIn(tree),
+      40,
+      { environment, name: "squiz-142-r1", started: (place) => places.push(place) },
+    );
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], [finding]);
+    const [place] = places;
+    assert.ok(place?.backend === "herdr", `the reviewer started in ${JSON.stringify(place)}`);
+    assert.equal(place.identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
+    assert.match(herdr(["pane", "get", place.pane]), /pane_not_found/u, "the reviewer's pane is still open");
+  });
+
+  test("a reviewer in a pane that finishes at once is a review, not a start that failed", async (t) => {
+    const tree = treeFor(t);
+    const noteFile = join(tree, "note.json");
+    const places: SessionPlace[] = [];
+
+    const round = await runRound(
+      adapterOf({ inPane: finishingInAPane(noteFile, 0), detached: "process.exit(3)" }, "pi"),
       invocationIn(tree),
       40,
       { environment, name: "squiz-142-r1", started: (place) => places.push(place) },

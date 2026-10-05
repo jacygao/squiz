@@ -18,7 +18,7 @@ const request: SessionRequest = {
   directory: "/work/tree",
   inPane: { program: "agent", arguments: ["--interactive", "two words"] },
   withoutTerminal: { program: "agent", arguments: ["--print"] },
-  readyWithinMs: 5_000,
+  startsWithinMs: 5_000,
 };
 
 const insideHerdr: Environment = { HERDR_SOCKET_PATH: "/run/herdr.sock" };
@@ -79,9 +79,9 @@ test("inside Herdr the session starts in a Herdr pane, and nowhere else", async 
     command: {
       directory: "/work/tree",
       name: "worker-1",
-      kind: "agent",
+      program: "agent",
       arguments: ["--interactive", "two words"],
-      readyWithinMs: 5_000,
+      startsWithinMs: 5_000,
     },
     options: { environment: insideBoth, boundMs: BOUND_MS },
   });

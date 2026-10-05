@@ -149,10 +149,10 @@ export type Sessions = {
 type SessionsAt = Sessions & { readonly environment: Environment; readonly boundEndsAt: number };
 
 /**
- * How long Herdr waits for a reviewer to say it is ready, on top of the bound
- * on each program the start runs.
+ * How long a reviewer in a Herdr pane may take to start running once the
+ * pane's shell has its line. The review itself is bounded by the round.
  */
-const READY_MS = 15_000;
+const STARTS_MS = 15_000;
 
 /** Bounds each program run to start a session or close a pane. */
 const SESSION_BOUND_MS = 5_000;
@@ -371,7 +371,7 @@ async function attempt(
       directory: detached.directory,
       inPane: { program: inPane.command, arguments: inPane.args },
       withoutTerminal: { program: detached.command, arguments: detached.args },
-      readyWithinMs: READY_MS,
+      startsWithinMs: STARTS_MS,
       ...(sessions.workspace === undefined ? {} : { workspace: sessions.workspace }),
       variables: { ...variables, ...detached.environment, ...inPane.environment },
     },

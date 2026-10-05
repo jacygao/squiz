@@ -74,6 +74,10 @@ session is reached by nothing here.
   is the shell's again, so the round host records it as soon as
   `herdr agent start` returns.
 
+  2026-10-05: squiz now starts the reviewer with `herdr pane run` behind a
+  gate, and reads the group before `pi` runs. § 4 The reviewer session says
+  how.
+
 - **Have the round host close a Herdr pane itself once `pi` exits.** Herdr
   returns the pane to its shell, as its documentation says: in four runs out of
   four the shell's prompt came back, the foreground process was `zsh`, and

@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.69 (draft)
+**Version:** 0.70 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -797,15 +797,33 @@ it.** The round host starts it in the first place that applies:
 
 | Where | How the round host starts it |
 |---|---|
-| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus --workspace <id>` gives a pane, in the workspace the state's record names, and in the focused workspace where it names none, and `herdr agent start squiz-41-r2 --kind pi --pane <pane> -- <pi arguments>` starts `pi` in it |
+| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus --workspace <id>` gives a pane, in the workspace the state's record names, and in the focused workspace where it names none, and `herdr pane run <pane> '<gated pi command line>'` types `pi`'s line into the pane's shell once the shell is at its prompt |
 | tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<pi command line>'` |
 | Neither | As a child of the round host, with no terminal |
 
-**Herdr refuses to start a command with a newline or a tab in any argument**, and
-answers `invalid_agent_argument` only once the tab is open. The round host checks
-the arguments before it creates the tab, and treats such a command as a pane
-Herdr refused: nothing opens, and it goes on to tmux or a child. `pi`'s own line
-carries neither unless a path in it does (The `pi` adapter).
+**In Herdr, the start returns once `pi` is running, and the round's bound is all
+that limits the review.** `herdr pane run` types a line and returns at once. The
+line is `pi`'s behind a gate, each word single-quoted:
+
+```
+'/bin/sh' '-c' '<gate>' '/tmp/squiz-gate-Xa81Qe' '400' 'pi' '--session-dir' …
+```
+
+The gate writes its pid into the gate directory, waits for a `go` file there,
+and then becomes `pi` with the same pid, group and start time. The round host
+reads the pid and the reviewer's group while the gate is shut, and only then
+writes `go`. So a `pi` that finishes within a second of starting is still a
+review that started, and a start that fails never lets `pi` run. A gate left
+waiting gives up on its own after four times the bound on each program the start
+runs, without running `pi`. Where `pi` is not on the shell's path, the gate says
+so and the start fails at once. Where `pi` has not started 15 seconds after the
+line was typed, the start fails.
+
+**A pane's shell reads the line as typed**, so a control character in an
+argument would be a key: a newline would end the line, and a tab would complete.
+The round host checks the arguments before it creates the tab, and treats such a
+command as a pane Herdr refused: nothing opens, and it goes on to tmux or a
+child. `pi`'s own line carries none unless a path in it does (The `pi` adapter).
 
 In a pane, `pi` runs interactively with the pane as its terminal, and draws its
 own interface there. Detached, it runs in print mode. Either way it reports
@@ -814,7 +832,7 @@ environment the adapter sets reaches it through `--env` and `-e`.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits. Herdr returns the pane to its shell when
-the agent exits, and the round host then closes it with `herdr pane close`. Each
+`pi` exits, and the round host then closes it with `herdr pane close`. Each
 round's `pi` writes its session to `.squiz/<number>/rounds/<k>/session/`, and the
 round host writes the command that resumes it to `rounds/<k>/resume.txt`:
 
@@ -846,7 +864,7 @@ the pane. It reads the reviewer's group from the backend while `pi` runs:
 | Backend | Where the reviewer's group comes from |
 |---|---|
 | tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is `pi`, so this is `pi`'s own pid and leads its group. |
-| Herdr | `foreground_process_group_id` from `herdr pane process-info`. Its `shell_pid` is the pane's shell, whose group does not hold `pi`. |
+| Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold `pi`. |
 
 A pane close is not relied on to stop anything. tmux's `kill-window` sends one
 `SIGHUP` to the window's command and nothing more, so a command that ignores it
@@ -861,8 +879,8 @@ the recorded groups, which name the shells' groups and not that session. It runs
 on after the round. Nothing in this version detects it. Only `deep` grants a
 shell, so only a round at `deep` can leave one.
 
-**When `pi` exits, Herdr returns the pane to its shell** and no longer tracks the
-agent, so the round host closes the pane itself.
+**When `pi` exits, Herdr returns the pane to its shell**, so the round host closes
+the pane itself.
 
 ### The snapshot
 
@@ -1099,9 +1117,9 @@ argument names into its first message, wrapped in a tag that names the file:
 </file>
 ```
 
-`pi` exits 1 where the file is missing. The prompt itself has newlines, and
-Herdr refuses to start a command with a newline or a tab in any argument, so no
-argument on this line carries either.
+`pi` exits 1 where the file is missing. The prompt itself has newlines, and a
+Herdr pane's shell reads the line as typed, where a newline or a tab is a key,
+so no argument on this line carries either.
 
 In a pane `pi` runs interactively, with the pane as its standard input and
 output. Detached, the round host adds `--print` and gives it `< /dev/null`. With

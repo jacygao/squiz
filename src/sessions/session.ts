@@ -15,15 +15,15 @@ import type { ProcessIdentity } from "./process.ts";
 import { openWindow, type Environment, type TmuxWindow, type WindowOpening, type WindowRequest } from "./tmux.ts";
 
 export type SessionRequest = {
-  /** The tab's label or the window's name. Herdr refuses a name not matching `[a-z][a-z0-9_-]{0,31}`. */
+  /** The tab's label or the window's name. */
   readonly name: string;
   readonly directory: string;
-  /** What runs where there is a terminal. In Herdr the program also names the agent kind. */
+  /** What runs where there is a terminal. */
   readonly inPane: { readonly program: string; readonly arguments: readonly string[] };
   /** What runs where there is none, which may need other arguments to run unattended. */
   readonly withoutTerminal: { readonly program: string; readonly arguments: readonly string[] };
-  /** How long Herdr waits for the command to be ready. */
-  readonly readyWithinMs: number;
+  /** How long a Herdr pane's command may take to start running once the shell has it. */
+  readonly startsWithinMs: number;
   /** The Herdr workspace to open the tab in. Without one, Herdr uses the focused workspace. */
   readonly workspace?: string;
   /**
@@ -100,9 +100,9 @@ export async function startSession(
     const command: PaneCommand = {
       directory: request.directory,
       name: request.name,
-      kind: request.inPane.program,
+      program: request.inPane.program,
       arguments: request.inPane.arguments,
-      readyWithinMs: request.readyWithinMs,
+      startsWithinMs: request.startsWithinMs,
       ...(request.workspace === undefined ? {} : { workspace: request.workspace }),
       ...(request.variables === undefined ? {} : { variables: request.variables }),
     };
