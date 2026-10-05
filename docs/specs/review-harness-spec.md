@@ -1768,24 +1768,11 @@ review passes.
 comment, and then writes the close to the episode's state. Every path that ends an
 episode writes it, the paths that end one with no comment included.
 
-That record is what ends the episode. A later run of the command in the same
-worktree, on the same pull request, reads it after the gate on the pull request
-and runs no round: no reviewer runs, nothing more is asked of GitHub, and the
-command prints the close. The bounds are not consulted there. A cap raised
-between runs would otherwise let a closed episode review again, and it would post
-a second comment for one episode.
-
 A round that leaves threads open for the coding agent posts no summary and records
 no close, because the comment is the close of the episode rather than the end of a
 round. A round the reviewer failed posts no summary either: it reached no decision
 about the episode, and counts taken from a review that did not finish would read
 as counts from one that did. It posts the failure comment under § 7 instead.
-
-The comment goes up after the round's findings and its verdicts, inside the
-round's posting reserve. Nothing is attempted past the end of that reserve. Where
-the reserve is spent before the comment can be sent, no comment is posted, and
-the round records that the episode closed without its summary, which a run of
-`squiz review` prints on stderr.
 
 A run that finds the round cap or the token bound already spent closes the
 episode without running a reviewer. A bound lowered between runs reaches this: the
@@ -1842,10 +1829,7 @@ nothing wrong.
 **The Notes items from the comparison cover every round of the episode, not the
 round that closed it.** A round that leaves threads open posts no summary, so a
 file it found changed, or a `HEAD` it found moved, is named in the closing round's
-comment or nowhere. Each round adds what its readings found to the episode's state, and the
-closing round composes Notes from all of it. The closing round finding nothing
-changed is not the episode finding nothing changed, and an earlier round's answer
-stands in Notes beside it.
+comment or nowhere.
 
 Each move of `HEAD` a round found is a line of its own, naming both ends as the
 comparison read them:
@@ -1864,10 +1848,6 @@ round that closes the episode later, from the episode's state:
 - The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
 ```
 
-A review that finished on its own has no such line, however close to the bound
-it ran. So has one that reported its review complete before the bound and was
-stopped writing its closing message after it.
-
 **A cap or bound that left queued states not reviewed is one line, naming the
 bound and each of those states.** It takes the place of the line the bound
 writes where nothing was queued. Each state is named as § 3 The state file names
@@ -1880,9 +1860,6 @@ it:
 
 The second is a last round that left nothing open, with a state queued behind it
 that the bound left no round for.
-
-A round whose review did not run closes no episode, so no summary reports one.
-The round's failure comment reports it, under § 7.
 
 ### The format
 
