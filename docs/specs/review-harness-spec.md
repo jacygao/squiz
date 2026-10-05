@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.77 (draft)
+**Version:** 0.74 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -708,10 +708,8 @@ Five things are handed to it:
 **A configured test command reaches the reviewer in the prompt, and only at depth
 `deep`.** The prompt is the only channel a project's own text arrives through:
 the charter ships with the harness, and the command line is flags and tool names.
-It is named there as the only test command the reviewer may run, because a
-command offered as one option among several leaves the reviewer inferring one,
-which is what naming it prevents. At `read` it is absent, because there is no
-shell to run it with.
+It is named there as the only test command the reviewer may run. At `read` it is
+absent, because there is no shell to run it with.
 
 **There is no file-selection or budgeting stage.** The reviewer decides what to
 open, one read at a time.
@@ -755,12 +753,7 @@ The round host checks the arguments before it creates the tab, and treats such a
 command as a pane Herdr refused: nothing opens, and it goes on to tmux or a
 child. Neither adapter's line carries one unless a path in it does.
 
-In a pane, `pi` runs interactively with the pane as its terminal, and draws its
-own interface there. Detached, it runs in print mode. Either way it reports
-through the same extension, into the same report file (The `pi` adapter).
-Copilot runs in print mode in a pane and detached alike, and prints its work to
-the pane as text (The Copilot adapter). The environment the adapter sets reaches
-the reviewer through `--env` and `-e`.
+The environment the adapter sets reaches the reviewer through `--env` and `-e`.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits. Herdr returns the pane to its shell when
@@ -812,9 +805,6 @@ the recorded groups, which name the shells' groups and not that session. It runs
 on after the round. Nothing in this version detects it. Only `deep` grants a
 shell, so only a round at `deep` can leave one.
 
-**When `pi` exits, Herdr returns the pane to its shell**, so the round host closes
-the pane itself.
-
 ### The snapshot
 
 **Every reviewer reads its own snapshot of the head commit, at either depth.**
@@ -855,26 +845,16 @@ change the comparison finds is the reviewer's.
 **What it costs:**
 
 - **Time and disk on every round.** Checking out every tracked file grows with
-  the size of the repository, not the size of the change. Measured on Apple
-  silicon with an internal SSD:
-
-  | Repository | Tracked files | Disk | Add | Remove, clean | Remove, 50,000 files left behind |
-  |---|---|---|---|---|---|
-  | squiz | 166 | 2.1 MB | 0.06 s | 0.03 s | — |
-  | `rust-lang/rust` | 63,424 | 408 MB | 4.6 to 6.1 s | 2.9 s | 7.9 to 11.9 s |
-
-- **A limit on very large repositories.** The disk held at once is the
-  checkout's size times the reviews running at once, so ten parallel reviews of a
-  repository the size of `rust-lang/rust` hold about 4 GB. Extrapolating the add
-  linearly, it would spend the whole 30 seconds before the review at 300,000 to
-  400,000 tracked files, which is unmeasured. A snapshot per round does not
-  scale to such repositories, and the first version accepts that.
+  the size of the repository, not the size of the change. The disk held at once
+  is the checkout's size times the reviews running at once.
+- **A limit on very large repositories.** The add runs inside the 30 seconds
+  before the review, so a repository large enough that the add spends them
+  cannot be reviewed. A snapshot per round does not scale to such repositories,
+  and the first version accepts that.
 - **A build before tests at `deep`.** The snapshot has no installed
   dependencies, so the configured test command has to install or build what it
   needs before it runs the tests. A project that names a test command at `deep`
   names one that works in a fresh checkout.
-- **Committed work only.** The reviewer reviews what was committed. Work the
-  coding agent has not committed is reviewed in a later round, once it is.
 
 ### Depth
 
@@ -923,10 +903,7 @@ follows. None is configurable, and each applies where the third column says.
 | **The process group each shell records for itself**, signalled when the round ends. | A tool the reviewer started outliving the round, where the signal to the reviewer's own group does not reach it. | Where the reviewer CLI starts a shell in a group of its own |
 
 The first three prevent, the fourth detects, and the fifth reaches what the
-round's own signal does not. A tracked file that changed, and a `HEAD` that
-moved, during any round of the episode are named in the summary comment. A round
-that exits 2 or 3 also names its own move of `HEAD` in what the command prints,
-as § 6 shows.
+round's own signal does not.
 
 **A refused call never reaches a shell**, and the reviewer reads the refusal as
 that call's own error while it is still there to choose something else.
@@ -1046,7 +1023,7 @@ Confinement. Copilot starts every shell this way, which matters at `deep` alone.
 
 ### The `pi` adapter
 
-The adapter that ships. It builds this command line:
+The adapter `reviewer` chooses by default. It builds this command line:
 
 ```bash
 pi --session-dir .squiz/<number>/rounds/<k>/session \
@@ -1078,10 +1055,6 @@ output. Detached, the round host adds `--print` and gives it `< /dev/null`. With
 stdin inherited, `pi` in print mode blocks forever and emits nothing: no output,
 no error, no exit. This holds whether or not any tool is enabled.
 
-Each round is stateless because each starts a fresh `pi`, with a session
-directory of its own. The session is kept so a person can resume it, and nothing
-of it reaches the next round.
-
 `--extension` names the file that registers the three reporting calls. It ships
 with the adapter, and `pi` compiles it and the modules it imports when it loads
 it. The call refuses a report the harness could not compose a comment or a
@@ -1110,10 +1083,9 @@ record.
 `--no-approve` untrusts the tree under review, so none of its own `.pi/`
 configuration reaches `pi`. Without it `pi` merges a trusted project's
 `.pi/settings.json` over the user's global settings, and a trust decision saved
-against any directory above the worktree trusts the worktree. What a tree could
-set there is the model the review runs on and the prompt the charter is appended
-to. A shell command prefix of its own replaces the recording line outright, and
-then no shell records anything.
+against any directory above the worktree trusts the worktree. A shell command
+prefix of its own replaces the recording line outright, and then no shell records
+anything.
 
 A shell command prefix the project configured still runs. The adapter resolves it
 the way `pi` resolves it — the project's where the tree sets one, the user's own
@@ -1184,8 +1156,8 @@ an answer.
 agent settles, indefinitely, so the extension ends it two ways:
 
 - **After `finish_review`**, it records the finish and calls `ctx.shutdown()`,
-  which `pi` defers until it is idle. The reviewer writes its closing message
-  first, and exits a few seconds later.
+  which `pi` defers until it is idle, so the reviewer writes its closing message
+  first.
 - **On `agent_settled` with no finish recorded**, it records an unfinished end
   and calls `ctx.shutdown()`.
 
@@ -2592,7 +2564,7 @@ These are settled, each measured in nested `claude` sessions:
 This is settled by measurement on one machine:
 
 - A snapshot of 63,424 tracked files adds in 4.6 to 6.1 seconds and removes in
-  2.9, as § 4 The snapshot tabulates.
+  2.9.
 - What a tmux window close and a Herdr pane close reach, and where each backend
   reports the reviewer's group, as § 4 The reviewer session sets out. Measured
   with stand-ins and `pi` 0.85.1, with no model call.
