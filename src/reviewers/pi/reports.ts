@@ -19,7 +19,8 @@
  * after the finish, and where the file refuses its usage the extension can
  * write nothing to say so. Every run ends on an assistant message, so a file
  * whose last line is not that message's usage is owed one, and its cost is
- * reported as a floor.
+ * reported as a floor. So is the cost of a file holding a line that could not
+ * be read, since that line may have been a message's usage, whatever follows it.
  */
 
 import type { Finding } from "../../findings/finding.ts";
@@ -44,6 +45,8 @@ type Tally = {
   messages: number;
   /** Whether the last line that counts toward the cost left a message's usage owed. */
   owed: boolean;
+  /** Whether a line that could not be read may have carried spend the sum is missing. */
+  lost: boolean;
   /** Whether any assistant message carried a stop reason of `stop`. */
   stopped: boolean;
   /** The last reason an errored message gave. */
@@ -73,6 +76,7 @@ export async function readReports(
     tokens: 0,
     messages: 0,
     owed: false,
+    lost: false,
     stopped: false,
     reason: undefined,
     findings: [],
@@ -111,6 +115,7 @@ export async function readReports(
 /** Count one whole line, newline taken off. */
 function take(tally: Tally, text: string, number: number): void {
   const unreadable = (why: string): void => {
+    tally.lost = true;
     tally.broken ??= `line ${number} of the report file could not be read: ${why}: ${excerptOf(text)}`;
   };
 
@@ -222,7 +227,7 @@ function resultOf(tally: Tally): RunResult {
 
 function costOf(tally: Tally): RoundCost {
   const cost = { dollars: tally.dollars, tokens: tally.tokens, messages: tally.messages };
-  return tally.owed ? { ...cost, floor: true } : cost;
+  return tally.owed || tally.lost ? { ...cost, floor: true } : cost;
 }
 
 function reportedIn(tally: Tally): Reported {

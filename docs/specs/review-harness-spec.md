@@ -1093,6 +1093,8 @@ ends cannot confirm it:
   say so.
 - **The time bound stopped the reviewer.** A request in flight at the stop was
   spent and is never reported, whatever the file ends on.
+- **A line of the file could not be read.** It may have been a message's usage,
+  so the sum may be missing that spend, whatever lines follow it.
 
 A round that ran the reviewer twice has a floor where either run does.
 

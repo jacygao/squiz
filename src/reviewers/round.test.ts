@@ -854,6 +854,25 @@ test("a round whose retry's cost is a floor has a cost that is a floor", async (
   });
 });
 
+/**
+ * Usage the reader could not count is spend the round knows it is missing,
+ * however the file ends and whatever a retry then reports.
+ */
+test("usage that could not be read keeps the cost a floor through a retry that reviewed", async () => {
+  await inATree(async (tree) => {
+    const unreadable = `${JSON.stringify({
+      type: "usage",
+      stopReason: "toolUse",
+      usage: { totalTokens: "many", cost: { total: 0.02 } },
+    })}\n`;
+    const first = writing(unreadable + called(FINISH_REVIEW, {}) + closing);
+    const second = writing(called(FINISH_REVIEW, {}) + closing);
+    const round = await runRound(reviewer(first, second).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+  });
+});
+
 /** The identifier of the reviewer itself, as the reviewer recorded it. */
 function reviewerIn(tree: string): number {
   const reviewer = Number(readFileSync(join(tree, "pids"), "utf8").split(" ")[0]);
