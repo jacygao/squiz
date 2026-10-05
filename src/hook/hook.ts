@@ -99,6 +99,7 @@ export function failureIn(conclusion: RoundConclusion): readonly string[] {
     // request for failed at nothing, and an episode that had already reported its
     // close ran nothing: what it came to was said when it closed.
     case "block":
+    case "clean, episode open":
     case "no-pull-request":
     case "episode-over":
     case "round-running":

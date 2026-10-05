@@ -61,6 +61,7 @@ import {
 import { episodeAt, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
 import { postFailure } from "./failure-comment.ts";
+import type { RoundEnd } from "./round-end.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
 import { blockingReason } from "./reason.ts";
@@ -69,6 +70,7 @@ import {
   tokenBoundIsReached,
   type ClosingReason,
   type EpisodeBounds,
+  type RoundDecision,
 } from "./round-decision.ts";
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 import { HOOK_CEILING_MS, POSTING_MARGIN_MS, PRE_REVIEW_MARGIN_MS } from "./window.ts";
@@ -117,6 +119,30 @@ export type RoundSetup = {
    * asks otherwise, for a round whose failure is announced some other way.
    */
   readonly postsFailure?: boolean;
+  /**
+   * The episode's lock, where the caller holds it already. The round then takes
+   * no lock and releases none, and runs only for the pull request the lock was
+   * taken for.
+   */
+  readonly held?: HeldLock;
+  /**
+   * What the round ends on, where the caller decides it from the states queued
+   * behind this one. Asked once, after the findings and verdicts are posted and
+   * before any summary. The round's own decision stands where this is absent.
+   */
+  readonly endsOn?: (tally: RoundTally) => RoundEnd;
+};
+
+/** An episode's lock as its caller took it, and the pull request it was taken for. */
+export type HeldLock = { readonly pullRequest: number; readonly lock: HostLock };
+
+/** What a round that reviewed hands `endsOn` to decide from. */
+export type RoundTally = {
+  /** The node ids of the reviewer's threads left open now the verdicts are applied. */
+  readonly openThreads: readonly string[];
+  /** Rounds the episode has finished, counting from 1 and including this one. */
+  readonly roundsRun: number;
+  readonly tokens: number;
 };
 
 /** Why a round reported a failure, and whose failure it was. */
@@ -185,6 +211,11 @@ export type RoundConclusion =
   | { readonly outcome: "round-running"; readonly pullRequest: number }
   /** Another round. The coding agent is handed the open threads, with this reason. */
   | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount & AroundTheReviewer)
+  /**
+   * Nothing is open, and a later state is queued behind this one, so the episode
+   * stays open and no summary is posted. Only a caller's `endsOn` decides this.
+   */
+  | ({ readonly outcome: "clean, episode open" } & RoundAccount & AroundTheReviewer)
   /** This round ended the episode, for the reason the decision gave. */
   | ({
       readonly outcome: "close";
@@ -259,7 +290,7 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
       clearRoundRunning(opened.held.episode);
       // A lock this round could not remove names a process that is about to
       // exit, and the next round takes over a lock whose holder has gone.
-      opened.held.lock.release();
+      if (opened.held.owned) opened.held.lock.release();
     }
   }
 }
@@ -272,7 +303,7 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
  * that round's, and clearing it would hide a round still in flight.
  */
 type Opened = {
-  held?: { readonly episode: Episode; readonly lock: HostLock };
+  held?: { readonly episode: Episode; readonly lock: HostLock; readonly owned: boolean };
   /** Whatever this round made at its snapshot path, added or left by a failed add. */
   snapshot?: string;
 };
@@ -309,6 +340,13 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   const gated = gate(preReview);
   if ("ended" in gated) return gated.ended;
   const pullRequest = gated.step;
+  // A lock taken for one pull request says nothing about another's rounds.
+  if (setup.held !== undefined && setup.held.pullRequest !== pullRequest.number) {
+    return failed(
+      "harness",
+      `no review ran: PR #${setup.held.pullRequest}'s head is not the branch checked out in ${directory}, whose pull request is #${pullRequest.number}`,
+    );
+  }
 
   const keyed = keyedBy(directory, pullRequest);
   if ("ended" in keyed) return keyed.ended;
@@ -318,9 +356,10 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   // Everything from the state read to the last post is one round's, because two
   // rounds that each read the state before the other wrote would both pass the
   // cap, both review, and keep only one of their costs.
-  const locked = lockOf(episode, pullRequest.number);
+  const locked: Step<HostLock> =
+    setup.held === undefined ? lockOf(episode, pullRequest.number) : { step: setup.held.lock };
   if ("ended" in locked) return locked.ended;
-  opened.held = { episode, lock: locked.step };
+  opened.held = { episode, lock: locked.step, owned: setup.held === undefined };
 
   const stateRead = openState(episode);
   if ("ended" in stateRead) return stateRead.ended;
@@ -498,16 +537,23 @@ async function reviewOn(
     ...threadsOpened(account.findings),
   ];
 
-  const decision = decideAfterRound(
-    {
-      openThreads: threads.filter((thread) => !thread.isResolved).length,
-      // The recorded entries are the rounds that have run, this one included,
-      // which is the count the cap does its arithmetic on.
-      roundsRun: recorded.rounds.length,
-      tokens: review.cost.tokens,
-    },
-    bounds,
-  );
+  const tally: RoundTally = {
+    openThreads: threads.filter((thread) => !thread.isResolved).map((thread) => thread.id),
+    // The recorded entries are the rounds that have run, this one included,
+    // which is the count the cap does its arithmetic on.
+    roundsRun: recorded.rounds.length,
+    tokens: review.cost.tokens,
+  };
+  const ends = setup.endsOn?.(tally);
+  if (ends?.outcome === "reviewed clean, episode open") {
+    return { outcome: "clean, episode open", confinement, ...account };
+  }
+  const decision: RoundDecision =
+    ends === undefined
+      ? decideAfterRound({ ...tally, openThreads: tally.openThreads.length }, bounds)
+      : ends.outcome === "closed"
+        ? { next: "close", because: ends.because }
+        : { next: "block" };
 
   if (decision.next === "close") {
     return closeAfterReview(

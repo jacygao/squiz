@@ -1,0 +1,352 @@
+/**
+ * The round host: the process that runs one episode's rounds, one at a time,
+ * outside every trigger.
+ *
+ * It holds `host.lock` for as long as it runs. For each round it takes the
+ * oldest queued state, writes the reviewing record naming itself, runs the round
+ * under the lock it already holds, and records what the round reached. It exits
+ * when nothing is left queued, and when its worktree is gone.
+ *
+ * **No review runs for a state without a record saying so.** The reviewing record
+ * is written before the reviewer starts, because it is what a second trigger
+ * reads to find the round. A record that cannot be written runs no review.
+ *
+ * What it did goes to `host.log` in the episode's directory, one line each,
+ * because nothing waits on the host to be told.
+ */
+
+import { appendFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
+import { readState, type EpisodeState } from "../loop/episode-state.ts";
+import { episodeAt, type Episode } from "../loop/episode.ts";
+import { decideRoundEnd, type QueuedRecord, type RoundEnd } from "../loop/round-end.ts";
+import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
+import { putRecord, sameState, type ReviewerPlace, type StateKey, type StateRecord } from "../loop/state-record.ts";
+import { updateState, type StateUpdate } from "../loop/state-update.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
+import type { ProcessIdentity } from "../sessions/process.ts";
+import { takeHostLock, type HostLock } from "./lock.ts";
+
+// Each `ps` run that tells whether the lock's holder is still running.
+const LOCK_BOUND_MS = 5_000;
+
+// Another writer holds the state lock for one read and one write, so a wait this
+// long is a holder that has stopped.
+const STATE_WAIT_MS = 5_000;
+
+const ALREADY_CLOSED = "the episode had closed before a round took this state";
+
+// The reviewer is the round's child in print mode, in no pane.
+const REVIEWER: ReviewerPlace = { backend: "detached" };
+
+export type HostSetup = {
+  /** The worktree whose episode the host serves. */
+  readonly worktree: string;
+  readonly pullRequest: number;
+  /** What every round runs with, less what the host decides for each. */
+  readonly round: Omit<RoundSetup, "worktree" | "held" | "endsOn">;
+  /** What changes the state file. `updateState` where not given. */
+  readonly update?: typeof updateState;
+};
+
+/** Why the host exited. */
+export type HostEnd =
+  | { readonly outcome: "nothing queued" }
+  | { readonly outcome: "worktree gone" }
+  | { readonly outcome: "lock held"; readonly holder: ProcessIdentity }
+  | { readonly outcome: "lock unknown"; readonly reason: string }
+  | { readonly outcome: "state unreadable"; readonly reason: string }
+  /**
+   * A record the host had to write could not be written. Taking the next state
+   * would fail the same way, and leave the state it took queued.
+   */
+  | { readonly outcome: "state unwritable"; readonly reason: string };
+
+/**
+ * Run the episode's queued states until none is left, and say why the host
+ * stopped.
+ *
+ * A host that finds the lock held by a live process exits at once, so two
+ * triggers that each start one leave one running.
+ */
+export async function runHost(setup: HostSetup): Promise<HostEnd> {
+  // Taking the lock makes the episode's directory, which would make the
+  // worktree's directory again where it has gone.
+  if (worktreeGone(setup.worktree)) return { outcome: "worktree gone" };
+  const episode = episodeAt(setup.worktree, setup.pullRequest);
+  const log = logIn(episode);
+
+  const taking = takeHostLock(episode.directory, { boundMs: LOCK_BOUND_MS });
+  if (taking.outcome === "held") {
+    const { pid, startedAt } = taking.holder;
+    log(`exiting: process ${pid}, started at ${startedAt}, holds the host lock`);
+    return { outcome: "lock held", holder: taking.holder };
+  }
+  if (taking.outcome === "unknown") {
+    log(`exiting: whether another host is running could not be told: ${taking.reason}`);
+    return { outcome: "lock unknown", reason: taking.reason };
+  }
+
+  try {
+    const end = await hostRounds(setup, episode, taking.lock, log);
+    log(endLine(end));
+    return end;
+  } finally {
+    taking.lock.release();
+  }
+}
+
+type Log = (line: string) => void;
+
+async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, log: Log): Promise<HostEnd> {
+  const update = setup.update ?? updateState;
+  const write = (change: (state: EpisodeState) => EpisodeState): StateUpdate =>
+    update(episode, change, { until: deadlineIn(STATE_WAIT_MS) });
+
+  for (;;) {
+    if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
+    const read = readState(episode);
+    if (read.outcome === "unreadable") return { outcome: "state unreadable", reason: read.reason };
+    const oldest = read.outcome === "read" ? queuedIn(read.state)[0] : undefined;
+    if (oldest === undefined) return { outcome: "nothing queued" };
+
+    const startedAt = nowSeconds();
+    let taken: { readonly record: QueuedRecord; readonly number: number } | undefined;
+    let closed = 0;
+    const took = write((state) => {
+      taken = undefined;
+      // The close is checked again here, under the state lock, so a round that
+      // closed the episode after this host read the file runs nothing more.
+      if (state.closeReported === true) {
+        const queued = queuedIn(state);
+        closed = queued.length;
+        return withRecords(state, queued.map((record) => notReviewed(keyOf(record), ALREADY_CLOSED)));
+      }
+      const record = queuedIn(state)[0];
+      if (record === undefined) return state;
+      taken = { record, number: state.rounds.length + 1 };
+      const reviewing: StateRecord = {
+        ...keyOf(record),
+        status: "reviewing",
+        host: lock.holder,
+        round: { number: taken.number },
+      };
+      return withRecords(state, [reviewing]);
+    });
+
+    if (took.outcome === "failed") {
+      const reason = `no review ran: the reviewing record could not be written: ${took.reason}`;
+      log(`${named(oldest)}: ${reason}`);
+      const recorded = write((state) => {
+        const record = queuedIn(state).find((queued) => sameState(queued, oldest));
+        if (record === undefined) return state;
+        return withRecords(state, [{ ...keyOf(record), status: "failed", reason, ownerNoted: false }]);
+      });
+      if (recorded.outcome === "failed") {
+        log(`${named(oldest)}: could not be recorded failed either: ${recorded.reason}`);
+        return { outcome: "state unwritable", reason: recorded.reason };
+      }
+      log(`${named(oldest)}: recorded failed`);
+      continue;
+    }
+    if (closed > 0) log(`${closed === 1 ? "1 queued state" : `${closed} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
+    const round = taken;
+    if (round === undefined) continue;
+
+    log(`round ${round.number}: reviewing ${named(round.record)}`);
+    const { config } = setup.round;
+    let ended: RoundEnd | undefined;
+    const conclusion = await runRound({
+      ...setup.round,
+      worktree: episode.worktree,
+      held: { pullRequest: Number(episode.id), lock },
+      endsOn: (tally) => {
+        ended = decideRoundEnd(
+          { ...tally, state: keyOf(round.record) },
+          { rounds: config.rounds, tokens: config.tokens },
+          queuedBehind(episode),
+        );
+        return ended;
+      },
+    });
+
+    // Recording the result would make the worktree's directory again.
+    if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
+    const result = resultOf(conclusion, ended, round.record, {
+      number: round.number,
+      startedAt,
+      endedAt: nowSeconds(),
+    });
+    const recorded = write((state) => result.change(state));
+    if (recorded.outcome === "failed") {
+      log(`round ${round.number}: ${result.line}, and could not be recorded: ${recorded.reason}`);
+      return { outcome: "state unwritable", reason: recorded.reason };
+    }
+    log(`round ${round.number}: ${result.line}`);
+  }
+}
+
+/** When a round started and ended, and its number. */
+type Timing = { readonly number: number; readonly startedAt: number; readonly endedAt: number };
+
+/** What a round's conclusion records, and the line host.log says it in. */
+type Result = { readonly change: (state: EpisodeState) => EpisodeState; readonly line: string };
+
+/**
+ * The records a round's conclusion leaves, for its own state and for the states
+ * queued behind it.
+ *
+ * `ended` is what the round decided where it reviewed. A round that closed with
+ * none decided closed before its review ran, and its state was never reviewed.
+ */
+function resultOf(
+  conclusion: RoundConclusion,
+  ended: RoundEnd | undefined,
+  taken: QueuedRecord,
+  timing: Timing,
+): Result {
+  const key = keyOf(taken);
+  switch (conclusion.outcome) {
+    case "block":
+    case "clean, episode open":
+    case "close": {
+      if (ended === undefined) {
+        const at = conclusion.outcome === "close" && conclusion.because === "token-bound" ? "the token bound" : "the round cap";
+        const reason = `the episode closed at ${at} before a round took this state`;
+        return {
+          change: (state) => withRecords(state, [key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, reason))),
+          line: `${named(taken)} not reviewed: ${reason}`,
+        };
+      }
+      const round = { ...timing, reviewer: REVIEWER };
+      const reviewed: StateRecord = { ...ended.record, round };
+      const behind = ended.outcome === "closed" ? (ended.leftNotReviewed?.states ?? []) : [];
+      return {
+        change: (state) => withRecords(state, [reviewed, ...behind]),
+        line: `${named(taken)} ${endedLine(ended)}`,
+      };
+    }
+    case "episode-over":
+      return {
+        change: (state) => withRecords(state, [key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, ALREADY_CLOSED))),
+        line: `${named(taken)} not reviewed: ${ALREADY_CLOSED}`,
+      };
+    case "failed":
+    case "no-pull-request":
+    case "round-running": {
+      const reason = failureOf(conclusion);
+      // A conclusion carries what the readings around the reviewer found only
+      // where a reviewer ran.
+      const ran = conclusion.outcome === "failed" && conclusion.confinement !== undefined;
+      const round = ran ? { ...timing, reviewer: REVIEWER } : timing;
+      const failed: StateRecord = { ...key, status: "failed", reason, ownerNoted: false, round };
+      return { change: (state) => withRecords(state, [failed]), line: `${named(taken)} failed: ${reason}` };
+    }
+  }
+}
+
+/** Why a round that reviewed nothing for its state failed. */
+function failureOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" | "no-pull-request" | "round-running" }>): string {
+  switch (conclusion.outcome) {
+    case "failed":
+      return conclusion.reason;
+    case "no-pull-request":
+      return conclusion.branch === null
+        ? `no review ran: HEAD is detached in ${JSON.stringify(conclusion.directory)}`
+        : `no review ran: no open pull request has ${JSON.stringify(conclusion.branch)} as its head, in ${JSON.stringify(conclusion.directory)}`;
+    case "round-running":
+      // The round runs under the host's own lock, so only a defect reaches this.
+      return `no review ran: a round is already running on PR #${conclusion.pullRequest}`;
+  }
+}
+
+function endedLine(ended: RoundEnd): string {
+  switch (ended.outcome) {
+    case "threads open":
+      return `reviewed, ${ended.record.result === "exited" ? ended.record.openThreads.length : 0} threads open`;
+    case "reviewed clean, episode open":
+      return "reviewed clean, episode open";
+    case "closed": {
+      const behind = ended.leftNotReviewed?.states.length ?? 0;
+      return `reviewed, episode closed (${ended.because})${behind === 0 ? "" : `, ${behind} queued behind it not reviewed`}`;
+    }
+  }
+}
+
+function endLine(end: HostEnd): string {
+  switch (end.outcome) {
+    case "nothing queued":
+      return "exiting: nothing is left queued";
+    case "worktree gone":
+      return "exiting: the worktree is gone";
+    case "state unreadable":
+      return `exiting: ${end.reason}`;
+    case "state unwritable":
+      return `exiting: the state file could not be written: ${end.reason}`;
+    case "lock held":
+    case "lock unknown":
+      return `exiting: ${end.outcome}`;
+  }
+}
+
+/** The states still queued, oldest first, as the state file keeps them. */
+function queuedIn(state: EpisodeState): readonly QueuedRecord[] {
+  return (state.records ?? []).filter((record): record is QueuedRecord => record.status === "queued");
+}
+
+/** The states queued as the round decides, read afresh, or none where the file will not read. */
+function queuedBehind(episode: Episode): readonly QueuedRecord[] {
+  const read = readState(episode);
+  return read.outcome === "read" ? queuedIn(read.state) : [];
+}
+
+/** A record's state and what the trigger knew of it, without where its review has got to. */
+function keyOf(record: QueuedRecord): Omit<QueuedRecord, "status"> {
+  const { status: _queued, ...key } = record;
+  return key;
+}
+
+function notReviewed(key: Omit<QueuedRecord, "status">, reason: string): StateRecord {
+  return { ...key, status: "not reviewed", reason };
+}
+
+function withRecords(state: EpisodeState, records: readonly StateRecord[]): EpisodeState {
+  return { ...state, records: records.reduce(putRecord, state.records ?? []) };
+}
+
+function named(key: StateKey): string {
+  return key.activity === null ? key.head.slice(0, 7) : `${key.head.slice(0, 7)} with reply ${key.activity}`;
+}
+
+/**
+ * Whether the worktree the host serves is gone.
+ *
+ * Asked of its `.git` rather than of its directory: a round's state writes make
+ * the episode's directory where it is missing, so a directory removed during a
+ * round can be back, holding nothing but `.squiz/`.
+ */
+function worktreeGone(worktree: string): boolean {
+  return !existsSync(join(worktree, ".git"));
+}
+
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1_000);
+}
+
+/**
+ * A writer of lines to the episode's `host.log`.
+ *
+ * A line that cannot be written is dropped. The log is the host's only
+ * channel, and a worktree that has gone takes it with it.
+ */
+function logIn(episode: Episode): Log {
+  const file = join(episode.directory, "host.log");
+  return (line) => {
+    try {
+      if (existsSync(episode.directory)) appendFileSync(file, `${new Date().toISOString()} ${line}\n`, "utf8");
+    } catch {
+      // Nowhere else to say it.
+    }
+  };
+}

@@ -172,7 +172,7 @@ test("a command the binary does not have is named on stderr, and still exits 0",
   assert.equal(result.code, 0, "the binary is the hook entry point, and only exit 2 may block a turn");
   assert.equal(
     result.stderr,
-    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status\n',
+    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host\n',
     "the list backs the message, so a command the binary has must be on it",
   );
   assert.equal(result.stdout, "");
@@ -182,7 +182,7 @@ test("no command at all is reported the same way", async () => {
   const result = await run(shim, [], { cwd: elsewhere });
 
   assert.equal(result.code, 0);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host\n");
   assert.equal(result.stdout, "");
 });
 
@@ -483,5 +483,31 @@ test("squiz status lists the reviews of every worktree, and never runs gh", asyn
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", linked], { cwd: onABranch });
     await rm(fakes, { recursive: true, force: true });
+  }
+});
+
+test("squiz host without a pull request's number reports how it is called, and starts nothing", async () => {
+  const result = await run(shim, ["host", "forty-one"], { cwd: onABranch });
+
+  assert.equal(result.code, 0);
+  assert.equal(
+    result.stderr,
+    "squiz: no round host started: squiz host <number>, where <number> is the pull request's\n",
+  );
+  assert.equal(result.stdout, "");
+  await assert.rejects(stat(join(onABranch, ".squiz")), "a host that never started made the episode's directory");
+});
+
+test("squiz host with nothing queued exits, and says so in host.log", async () => {
+  try {
+    const result = await run(shim, ["host", "41"], { cwd: onABranch });
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    const log = await readFile(join(onABranch, ".squiz", "41", "host.log"), "utf8");
+    assert.match(log, /exiting: nothing is left queued\n$/u);
+  } finally {
+    await rm(join(onABranch, ".squiz"), { recursive: true, force: true });
   }
 });
