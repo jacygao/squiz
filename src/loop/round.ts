@@ -41,6 +41,7 @@ import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import { clearRoundRunning } from "../worktree/shared-tree.ts";
+import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
 import { takeHostLock, type HostLock } from "../host/lock.ts";
 import {
   evidenceWith,
@@ -79,9 +80,9 @@ const LOCK_BOUND_MS = 5_000;
 /** What one round needs to run. */
 export type RoundSetup = {
   /**
-   * The git work tree the round reviews: where git and `gh` are asked from, where
-   * the reviewer runs, and where the episode of the pull request it finds keeps
-   * the round's state, the reviewer's session and its scratch space.
+   * The coding agent's git work tree: where git and `gh` are asked from, and where
+   * the episode of the pull request it finds keeps the round's state, its
+   * snapshot, the reviewer's session and its scratch space.
    */
   readonly worktree: string;
   readonly config: Config;
@@ -149,9 +150,9 @@ export type RoundAccount = {
 /** What the readings taken around the reviewer established. */
 export type AroundTheReviewer = {
   /**
-   * What the reviewer did to the worktree, and which other episodes were live in
-   * it. Absent where no reviewer ran, which is every conclusion reached before
-   * the review.
+   * What the reviewer did to its snapshot, and which other episodes were live in
+   * the worktree. Absent where no reviewer ran, which is every conclusion reached
+   * before the review.
    *
    * The round reports none of this itself, except that a blocking reason names
    * a move of `HEAD`. The summary comment, or a failed round's failure comment,
@@ -247,6 +248,10 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
     // A throw here is this harness's own defect. The round is still a value.
     return failed("harness", `the round could not be run: ${reasonFor(cause)}`);
   } finally {
+    // Removal grows with what the reviewer left in the snapshot, so it waits for
+    // the round's result. It runs under the lock, before the next round can add
+    // a snapshot of its own.
+    if (opened.snapshot !== undefined) removeSnapshot(setup.worktree, opened.snapshot);
     // Every path the round ends on comes through here, a throw included. A marker
     // left behind already reads as no round in flight, so clearing it keeps them
     // from piling up in a worktree rather than making any answer right.
@@ -266,7 +271,11 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
  * Nothing is set for an episode whose lock another round holds. Its marker is
  * that round's, and clearing it would hide a round still in flight.
  */
-type Opened = { held?: { readonly episode: Episode; readonly lock: HostLock } };
+type Opened = {
+  held?: { readonly episode: Episode; readonly lock: HostLock };
+  /** Whatever this round made at its snapshot path, added or left by a failed add. */
+  snapshot?: string;
+};
 
 /** A step's answer, or the conclusion the round ended on instead of one. */
 type Step<T> = { readonly step: T } | { readonly ended: RoundConclusion };
@@ -288,7 +297,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   // One deadline over the whole phase, not a bound on each of its calls. The
   // threads listing pages, so how many calls the phase makes is not known in
   // advance, and a bound per call lets every page have the whole of one.
-  const preReview: GhCall = {
+  const preReview: PreReview = {
     directory,
     until: deadlineIn(
       Math.min(lowered(setup.preReviewMs, PRE_REVIEW_MARGIN_MS), beforePosting.remaining()),
@@ -332,6 +341,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
 
   const concluded = await reviewOn(pullRequest, onFile, {
     setup,
+    opened,
     episode,
     window,
     beforePosting,
@@ -348,14 +358,19 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   };
 }
 
+/** The calls before the review, under the one deadline the snapshot's add runs under too. */
+type PreReview = GhCall & { readonly until: Deadline };
+
 /** What the part of a round after the gate runs with. */
 type AfterTheGate = {
   readonly setup: RoundSetup;
+  /** Where the round notes the snapshot it made, for removal once it ends. */
+  readonly opened: Opened;
   readonly episode: Episode;
   readonly window: Deadline;
   /** The moment the review has to be over by. */
   readonly beforePosting: Deadline;
-  readonly preReview: GhCall;
+  readonly preReview: PreReview;
   /** The posting reserve, the same deadline every time it is asked for. */
   readonly posting: () => Deadline;
 };
@@ -364,7 +379,7 @@ type AfterTheGate = {
 async function reviewOn(
   pullRequest: PullRequest,
   onFile: EpisodeState | null,
-  { setup, episode, window, beforePosting, preReview, posting: reserve }: AfterTheGate,
+  { setup, opened, episode, window, beforePosting, preReview, posting: reserve }: AfterTheGate,
 ): Promise<RoundConclusion> {
   const { config } = setup;
   const directory = episode.worktree;
@@ -391,9 +406,24 @@ async function reviewOn(
   const unmade = makeDirectories(episode);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
+  const ordinal = state.rounds.length + 1;
+  // The coding agent may edit its worktree while the review runs, so the reviewer
+  // and both readings get a tree only the reviewer writes.
+  const snapshot = addSnapshot(
+    directory,
+    { pullRequest: pullRequest.number, round: ordinal, commit: pullRequest.headSha },
+    preReview.until,
+  );
+  if (snapshot.outcome === "failed") {
+    if (snapshot.leftBehind !== undefined) opened.snapshot = snapshot.leftBehind;
+    return failed("harness", `no review ran: ${snapshot.reason}`);
+  }
+  opened.snapshot = snapshot.path;
+  const tree = snapshot.path;
+
   // Taken before the reviewer's bound is worked out, so that what the reading
   // spends shortens the review rather than the posting that follows it.
-  const around = readBeforeReviewer(episode, beforePosting);
+  const around = readBeforeReviewer(episode, tree, beforePosting);
 
   const seconds = reviewSeconds(config.timeout, beforePosting);
   if (seconds === null) {
@@ -418,14 +448,14 @@ async function reviewOn(
     review = await runReview(
       setup.adapter,
       {
-        directory,
+        directory: tree,
         charterFile: setup.charterFile,
         prompt: composePrompt(
           { pullRequest, diff: fetched.diff, threads: handedOver },
           { depth: config.depth, command: config.test },
         ),
         sessionDirectory: episode.sessionDirectory,
-        reportsFile: join(episode.directory, "rounds", String(state.rounds.length + 1), "reports.jsonl"),
+        reportsFile: join(episode.directory, "rounds", String(ordinal), "reports.jsonl"),
         scratchDirectory: episode.scratchDirectory,
         thinking: config.thinking,
         depth: config.depth,

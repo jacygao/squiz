@@ -95,12 +95,11 @@ function reviewed(pullRequest: number, posted: number): string {
   return `Squiz reviewed the change on this branch and ${left} on PR #${pullRequest}.`;
 }
 
-/** What became of `HEAD` while the reviewer ran, and what the next round does with it. */
+/** What became of `HEAD` in the reviewer's snapshot while the reviewer ran. */
 function movedHead(moved: string): string {
   return [
     `\`HEAD\` moved while the reviewer ran: ${moved}.`,
-    "Squiz did not move it back.",
-    "The next round reviews the branch `HEAD` is on when it starts, and only where that branch has a pull request.",
+    "The move was in the reviewer's snapshot, which is removed after the round, and the coding agent's worktree is as it was.",
   ].join(" ");
 }
 

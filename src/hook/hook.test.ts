@@ -819,25 +819,45 @@ function git(directory: string, ...args: readonly string[]): void {
   assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
 }
 
+/**
+ * The commit `commitOn` makes, which the pull request names as its head. Every
+ * input to it is fixed, the dates included, so a round can snapshot it.
+ */
+const HEAD_COMMIT = "8e453b0911a073d01dd027140becb7c063df3a46";
+
 function commitOn(directory: string, branch: string): void {
   git(directory, "init", "--quiet", "--initial-branch", branch);
   // Ignored, as adopting the harness asks: the reviewer's report file is
   // written there, and the confinement reading would take it for a change.
   writeFileSync(join(directory, ".git", "info", "exclude"), ".squiz/\n");
-  git(
-    directory,
-    "-c",
-    "user.email=squiz@example.invalid",
-    "-c",
-    "user.name=Squiz",
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "--quiet",
-    "--allow-empty",
-    "--message",
-    "the change under review",
+  const committed = spawnSync(
+    "git",
+    [
+      "-c",
+      "user.email=squiz@example.invalid",
+      "-c",
+      "user.name=Squiz",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "--message",
+      "the change under review",
+    ],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_DATE: "2026-09-06T07:13:05Z",
+        GIT_COMMITTER_DATE: "2026-09-06T07:13:05Z",
+      },
+    },
   );
+  assert.equal(committed.status, 0, `git commit: ${committed.stderr}`);
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
+  assert.equal(head.stdout.trim(), HEAD_COMMIT, "the fixture's commit is not the one the pull request names");
 }
 
 /** The blocking reason of a round that found something, as the round composes it. */
@@ -1283,7 +1303,7 @@ const LISTING = JSON.stringify([
     id: "PR_kwDOUEd2qM8AAAABDNPXSA",
     baseRefName: "main",
     headRefName: BRANCH,
-    headRefOid: "3a1937e729dbab0f618ef761c833a7e2d3675b80",
+    headRefOid: HEAD_COMMIT,
     body: "",
   },
 ]);

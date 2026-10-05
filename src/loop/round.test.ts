@@ -135,6 +135,11 @@ type Setup = {
   readonly postsFailure?: boolean;
   readonly detached?: boolean;
   /**
+   * Whether git's `worktree add` makes the snapshot and then exits non-zero, for
+   * a snapshot left behind by an add that failed.
+   */
+  readonly snapshotAddFails?: boolean;
+  /**
    * The rounds after the first, in order.
    *
    * Each runs against the worktree the round before it left behind and reads the
@@ -198,6 +203,19 @@ type Ran = {
   readonly lockLeft: boolean;
   /** What `.squiz/` holds once the rounds have ended, empty where it is not there. */
   readonly episodesLeft: readonly string[];
+  /**
+   * The commit checked out in each reviewer's current directory as its process
+   * started, `null` where git could not say.
+   */
+  readonly headsWhenStarted: readonly (string | null)[];
+  /** The commit the fixture's worktree holds, which the pull request names as its head. */
+  readonly head: string;
+  /** The rounds' snapshot directories still standing once the rounds have ended. */
+  readonly snapshotsLeft: readonly string[];
+  /** The worktrees git lists once the rounds have ended, the fixture's own included. */
+  readonly worktreesLeft: readonly string[];
+  /** Whether a snapshot was standing as each `gh` call was made, in call order. */
+  readonly snapshotAtCall: readonly boolean[];
 };
 
 const ANSWER_COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
@@ -390,16 +408,16 @@ function writesThenHangs(cost: RoundCost): Reviewer {
 function writesThenLocksTheState(): Reviewer {
   return {
     command: "/bin/sh",
-    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; chmod 500 .squiz/${PULL_REQUEST}`],
+    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; chmod 500 "$AGENT_WORKTREE/.squiz/${PULL_REQUEST}"`],
     parse: reviews({}).parse,
   };
 }
 
-/** A reviewer that corrupted git's index, so the reading after it cannot be taken. */
+/** A reviewer that corrupted its snapshot's git index, so the reading after it cannot be taken. */
 function breaksGit(): Reviewer {
   return {
     command: "/bin/sh",
-    args: ["-c", "printf 'not an index' > .git/index"],
+    args: ["-c", "printf 'not an index' > \"$(git rev-parse --git-dir)/index\""],
     parse: reviews({}).parse,
   };
 }
@@ -448,15 +466,21 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     git(worktree, ["add", "."]);
     git(worktree, ["commit", "--quiet", "--message", "the change under review"]);
     if (setup.detached === true) git(worktree, ["checkout", "--quiet", "--detach", "HEAD"]);
+    const head = headIn(worktree) ?? assert.fail("the fixture's own commit must read back");
 
     const episode = episodeAt(worktree, PULL_REQUEST);
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
-    await writeFake(binaries, setup.answers, setup.sequences ?? {}, setup.delays ?? {}, {
+    // The pull request names the commit the fixture made, which is one a snapshot
+    // can be made of.
+    const answers = withHead(setup.answers, head);
+    const sequences = withHead(setup.sequences ?? {}, head);
+    await writeFake(binaries, answers, sequences, setup.delays ?? {}, {
       ...(setup.lockStateAfter === undefined
         ? {}
         : { [setup.lockStateAfter]: episode.directory }),
     });
+    if (setup.snapshotAddFails === true) failWorktreeAdd(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     if (setup.rounds !== undefined) {
@@ -488,6 +512,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const invocations: Invocation[] = [];
     const directoriesReady: boolean[] = [];
     const markedWhenStarted: boolean[] = [];
+    const headsWhenStarted: (string | null)[] = [];
     const laterRounds = setup.andThen ?? [];
     const reviewers = [setup.reviewer, ...laterRounds.map((later) => later.reviewer)];
     // Which round is running, which is what says whose reviewer the adapter starts.
@@ -496,7 +521,9 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     let running = 0;
     const current = (): Reviewer => reviewers[running] ?? setup.reviewer;
     const adapter: Adapter = {
-      confine: () => ({ outcome: "prepared", environment: {} }),
+      // The coding agent's worktree, for a reviewer standing in for the agent's
+      // own edits while the review runs.
+      confine: () => ({ outcome: "prepared", environment: { AGENT_WORKTREE: worktree } }),
       argv: (invocation) => {
         invocations.push(invocation);
         // Read here rather than after the round: the reviewer is told to write
@@ -507,6 +534,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         // The round is marked before the reading it takes here, so a reviewer that
         // starts unmarked is a round no other episode in this worktree can find.
         markedWhenStarted.push(existsSync(marker));
+        headsWhenStarted.push(headIn(invocation.directory));
         return {
           command: current().command ?? "/bin/sh",
           args: [...(current().args ?? ["-c", "exit 0"])],
@@ -564,6 +592,11 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       elapsedMs,
       episodesLeft: existsSync(episodes) ? readdirSync(episodes) : [],
       lockLeft: existsSync(join(episode.directory, "host.lock")),
+      headsWhenStarted,
+      head,
+      snapshotsLeft: snapshotsIn(episode.directory),
+      worktreesLeft: worktreesOf(worktree),
+      snapshotAtCall: kinds.map((_, at) => existsSync(join(binaries, `snapshot-${at + 1}`))),
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -573,6 +606,60 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     unlock(join(worktree, ".squiz"));
     await rm(root, { recursive: true, force: true });
   }
+}
+
+/** The commit checked out in `directory`, or `null` where git cannot say. */
+function headIn(directory: string): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Every answer, with the placeholder head replaced by the commit the fixture made. */
+function withHead<T extends Partial<Record<Kind, string | readonly string[]>>>(
+  answers: T,
+  head: string,
+): T {
+  const replaced = (answer: string): string => answer.replaceAll(HEAD_SHA, head);
+  return Object.fromEntries(
+    Object.entries(answers).map(([kind, answer]) => [
+      kind,
+      typeof answer === "string" ? replaced(answer) : (answer as readonly string[]).map(replaced),
+    ]),
+  ) as T;
+}
+
+/** A `git` ahead of the real one, whose `worktree add` adds and then fails. */
+function failWorktreeAdd(binaries: string): void {
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  standIn(
+    binaries,
+    "git",
+    [
+      "#!/bin/sh",
+      `case " $* " in *" worktree add "*) '${real}' "$@"; exit 1 ;; esac`,
+      `exec '${real}' "$@"`,
+      "",
+    ].join("\n"),
+  );
+}
+
+/** The round snapshots standing under the episode's directory. */
+function snapshotsIn(episodeDirectory: string): readonly string[] {
+  const rounds = join(episodeDirectory, "rounds");
+  if (!existsSync(rounds)) return [];
+  return readdirSync(rounds)
+    .map((round) => join(rounds, round, "tree"))
+    .filter((tree) => existsSync(tree));
+}
+
+/** The worktrees git lists for the repository holding `worktree`. */
+function worktreesOf(worktree: string): readonly string[] {
+  return execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: worktree, encoding: "utf8" })
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "));
 }
 
 /** Whether the space the round made for itself outlived the round. */
@@ -680,6 +767,9 @@ const GH_SCRIPT = [
   "  *'v3.diff'*) kind=diff ;;",
   "esac",
   'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
+  // Whether a round's snapshot stood as this call was made. `gh` runs in the
+  // worktree, which the snapshots sit inside.
+  'for tree in .squiz/*/rounds/*/tree; do [ -d "$tree" ] && : > "$dir/snapshot-$n"; done',
   // The arguments of this one call, so a test can read the method and the path
   // a comment was sent to and not only that a call was made.
   'printf \'%s\\n\' "$*" > "$dir/argv-$n"',
@@ -2464,6 +2554,118 @@ test("a tracked file the reviewer wrote to is named, and the round posts what it
   assert.equal(ran.markerLeft, false, "the marker goes when the round ends");
 });
 
+/** A reviewer during whose run the coding agent edits the file under review in its own worktree. */
+function agentEditsWhileItReviews(): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", `printf '// line 2\\n' >> "$AGENT_WORKTREE/${TRACKED}"`],
+    parse: reviews({}).parse,
+  };
+}
+
+test("the reviewer runs in a snapshot of the head commit, at either depth, with scratch space outside it", async () => {
+  for (const depth of ["read", "deep"] as const) {
+    const ran = await runInFixture({ config: { depth }, answers: POSTING, reviewer: reviews({}) });
+
+    const directory = ran.invocations[0]?.directory ?? "";
+    assert.match(directory, new RegExp(`/\\.squiz/${PULL_REQUEST}/rounds/1/tree$`, "u"), depth);
+    assert.deepEqual(ran.headsWhenStarted, [ran.head], `the snapshot holds the head commit at ${depth}`);
+    const scratch = ran.invocations[0]?.scratchDirectory ?? "";
+    assert.match(scratch, new RegExp(`/\\.squiz/${PULL_REQUEST}/scratch$`, "u"));
+    assert.equal(scratch.startsWith(directory), false, "scratch space is outside the snapshot");
+  }
+});
+
+/**
+ * The coding agent goes on working while the reviewer reads, and nothing it does
+ * in its own worktree is the reviewer's.
+ */
+test("an edit the coding agent makes to its worktree during the review appears in no comparison", async () => {
+  const ran = await runInFixture({ answers: POSTING, reviewer: agentEditsWhileItReviews() });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
+});
+
+test("a change the reviewer makes in its snapshot is named, and the coding agent's worktree is left alone", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: writesThenReviews([finding("The flag is never read")]),
+    andThen: [
+      {
+        before: (worktree) =>
+          assert.equal(
+            readFileSync(join(worktree, TRACKED), "utf8"),
+            "// line 1\n",
+            "the reviewer wrote to the coding agent's worktree",
+          ),
+        reviewer: reviews({}),
+      },
+    ],
+  });
+
+  assert.ok(ran.conclusions[0]?.outcome === "block");
+  assert.deepEqual(ran.conclusions[0].confinement?.trackedFiles, {
+    outcome: "changed",
+    paths: [TRACKED],
+  });
+});
+
+test("a snapshot stands until the round's result is posted, and is gone once the round ends", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.deepEqual(ran.headsWhenStarted, [ran.head]);
+  assert.equal(ran.snapshotAtCall.at(-1), true, "the snapshot is removed after the result, not before");
+  assert.deepEqual(ran.snapshotsLeft, []);
+  assert.equal(ran.worktreesLeft.length, 1, `git still lists a snapshot: ${ran.worktreesLeft.join(", ")}`);
+});
+
+const FLOOR: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
+
+for (const [became, reviewer] of Object.entries({
+  failed: unreadable(FLOOR),
+  "was killed at its bound": hangs(FLOOR),
+  "never started": notInstalled,
+})) {
+  test(`a snapshot is removed when the reviewer ${became}`, async () => {
+    const ran = await runInFixture({ config: { timeout: 1 }, answers: FAILING, reviewer });
+
+    assert.ok(ran.conclusion.outcome === "failed");
+    assert.ok(ran.invocations.length > 0, "the round got as far as the reviewer");
+    assert.deepEqual(ran.snapshotsLeft, [], "the snapshot outlived the round");
+    assert.equal(ran.worktreesLeft.length, 1, `git still lists a snapshot: ${ran.worktreesLeft.join(", ")}`);
+  });
+}
+
+test("a snapshot that cannot be made runs no review, and what the add left is removed", async () => {
+  const ran = await runInFixture({ snapshotAddFails: true, answers: FAILING, reviewer: reviews({}) });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /^no review ran: the snapshot could not be added at /u);
+  assert.deepEqual(ran.invocations, [], "no reviewer starts without its snapshot");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "failure"]);
+  assert.deepEqual(ran.snapshotsLeft, [], "what the failed add made is removed with the round");
+  assert.equal(ran.worktreesLeft.length, 1, `git still lists a snapshot: ${ran.worktreesLeft.join(", ")}`);
+});
+
+test("a head commit the repository cannot get runs no review", async () => {
+  const missing = "0123456789abcdef0123456789abcdef01234567";
+  const ran = await runInFixture({
+    answers: { ...FAILING, prlist: PR_LIST.replace(HEAD_SHA, missing) },
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.match(ran.conclusion.reason, new RegExp(`^no review ran: ${missing} could not be fetched: `, "u"));
+  assert.deepEqual(ran.invocations, []);
+  assert.deepEqual(ran.snapshotsLeft, []);
+});
+
 /**
  * The reading after the reviewer is taken on every path the reviewer can end on.
  *
@@ -2572,7 +2774,7 @@ test("a marker that could not be written is reported, and the round reviews and 
   assert.deepEqual(
     ran.conclusion.confinement?.trackedFiles,
     { outcome: "changed", paths: [TRACKED] },
-    "the marker is for the other episodes, and this round reads its own worktree either way",
+    "the marker is for the other episodes, and this round reads its own snapshot either way",
   );
 });
 
@@ -2718,18 +2920,15 @@ function movesHeadThenReviews(move: string, findings: readonly Finding[]): Revie
 }
 
 /**
- * A move that leaves the branch is told to the coding agent by the round that
- * blocks.
- *
- * The next firing gates on the branch `HEAD` names then, and finds no pull request
- * for it. That firing reads nothing the episode saved, so a move kept only for the
- * summary is reported by nothing at all.
+ * A move of `HEAD` in the snapshot is named by the round that blocks, and leaves
+ * the coding agent's branch where it was, so the next firing finds the pull
+ * request again.
  */
-test("a reviewer that detached HEAD is named in the blocking reason, before the next firing finds no pull request", async () => {
+test("a reviewer that committed in its snapshot is named in the blocking reason", async () => {
   const ran = await runInFixture({
     answers: TWO_ROUNDS,
     sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: movesHeadThenReviews("git checkout --quiet --detach", [
+    reviewer: movesHeadThenReviews("git commit --quiet --allow-empty --message moved", [
       finding("The flag is never read"),
     ]),
     andThen: [{ reviewer: FIXES_IT }],
@@ -2737,23 +2936,23 @@ test("a reviewer that detached HEAD is named in the blocking reason, before the 
 
   assert.deepEqual(
     ran.conclusions.map((conclusion) => conclusion.outcome),
-    ["block", "no-pull-request"],
+    ["block", "close"],
+    "the coding agent's branch is untouched, so the next firing finds its pull request",
   );
   assert.ok(ran.conclusions[0]?.outcome === "block");
   assert.match(
     ran.conclusions[0].reason,
     new RegExp(
-      `\`HEAD\` moved while the reviewer ran: from refs/heads/${BRANCH} at [0-9a-f]{40} to a detached HEAD at [0-9a-f]{40}`,
+      `\`HEAD\` moved while the reviewer ran: from a detached HEAD at ${ran.head} to a detached HEAD at (?!${ran.head})[0-9a-f]{40}\\. The move was in the reviewer's snapshot, which is removed after the round, and the coding agent's worktree is as it was\\.\\n$`,
       "u",
     ),
-    "the next firing finds no pull request and reports nothing, so the blocking reason is the move's one report",
   );
 });
 
-test("a reviewer that switched to a branch with no pull request is named in the blocking reason", async () => {
+test("a reviewer that switched its snapshot to a branch is named in the blocking reason", async () => {
   const ran = await runInFixture({
     answers: TWO_ROUNDS,
-    sequences: { ...THREADS_OF_TWO_ROUNDS, prlist: [PR_LIST, "[]"] },
+    sequences: THREADS_OF_TWO_ROUNDS,
     reviewer: movesHeadThenReviews("git checkout --quiet -b elsewhere", [
       finding("The flag is never read"),
     ]),
@@ -2762,16 +2961,16 @@ test("a reviewer that switched to a branch with no pull request is named in the 
 
   assert.deepEqual(
     ran.conclusions.map((conclusion) => conclusion.outcome),
-    ["block", "no-pull-request"],
+    ["block", "close"],
+    "the coding agent's branch is untouched, so the next firing finds its pull request",
   );
   assert.ok(ran.conclusions[0]?.outcome === "block");
   assert.match(
     ran.conclusions[0].reason,
     new RegExp(
-      `\`HEAD\` moved while the reviewer ran: from refs/heads/${BRANCH} at ([0-9a-f]{40}) to refs/heads/elsewhere at \\1`,
+      `\`HEAD\` moved while the reviewer ran: from a detached HEAD at ${ran.head} to refs/heads/elsewhere at ${ran.head}`,
       "u",
     ),
-    "the next firing finds no pull request and reports nothing, so the blocking reason is the move's one report",
   );
 });
 
