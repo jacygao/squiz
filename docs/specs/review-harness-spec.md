@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.64 (draft)
+**Version:** 0.66 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -246,7 +246,8 @@ A record also carries the Herdr workspace the trigger ran in, from the
 `HERDR_WORKSPACE_ID` in its environment, where it has one. Herdr sets it in every
 pane it manages, so a hook or a `squiz review` run from the coding agent's pane
 finds the coding agent's workspace. The reviewer's tab opens there (§ 4 The
-reviewer session).
+reviewer session). A value that is not a Herdr workspace id, such as `w2`, is
+not recorded, and the tab opens in the focused workspace.
 
 **A trigger reads the record for the pull request's state before it queues
 anything.** It has looked up the pull request and listed its threads by then,
