@@ -25,6 +25,11 @@ export type WindowRequest = {
   readonly directory: string;
   /** The program and its arguments, each of which reaches it exactly as given. */
   readonly argv: readonly string[];
+  /**
+   * Set in the command's environment. tmux starts a window's command with the
+   * server's environment, so the client's own reaches it only through these.
+   */
+  readonly variables?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -55,9 +60,11 @@ export function openWindow(request: WindowRequest, environment: Environment, bou
   if (request.argv.length === 0) return { outcome: "refused", reason: "there is no command to run" };
 
   const commandLine = ["exec", ...request.argv.map(quoted)].join(" ");
+  const variables = Object.entries(request.variables ?? {}).flatMap(([name, value]) => ["-e", `${name}=${value}`]);
   const ran = tmux(
     [
       "new-window",
+      ...variables,
       "-d",
       "-P",
       "-F",

@@ -44,6 +44,11 @@ export type PaneCommand = {
   readonly readyWithinMs: number;
   /** The workspace the tab opens in. Absent, it opens in the focused one. */
   readonly workspace?: string;
+  /**
+   * Set in the pane's shell, which the command inherits. Herdr starts the shell
+   * with the server's environment, so the client's own reaches it only through these.
+   */
+  readonly variables?: Readonly<Record<string, string>>;
 };
 
 export type PaneStart =
@@ -71,7 +76,8 @@ export function isHerdrWorkspace(id: string): boolean {
  * refusal cannot mean some other workspace.
  */
 export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): PaneStart {
-  const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus"];
+  const variables = Object.entries(command.variables ?? {}).flatMap(([name, value]) => ["--env", `${name}=${value}`]);
+  const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus", ...variables];
   let created: Answer;
   if (command.workspace === undefined) {
     created = herdr(tab, options.environment, options.boundMs);
