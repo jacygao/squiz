@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.22 (draft)
+**Version:** 0.23 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -304,6 +304,17 @@ Three it rests on are answered:
   registers the reporting calls, applies the refusals, and exits after
   `finish_review`.
 
+### After the MVP
+
+Two parts of the design wait until the MVP ships, held with `milestone:M9`:
+
+- **Recovering a round whose host died** (#327). Until then a reviewing record
+  whose host has gone reads as killed, and nothing stops its orphaned reviewer
+  or removes its snapshot.
+- **The `Stop` hook's `asyncRewake` waiter** (#334). Until then the round host
+  wakes the owner by the messaging socket alone, and a note no socket reached is
+  read through `squiz review` or `squiz status`.
+
 ### Acceptance criteria
 
 The findings, each in `docs/notes/` before the part that rests on it is built:
@@ -349,10 +360,6 @@ The round host and the reviewer:
 - [ ] The extension ends the reviewer after `finish_review`. After
       `agent_settled` with no `finish_review`, it records an unfinished end and
       ends the reviewer.
-- [ ] A round host that died is found by its pid and start time. The recovery
-      that finds its round stops the orphaned reviewer and its recorded shell
-      groups, confirms they are gone, removes the snapshot, and records the
-      round failed, with no failure comment.
 
 The bounds:
 
@@ -417,10 +424,9 @@ The hooks and the report:
     behind it:** no note.
   - **No hook recorded an owner:** no note.
 - [ ] An idle main session starts a turn with the note's text, by the messaging
-      socket or by its newest `Stop` waiter. Whichever delivers moves the note
-      into `delivered/`, so the other does not deliver it again.
+      socket. Delivering it moves the note into `delivered/`.
 - [ ] For a subagent's work, the note reaches the parent session, by the socket
-      where the hook carries it, and otherwise by the parent's `Stop` waiter.
+      the hook carries.
 - [ ] A note no wake reached stays where it was written, and the owner learns
       the result from `squiz review` or `squiz status`.
 
