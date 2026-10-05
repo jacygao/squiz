@@ -7,13 +7,17 @@ import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { identityOf, stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { identityOf, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState } from "./episode-state.ts";
 import { type Episode, episodeAt } from "./episode.ts";
 import { putRecord } from "./state-record.ts";
 import { updateState } from "./state-update.ts";
 
 const pullRequest = 142;
+
+// Far longer than any wait these tests make, so no load on the machine reaches it.
+// A test whose claim is about time runs on a clock of its own instead.
+const LONG_MS = 120_000;
 
 /** A worktree of its own, holding one episode, removed when the test ends. */
 function episodeIn(t: TestContext): Episode {
@@ -70,7 +74,7 @@ test("a lock left by a writer killed while holding it is taken over, and the upd
   assert.equal(signal, "SIGKILL");
   assert.equal(existsSync(join(episode.directory, "state.lock")), true, "the killed writer left no lock to take over");
 
-  const updated = updateState(episode, queue("B"), { until: deadlineIn(10_000) });
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(LONG_MS) });
 
   assert.equal(updated.outcome, "written", JSON.stringify(updated));
   assert.deepEqual(headsIn(episode), ["B"]);
@@ -80,12 +84,20 @@ test("a lock left by a writer killed while holding it is taken over, and the upd
 test("a holder that cannot be told running or gone keeps its lock, and the update reports it could not be made", (t) => {
   const episode = episodeIn(t);
   const lock = holdLock(episode, goneIdentity());
-  const unknown = (): Presence => ({ outcome: "unknown", reason: "ps could not be run" });
+  const clock = fakeClock();
+  let asked = 0;
+  // Each answer takes 100ms of the clock, so the 300ms deadline passes at the third.
+  const unknown = (): Presence => {
+    asked += 1;
+    clock.advance(100);
+    return { outcome: "unknown", reason: "ps could not be run" };
+  };
 
-  const updated = updateState(episode, queue("B"), { until: deadlineIn(300), presence: unknown });
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(300, clock.now), presence: unknown });
 
   assert.equal(updated.outcome, "failed", JSON.stringify(updated));
   assert.match(updated.outcome === "failed" ? updated.reason : "", /could not be written.*ps could not be run/su);
+  assert.equal(asked, 3, "the update did not wait on the holder until its deadline");
   assert.equal(readFileSync(lock.path, "utf8"), lock.text, "the lock was broken");
   assert.equal(existsSync(episode.stateFile), false, "the state file was written without the lock");
 });
@@ -101,7 +113,7 @@ test("an update waits for a live holder to release the lock, then makes its chan
     return { outcome: "running" };
   };
 
-  const updated = updateState(episode, queue("B"), { until: deadlineIn(10_000), presence });
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(LONG_MS), presence });
 
   assert.equal(updated.outcome, "written", JSON.stringify(updated));
   assert.equal(asked, 3, "the update did not wait on the holder");
@@ -112,30 +124,41 @@ test("an update whose wait for a live holder runs out fails at its deadline, and
   const episode = episodeIn(t);
   const holder = ownIdentity();
   const lock = holdLock(episode, holder);
-  const started = Date.now();
+  const clock = fakeClock();
+  let asked = 0;
+  // The holder is alive at every look, and each look takes 100ms of the clock.
+  const running = (): Presence => {
+    asked += 1;
+    clock.advance(100);
+    return { outcome: "running" };
+  };
 
-  const updated = updateState(episode, queue("B"), { until: deadlineIn(300) });
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(300, clock.now), presence: running });
 
-  const waited = Date.now() - started;
   assert.equal(updated.outcome, "failed", JSON.stringify(updated));
   assert.match(updated.outcome === "failed" ? updated.reason : "", new RegExp(`could not be written.*process ${holder.pid}`, "su"));
-  assert.ok(waited >= 300, `the update gave up after ${waited}ms, before its deadline`);
+  assert.equal(asked, 3, "the update stopped waiting before its deadline, or after it");
   assert.equal(readFileSync(lock.path, "utf8"), lock.text, "the lock was broken");
   assert.equal(existsSync(episode.stateFile), false, "the state file was written without the lock");
 });
 
-test("a wait on a live holder ends at its deadline even where ps is slow", (t) => {
+test("a wait on a live holder gives ps no longer than its deadline has left", (t) => {
   const episode = episodeIn(t);
   const holder = ownIdentity();
   holdLock(episode, holder);
-  slowPs(t, 0.4);
-  const started = Date.now();
+  const clock = fakeClock();
+  const bounds: number[] = [];
+  // A ps that never answers in time: it runs to its bound and is cut off.
+  const slow = (_identity: ProcessIdentity, boundMs: number): Presence => {
+    bounds.push(boundMs);
+    clock.advance(boundMs);
+    return { outcome: "unknown", reason: `ps did not answer within ${boundMs}ms` };
+  };
 
-  const updated = updateState(episode, queue("B"), { until: deadlineIn(50), self: holder });
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(50, clock.now), self: holder, presence: slow });
 
-  const took = Date.now() - started;
   assert.equal(updated.outcome, "failed", JSON.stringify(updated));
-  assert.ok(took < 50 + 200, `an update given 50ms took ${took}ms, spent waiting on ps past its deadline`);
+  assert.deepEqual(bounds, [50], "the bound each ps was given, against a deadline 50ms away");
 });
 
 test("a takeover that needs more ps checks than its deadline leaves fails at the deadline, and writes nothing", (t) => {
@@ -145,34 +168,36 @@ test("a takeover that needs more ps checks than its deadline leaves fails at the
   const lock = holdLock(episode, stale);
   // A taker that died replacing the lock, so taking it over asks ps about two processes.
   writeFileSync(join(episode.directory, `state.lock.${stale.pid}-${stale.startedAt}.claim`), `${JSON.stringify(taker)}\n`);
-  const self = ownIdentity();
-  slowPs(t, 0.1);
-  stillRunning(stale, 5_000);
-  // Timed once warmed, so that the deadline fits one check and not two.
-  const warmed = Date.now();
-  stillRunning(stale, 5_000);
-  const deadlineMs = Math.round(1.5 * (Date.now() - warmed));
-  const started = Date.now();
+  const clock = fakeClock();
+  const bounds: number[] = [];
+  // A ps that takes 150ms to answer "gone", and is cut off where its bound is shorter.
+  const slow = (_identity: ProcessIdentity, boundMs: number): Presence => {
+    bounds.push(boundMs);
+    if (boundMs < 150) {
+      clock.advance(boundMs);
+      return { outcome: "unknown", reason: `ps did not answer within ${boundMs}ms` };
+    }
+    clock.advance(150);
+    return { outcome: "gone" };
+  };
 
-  const updated = updateState(episode, queue("B"), { until: deadlineIn(deadlineMs), self });
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(200, clock.now), self: ownIdentity(), presence: slow });
 
-  const took = Date.now() - started;
-  assert.equal(updated.outcome, "failed", `${JSON.stringify(updated)} after ${took}ms of ${deadlineMs}`);
-  assert.ok(took < deadlineMs + 100, `an update given ${deadlineMs}ms took ${took}ms`);
+  assert.equal(updated.outcome, "failed", JSON.stringify(updated));
+  assert.deepEqual(bounds, [200, 50], "the bound each ps was given, against a deadline 200ms away");
   assert.equal(readFileSync(lock.path, "utf8"), lock.text, "the lock was replaced past the deadline");
   assert.equal(existsSync(episode.stateFile), false, "the state file was written past the deadline");
 });
 
-/** Put a `ps` first on the PATH for the rest of the test that waits `seconds` before answering. */
-function slowPs(t: TestContext, seconds: number): void {
-  const bin = mkdtempSync(join(tmpdir(), "squiz-slow-ps-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "ps"), `#!/bin/sh\nsleep ${seconds}\nexec /bin/ps "$@"\n`, { mode: 0o755 });
-  const path = process.env["PATH"];
-  process.env["PATH"] = `${bin}:${path ?? ""}`;
-  t.after(() => {
-    process.env["PATH"] = path;
-  });
+/** A clock that moves only when the test moves it. */
+function fakeClock(): { readonly now: () => number; readonly advance: (milliseconds: number) => void } {
+  let at = 0;
+  return {
+    now: () => at,
+    advance: (milliseconds) => {
+      at += milliseconds;
+    },
+  };
 }
 
 function ownIdentity(): ProcessIdentity {

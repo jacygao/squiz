@@ -14,6 +14,9 @@ import { episodeAt } from "./episode.ts";
 import { putRecord, type StateRecord } from "./state-record.ts";
 import { updateState } from "./state-update.ts";
 
+// Far longer than another writer holds the lock, however loaded the machine.
+const LONG_MS = 120_000;
+
 const [worktree = "", pullRequest = "0", label = "", count = "0", status = "queued", at = "0"] = process.argv.slice(2);
 const episode = episodeAt(worktree, Number(pullRequest));
 
@@ -36,7 +39,7 @@ for (let index = 0; index < Number(count); index += 1) {
   const updated = updateState(
     episode,
     (state) => ({ ...state, records: putRecord(state.records ?? [], record) }),
-    { until: deadlineIn(10_000), self },
+    { until: deadlineIn(LONG_MS), self },
   );
   if (updated.outcome !== "written") {
     process.stderr.write(`${updated.reason}\n`);

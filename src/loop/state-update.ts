@@ -38,8 +38,11 @@ export type UpdateOptions = {
   readonly until: Deadline;
   /** The identity the lock names. Read from `ps` where not given. */
   readonly self?: ProcessIdentity;
-  /** Whether a holder is still running. `stillRunning` where not given. */
-  readonly presence?: (identity: ProcessIdentity) => Presence;
+  /**
+   * Whether a holder is still running, asked within `boundMs`. `stillRunning`
+   * where not given.
+   */
+  readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
 };
 
 /** `written` carries the state as written, which is `change` applied to the file as it stood under the lock. */
@@ -82,11 +85,19 @@ export function updateState(
   const lastAttemptOnly = until.passed();
   const boundMs = (): number => (lastAttemptOnly ? PS_FLOOR_MS : Math.max(1, until.remaining()));
   const expired = (): boolean => !lastAttemptOnly && until.passed();
-  const ask = options.presence ?? ((identity: ProcessIdentity) => stillRunning(identity, boundMs()));
-  const presence = (identity: ProcessIdentity): Presence =>
-    expired() ? { outcome: "unknown", reason: "the deadline passed before it could be asked" } : ask(identity);
+  const ask = options.presence ?? stillRunning;
+  let cutShort = false;
+  const presence = (identity: ProcessIdentity): Presence => {
+    if (!expired()) return ask(identity, boundMs());
+    cutShort = true;
+    return { outcome: "unknown", reason: "the deadline passed before it could be asked" };
+  };
 
+  // The last answer a holder gave. An attempt the deadline cut short says only that
+  // time ran out, so the failure names what the attempt before it found.
+  let found: Exclude<Taking, { readonly outcome: "taken" }> | undefined;
   for (;;) {
+    cutShort = false;
     const taking = takeLock(episode.directory, LOCK_NAME, { boundMs: boundMs(), self, presence });
     if (taking.outcome === "taken") {
       if (!expired()) return underLock(episode, change, taking.lock);
@@ -94,11 +105,9 @@ export function updateState(
       taking.lock.release();
       return notWritten("its lock was taken only after the deadline had passed");
     }
-    if (until.passed()) return notWritten(whyNotTaken(taking));
+    if (!cutShort || found === undefined) found = taking;
+    if (until.passed()) return notWritten(whyNotTaken(found));
     pause(Math.min(until.remaining(), PAUSE_MS + Math.random() * JITTER_MS));
-    // Checked here as well, so the failure names the holder as this attempt found
-    // it rather than an attempt that would only find the deadline gone.
-    if (until.passed()) return notWritten(whyNotTaken(taking));
   }
 }
 
