@@ -47,8 +47,8 @@ export type ClosedEpisode = {
    * What every round of the episode established about the worktree its reviewer
    * ran in.
    *
-   * The episode's and not the closing round's. A round that blocks posts no
-   * comment, so a file it found changed is named here or nowhere.
+   * The episode's and not the closing round's. A round that leaves threads open
+   * posts no summary, so a file it found changed is named here or nowhere.
    */
   readonly confinement: ConfinementEvidence;
   /**
@@ -211,8 +211,6 @@ export function worktreeNotes(found: ConfinementEvidence): readonly string[] {
     ...whatChanged(found.changed),
     ...whereHeadMoved(found.moved),
     ...whatWasNotCompared(found.uncompared),
-    ...whoElseWasHere(found.shared),
-    ...whoWasNotEstablished(found.unestablished),
   ];
 }
 
@@ -248,27 +246,6 @@ function whatWasNotCompared(reasons: readonly string[]): readonly string[] {
     (reason) =>
       "A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
       ` ${oneLine(reason)}`,
-  );
-}
-
-/** Which other episodes were in the worktree, where any round found one. */
-function whoElseWasHere(ids: readonly string[]): readonly string[] {
-  if (ids.length === 0) return [];
-  const many = ids.length === 1 ? "Another episode was" : "Other episodes were";
-  return [`${many} in the worktree while the reviewer ran: ${ids.join(", ")}`];
-}
-
-/**
- * One line per round that could not say who else was in the worktree.
- *
- * Said rather than left out, because the comparison above it is only worth what
- * the answer here is.
- */
-function whoWasNotEstablished(reasons: readonly string[]): readonly string[] {
-  return reasons.map(
-    (reason) =>
-      "A round could not tell whether another episode was in the worktree" +
-      ` while the reviewer ran: ${oneLine(reason)}`,
   );
 }
 

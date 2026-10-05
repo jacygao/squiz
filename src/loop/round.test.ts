@@ -35,7 +35,7 @@ import {
 import { composeReview } from "../review/output.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { headMovedIn } from "./confinement.ts";
-import { readState, writeState, type EpisodeState } from "./episode-state.ts";
+import { writeState, type EpisodeState } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
@@ -43,9 +43,6 @@ import { runRound, type RoundConclusion } from "./round.ts";
 const BRANCH = "review-me";
 const PULL_REQUEST = 142;
 const HEAD_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
-
-/** A second pull request, whose episode is in the worktree a round does not have to itself. */
-const OTHER_PULL_REQUEST = 143;
 
 /** The file under review, tracked and committed, which is what a reviewer's write shows up in. */
 const TRACKED = "src/ui/card.ts";
@@ -120,13 +117,6 @@ type Setup = {
   readonly lockStateAfter?: Kind;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
-  /** The pull request of an episode of the same worktree that has run a round and not closed. */
-  readonly sharedWith?: number;
-  /**
-   * A directory where the round's marker goes, so that marking the round fails
-   * and every other write the round makes lands.
-   */
-  readonly blockMarker?: boolean;
   /** What the episode's lock holds before the round starts, where it is there. */
   readonly lockSource?: string;
   readonly postingMs?: number;
@@ -187,10 +177,6 @@ type Ran = {
   readonly invocations: readonly Invocation[];
   /** Whether both directories the reviewer writes into existed when it started. */
   readonly directoriesReady: readonly boolean[];
-  /** Whether the round was marked as running when each reviewer process started. */
-  readonly markedWhenStarted: readonly boolean[];
-  /** Whether the marker naming this round was still there once the round ended. */
-  readonly markerLeft: boolean;
   /**
    * Whether the round's own space was still there once the round had ended, or
    * `null` where the round was handed none.
@@ -524,15 +510,6 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       mkdirSync(episode.directory, { recursive: true });
       writeFileSync(episode.stateFile, setup.stateSource, "utf8");
     }
-    if (setup.sharedWith !== undefined) {
-      const written = writeState(episodeAt(worktree, setup.sharedWith), {
-        rounds: [ANSWER_COST],
-        spentOutsideRounds: unspent,
-      });
-      assert.equal(written.outcome, "written", "the other episode's own state must be written");
-    }
-    const marker = join(episode.directory, "running.json");
-    if (setup.blockMarker === true) mkdirSync(join(marker, "occupied"), { recursive: true });
     if (setup.lockSource !== undefined) {
       mkdirSync(episode.directory, { recursive: true });
       writeFileSync(join(episode.directory, "host.lock"), setup.lockSource, "utf8");
@@ -540,7 +517,6 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     const invocations: Invocation[] = [];
     const directoriesReady: boolean[] = [];
-    const markedWhenStarted: boolean[] = [];
     const headsWhenStarted: (string | null)[] = [];
     const laterRounds = setup.andThen ?? [];
     const reviewers = [setup.reviewer, ...laterRounds.map((later) => later.reviewer)];
@@ -560,9 +536,6 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         directoriesReady.push(
           existsSync(invocation.sessionDirectory) && existsSync(invocation.scratchDirectory),
         );
-        // The round is marked before the reading it takes here, so a reviewer that
-        // starts unmarked is a round no other episode in this worktree can find.
-        markedWhenStarted.push(existsSync(marker));
         headsWhenStarted.push(headIn(invocation.directory));
         return {
           command: current().command ?? "/bin/sh",
@@ -618,8 +591,6 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       })),
       invocations,
       directoriesReady,
-      markedWhenStarted,
-      markerLeft: existsSync(marker),
       roundSpaceLeft: spaceLeft(invocations),
       state: stateIn(stateSource),
       stateSource,
@@ -2541,18 +2512,11 @@ test("a tracked file the reviewer wrote to is named, and the round posts what it
     outcome: "changed",
     paths: [TRACKED],
   });
-  assert.deepEqual(ran.conclusion.confinement?.otherEpisodes, { outcome: "alone" });
   assert.deepEqual(
     ran.kinds,
     ["prlist", "threads", "diff", "create", "lookup"],
-    "a mutated tree is reported rather than blocked on, so the round posts what it always would",
+    "a mutated tree is reported rather than acted on, so the round posts what it always would",
   );
-  assert.deepEqual(
-    ran.markedWhenStarted,
-    [true],
-    "a round another episode cannot find is one whose reviewer's writes that episode reads as its own",
-  );
-  assert.equal(ran.markerLeft, false, "the marker goes when the round ends");
 });
 
 /** A reviewer during whose run the coding agent edits the file under review in its own worktree. */
@@ -2690,37 +2654,6 @@ test("a round killed at its bound takes the reading after the reviewer all the s
     { outcome: "changed", paths: [TRACKED] },
     "the write the kill left behind is what the comparison exists to name",
   );
-  assert.deepEqual(ran.markedWhenStarted, [true]);
-  assert.equal(ran.markerLeft, false, "a round that failed clears its marker too");
-});
-
-test("a worktree shared with another live episode takes no comparison, and the round still runs", async () => {
-  const ran = await runInFixture({
-    sharedWith: OTHER_PULL_REQUEST,
-    answers: POSTING,
-    reviewer: writesThenReviews([finding("The flag is never read")]),
-  });
-
-  assert.ok(ran.conclusion.outcome === "block");
-  const confinement = ran.conclusion.confinement;
-  assert.equal(confinement?.otherEpisodes.outcome, "shared");
-  assert.deepEqual(
-    confinement?.otherEpisodes.outcome === "shared"
-      ? confinement.otherEpisodes.episodes.map((other) => other.id)
-      : [],
-    [String(OTHER_PULL_REQUEST)],
-    "the episodes that shared the worktree are what the summary names in place of a comparison",
-  );
-  assert.equal(
-    confinement?.trackedFiles.outcome,
-    "not-taken",
-    "a reading taken here would name the other episode's writing as this reviewer's",
-  );
-  assert.deepEqual(
-    ran.kinds,
-    ["prlist", "threads", "diff", "create", "lookup"],
-    "what is disabled in a shared worktree is the comparison and nothing else",
-  );
 });
 
 test("a reading that could not be taken is not a tree that did not change", async () => {
@@ -2756,26 +2689,6 @@ test("a round with too little left before the review takes no reading", async ()
   const trackedFiles = ran.conclusion.confinement?.trackedFiles;
   assert.equal(trackedFiles?.outcome, "not-taken");
   assert.match(trackedFiles?.outcome === "not-taken" ? trackedFiles.reason : "", /window/u);
-});
-
-test("a marker that could not be written is reported, and the round reviews and posts", async () => {
-  const ran = await runInFixture({
-    blockMarker: true,
-    answers: POSTING,
-    reviewer: writesThenReviews([finding("The flag is never read")]),
-  });
-
-  assert.ok(ran.conclusion.outcome === "block");
-  assert.equal(
-    ran.conclusion.confinement?.marked.outcome,
-    "failed",
-    "a round no other episode can find says so rather than passing for one they can",
-  );
-  assert.deepEqual(
-    ran.conclusion.confinement?.trackedFiles,
-    { outcome: "changed", paths: [TRACKED] },
-    "the marker is for the other episodes, and this round reads its own snapshot either way",
-  );
 });
 
 /**
@@ -2834,19 +2747,6 @@ function summaryBody(ran: Ran): string {
   const posted = ran.calls.filter((call) => call.kind === "summary");
   assert.equal(posted.length, 1, "the comment is posted once, and nothing ever edits it");
   return sent(posted[0]?.body ?? "");
-}
-
-/** Another episode of the worktree reports its close, which leaves it no longer live. */
-function closeEpisode(worktree: string, pullRequest: number): void {
-  const other = episodeAt(worktree, pullRequest);
-  const read = readState(other);
-  assert.equal(read.outcome, "read", "the fixture's other episode must have a state file");
-  const written = writeState(other, {
-    rounds: [ANSWER_COST],
-    spentOutsideRounds: unspent,
-    closeReported: true,
-  });
-  assert.equal(written.outcome, "written", "the other episode's close must be written");
 }
 
 /**
@@ -2970,55 +2870,6 @@ test("a reviewer that switched its snapshot to a branch is read as a move of HEA
   assert.equal(
     movedIn(ran.conclusions[0]),
     `from a detached HEAD at ${ran.head} to refs/heads/elsewhere at ${ran.head}`,
-  );
-});
-
-/**
- * A worktree an earlier round shared, and could not compare, reaches the comment
- * too.
- *
- * The other episode reports its close between the rounds, so the closing round has
- * the tree to itself and compares it. Those are the two answers that would
- * overwrite the first round's, and the first round's are the ones a person needs:
- * nothing about its interval was established at all.
- */
-test("a worktree the first round shared is named in the comment the closing round posts", async () => {
-  const ran = await runInFixture({
-    sharedWith: OTHER_PULL_REQUEST,
-    answers: TWO_ROUNDS,
-    sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-    andThen: [
-      { before: (worktree) => closeEpisode(worktree, OTHER_PULL_REQUEST), reviewer: FIXES_IT },
-    ],
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.deepEqual(
-    ran.conclusion.confinement?.otherEpisodes,
-    { outcome: "alone" },
-    "the closing round had the tree to itself, which the comment must not be composed from",
-  );
-  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
-
-  assert.equal(
-    summaryBody(ran),
-    [
-      "**Squiz review — 2 rounds, 1 finding**",
-      "",
-      "Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0",
-      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
-      "",
-      "**Needs a person**",
-      "",
-      "Nothing needs a person.",
-      "",
-      "**Notes**",
-      "",
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        ` the worktree is shared with live episode ${OTHER_PULL_REQUEST}`,
-      `- Another episode was in the worktree while the reviewer ran: ${OTHER_PULL_REQUEST}`,
-    ].join("\n"),
   );
 });
 

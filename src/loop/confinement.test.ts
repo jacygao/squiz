@@ -9,8 +9,8 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,7 +19,6 @@ import { renderSummary } from "../github/summary-body.ts";
 import { unspent } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { markRoundRunning } from "../worktree/shared-tree.ts";
 import {
   evidenceWith,
   nothingEstablished,
@@ -77,7 +76,7 @@ async function around(
   between: () => Promise<void> | void,
   windowMs = WINDOW_MS,
 ): Promise<RoundConfinement> {
-  const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(windowMs));
+  const before = readBeforeReviewer(episode.worktree, deadlineIn(windowMs));
   await between();
   return readAfterReviewer(before, deadlineIn(windowMs));
 }
@@ -85,22 +84,6 @@ async function around(
 /** A reviewer that wrote to the file under review, through its shell. */
 async function wroteToTheTree(episode: Episode): Promise<void> {
   await appendFile(join(episode.worktree, TRACKED), "// line 2\n", "utf8");
-}
-
-/** A round of another episode, started in this worktree after ours. */
-function otherRoundStarts(worktree: string, id: string): void {
-  const marked = markRoundRunning(episodeAt(worktree, Number(id)));
-  assert.equal(marked.outcome, "written", marked.outcome === "failed" ? marked.reason : "");
-}
-
-/** An episode of the worktree that has run `rounds` rounds and reported its close. */
-function episodeRanRounds(worktree: string, id: string, rounds: number): void {
-  const written = writeState(episodeAt(worktree, Number(id)), {
-    rounds: Array.from({ length: rounds }, () => unspent),
-    spentOutsideRounds: unspent,
-    closeReported: true,
-  });
-  assert.equal(written.outcome, "written", written.outcome === "failed" ? written.reason : "");
 }
 
 /** An episode of the worktree that has run a round and not closed. */
@@ -117,21 +100,10 @@ async function breakGit(episode: Episode): Promise<void> {
   await writeFile(join(episode.worktree, ".git", "index"), "not an index", "utf8");
 }
 
-function markerIn(episode: Episode): string {
-  return join(episode.directory, "running.json");
-}
-
-test("a file the reviewer wrote to is named, and the round is marked while it runs", async () => {
+test("a file the reviewer wrote to is named", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
-    assert.equal(before.marked.outcome, "written");
-    assert.ok(existsSync(markerIn(episode)), "the round is marked for as long as it runs");
-
-    await wroteToTheTree(episode);
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-
+    const confinement = await around(episode, () => wroteToTheTree(episode));
     assert.deepEqual(confinement.trackedFiles, { outcome: "changed", paths: [TRACKED] });
-    assert.deepEqual(confinement.otherEpisodes, { outcome: "alone" });
   });
 });
 
@@ -139,60 +111,6 @@ test("a reviewer that wrote nothing leaves the tree unchanged", async () => {
   await withWorktree(async (episode) => {
     const confinement = await around(episode, () => {});
     assert.deepEqual(confinement.trackedFiles, { outcome: "unchanged" });
-  });
-});
-
-/**
- * The round is marked before it asks who else is here, so a round that starts
- * between the two can still find this one.
- *
- * A git of the test's own witnesses the marker: every question about the worktree
- * starts with `git rev-parse`, and the marker is already there when the first one
- * is asked.
- */
-test("the round is marked before the worktree is asked about", async () => {
-  await withWorktree(async (episode) => {
-    const witness = join(episode.worktree, "witness");
-    await withGitThatRecords(markerIn(episode), witness, async () => {
-      readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
-    });
-    const seen = (await readLines(witness))[0];
-    assert.equal(seen, "marked", "a round that read first could miss a round that marked after it");
-  });
-});
-
-test("a worktree shared with another live episode takes no comparison", async () => {
-  await withWorktree(async (episode) => {
-    liveEpisode(episode.worktree, OTHER_KEY);
-
-    const confinement = await around(episode, () => wroteToTheTree(episode));
-
-    assert.equal(confinement.otherEpisodes.outcome, "shared");
-    assert.deepEqual(
-      confinement.otherEpisodes.outcome === "shared"
-        ? confinement.otherEpisodes.episodes.map((other) => other.id)
-        : [],
-      [OTHER_KEY],
-    );
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
-    assert.match(
-      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`shared with live episode ${OTHER_KEY}`, "u"),
-      "the reading would have named the other episode's writing as this reviewer's",
-    );
-  });
-});
-
-test("a worktree nothing could be established about takes no comparison either", async () => {
-  await withWorktree(async (episode) => {
-    const other = episodeAt(episode.worktree, Number(OTHER_KEY));
-    await mkdir(other.directory, { recursive: true });
-    await writeFile(other.stateFile, "{ not json", "utf8");
-
-    const confinement = await around(episode, () => wroteToTheTree(episode));
-
-    assert.equal(confinement.otherEpisodes.outcome, "unknown");
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
   });
 });
 
@@ -216,12 +134,10 @@ test("a reading that failed is not a tree that did not change", async () => {
 test("a first reading that failed is its own answer", async () => {
   await withWorktree(async (episode) => {
     // Broken before the round starts, so the reading it would be compared against
-    // is the one that could not be taken. Resolving the worktree reads no index,
-    // so the other episodes are still asked about.
+    // is the one that could not be taken.
     await breakGit(episode);
     const confinement = await around(episode, () => {});
 
-    assert.deepEqual(confinement.otherEpisodes, { outcome: "alone" });
     assert.equal(confinement.trackedFiles.outcome, "unknown");
     assert.match(
       confinement.trackedFiles.outcome === "unknown" ? confinement.trackedFiles.reason : "",
@@ -239,75 +155,6 @@ test("a round with too little of its window left reads nothing", async () => {
       confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
       /window/u,
     );
-    assert.equal(confinement.marked.outcome, "written", "the round is marked whatever is left");
-  });
-});
-
-test("a marker that could not be written is carried out, and the comparison is taken all the same", async () => {
-  await withWorktree(async (episode) => {
-    // A directory where the marker goes: the round's own write cannot replace it.
-    await mkdir(join(markerIn(episode), "occupied"), { recursive: true });
-
-    const confinement = await around(episode, () => wroteToTheTree(episode));
-
-    assert.equal(confinement.marked.outcome, "failed");
-    assert.deepEqual(
-      confinement.trackedFiles,
-      { outcome: "changed", paths: [TRACKED] },
-      "a round no other episode can find still reads its own worktree",
-    );
-  });
-});
-
-
-/**
- * The tree is asked about again after the reviewer, because an episode that
- * became live during the review is the one a single asking cannot see.
- *
- * Marking this round first only makes the round that starts later see this one.
- * It does nothing for this one, which asked before that round existed, so a
- * comparison built on the first answer alone names the other reviewer's writing
- * as this one's.
- */
-test("an episode that became live after the first reading is not compared against", async () => {
-  await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
-    assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
-
-    otherRoundStarts(episode.worktree, OTHER_KEY);
-    await wroteToTheTree(episode);
-
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-
-    assert.equal(confinement.otherEpisodes.outcome, "shared");
-    assert.equal(
-      confinement.trackedFiles.outcome,
-      "not-taken",
-      "the write is the other episode's, and naming it here accuses this reviewer of it",
-    );
-  });
-});
-
-/**
- * An episode that started and closed inside one review is live at neither asking,
- * and the tree was shared for the whole of the interval the comparison covers.
- */
-test("an episode that came and went inside the review is not compared against", async () => {
-  await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
-    assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
-
-    episodeRanRounds(episode.worktree, OTHER_KEY, 1);
-    await wroteToTheTree(episode);
-
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
-    assert.match(
-      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`${OTHER_KEY} worked in the worktree`, "u"),
-      "the episode that appeared while the reviewer ran is what the answer names",
-    );
   });
 });
 
@@ -321,7 +168,7 @@ test("an episode that came and went inside the review is not compared against", 
  */
 test("a reading that runs past its bound is cut short and answered as one that failed", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode.worktree, deadlineIn(WINDOW_MS));
     assert.equal(before.reading.outcome, "read");
 
     const started = Date.now();
@@ -343,109 +190,6 @@ test("a reading that runs past its bound is cut short and answered as one that f
   });
 });
 
-
-/**
- * The case a comparison of directory names cannot see.
- *
- * The other episode has run before, so its directory and its state file are both
- * there at the first asking, and it is closed at both. It runs again and closes
- * again while this reviewer is running: neither asking finds it live, the
- * directory names are identical, and what it recorded is the only thing that
- * moved.
- */
-test("an episode that ran and closed inside the review is not compared against", async () => {
-  await withWorktree(async (episode) => {
-    episodeRanRounds(episode.worktree, OTHER_KEY, 1);
-
-    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
-    assert.deepEqual(before.otherEpisodes, { outcome: "alone" }, "the other episode has closed");
-
-    episodeRanRounds(episode.worktree, OTHER_KEY, 2);
-    await wroteToTheTree(episode);
-
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-
-    assert.deepEqual(confinement.otherEpisodes, { outcome: "alone" });
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
-    assert.match(
-      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`${OTHER_KEY} worked in the worktree`, "u"),
-      "the write may be the other episode's, and naming it here accuses this reviewer of it",
-    );
-  });
-});
-
-/**
- * A directory with nothing recorded under it is an episode that may be in its
- * first round, which is the round nothing on disk says anything about.
- */
-test("an episode with nothing recorded is not a tree this round had to itself", async () => {
-  await withWorktree(async (episode) => {
-    await mkdir(episodeAt(episode.worktree, Number(OTHER_KEY)).directory, { recursive: true });
-
-    const confinement = await around(episode, () => wroteToTheTree(episode));
-
-    assert.deepEqual(confinement.otherEpisodes, { outcome: "alone" });
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
-    assert.match(
-      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      new RegExp(`${OTHER_KEY}: nothing is recorded`, "u"),
-      "an episode that recorded nothing cannot be shown to have done nothing",
-    );
-  });
-});
-
-/**
- * The lookup is bounded rather than merely gated.
- *
- * What the round has left of its window decides that the lookup starts, and
- * nothing about it reaches a git already spawned. A lookup let in on what was left
- * and then given no bound of its own waits as long as git does, and it runs before
- * the comparison, so an overrun here leaves that with none of the window either.
- */
-test("a lookup that runs past its bound is cut short and establishes nothing", async () => {
-  await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
-    assert.equal(before.reading.outcome, "read");
-
-    const started = Date.now();
-    const confinement = await withGitThatDelays("rev-parse", 30, () =>
-      readAfterReviewer(before, deadlineIn(WINDOW_MS)),
-    );
-    const elapsedMs = Date.now() - started;
-
-    assert.equal(confinement.otherEpisodes.outcome, "unknown");
-    assert.match(
-      confinement.otherEpisodes.outcome === "unknown" ? confinement.otherEpisodes.reason : "",
-      /the worktree could not be resolved: git ran out of the time it was given/u,
-      "a lookup that ran out of time is its own answer and never a tree this round had to itself",
-    );
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
-    assert.match(
-      confinement.trackedFiles.outcome === "not-taken" ? confinement.trackedFiles.reason : "",
-      /the live episodes of the worktree could not be established/u,
-    );
-    assert.ok(
-      elapsedMs < 20_000,
-      `the lookup is cut short rather than waited out: it took ${elapsedMs}ms`,
-    );
-  });
-});
-
-/**
- * Run `body` with a `git` of the test's own in front of the real one, recording
- * for each call whether the marker was already there.
- */
-async function withGitThatRecords(
-  marker: string,
-  witness: string,
-  body: () => Promise<void>,
-): Promise<void> {
-  await withGitThat(
-    `if [ -f ${quote(marker)} ]; then echo marked; else echo unmarked; fi >> ${quote(witness)}`,
-    body,
-  );
-}
 
 /**
  * Run `body` with a `git` that waits before answering one subcommand.
@@ -504,11 +248,6 @@ async function withGitThat<T>(preamble: string, body: () => T | Promise<T>): Pro
   }
 }
 
-async function readLines(path: string): Promise<readonly string[]> {
-  const source = await readFile(path, "utf8");
-  return source.split("\n").filter((line) => line !== "");
-}
-
 function quote(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`;
 }
@@ -517,8 +256,6 @@ function quote(text: string): string {
 function established(found: Partial<RoundConfinement>): RoundConfinement {
   return {
     trackedFiles: { outcome: "unchanged" },
-    otherEpisodes: { outcome: "alone" },
-    marked: { outcome: "written" },
     ...found,
   };
 }
@@ -533,8 +270,8 @@ function after(...rounds: readonly Partial<RoundConfinement>[]): ConfinementEvid
 /**
  * What an earlier round found is what the closing round's comment carries.
  *
- * A round that blocks posts no comment, so a file it named as changed reaches a
- * person through the closing round's comment or not at all. The closing round here
+ * A round that leaves threads open posts no summary, so a file it named as changed
+ * reaches a person through the closing round's comment or not at all. The closing round here
  * compared and found nothing, which is the answer that would overwrite it.
  */
 test("a file an earlier round found changed survives a round that found nothing", () => {
@@ -545,46 +282,15 @@ test("a file an earlier round found changed survives a round that found nothing"
 });
 
 test("an earlier round that could not compare survives a closing round that could", () => {
-  const shared = `the worktree is shared with live episode ${OTHER_KEY}`;
+  const short = "the round had too little of its window left to read the worktree";
   assert.deepEqual(
-    after(
-      {
-        otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_KEY, pid: 4021 }] },
-        trackedFiles: { outcome: "not-taken", reason: shared },
-      },
-      {},
-    ),
-    { changed: [], moved: [], uncompared: [shared], shared: [OTHER_KEY], unestablished: [] },
-  );
-});
-
-test("an earlier round that could not tell who else was here survives a round that was alone", () => {
-  const killed = "ps was killed by SIGKILL";
-  assert.deepEqual(
-    after(
-      {
-        otherEpisodes: { outcome: "unknown", reason: killed },
-        trackedFiles: {
-          outcome: "not-taken",
-          reason: `the live episodes of the worktree could not be established: ${killed}`,
-        },
-      },
-      {},
-    )?.unestablished,
-    [killed],
+    after({ trackedFiles: { outcome: "not-taken", reason: short } }, {}),
+    { ...nothingEstablished, uncompared: [short] },
   );
 });
 
 test("an episode whose rounds left the worktree alone establishes nothing at all", () => {
   assert.equal(after({}, {}, {}), undefined);
-});
-
-/**
- * A marker that was not written costs a later round its comparison rather than this
- * episode's, and nobody reading this pull request can act on it.
- */
-test("a marker that was not written is nothing the episode establishes", () => {
-  assert.equal(after({ marked: { outcome: "failed", reason: "EACCES" } }), undefined);
 });
 
 // One entry per path however many rounds changed it, which is what keeps the list
@@ -603,8 +309,8 @@ test("a file two rounds changed is named once", () => {
  * The lists stop growing, and what they keep is the earliest answer rather than the
  * latest.
  *
- * An attempt that is no round spends none of the round cap and fails the same way
- * every time the hook fires, so nothing bounds the firings of one episode. A list
+ * An attempt that is no round spends none of the round cap and can fail the same
+ * way on every run, so nothing bounds the firings of one episode. A list
  * that grew with them would grow without end, and an episode's earliest evidence is
  * the evidence a later firing must not push out.
  */
@@ -654,10 +360,10 @@ function commentOn(found: ConfinementEvidence | undefined): string {
 /**
  * A later round that fills the cap pushes nothing of an earlier round's out.
  *
- * Round 1 names one changed file and blocks, and round 2 names sixty-four that all
- * sort before it. Choosing the sixty-four to keep from the sorted list drops the
- * earlier round's file, which this comment is the only report of, while the file
- * itself is still changed in the worktree.
+ * Round 1 names one changed file and leaves threads open, and round 2 names
+ * sixty-four that all sort before it. Choosing the sixty-four to keep from the
+ * sorted list drops the earlier round's file, which this comment is the only
+ * report of, while the file itself is still changed in the worktree.
  */
 test("a file an earlier round found changed survives a later round that fills the cap", () => {
   const crowd = aCapsWorth("a").map((name) => `${name}.txt`);
@@ -675,47 +381,6 @@ test("a file an earlier round found changed survives a later round that fills th
   assert.ok(
     comment.includes(`\`${TRACKED}\``),
     `${TRACKED} changed in the worktree and the comment does not name it:\n${comment}`,
-  );
-});
-
-/**
- * The same cap, over the episodes a round found in the worktree.
- *
- * An episode named by the round that blocked is the only account of who was in the
- * tree while that reviewer ran, and a later round that found a crowd must not take
- * its place.
- */
-test("an episode an earlier round found here survives a later round that fills the cap", () => {
-  const crowd = aCapsWorth("1");
-  const evidence = after(
-    {
-      otherEpisodes: { outcome: "shared", episodes: [{ id: OTHER_KEY, pid: 4021 }] },
-      trackedFiles: {
-        outcome: "not-taken",
-        reason: `the worktree is shared with live episode ${OTHER_KEY}`,
-      },
-    },
-    {
-      otherEpisodes: {
-        outcome: "shared",
-        episodes: crowd.map((id, index) => ({ id, pid: 5000 + index })),
-      },
-      trackedFiles: {
-        outcome: "not-taken",
-        reason: "the worktree is shared with 64 live episodes",
-      },
-    },
-  );
-  const comment = commentOn(evidence);
-
-  assert.deepEqual(
-    evidence?.shared,
-    [...crowd.slice(0, 63), OTHER_KEY],
-    "the cap drops the episode that arrived last, and orders what it kept for display",
-  );
-  assert.ok(
-    comment.includes(OTHER_KEY),
-    `episode ${OTHER_KEY} was in the worktree and the comment does not name it:\n${comment}`,
   );
 });
 
@@ -755,16 +420,35 @@ test("a reviewer that amended the commit is named from a clean tree, and so is t
   });
 });
 
-// Another episode's commit in a shared tree is not this reviewer's, so HEAD is
-// read with the files or not at all.
-test("a HEAD moved in a shared worktree is not named as this reviewer's", async () => {
+/**
+ * Each reviewer reads a snapshot that only it writes, so what another episode of
+ * the worktree recorded says nothing about the snapshot. A running marker an
+ * earlier version left there is read by nothing.
+ */
+test("another episode's state in the worktree takes nothing from the comparison or the comment", async () => {
   await withWorktree(async (episode) => {
     liveEpisode(episode.worktree, OTHER_KEY);
+    const other = episodeAt(episode.worktree, Number(OTHER_KEY));
+    await writeFile(join(other.directory, "running.json"), `{"pid": 4021}\n`, "utf8");
+    await mkdir(episode.directory, { recursive: true });
+    await writeFile(join(episode.directory, "running.json"), `{"pid": 4022}\n`, "utf8");
+    const was = headOf(episode.worktree);
 
-    const confinement = await around(episode, () => amendedTheCommit(episode));
+    const confinement = await around(episode, async () => {
+      await wroteToTheTree(episode);
+      git(episode.worktree, "commit", "--quiet", "--all", "--message", "the reviewer's commit");
+    });
+    const comment = commentOn(evidenceWith(undefined, confinement));
 
-    assert.equal(confinement.trackedFiles.outcome, "not-taken");
-    assert.deepEqual(evidenceWith(undefined, confinement)?.moved, []);
+    const move = `from refs/heads/review-me at ${was} to refs/heads/review-me at ${headOf(episode.worktree)}`;
+    assert.ok(
+      comment.includes(`- A file changed in the worktree while the reviewer ran: \`${TRACKED}\``),
+      `the reviewer changed ${TRACKED} and the comment does not say so:\n${comment}`,
+    );
+    assert.ok(
+      comment.includes(`- \`HEAD\` moved while the reviewer ran: ${move}`),
+      `the reviewer moved HEAD and the comment does not say so:\n${comment}`,
+    );
   });
 });
 

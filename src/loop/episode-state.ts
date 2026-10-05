@@ -77,17 +77,18 @@ export type EpisodeState = {
    * Absent is no, which is what a file written before this field existed says.
    * The rounds alone cannot stand in for it. A firing that finds the bound spent
    * cannot tell an episode whose last round closed it from one whose last round
-   * blocked under a cap that has since been lowered, and those two want opposite
-   * answers: silence, and a line saying the episode closed with no summary.
+   * left threads open under a cap that has since been lowered, and those two want
+   * opposite answers: silence, and a line saying the episode closed with no
+   * summary.
    */
   readonly closeReported?: boolean;
   /**
    * What the episode's rounds have established about the worktree they ran in.
    *
-   * Here because a round that blocks posts no comment. The summary is composed
-   * when the episode closes, and a composer reading the closing round's own
-   * readings alone would report the worktree of one round as the worktree of the
-   * whole episode.
+   * Here because a round that leaves threads open posts no summary. The summary
+   * is composed when the episode closes, and a composer reading the closing
+   * round's own readings alone would report the worktree of one round as the
+   * worktree of the whole episode.
    *
    * Absent is nothing established, which is what a file written before this field
    * existed says and what an episode every reviewer left alone writes.
@@ -325,8 +326,8 @@ type ReadEvidence =
  * looked at is one nothing touched, and that is the reading this field exists to
  * stop.
  *
- * A key this reader has no name for is ignored, so a file a later version wrote is
- * still the episode's own.
+ * A key this reader has no name for is ignored, so a file an earlier or a later
+ * version wrote is still the episode's own.
  */
 function confinementIn(parsed: Record<string, unknown>): ReadEvidence {
   const found = parsed["confinement"];
@@ -341,18 +342,12 @@ function confinementIn(parsed: Record<string, unknown>): ReadEvidence {
   if ("problem" in moved) return moved;
   const uncompared = linesIn(found, "uncompared");
   if ("problem" in uncompared) return uncompared;
-  const shared = linesIn(found, "shared");
-  if ("problem" in shared) return shared;
-  const unestablished = linesIn(found, "unestablished");
-  if ("problem" in unestablished) return unestablished;
 
   return {
     evidence: {
       changed: changed.lines,
       moved: moved.lines,
       uncompared: uncompared.lines,
-      shared: shared.lines,
-      unestablished: unestablished.lines,
     },
   };
 }

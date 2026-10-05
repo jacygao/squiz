@@ -46,7 +46,6 @@ import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import type { Environment } from "../sessions/tmux.ts";
-import { clearRoundRunning } from "../worktree/shared-tree.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
 import { takeHostLock, type HostLock } from "../host/lock.ts";
 import {
@@ -201,9 +200,9 @@ export type RoundAccount = {
 /** What the readings taken around the reviewer established. */
 export type AroundTheReviewer = {
   /**
-   * What the reviewer did to its snapshot, and which other episodes were live in
-   * the worktree. Absent where no reviewer ran, which is every conclusion reached
-   * before the review.
+   * What the reviewer did to the tracked files and `HEAD` of its snapshot.
+   * Absent where no reviewer ran, which is every conclusion reached before the
+   * review.
    *
    * The round reports none of this itself. The summary comment, or a failed
    * round's failure comment, names what the readings found, and the round host
@@ -313,27 +312,20 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
     // the round's result. It runs under the lock, before the next round can add
     // a snapshot of its own.
     if (opened.snapshot !== undefined) removeSnapshot(setup.worktree, opened.snapshot);
-    // Every path the round ends on comes through here, a throw included. A marker
-    // left behind already reads as no round in flight, so clearing it keeps them
-    // from piling up in a worktree rather than making any answer right.
-    if (opened.held !== undefined) {
-      clearRoundRunning(opened.held.episode);
-      // A lock this round could not remove names a process that is about to
-      // exit, and the next round takes over a lock whose holder has gone.
-      if (opened.held.owned) opened.held.lock.release();
-    }
+    // A lock this round could not remove names a process that is about to exit,
+    // and the next round takes over a lock whose holder has gone.
+    if (opened.held?.owned === true) opened.held.lock.release();
   }
 }
 
 /**
- * The episode the round holds, once the gate has found the pull request that
- * keys it and the round has taken its lock.
+ * What the round must undo on every path it ends on, once it has made it.
  *
- * Nothing is set for an episode whose lock another round holds. Its marker is
- * that round's, and clearing it would hide a round still in flight.
+ * `owned` is false for a lock the caller took and handed in, which the caller
+ * releases.
  */
 type Opened = {
-  held?: { readonly episode: Episode; readonly lock: HostLock; readonly owned: boolean };
+  held?: { readonly lock: HostLock; readonly owned: boolean };
   /** Whatever this round made at its snapshot path, added or left by a failed add. */
   snapshot?: string;
 };
@@ -377,7 +369,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   const locked: Step<HostLock> =
     setup.held === undefined ? lockOf(episode, pullRequest.number) : { step: setup.held.lock };
   if ("ended" in locked) return locked.ended;
-  opened.held = { episode, lock: locked.step, owned: setup.held === undefined };
+  opened.held = { lock: locked.step, owned: setup.held === undefined };
 
   const stateRead = openState(episode);
   if ("ended" in stateRead) return stateRead.ended;
@@ -560,7 +552,7 @@ async function reviewOn(
   opened.snapshot = snapshot.path;
   const tree = snapshot.path;
 
-  const around = readBeforeReviewer(episode, tree, preReview.until);
+  const around = readBeforeReviewer(tree, preReview.until);
 
   // Only `deep` grants a shell, and only a shell detaches, so at `read` there is
   // nothing for a round to record and nothing for it to reach. One value says
