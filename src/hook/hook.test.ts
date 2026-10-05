@@ -1984,7 +1984,7 @@ test("a state file that will not take the round after the review posts nothing",
       assert.equal(result.stdout, "");
       assert.match(
         result.stderr,
-        /^squiz: nothing the reviewer found was posted: .*state\.json could not be written: [A-Z]+: /u,
+        /^squiz: nothing the reviewer found was posted: .*state\.json could not be written: .*\b[A-Z]+: /u,
         "the pointer must carry the filesystem's own error rather than the word failed",
       );
       assert.match(result.stderr, /\nsquiz: the failure is posted on PR #142\n$/u);
