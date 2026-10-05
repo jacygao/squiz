@@ -183,7 +183,8 @@ function settle(waiting: Waiting, state: EpisodeState): Settled | undefined {
   return settleRecord(waiting, state, record);
 }
 
-function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord): Settled | undefined {
+/** `hops` counts the superseded states followed so far, which ends a loop of them. */
+function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord, hops = 0): Settled | undefined {
   switch (record.status) {
     case "queued":
     case "reviewing":
@@ -197,7 +198,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
       if (record.result === "exited") return compose((threads) => roundResult(waiting, state, record, threads));
       return afterClean(waiting, state, record);
     case "not reviewed":
-      return notReviewed(waiting, state, record);
+      return notReviewed(waiting, state, record, hops);
   }
 }
 
@@ -222,11 +223,23 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord): 
 }
 
 /**
- * A state no round took: handed the close where the close stopped it, and the
- * close alone where the episode had closed before it was queued.
+ * A state no round took. One a later state superseded follows that state, or is
+ * `undefined` until a trigger has queued it. One the close stopped is handed the
+ * close, and one queued after the close is handed the close alone.
  */
-function notReviewed(waiting: Waiting, state: EpisodeState, record: Extract<StateRecord, { readonly status: "not reviewed" }>): Settled {
+function notReviewed(
+  waiting: Waiting,
+  state: EpisodeState,
+  record: NotReviewed,
+  hops: number,
+): Settled | undefined {
   const records = state.records ?? [];
+  const superseded = supersededBy(record);
+  if (superseded !== undefined) {
+    const newer = records.findLast((held) => !sameState(held, record) && superseded(held));
+    if (newer === undefined || hops >= records.length) return undefined;
+    return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
+  }
   const closing = closingRecord(records);
   const stopped = /^the episode closed at the (round cap|token bound), after reviewing /u.exec(record.reason);
   if (state.closeReported === true && closing !== undefined && stopped !== null) {
@@ -239,6 +252,22 @@ function notReviewed(waiting: Waiting, state: EpisodeState, record: Extract<Stat
   if (state.closeReported === true) return closed(waiting, state);
   const reason = `PR #${waiting.pullRequest} at ${record.head.slice(0, 7)} was not reviewed: ${record.reason}`;
   return { kind: "result", result: { outcome: "not run", pullRequest: waiting.pullRequest, reason } };
+}
+
+type NotReviewed = Extract<StateRecord, { readonly status: "not reviewed" }>;
+
+/**
+ * The state a superseded record names, as a test on records, and the name it is
+ * printed by. `undefined` where the record was not superseded.
+ */
+function supersededBy(record: NotReviewed): ((held: StateRecord) => boolean) & { readonly named: string } | undefined {
+  const found = /^superseded by ([0-9a-f]+)( with different replies)?$/u.exec(record.reason);
+  const commit = found?.[1];
+  if (found === null || commit === undefined) return undefined;
+  // A state on the same commit differs only in its replies, which the reason does not name.
+  const sameCommit = found[2] !== undefined;
+  const test = (held: StateRecord): boolean => (sameCommit ? held.head === record.head : held.head.startsWith(commit));
+  return Object.assign(test, { named: record.reason.slice("superseded by ".length) });
 }
 
 function compose(build: (threads: readonly ReviewThread[]) => ReviewResult): Settled {
@@ -263,17 +292,29 @@ function roundResult(
   threads: readonly ReviewThread[],
   left?: { readonly state: string; readonly closedAt: ClosingBound },
 ): ReviewResult {
+  // A record from before records kept the round's number: the count of rounds stands in.
+  const round = record.round?.number ?? state.rounds.length;
+  const unposted = record.unposted;
+  // A round whose every finding GitHub refused reached nothing it could hand
+  // over, so its clean exit would hide them all.
+  if (unposted !== undefined && unposted.failed === unposted.of) {
+    return { outcome: "unposted", pullRequest: waiting.pullRequest, round, findings: unposted.of };
+  }
+  const lost =
+    unposted === undefined
+      ? []
+      : [`round ${round} could not post ${unposted.failed} of its ${unposted.of} findings to PR #${waiting.pullRequest}`];
+  const problems = [...lost, ...(record.problems ?? [])];
   const base = {
     outcome: "reviewed" as const,
     pullRequest: waiting.pullRequest,
     commit: record.head.slice(0, 7),
-    // A record from before records kept the round's number: the count of rounds stands in.
-    round: record.round?.number ?? state.rounds.length,
+    round,
     cap: waiting.cap,
     newFindings: record.newFindings ?? 0,
     threads: threads.filter((thread) => record.openThreads.includes(thread.id)),
     recorded: waiting.recorded,
-    ...(record.problems === undefined ? {} : { problems: record.problems }),
+    problems,
   };
   switch (record.exitStatus) {
     case 2:
@@ -323,5 +364,7 @@ function stillReviewing(context: Context, records: readonly StateRecord[]): Revi
     const next = underway ?? records.find((held) => held.status === "queued");
     if (next !== undefined) return { ...about, wait: "clean", commit, reviewing: next.head.slice(0, 7) };
   }
+  const superseded = record?.status === "not reviewed" ? supersededBy(record) : undefined;
+  if (superseded !== undefined) return { ...about, wait: "superseded", commit, reviewing: superseded.named };
   return { ...about, wait: "under review", commit };
 }

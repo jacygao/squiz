@@ -323,8 +323,11 @@ function reportOf(
       : [`the review of PR #${conclusion.pullRequest} closed without its summary: ${summary.reason}`];
   // Only a close that left threads open is printed with its bound.
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
+  const outcomes = conclusion.findings.outcomes;
+  const failed = outcomes.filter((outcome) => outcome.outcome === "failed").length;
   return {
     newFindings: conclusion.posted.length,
+    ...(failed === 0 ? {} : { unposted: { failed, of: outcomes.length } }),
     ...(moved === undefined ? {} : { moved }),
     ...(problems.length === 0 ? {} : { problems }),
     ...(bound === "round-cap" ? { closedAt: "round cap" } : bound === "token-bound" ? { closedAt: "token bound" } : {}),

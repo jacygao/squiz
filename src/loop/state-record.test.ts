@@ -111,6 +111,7 @@ const everyState: readonly StateRecord[] = [
     problems: ["the round closed the episode on PR #41 having failed to post the episode's summary: GitHub answered 502"],
   },
   { head, activity: reply, status: "reviewed", result: "clean, episode open", newFindings: 0 },
+  { head, activity: reply, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1, unposted: { failed: 1, of: 2 } },
   {
     head,
     activity: reply,
@@ -242,6 +243,9 @@ const malformed: readonly [string, unknown][] = [
   ["new findings counted with a fraction", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1.5 }],
   ["a close at a bound that is neither", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "deadline" }],
   ["a move of HEAD that is not a string", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], moved: 1 }],
+  ["unposted findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: "1", of: 1 } }],
+  // More failed than the round posted is a writer that counted something else.
+  ["more unposted findings than the round had", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: 2, of: 1 } }],
   ["problems that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
   ["failure lines that are not strings", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, lines: "posted" }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],

@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.67 (draft)
+**Version:** 0.68 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -330,6 +330,11 @@ superseded by 3f9c2e0 with different replies
 The newer state is queued by the trigger that read it, and reviewed in its turn.
 The state a round reviews is the one its result is recorded against: the reviewer
 reads a snapshot of that state's head commit (§ 4 The snapshot).
+
+A run of `squiz review` whose own state was superseded goes on waiting, for the
+state that superseded it, and returns that state's result. Where that state was
+superseded in turn, the run follows it to the next. It exits 4 where its wait
+runs out first, as § 6 shows.
 
 **A round decides its close and records it in one step.** It reads the queue
 under `state.lock`, decides from it as the table above sets out, and writes the
@@ -1680,7 +1685,7 @@ invocation (§ 7). The exit status says what the coding agent does next:
 | 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
 | 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
-| 4 | Still reviewing. The run's deadline came before the review of this state was done, or before the review of a state queued behind a clean one. The round goes on in the round host. | Runs the command again. |
+| 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
 
 Exit 4 is neither an outcome nor a failure: nothing about the pull request was
@@ -1795,6 +1800,15 @@ come only with the close itself:
 ```
 Full output: /work/squiz/.squiz/41/review.txt
 Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.
+```
+
+A run whose own state was superseded before a round took it (§ 3 The state
+file), and whose wait ran out before the newer state's round ended. The newer
+state is named as the reason for superseding names it:
+
+```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.
 ```
 
 A run on an episode that has already closed, exit 0 or 3 as the close was:

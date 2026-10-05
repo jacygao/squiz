@@ -80,10 +80,12 @@ type ClosedOpen = RoundResult &
  * - `queued`: the run's state waits behind the round of `reviewing`.
  * - `clean`: the run's state was reviewed clean, and `reviewing` was queued
  *   behind it, so the episode has not closed.
+ * - `superseded`: the pull request moved on to `reviewing` before a round took
+ *   the run's state.
  */
 type StillReviewing = About & { readonly outcome: "reviewing" } & (
     | { readonly wait: "under review"; readonly commit: string }
-    | { readonly wait: "queued" | "clean"; readonly commit: string; readonly reviewing: string }
+    | { readonly wait: "queued" | "clean" | "superseded"; readonly commit: string; readonly reviewing: string }
   );
 
 /** A run on an episode whose close is already recorded, exiting as the close did. */
@@ -257,6 +259,8 @@ function stillReviewing(result: StillReviewing): string {
       return `Squiz is reviewing ${pr} at ${result.reviewing} first, and ${result.commit} is next. ${again}`;
     case "clean":
       return `Squiz found nothing open in ${pr} at ${result.commit}, and is reviewing ${result.reviewing} before it closes the review. ${again}`;
+    case "superseded":
+      return `Squiz is reviewing ${pr} at ${result.reviewing} instead of ${result.commit}. ${again}`;
   }
 }
 

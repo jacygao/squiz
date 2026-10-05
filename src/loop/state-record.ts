@@ -93,6 +93,8 @@ export type RoundReport = {
   readonly moved?: string;
   /** What failed without changing the round's outcome, a line each. */
   readonly problems?: readonly string[];
+  /** How many of the findings the round posted GitHub refused, of how many it posted. */
+  readonly unposted?: { readonly failed: number; readonly of: number };
 };
 
 type Shared = StateKey & {
@@ -385,8 +387,19 @@ function reportFrom(entry: Record<string, unknown>): ReadReport {
   if (problems !== undefined && !isLines(problems)) {
     return { problem: `has "problems" as ${render(problems)} rather than an array of lines` };
   }
+  const unposted = entry["unposted"];
+  let unpostedRead: { failed: number; of: number } | undefined;
+  if (unposted !== undefined) {
+    const failed = isObject(unposted) ? unposted["failed"] : undefined;
+    const of = isObject(unposted) ? unposted["of"] : undefined;
+    if (!isWholeSeconds(failed) || !isWholeSeconds(of) || failed > of) {
+      return { problem: `has "unposted" as ${render(unposted)} rather than how many failed of how many` };
+    }
+    unpostedRead = { failed, of };
+  }
   return {
     report: {
+      ...(unpostedRead === undefined ? {} : { unposted: unpostedRead }),
       ...(newFindings === undefined ? {} : { newFindings }),
       ...(moved === undefined ? {} : { moved }),
       ...(problems === undefined ? {} : { problems }),

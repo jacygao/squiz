@@ -286,6 +286,61 @@ test("a state left not reviewed by the cap is handed the close, with the line sa
   });
 });
 
+test("a state superseded before its round started follows to the state that superseded it, and returns its result", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f" },
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
+    ], { rounds: [NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
+
+    assert.equal(printed.exit, 2, printed.stdout + printed.stderr);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz reviewed PR #41 at 8d21a4f: round 1 of 3, 1 new finding.");
+  });
+});
+
+test("a superseded state whose wait runs out before the newer state's round ends exits 4, naming both", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f" }, reviewing(LATER)]);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
+test("a round whose findings all failed to post exits 1 saying so, and never reads as nothing open", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, unposted: { failed: 1, of: 1 }, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
+    ], { closeReported: true, rounds: [NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
+
+    assert.equal(printed.exit, 1, printed.stdout);
+    assert.equal(printed.stdout, "");
+    assert.equal(printed.stderr, "squiz: round 1 found 1 finding and could not post it to PR #41\n");
+  });
+});
+
+test("a round some of whose findings failed to post keeps its status, and says how many on stderr", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, unposted: { failed: 1, of: 2 }, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
+    ], { rounds: [NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
+
+    assert.equal(printed.exit, 2);
+    assert.equal(printed.stderr, "squiz: round 1 could not post 1 of its 2 findings to PR #41\n");
+  });
+});
+
 test("a run on a closed episode prints the close, exiting as it did", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

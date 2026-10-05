@@ -112,6 +112,12 @@ function answer(body) {
     return http("201 Created", { id: 7000 + state.issueComments.length, node_id: "IC_" + state.issueComments.length, html_url: "https://github.com/o/r/pull/41#issuecomment-1" });
   }
   if (at.endsWith("/comments")) {
+    if (state.rejectCreate) {
+      process.stdout.write(http("403 Forbidden", { message: "Resource not accessible by integration" }));
+      process.stderr.write("gh: Resource not accessible by integration (HTTP 403)\n");
+      process.exitCode = 1;
+      return "";
+    }
     const posted = JSON.parse(body);
     const n = state.threads.length + 1;
     state.threads.push({
@@ -143,6 +149,8 @@ type GhState = {
   readonly diff: string;
   threads: { id: string; isResolved: boolean; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
   readonly issueComments: string[];
+  /** Whether GitHub refuses every review comment the round creates. */
+  readonly rejectCreate?: boolean;
 };
 
 type Fixture = {
@@ -248,6 +256,18 @@ for (const [verdict, exit, paragraph] of rulings) {
     });
   });
 }
+
+test("a round whose only finding GitHub refused exits 1 saying it could not post it, rather than nothing open", async () => {
+  await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {
+    fixture.setGh({ ...fixture.gh(), rejectCreate: true });
+
+    const printed = await review(fixture);
+
+    assert.equal(printed.exit, 1, `${printed.stdout}${printed.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(printed.stdout, "");
+    assert.equal(printed.stderr, "squiz: round 1 found 1 finding and could not post it to PR #41\n");
+  });
+});
 
 test("stopping a run while it waits ends only the wait, and the next run returns the round's result", async () => {
   await withPullRequest([{ findings: [FINDING], verdicts: [], holdSeconds: 2 }], async (fixture) => {
