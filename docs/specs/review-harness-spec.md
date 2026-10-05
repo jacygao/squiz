@@ -221,8 +221,8 @@ Each record is in one of five states:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also when the round started and ended, and the reviewer's backend and pane or window, which `squiz status` prints. |
-| Failed | The reason the round failed, and whether its owner has been sent a note about it. Also when the round started and ended, and the reviewer's backend and pane or window where a reviewer started. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window, which `squiz status` prints. |
+| Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, and why. |
 
 A record also names the session that owns the work, where a trigger knew it:
