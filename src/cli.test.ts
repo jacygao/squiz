@@ -12,6 +12,7 @@ const shim = fileURLToPath(new URL("../bin/squiz", import.meta.url));
 const cliEntry = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
 const reviewModule = new URL("./review/review.ts", import.meta.url).href;
+const initModule = new URL("./review/init.ts", import.meta.url).href;
 
 // Anywhere that is not the plugin. The hook runs in the subagent's directory,
 // which is not even the worktree root, so every run here starts somewhere the
@@ -170,7 +171,7 @@ test("a command the binary does not have is named on stderr, and still exits 0",
   assert.equal(result.code, 0, "the binary is the hook entry point, and only exit 2 may block a turn");
   assert.equal(
     result.stderr,
-    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review\n',
+    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review, init\n',
     "the list backs the message, so a command the binary has must be on it",
   );
   assert.equal(result.stdout, "");
@@ -180,7 +181,7 @@ test("no command at all is reported the same way", async () => {
   const result = await run(shim, [], { cwd: elsewhere });
 
   assert.equal(result.code, 0);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init\n");
   assert.equal(result.stdout, "");
 });
 
@@ -557,6 +558,73 @@ test("a throw inside squiz review exits 1, which never reads as a result", async
 
     assert.equal(result.code, 1);
     assert.equal(result.stderr, "squiz: the review failed: Error: the wait exploded\n");
+    assert.equal(result.stdout, "");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("squiz init adds the review section to AGENTS.md, and prints the line that says so", async () => {
+  const root = await mkdtemp(join(tmpdir(), "squiz-init-cli-"));
+  try {
+    gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
+
+    const result = await run(shim, ["init"], { cwd: root });
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "squiz: added the review section to AGENTS.md\n");
+    assert.equal(result.stderr, "");
+    assert.match(await readFile(join(root, "AGENTS.md"), "utf8"), /^## Review\n/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("squiz init outside a git repository exits 1, and writes nothing", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "squiz-init-outside-"));
+  try {
+    const result = await run(shim, ["init"], { cwd: outside });
+
+    assert.equal(result.code, 1, "a person runs squiz init, and the exit is how they learn it did nothing");
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^squiz: nothing changed: the repository's root could not be found: [^\n]+\n$/u);
+    await assert.rejects(stat(join(outside, "AGENTS.md")));
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("a throw inside squiz init exits 1, which never reads as the section added", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-cli-"));
+  try {
+    const fixture = join(directory, "throwing-init.mjs");
+    await writeFile(
+      fixture,
+      [
+        'import { registerHooks } from "node:module";',
+        "registerHooks({",
+        "  load(url, context, nextLoad) {",
+        `    if (url === ${JSON.stringify(initModule)}) {`,
+        "      return {",
+        '        format: "module",',
+        "        shortCircuit: true,",
+        '        source: \'export function squizInit() { throw new Error("the append exploded"); }\',',
+        "      };",
+        "    }",
+        "    return nextLoad(url, context);",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await run(process.execPath, ["--import", pathToFileURL(fixture).href, cliEntry, "init"], {
+      cwd: onABranch,
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr, "squiz: squiz init failed: Error: the append exploded\n");
     assert.equal(result.stdout, "");
   } finally {
     await rm(directory, { recursive: true, force: true });
