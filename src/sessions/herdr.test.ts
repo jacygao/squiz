@@ -168,6 +168,61 @@ test("a pane Herdr refuses to open is refused, and nothing more is asked of it",
   });
 });
 
+test("a command given a workspace opens its tab there", () => {
+  withFakeHerdr(
+    {
+      "tab-create": [tabCreated("w2:p7")],
+      "agent-start": [agentStarted("squiz-test", "w2:p7")],
+      "pane-process-info": [processInfo("w2:p7", process.pid, 1)],
+    },
+    ({ options, calls }) => {
+      const started = startInHerdrPane({ ...command, workspace: "w2" }, options);
+
+      assert.equal(started.outcome, "started", JSON.stringify(started));
+      assert.equal(calls()[0], "tab create --cwd /somewhere --label squiz-test --no-focus --workspace w2");
+    },
+  );
+});
+
+test("a workspace that is not Herdr's shape is refused, and herdr is never run with it", () => {
+  for (const workspace of ["--focus", "", "w", "w1:p2", "W1", "w01", "w1 w2"]) {
+    withFakeHerdr({ "tab-create": [tabCreated("w1:p7")] }, ({ options, calls }) => {
+      const started = startInHerdrPane({ ...command, workspace }, options);
+
+      assert.equal(started.outcome, "refused", `${JSON.stringify(workspace)} read as ${JSON.stringify(started)}`);
+      assert.deepEqual(calls(), [], `herdr was run for ${JSON.stringify(workspace)}`);
+    });
+  }
+});
+
+test("a workspace Herdr no longer has opens the tab in the focused one instead", () => {
+  withFakeHerdr(
+    {
+      "tab-create": [refusal("workspace_not_found"), tabCreated("w1:p7")],
+      "agent-start": [agentStarted("squiz-test", "w1:p7")],
+      "pane-process-info": [processInfo("w1:p7", process.pid, 1)],
+    },
+    ({ options, calls }) => {
+      const started = startInHerdrPane({ ...command, workspace: "w2" }, options);
+
+      assert.equal(started.outcome, "started", JSON.stringify(started));
+      assert.deepEqual(calls().slice(0, 2), [
+        "tab create --cwd /somewhere --label squiz-test --no-focus --workspace w2",
+        "tab create --cwd /somewhere --label squiz-test --no-focus",
+      ]);
+    },
+  );
+});
+
+test("a server with no workspace at all still refuses when one was named", () => {
+  withFakeHerdr({ "tab-create": [refusal("workspace_not_found")] }, ({ options, calls }) => {
+    const started = startInHerdrPane({ ...command, workspace: "w2" }, options);
+
+    assert.equal(started.outcome, "refused", JSON.stringify(started));
+    assert.equal(calls().length, 2);
+  });
+});
+
 test("a herdr that is not on the path is refused", () => {
   const empty = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-path-"));
   try {
@@ -440,6 +495,36 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
       assert.deepEqual(stillRunning(started.leader, BOUND_MS), { outcome: "running" });
     } finally {
       assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
+    }
+  });
+
+  test("a tab opens in the workspace it is given, and in the focused one otherwise", () => {
+    const workspaces = (): { workspace_id: string; focused: boolean }[] =>
+      JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    // The first workspace a server has is focused, whatever it was created with.
+    if (workspaces().length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    const created = herdr(["workspace", "create", "--cwd", home, "--no-focus"]);
+    assert.equal(created.status, 0, `no workspace was created: ${created.output}`);
+    const unfocused: unknown = JSON.parse(created.output).result.workspace.workspace_id;
+    const listed = workspaces();
+    const focused = listed.find((workspace) => workspace.focused)?.workspace_id;
+    assert.ok(typeof unfocused === "string" && focused !== undefined && focused !== unfocused, JSON.stringify(listed));
+
+    // A workspace Herdr never had stands for one that has since closed: Herdr does not reuse an id.
+    for (const [given, expected] of [[unfocused, unfocused], [undefined, focused], ["w999", focused]] as const) {
+      const name = `squiz-ws-${given ?? "none"}`;
+      const started = startInHerdrPane(
+        { ...fakeCommand(name, join(home, `${name}.pid`), 60), ...(given === undefined ? {} : { workspace: given }) },
+        options,
+      );
+      assert.equal(started.outcome, "started", `given ${given}: ${JSON.stringify(started)}`);
+      if (started.outcome !== "started") continue;
+      try {
+        const pane = JSON.parse(herdr(["pane", "get", started.pane]).output);
+        assert.equal(pane.result.pane.workspace_id, expected, `given ${given}, the tab opened in ${pane.result.pane.workspace_id}`);
+      } finally {
+        assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
+      }
     }
   });
 

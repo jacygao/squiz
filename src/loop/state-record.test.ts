@@ -22,7 +22,7 @@ const owner = {
 
 /** One record in each of the five states, each carrying all § 3 gives it. */
 const everyState: readonly StateRecord[] = [
-  { head, activity: null, status: "queued", owner },
+  { head, activity: null, status: "queued", owner, herdrWorkspace: "w2" },
   { head, activity: reply, status: "reviewing", host: { pid: 4012, startedAt: 1_791_000_000 } },
   {
     head,
@@ -98,6 +98,10 @@ const malformed: readonly [string, unknown][] = [
   ["an owner that is not an object", { head, activity: null, status: "queued", owner: "me" }],
   ["an owner with no session", { head, activity: null, status: "queued", owner: { subagent: "a1" } }],
   ["an owner whose socket is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", messagingSocket: 3 } }],
+  ["an empty Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: "" }],
+  ["a numeric Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: 2 }],
+  // The round host puts it on a herdr command line, where this would be read as a flag.
+  ["a Herdr workspace that is not Herdr's shape", { head, activity: null, status: "queued", herdrWorkspace: "--focus" }],
   ["a reviewing record with no host", { head, activity: null, status: "reviewing" }],
   ["a host with no start time", { head, activity: null, status: "reviewing", host: { pid: 4012 } }],
   ["a host whose pid is zero", { head, activity: null, status: "reviewing", host: { pid: 0, startedAt: 1 } }],

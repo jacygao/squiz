@@ -10,6 +10,7 @@
  * Nothing here touches the filesystem or decides anything from a record.
  */
 
+import { isHerdrWorkspace } from "../sessions/herdr.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 
 /**
@@ -53,6 +54,8 @@ export type ReviewedExit = 0 | 2 | 3;
 type Shared = StateKey & {
   /** Absent where no trigger knew it, as for every state `squiz review` queued. */
   readonly owner?: Owner;
+  /** The Herdr workspace the trigger ran in, where it ran in one. The reviewer's tab opens there. */
+  readonly herdrWorkspace?: string;
 };
 
 export type StateRecord = Shared &
@@ -130,7 +133,16 @@ export function recordFrom(entry: unknown): ReadRecord {
 
   const owner = ownerFrom(entry["owner"]);
   if ("problem" in owner) return owner;
-  const shared: Shared = { head, activity, ...(owner.owner === undefined ? {} : { owner: owner.owner }) };
+  const workspace = entry["herdrWorkspace"];
+  if (workspace !== undefined && !(typeof workspace === "string" && isHerdrWorkspace(workspace))) {
+    return { problem: `has "herdrWorkspace" as ${render(workspace)} rather than a Herdr workspace id` };
+  }
+  const shared: Shared = {
+    head,
+    activity,
+    ...(owner.owner === undefined ? {} : { owner: owner.owner }),
+    ...(workspace === undefined ? {} : { herdrWorkspace: workspace }),
+  };
 
   const status = entry["status"];
   switch (status) {
