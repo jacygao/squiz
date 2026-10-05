@@ -7,7 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
-import { deliverNote, waitingNotes, writeNote, type NoteFields, type WaitingNote } from "./notes.ts";
+import { deliverNote, releaseNote, waitingNotes, writeNote, type NoteFields, type WaitingNote } from "./notes.ts";
 
 const SESSION = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const NOTES_MODULE = pathToFileURL(join(import.meta.dirname, "notes.ts")).href;
@@ -216,6 +216,33 @@ test("delivering a note moves it into delivered/, and it is no longer waiting", 
     assert.deepEqual(listed(directory, SESSION), []);
     assert.equal(readFileSync(join(directory, SESSION, "delivered", name), "utf8"), `to=${SESSION}\n`);
     assert.deepEqual(deliverNote(directory, SESSION, name), { outcome: "lost" });
+  });
+});
+
+test("releasing a delivered note leaves it waiting again, as it was written", async () => {
+  await withDirectory((directory) => {
+    const name = written(directory, SESSION, { to: SESSION });
+    deliverNote(directory, SESSION, name);
+
+    assert.deepEqual(releaseNote(directory, SESSION, name), { outcome: "released" });
+    assert.deepEqual(listed(directory, SESSION), [{ outcome: "read", name, fields: { to: SESSION } }]);
+    assert.deepEqual(deliverNote(directory, SESSION, name), { outcome: "delivered" });
+  });
+});
+
+test("releasing a note that is not delivered fails as a value, and a name that is not a note's is refused", async () => {
+  await withDirectory((parent) => {
+    const directory = join(parent, "notes");
+    const name = written(directory, SESSION, { to: "x" });
+    mkdirSync(join(directory, SESSION, "delivered"));
+    writeFileSync(join(parent, "outside.note"), "to=x\n");
+
+    assert.equal(releaseNote(directory, SESSION, name).outcome, "failed");
+    for (const refused of ["../../../outside.note", "delivered", ".", ".."]) {
+      assert.equal(releaseNote(directory, SESSION, refused).outcome, "failed", `releasing ${JSON.stringify(refused)} was not refused`);
+    }
+    assert.ok(existsSync(join(parent, "outside.note")), "a file outside the session was moved");
+    assert.deepEqual(listed(directory, SESSION).map((note) => note.name), [name]);
   });
 });
 

@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -97,6 +98,8 @@ type Hosted = {
   readonly summaryHook: string;
   /** The notes waiting in the episode's notes/, by session id. */
   readonly notes: Readonly<Record<string, readonly NoteFields[]>>;
+  /** How many notes each session has in delivered/. */
+  readonly delivered: Readonly<Record<string, number>>;
 };
 
 type Arrangement = {
@@ -226,6 +229,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       worktreeLeft: existsSync(worktree),
       summaryHook: existsSync(join(binaries, "on-summary.out")) ? readFileSync(join(binaries, "on-summary.out"), "utf8") : "",
       notes: notesIn(episode),
+      delivered: deliveredIn(episode),
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -247,6 +251,17 @@ function notesIn(episode: Episode): Record<string, readonly NoteFields[]> {
     });
   }
   return notes;
+}
+
+function deliveredIn(episode: Episode): Record<string, number> {
+  const directory = join(episode.directory, "notes");
+  const delivered: Record<string, number> = {};
+  if (!existsSync(directory) || !statSync(directory).isDirectory()) return delivered;
+  for (const session of readdirSync(directory)) {
+    const moved = join(directory, session, "delivered");
+    if (existsSync(moved)) delivered[session] = readdirSync(moved).length;
+  }
+  return delivered;
 }
 
 function git(directory: string, args: readonly string[]): void {
@@ -899,6 +914,61 @@ test("a result that cannot be recorded writes no note", async () => {
 
   assert.equal(ran.end.outcome, "state unwritable");
   assert.deepEqual(ran.notes, {});
+});
+
+/** A socket that reads each connection to its end, standing in for an owner session. */
+async function ownerSocket(): Promise<{ readonly path: string; readonly received: () => readonly string[]; readonly close: () => Promise<void> }> {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-owner-"));
+  const path = join(directory, "s.sock");
+  const received: string[] = [];
+  const server = createServer((socket) => {
+    let text = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: string) => (text += chunk));
+    socket.on("end", () => received.push(text));
+  });
+  await new Promise<void>((resolve) => server.listen(path, resolve));
+  return {
+    path,
+    received: () => received,
+    close: async () => {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+test("a subagent's note is posted to the socket its hook recorded, the parent's, and moved into delivered/", async () => {
+  const socket = await ownerSocket();
+  try {
+    const owner: Owner = { ...PARENT, messagingSocket: socket.path };
+    const ran = await host({
+      records: (fixture) => [queued(fixture.head(), null, owner)],
+      findings: [[finding("The name says nothing.")]],
+    });
+
+    const text = `Squiz reviewed PR #${PULL_REQUEST} at ${ran.firstHead.slice(0, 7)}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`;
+    assert.deepEqual(socket.received(), [`${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`]);
+    assert.deepEqual(ran.notes[PARENT.sessionId], [], `notes/ holds ${JSON.stringify(ran.notes)}`);
+    assert.equal(ran.delivered[PARENT.sessionId], 1);
+    assert.match(ran.log, /woke its owner/u);
+  } finally {
+    await socket.close();
+  }
+});
+
+test("a note whose owner's socket has gone stays waiting, host.log says why, and the result is unchanged", async () => {
+  const gone = join(tmpdir(), `squiz-gone-${process.pid}.sock`);
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, { ...MAIN, messagingSocket: gone })],
+    findings: [[finding("The name says nothing.")]],
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 2, `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(ran.end, { outcome: "nothing queued" });
+  assert.equal(ran.notes[MAIN.sessionId]?.length, 1, `notes/ holds ${JSON.stringify(ran.notes)}`);
+  assert.match(ran.log, new RegExp(`did not wake its owner: the post to ${gone} did not arrive`, "u"));
 });
 
 test("a note that cannot be written is reported in host.log, and changes neither the result nor what the host does next", async () => {

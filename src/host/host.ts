@@ -15,8 +15,10 @@
  * because nothing waits on the host to be told.
  *
  * **A note for a state's owner is written only once its result is recorded**,
- * because the note sends the owner to read that result. A note that cannot be
- * written goes to `host.log` and changes nothing else.
+ * because the note sends the owner to read that result. Where the owner's hook
+ * recorded a messaging socket, the host then wakes it there. A note that cannot
+ * be written, or a wake that does not arrive, goes to `host.log` and changes
+ * nothing else.
  */
 
 import { appendFileSync, existsSync } from "node:fs";
@@ -43,6 +45,7 @@ import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 import { takeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote } from "./owner-note.ts";
+import { wakeOwner } from "./wake.ts";
 
 // Each `ps` run that tells whether the lock's holder is still running.
 const LOCK_BOUND_MS = 5_000;
@@ -167,12 +170,12 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         return { outcome: "state unwritable", reason: recorded.reason };
       }
       log(`${named(oldest)}: recorded failed`);
-      noteOwners(episode, failed, log);
+      await noteOwners(episode, failed, log);
       continue;
     }
     if (closed.length > 0) {
       log(`${closed.length === 1 ? "1 queued state" : `${closed.length} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
-      noteOwners(episode, closed, log);
+      await noteOwners(episode, closed, log);
     }
     const round = taken;
     if (round === undefined) continue;
@@ -212,7 +215,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       return { outcome: "state unwritable", reason: recorded.reason };
     }
     log(`round ${round.number}: ${result.line}`);
-    noteOwners(episode, written, log);
+    await noteOwners(episode, written, log);
   }
 }
 
@@ -232,13 +235,26 @@ function inOrder(records: readonly StateRecord[], after?: StateKey): Recorded[] 
   return records.map((record, index) => ({ record, name: names[index] ?? record.head.slice(0, 7) }));
 }
 
-/** Write a note for the owner of each of `recorded` that gets one. */
-function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log): void {
+/** Write a note for the owner of each of `recorded` that gets one, and wake each owner that has a socket. */
+async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log): Promise<void> {
+  const notes = join(episode.directory, "notes");
   for (const { record, name } of recorded) {
     const note = ownerNote(Number(episode.id), record, name);
     if (note === undefined) continue;
-    const written = writeNote(join(episode.directory, "notes"), note.sessionId, note.fields);
-    log(written.outcome === "written" ? `${named(record)}: noted its owner, ${note.sessionId}` : `${named(record)}: ${written.reason}`);
+    const written = writeNote(notes, note.sessionId, note.fields);
+    if (written.outcome === "failed") {
+      log(`${named(record)}: ${written.reason}`);
+      continue;
+    }
+    log(`${named(record)}: noted its owner, ${note.sessionId}`);
+
+    const socket = record.owner?.messagingSocket;
+    const text = note.fields["text"];
+    if (socket === undefined || text === undefined) continue;
+    const woken = await wakeOwner({ notes, sessionId: note.sessionId, name: written.name, socket, text });
+    if (woken.outcome === "woken") log(`${named(record)}: woke its owner through ${socket}`);
+    else if (woken.outcome === "already delivered") log(`${named(record)}: its note was delivered before the host could post it`);
+    else log(`${named(record)}: did not wake its owner: ${woken.reason}`);
   }
 }
 
