@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — which directory a subagent's SubagentStop hook runs in, and § 7 — where a hook's stderr goes when it exits 0"
+settles: "§ 3 — which directory a subagent's SubagentStop hook runs in, and where a hook's stderr goes when it exits 0"
 issue: 264
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288 }

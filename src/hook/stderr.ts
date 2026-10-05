@@ -8,10 +8,8 @@
  * line written that way is lost exactly when it matters. `fs.writeSync` is a
  * `write(2)` call that has already happened by the time it returns.
  *
- * What is written is the caller's. Two different things go to this stream — the
- * failure pointer a round exits 0 with and the blocking reason a round exits 2
- * with — and each is composed somewhere else, so neither can grow into the
- * other here.
+ * What is written is the caller's. The failure pointer is composed somewhere
+ * else, so no second format can grow here.
  */
 
 import { writeSync } from "node:fs";

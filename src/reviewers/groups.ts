@@ -32,9 +32,8 @@
  * path is in the reviewer's own environment, and at the depth that grants a shell
  * the reviewer can write whatever it likes there.
  *
- * Nothing here throws. Every outcome is a value the caller reads, because this
- * runs inside a hook that may fail in any way except by preventing the coding
- * agent from finishing.
+ * Nothing here throws. Every outcome is a value the caller reads, because the
+ * round host has to record a result for every round it takes.
  */
 
 import { spawnSync } from "node:child_process";
@@ -267,9 +266,8 @@ export type GroupsStopped = {
  *
  * **`until` bounds every reading, both of them and each batch within them.** The
  * grace bounds the signals and nothing else, so a `ps` that will not answer would
- * otherwise hold the round open with no bound at all — past the ceiling the
- * runtime kills the hook at, with the review's own spend unrecorded and nothing
- * posted. A reading cut short at it establishes nothing, which refuses every
+ * otherwise hold the round open with no bound at all, with the review's own
+ * spend unrecorded and nothing posted. A reading cut short at it establishes nothing, which refuses every
  * group it covered rather than signalling any, and the round goes on to its
  * accounting and its posting.
  */

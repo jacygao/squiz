@@ -343,10 +343,9 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
 });
 
 /**
- * A window already spent makes no call at all.
+ * A reserve already spent makes no call at all.
  *
- * A call made past the end of the window is one the runtime kills the hook
- * during, and the round would then end having said nothing at all.
+ * A call made past the end of the reserve would run the round past its bound.
  */
 /**
  * A close reached before the review composes nothing, and says what the episode

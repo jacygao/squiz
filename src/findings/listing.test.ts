@@ -119,8 +119,8 @@ test("a pull request with nothing open says so in words", () => {
 });
 
 test("a thread on the file as a whole is listed as its file, not as its first line", () => {
-  // Both threads are on #80 and GitHub reads both back on line 1. Listing them
-  // alike is what this exists to stop.
+  // Both threads are on one pull request, and GitHub reads both back on line 1.
+  // Listing them alike is what this exists to stop.
   const printed = threadListing(80, [
     thread({
       id: "PRRT_kwDOUEd2qM6hqMTt",
@@ -166,7 +166,7 @@ test("a thread whose anchored line was edited is listed on the line it was ancho
 
 test("the identifier is the whole of the first field, so it copies into squiz reply", () => {
   const ids = ["PRRT_kwDOUEd2qM6hqQd7", "PRRT_kwDOUEd2qM6hqQfm"];
-  // What #80 carries: a path holding a space, so the location cannot be split on
+  // What a real pull request carried: a path holding a space, so the location cannot be split on
   // the first field; a path outside ASCII; and a headline holding both spaces and
   // the separator the severity sits in front of.
   const dashed: LineFinding = { ...partialPage, headline: "pageCount — the last one — drops a page" };

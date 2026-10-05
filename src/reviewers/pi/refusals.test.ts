@@ -42,7 +42,7 @@ function reasonFor(call: { toolName: string; input: unknown }): string {
 }
 
 /**
- * The commands the issue names, spelled here rather than read off the list.
+ * The commands to refuse, spelled here rather than read off the list.
  *
  * A test that took them from the list would pass against a list of typos, which
  * is the failure worth catching: a pattern matching nothing looks exactly like a

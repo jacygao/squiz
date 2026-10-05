@@ -8,8 +8,8 @@ import type { LineFinding } from "../findings/finding.ts";
 import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 import { composeReview, printReview, reviewOutputPath, type ReviewResult } from "./output.ts";
 
-// Every expected output below is copied from the specification's examples, so a
-// change of wording there shows here as a failure.
+// Every expected output below is written out whole, so any change of wording
+// shows here as a failure.
 const PATH = "/work/squiz/.squiz/41/review.txt";
 
 function thread(overrides: Partial<ReviewThread>): ReviewThread {

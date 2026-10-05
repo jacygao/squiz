@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — the window a round runs inside; § 2 — the Bash timeout and the stall watchdog; § 3 — what starts a round; § 8 — the five prerequisites for squiz review"
+settles: "§ 7 — the deadline `squiz review` waits within; § 2 — the Bash timeout and the stall watchdog; § 3 — what starts a round; § 8 — five of the settled prerequisites"
 issue: 278
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288, coding-agent: claude-opus-5-5 }
@@ -40,6 +40,10 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   outlasts it. The instruction does not hold. Background subagents did wait,
   two of two, because the finished command started them again.
 
+  2026-10-05: M7 moved the round out of the shell call into the round host
+  (§ 3). The shell call is now `squiz review` waiting within its 540-second
+  deadline (§ 7), and a stopped call ends only the wait.
+
 - **Expect no cleanup from a round stopped from outside, and expect no reviewer
   left behind.** The runtime sends `SIGTERM` to the command and to every process
   under it at the same instant, including a child started in a session of its
@@ -67,10 +71,16 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   stopping overrun and the process's own start included, before the shell's
   timeout moves it. Recommendation: a window of 540 seconds, which leaves a
   minute for both.
+
+  2026-10-05: settled. 540 seconds is now the deadline `squiz review` waits
+  within (§ 7), and no round runs inside a shell call.
 - **Whether § 9 says more about waiting.** The runtime's own message already says
   "do not end your turn to wait for it", and three subagents ended it anyway, so
   a sentence in the skill may not help. Recommendation: rely on the margin, and
   measure any added sentence against a moved command before shipping it.
+
+  2026-10-05: § 9's text now tells the agent to wait for a moved command to
+  finish and read its output before doing anything else.
 
 ## Reference
 

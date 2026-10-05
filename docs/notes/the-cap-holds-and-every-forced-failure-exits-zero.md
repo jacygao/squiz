@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether the round cap blocks R−1 times against a real runtime; § 7 — which failure rows a configuration or an environment can force, what each writes on stderr, and which rows a live run cannot reach at all; § 4 — whether a verdict of `open` re-opens a thread the loop had closed"
+settles: "§ 3 — whether the round cap hands threads back R−1 times against a real runtime, by blocking when this was recorded; § 7 — which failure rows a configuration or an environment can force, what each writes on stderr, and which rows a live run cannot reach at all; § 4 — whether a verdict of `open` re-opens a thread the loop had closed"
 issue: 201
 recorded: 2026-09-27
 versions: { claude-code: 2.1.270, pi: 0.85.1, provider: deepseek, model: deepseek-v4-pro, coding-agent: claude-sonnet-5, gh: 2.97.0, node: 24.15.0 }
@@ -41,6 +41,10 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   carried the blocking reason and no pointer beside it. No firing carried both,
   and no firing that failed was silent.
 
+  2026-10-05: since M7 no hook blocks or runs a round. The round host runs it,
+  `squiz review` exits 2 where threads are open and 1 where the round failed,
+  and a failed round posts a failure comment (§ 6, § 7).
+
 - **A verdict of `open` re-opens a thread the loop had closed.** A thread the
   previous episode's round 2 had resolved was handed to a later round with the
   defect restored, and GitHub reported it unresolved afterwards. That is the
@@ -73,7 +77,8 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   was read from, the setting, the value and the range, which is the cheapest
   proof that the file the round read is the file that was written. `timeout` is
   the setting to do it with: it is refused above 480 and its value is quoted
-  back in the pointer of a round it kills.
+  back in the pointer of a round it kills. 2026-10-05: M7 made the range 60 to
+  3,600 seconds, with 900 the default (§ 9 Configuration).
 
 - **Tell a driving session why a destructive step is wanted.** A parent given a
   numbered script that deleted the harness's own state directory investigated

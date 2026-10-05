@@ -40,6 +40,10 @@ pull request carrying 30,000 added lines across 400 files, run the fetch against
 it, and record the exit status, the HTTP status, the message and the last bytes
 of stdout. Issue #82 holds this.
 
+2026-10-05: settled outside the spec. #82 closed on a measurement that GitHub
+refuses a diff of 300 files or more with HTTP 406 and never truncates
+(unverified here).
+
 ## Reference
 
 The call, from a directory whose remotes name the repository:

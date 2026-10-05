@@ -8,8 +8,7 @@
  * one retry — is the same whatever reviewer a project configured.
  *
  * Nothing throws. Every outcome is a value the caller reads, because the round
- * runs inside a hook that may fail in any way except by preventing the coding
- * agent from finishing.
+ * host has to record a result for every round it takes.
  *
  * Deciding whether another round happens is the caller's. This runs one.
  */
@@ -63,9 +62,8 @@ const GRACE_MS = 2_000;
  *
  * Its own bound, and not part of the round's. It covers the readings rather than
  * the signals, which keep the grace above: a `ps` that will not answer has no
- * bound of its own, and the round would sit in its cleanup until the runtime
- * killed the hook — with the review already paid for, its spend unrecorded and
- * nothing posted. A reading cut short at this leaves the groups it covered alone,
+ * bound of its own, and the round would sit in its cleanup indefinitely — with
+ * the review already paid for, its spend unrecorded and nothing posted. A reading cut short at this leaves the groups it covered alone,
  * which is the same answer a machine without `ps` gets.
  *
  * This and four times the grace together are what the posting reserve has

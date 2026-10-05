@@ -51,9 +51,18 @@ recheck-when: git changes how worktree add checks out or how worktree remove del
   becomes when the add outlasts the part is not specified either. Recommend
   amending § 7's parts table to place both, and to give that case the outcome
   of a round that could not start.
+
+  2026-10-05: settled. § 7 The review budget counts the fetch and the add in
+  the 30 seconds before the review, and a snapshot not made in time is the row
+  for calls before the review that run out of time. § 4 The snapshot removes it
+  after the round's result is recorded, outside the round's deadline.
 - **§ 4's What it costs and § 8's Prerequisites still list the snapshot's time
   as not measured.** The time and disk part is settled here. What installing
   dependencies at `deep` adds is still open. Recommend narrowing both to that.
+
+  2026-10-05: settled. § 4 The snapshot tabulates these times, and § 8
+  Prerequisites lists them as measured and leaves `deep`'s install and very
+  large repositories open.
 
 ## Reference
 

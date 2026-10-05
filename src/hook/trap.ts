@@ -9,7 +9,7 @@
 
 import { reportFailure } from "./report.ts";
 
-// The two exits a round has: 0 lets the turn finish, 2 blocks it.
+// 0 lets the turn finish and 2 would block it. Every hook path returns 0.
 export type HookExit = 0 | 2;
 
 /**

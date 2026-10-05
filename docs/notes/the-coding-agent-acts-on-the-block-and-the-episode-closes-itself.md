@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether a live episode blocks, is acted on and closes itself, and what one costs; § 4 — whether a reviewer rules on the threads it is handed; § 2 — whether a coding agent's reply carries the marker Identity gives it"
+settles: "§ 3 — whether a live episode hands its threads to the coding agent, is acted on and closes itself, and what one costs; § 4 — whether a reviewer rules on the threads it is handed; § 2 — whether a coding agent's reply carries the marker Identity gives it"
 issue: 154
 recorded: 2026-09-26
 versions: { claude-code: 2.1.270, pi: 0.85.1, provider: deepseek, model: deepseek-v4-pro, coding-agent: claude-sonnet-5, gh: 2.97.0, node: 24.15.0 }
@@ -33,6 +33,10 @@ recheck-when: the coding agent's model changes, pi upgrades, or § 3's blocking 
   pushed, and replied on both. Round 2 was handed all three threads on the pull
   request, closed every one of them, found nothing new, and exited 0 with the
   episode's state written. Nothing declined anything.
+
+  2026-10-05: since M7 no hook blocks. The round runs in the round host, and
+  the coding agent reads the open threads from `squiz review`'s exit 2 output
+  (§ 3, § 6).
 
 - **Budget an episode in cents on the reviewer and in tens of cents on the
   coding agent.** The two rounds cost $0.0421 between them, and the Claude Code
@@ -91,6 +95,9 @@ recheck-when: the coding agent's model changes, pi upgrades, or § 3's blocking 
   to find out what they say is a step the harness can take for it, and the
   parser that reads a headline off a thread is being built for the summary
   comment anyway.
+
+  2026-10-05: settled as recommended. § 6 The `squiz` binary gives each line
+  the severity and headline of the finding.
 
 ## Reference
 

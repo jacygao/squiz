@@ -8,9 +8,8 @@
  * looks is capped, so a bound of minutes is never one long sleep, and a look
  * that arrives late is corrected at the next one instead of at the end.
  *
- * This is what stands between a reviewer that has hung and the runtime killing
- * the hook with nothing posted, so it is built to fire late rather than not at
- * all.
+ * This is what stands between a reviewer that has hung and a round that never
+ * ends with nothing posted, so it is built to fire late rather than not at all.
  *
  * One thing it cannot do. A timer runs on the event loop's timer phase, and a
  * caller that saturates the loop with microtasks never reaches it: the timer

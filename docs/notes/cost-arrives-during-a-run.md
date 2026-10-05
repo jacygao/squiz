@@ -1,5 +1,5 @@
 ---
-settles: "§ 8 — whether pi reports cost during a run"
+settles: "§ 4 — whether pi reports cost during a run, and how a round's cost is summed; § 7 — the cost a killed round records"
 issue: [12, 21]
 recorded: 2026-09-12
 versions: { pi: "0.84.2, 0.85.1", node: 24.15.0 }
@@ -38,7 +38,9 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
   failed round from a free one.
 - **`message_end` is the only event to read the cost from.** What
   `message_update` holds depends on the API path, and on one of the two measured
-  it holds zero for the whole of the message.
+  it holds zero for the whole of the message. 2026-10-05: M7 reads each
+  assistant message's usage from the report file the extension writes, not
+  from `pi`'s stream (§ 4 The `pi` adapter).
 - **The adapter assumes no provider reports cost, and treats one that does as
   the ordinary case.** Two providers on two API paths both report it, so the
   behaviour belongs to `pi` rather than to a provider — but `pi` prices from a

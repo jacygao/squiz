@@ -1,5 +1,5 @@
 ---
-settles: "§ 8 — the gh api shapes for a review comment thread's lifecycle"
+settles: "§ 2 — the gh api shapes for a review comment thread's lifecycle"
 issue: 10
 recorded: 2026-09-06
 versions: { gh: 2.97.0 }

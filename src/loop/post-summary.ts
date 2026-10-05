@@ -4,8 +4,8 @@
  *
  * **The comment is the episode's close and not a round's.** Only a round that
  * closed the episode reaches here. A round that blocks posts nothing, or the pull
- * request would carry a report of the review for every firing of the hook while
- * it was still going on.
+ * request would carry a report of the review for every round while it was still
+ * going on.
  *
  * Posting is a create and never an edit. Whatever this sends is permanent for the
  * episode, and a second episode on the same pull request adds a second comment
@@ -93,9 +93,9 @@ export type ClosingRound = {
  * Compose the summary for `closing` and post it on the pull request, once.
  *
  * `call.until` is the round's posting margin, and the call is not made at all
- * where nothing is left of it: a call made past the end of the window is one the
- * runtime kills the hook during, and the round would then end having said nothing
- * at all. The summary is lost in that case, which is what the caller reports.
+ * where nothing is left of it: a call made past the end of the reserve would run
+ * the round past its bound. The summary is lost in that case, which is what the
+ * caller reports.
  */
 export function postEpisodeSummary(closing: ClosingRound, call: GhCall): CommentPosting {
   const body = renderSummary({

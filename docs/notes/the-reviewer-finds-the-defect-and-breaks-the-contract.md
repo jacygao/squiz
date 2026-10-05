@@ -76,6 +76,8 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's output c
   broke the contract twice had found the defect both times, at `high` the first
   time. Taking the recommendation changes § 4's Charter, under what the reviewer
   returns, and § 7's failure row for output the adapter cannot parse.
+  2026-10-05: moot. § 4 Findings has the reviewer report through three calls,
+  and its last message is not read, so there is no object to fence.
 - **Whether anything is to hold the declared scope, now that the reviewer does
   not always.** Recommended: leave it with the reviewer and let the leakage
   show. A round holds the description and could weigh a finding against it, but

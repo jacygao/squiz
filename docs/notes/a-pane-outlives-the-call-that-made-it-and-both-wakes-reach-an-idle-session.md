@@ -1,5 +1,5 @@
 ---
-settles: "muster-spec § 5 — whether a session a trigger starts outlives the trigger, and how it is found again; § 6 — which wake reaches an idle Claude Code session; § 9 — spikes S1 and S3"
+settles: "§ 3 — whether a round host or a reviewer's pane outlives the trigger that started it, and which wake reaches an idle Claude Code session; § 4 — how a reviewer's pane is found again; § 8 — the prerequisites on a pane outliving its call and on the two wakes"
 issue: 277
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288, herdr: 0.9.3, tmux: 3.7b, pi: 0.85.1, macos: 26.6.2 }
@@ -79,7 +79,7 @@ after one.
 
 ## Needs your input
 
-- **Which wake muster uses for Claude Code.** Both work for a session that
+- **Which wake squiz uses for Claude Code.** Both work for a session that
   prompts for permissions. They differ in what the session is told:
   - `asyncRewake` arrives as a hook's feedback, and needs a waiter running for
     every turn that ends;
@@ -90,6 +90,10 @@ after one.
   session's own hook, and a message from another session is held for approval
   in a session that bypasses permissions, which was not tested. Keep the
   socket in mind for a coder whose waiter has gone.
+
+  2026-10-05: the harness spec's § 3 uses both. M7 built the socket wake and
+  held the `asyncRewake` waiter until after the MVP, so for now the socket is
+  the only wake.
 
 ## Reference
 

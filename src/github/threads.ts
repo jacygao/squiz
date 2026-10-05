@@ -199,7 +199,7 @@ export function listReviewThreads(pullRequestId: string, call: GhCall): ThreadLi
     }
 
     if (page.next === null) return { outcome: "listed", threads };
-    // A cursor that comes back unchanged would be followed forever, and a hook
+    // A cursor that comes back unchanged would be followed forever, and a round
     // that never returns is the one failure the harness cannot recover from.
     if (page.next === cursor) {
       return unreadable("GitHub answered with a review thread cursor that does not advance");

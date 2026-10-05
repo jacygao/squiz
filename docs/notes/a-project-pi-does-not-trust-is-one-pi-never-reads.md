@@ -51,6 +51,9 @@ recheck-when: pi upgrades, or pi's project trust resolution changes
   already withholds project extensions, and a tree that could name the model
   reviewing it could name a blind one.
 
+  2026-10-05: settled as recommended. § 4 The `pi` adapter passes
+  `--no-approve`, and only the project's shell command prefix still applies.
+
 ## Reference
 
 `SettingsManager.create(cwd, agentDir, { projectTrusted })` resolves the global

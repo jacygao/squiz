@@ -75,7 +75,8 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's reportin
   on a round, and this model was repriced within a week.
 - **Leave the time bound at 480 seconds.** The longest round used 314 of it, and
   a bound below 320 would cut off the widest reading measured with the review
-  nearly done.
+  nearly done. 2026-10-05: M7 raised the default to 900 seconds, settable 60 to
+  3,600 (§ 9 Configuration).
 - **Depth `read` leaves the tree alone.** After each of the three rounds `git
   status --porcelain` was empty, `HEAD` was unchanged, and the hash of `git
   ls-files -s` was identical to the reading taken before the first round.

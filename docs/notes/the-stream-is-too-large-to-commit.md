@@ -8,6 +8,10 @@ recheck-when: pi upgrades, or the reviewer's model changes
 
 # The stream is too large to commit
 
+2026-10-05: since M7 the round reads the reviewer's reports and usage from the
+report file its extension writes, and runs `pi` without `--mode json`, so no
+code reads this stream any more (§ 4 The `pi` adapter).
+
 ## Intent
 
 - **Nothing said how much output a real review produces.** The figure § 4 used
