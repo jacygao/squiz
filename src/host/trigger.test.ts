@@ -398,6 +398,48 @@ test("a host that took the state between the trigger's read and its queue keeps 
   });
 });
 
+test("a host that exits on an empty queue between the trigger's check and its queue is replaced", async () => {
+  await withFixture(async (fixture) => {
+    const self = ownIdentity();
+    const lock = join(fixture.episode.directory, "host.lock");
+    mkdirSync(fixture.episode.directory, { recursive: true });
+    writeFileSync(lock, `${JSON.stringify(self)}\n`);
+
+    // The host is seen running, then releases its lock and exits before the queue is written.
+    const result = decided(trigger(request(fixture, {
+      presence: () => {
+        rmSync(lock);
+        return { outcome: "running" };
+      },
+    })));
+
+    assert.equal(result.queued, true);
+    assert.equal(result.host.outcome, "started", `the queued state was left with no host: ${JSON.stringify(result.host)}`);
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+  });
+});
+
+test("a git that answers slowly is stopped at the trigger's deadline", async () => {
+  await withFixture((fixture) => {
+    // Every other git call goes to the real git, so only the branch lookup is slow.
+    const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    standIn(fixture.bin, "git", [
+      "#!/bin/sh",
+      'if [ "$1" = symbolic-ref ]; then sleep 1.2; fi',
+      `exec '${realGit}' "$@"`,
+      "",
+    ].join("\n"));
+
+    const began = Date.now();
+    const result = trigger(request(fixture, { until: deadlineIn(500) }));
+    const took = Date.now() - began;
+
+    assert.equal(result.outcome, "failed", JSON.stringify(result));
+    assert.match(result.outcome === "failed" ? result.reason : "", /current branch could not be resolved: git ran out of the time it was given/u);
+    assert.ok(took < 1_100, `the trigger ran ${took}ms past a 500ms deadline`);
+  });
+});
+
 /** Run one racer process and read the line it prints. */
 function startRacer(fixture: Fixture, at: number, linger: boolean) {
   const child = spawn(

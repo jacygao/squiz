@@ -138,7 +138,12 @@ export function trigger(request: TriggerRequest): Triggered {
     if (updated.outcome === "failed") return failed(updated.reason);
   }
 
-  const needsHost = decision.outcome === "start-host" || (decision.outcome === "queue" && decision.startHost);
+  // A host seen running before the queue was written can have found its queue
+  // empty and exited since, so the lock is read again once the state is there.
+  // A host started beside a live one exits at once on the lock.
+  const needsHost =
+    decision.outcome === "start-host" ||
+    (decision.outcome === "queue" && (decision.startHost || hostPresence(episode, undefined, request).outcome !== "running"));
   const host = needsHost ? startHost(request, episode, pullRequest.number) : ({ outcome: "not started" } as const);
   return { outcome: "decided", pullRequest, episode, state, threads: listed.threads, decision, queued, host };
 }
@@ -149,7 +154,7 @@ type Gate = { readonly outcome: "found"; readonly pullRequest: PullRequest } | F
 function gatePullRequest(request: TriggerRequest): Gate {
   const { directory, until } = request;
   const where = JSON.stringify(directory);
-  const branch = currentBranch(directory);
+  const branch = currentBranch(directory, until);
   if (branch.outcome === "failed") return failed(`the current branch could not be resolved: ${branch.reason}`);
   if (branch.outcome === "detached") {
     return noReview(`HEAD is detached in ${where}, so no pull request has it as its head`);
