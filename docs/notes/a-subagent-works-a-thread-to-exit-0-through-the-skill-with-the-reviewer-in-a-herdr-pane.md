@@ -15,8 +15,10 @@ brief that never named squiz. It opened a pull request, loaded
 on a planted off-by-one, and the command exited 2. The subagent fixed the code,
 added a test, pushed, replied with `squiz reply` and ran the command again.
 Round 2, in a second tab, ruled the thread `fixed`, and the command exited 0.
-Each tab closed when its round ended. Runs 1 and 3 reached no reviewer in Herdr,
-for two causes since fixed by #447 and #452.
+Each tab closed when its round ended. Neither run 1 nor run 3 completed a round
+in Herdr. In run 1 Herdr refused to start the reviewer, fixed by #447. In run 3
+the reviewer ran, found the planted defect and spent tokens, then was killed
+when the start's wait ran out, so its finding was never posted; #452 fixed that.
 
 ## Intent
 
