@@ -198,10 +198,15 @@ function place(path: string, identity: ProcessIdentity): Placing {
   }
 }
 
-type Holder =
+export type Holder =
   | { readonly outcome: "named"; readonly holder: ProcessIdentity }
   | { readonly outcome: "absent" }
   | { readonly outcome: "unknown"; readonly reason: string };
+
+/** The holder the lock `name` in `directory` names, read without taking it or creating anything. */
+export function lockHolder(directory: string, name: string): Holder {
+  return holderOf(join(directory, name));
+}
 
 /** The identity `path` names. */
 function holderOf(path: string): Holder {
