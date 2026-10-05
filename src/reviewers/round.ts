@@ -370,9 +370,9 @@ async function attempt(
     sessions.backends,
   );
   if (start.outcome === "failed") {
-    // A pane left open may be running a reviewer, so it is stopped and closed
-    // rather than another reviewer started beside it.
-    if (start.leftOpen !== undefined) await stopLeftOpen(start.leftOpen, sessions.environment, invocation.roundSpace);
+    // A failed start may have run the reviewer, so it is stopped and its pane
+    // closed rather than another reviewer started beside it.
+    await stopFailedStart(start.leftOpen, sessions.environment, invocation.roundSpace);
     const left = start.leftOpen === undefined ? undefined : closeLeftOpen(start.leftOpen, sessions.environment);
     return unstartable(`the reviewer could not be started: ${start.reason}${left === undefined ? "" : `; ${left}`}`);
   }
@@ -834,16 +834,25 @@ function closePlace(place: SessionPlace, environment: Environment): string | und
 }
 
 /**
- * Stop whatever a failed start left running in its pane, as a reviewer is
- * stopped at the bound: its group, then the groups its shells recorded.
+ * Stop whatever a failed start may have left running, as a reviewer is stopped
+ * at the bound: its group, then the groups its shells recorded.
+ *
+ * The recorded groups are stopped whether or not a pane was left open. A shell
+ * the reviewer detached leads a session of its own, which no pane's close
+ * reaches, and a start that failed after the reviewer ran may have closed its
+ * pane already.
  *
  * tmux closes a window with one `SIGHUP`, which a command may ignore, so the
  * window's command is found from tmux and its group signalled first. Herdr's
  * own close escalates to `SIGKILL` across the pane's shell session, which holds
  * the command, so a Herdr pane has only its recorded groups to stop here.
  */
-async function stopLeftOpen(left: LeftOpen, environment: Environment, space: RoundSpace | undefined): Promise<void> {
-  const pid = left.backend === "tmux" ? windowProcess(left.window, environment, SESSION_BOUND_MS) : undefined;
+async function stopFailedStart(
+  left: LeftOpen | undefined,
+  environment: Environment,
+  space: RoundSpace | undefined,
+): Promise<void> {
+  const pid = left?.backend === "tmux" ? windowProcess(left.window, environment, SESSION_BOUND_MS) : undefined;
   if (pid === undefined) {
     if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
     return;

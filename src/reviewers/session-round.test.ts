@@ -16,8 +16,10 @@ import { after, before, describe, test, type TestContext } from "node:test";
 
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import { startChild } from "../sessions/child.ts";
+import { closeHerdrPane, startInHerdrPane } from "../sessions/herdr.ts";
 import { openWindow } from "../sessions/tmux.ts";
 import type { Adapter, Invocation } from "./adapter.ts";
+import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { grants } from "./pi/argv.ts";
 import { REPORTS_VARIABLE } from "./pi/report-file.ts";
 import { readReports as parse } from "./pi/reports.ts";
@@ -492,5 +494,62 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     assert.ok(await eventually(() => !running(note.pid), 2_000), `the reviewer ${note.pid} is still running`);
     assert.ok(await eventually(() => !running(note.tool ?? 0), 2_000), `the reviewer's tool ${note.tool} is still running`);
     assert.match(herdr(["pane", "get", place.pane]), /pane_not_found/u, "the reviewer's pane is still open");
+  });
+
+  // The pane's close reaches the pane's shell session. A shell the reviewer
+  // detached leads a session of its own, so only its recorded group reaches it.
+  test("a start that fails and closes its pane still stops the groups the reviewer's shells recorded", async (t) => {
+    const tree = treeFor(t);
+    const made = makeRoundSpace(join(tree, ".squiz/142"));
+    assert.ok(made.outcome === "made", "the round's own space must be there before the reviewer starts");
+    const pidFile = join(tree, "pids");
+    const readyFile = join(tree, "ready");
+    const toolFile = join(tree, "tool.cjs");
+    const tool = [
+      "process.on('SIGTERM', () => {});",
+      `require("node:fs").writeFileSync(${JSON.stringify(readyFile)}, "up");`,
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+    const shell = [shellPrefix, `'${process.execPath}' '${toolFile}' &`, `printf '%s' "$!" > '${pidFile}'`].join("\n");
+    const reviewer = [
+      'const fs = require("node:fs");',
+      'const { spawn } = require("node:child_process");',
+      `fs.writeFileSync(${JSON.stringify(toolFile)}, ${JSON.stringify(tool)});`,
+      `spawn("/bin/bash", ["-c", ${JSON.stringify(shell)}], { stdio: "ignore", detached: true });`,
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+    const backends: Backends = {
+      // As a start that launched the reviewer and then failed: Herdr closes the
+      // pane it opened, and names none left open.
+      herdr: (command, options) => {
+        const started = startInHerdrPane(command, options);
+        if (started.outcome !== "started") return started;
+        const until = Date.now() + 10_000;
+        while (!(existsSync(readyFile) && existsSync(pidFile)) && Date.now() < until) spawnSync("sleep", ["0.05"]);
+        const closed = closeHerdrPane(started.pane, options);
+        assert.equal(closed.outcome, "closed", JSON.stringify(closed));
+        return { outcome: "failed", reason: "ps could not be run: a stand-in for ps failing" };
+      },
+      tmux: () => ({ outcome: "refused", reason: "not asked" }),
+      child: async () => ({ outcome: "failed", reason: "a second reviewer was started" }),
+    };
+
+    const round = await runRound(
+      adapterOf({ inPane: reviewer, detached: "process.exit(3)" }, "pi"),
+      { ...invocationIn(tree), depth: "deep", roundSpace: made.outcome === "made" ? made.space : undefined },
+      60,
+      { environment, name: "squiz-142-r1", backends },
+    );
+
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.match(round.outcome === "setup" ? round.reason : "", /a stand-in for ps failing/u);
+    const toolPid = Number(readFileSync(pidFile, "utf8"));
+    const outlived = !(await eventually(() => !running(toolPid), 2_000));
+    if (outlived) {
+      // The tool and the keeper beside it share the detached shell's group.
+      const group = spawnSync("ps", ["-o", "pgid=", "-p", String(toolPid)], { encoding: "utf8" }).stdout.trim();
+      process.kill(-Number(group), "SIGKILL");
+    }
+    assert.ok(!outlived, `the detached tool ${toolPid} outlived the round`);
   });
 });
