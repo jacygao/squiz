@@ -152,8 +152,8 @@ test("a finding scoped to a line the change touched routes inline", () => {
   const routed = routeFindings([onAChangedLine], cardDiff);
   const routing = inlineOnly(routed);
 
-  // The anchor is read off the finding without a cast, which is what M3 posts
-  // the thread from.
+  // The anchor is read off the finding without a cast, which is what the thread
+  // is posted from.
   const anchored: LineFinding = routing.finding;
   assert.equal(anchored.file, "src/ui/card.ts");
   assert.equal(anchored.line, 88);

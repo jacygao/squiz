@@ -36,8 +36,8 @@ import { failureLine } from "./report.ts";
 
 const PULL_REQUEST = 142;
 
-// § 7's rows arrive here as conclusions, because the round reports every one of
-// them as a value rather than by throwing.
+// Every failure row arrives here as a conclusion, because the round reports
+// each one as a value rather than by throwing.
 
 function failedRound(failure: RoundFailure, reason: string): RoundConclusion {
   return { outcome: "failed", failure, reason };
@@ -229,7 +229,7 @@ test("a GitHub that could not be reached is reported", () => {
 });
 
 test("a state file that will not take the round surfaces the underlying error", () => {
-  // § 7 asks for the error rather than the word "failed", because a state file
+  // The error is surfaced rather than the word "failed", because a state file
   // nothing can write fails the same way every round until someone reads why.
   const reason =
     "nothing was posted: the episode's state could not be written: EACCES: permission denied, open '/work/.squiz/a1e/state.json'";

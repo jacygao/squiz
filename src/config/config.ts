@@ -56,8 +56,8 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
  * A `.squiz.json` that cannot be read or parsed, or that holds a value the
  * settings table does not give it.
  *
- * This is a failure the harness controls, so the round exits 0 and the hook's
- * stderr names it rather than the throw reaching the coding agent.
+ * This is a failure the harness controls, so stderr names it rather than the
+ * throw reaching the coding agent.
  */
 export class ConfigError extends Error {
   constructor(message: string, options?: ErrorOptions) {

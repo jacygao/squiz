@@ -603,8 +603,8 @@ test("the extension pi loads writes to the file the variable names", async (t) =
 });
 
 /**
- * Nothing sets the variable until the adapter reads the file, and the rounds
- * read `pi`'s stdout until then. So with it unset every call answers as it did.
+ * Only the adapter's command line sets the variable. With it unset, every call
+ * still answers rather than being refused.
  */
 test("with no file named, every call answers as it did", async (t) => {
   keepVariable(t);

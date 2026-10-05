@@ -32,7 +32,7 @@ function comment(...lines: readonly string[]): string {
 const cardReference = "`AGENTS.md`: re-run placement whenever the card's height changes.";
 
 /**
- * The finding the specification's own example is rendered from.
+ * A finding with every field filled, the optional reference included.
  */
 const card: LineFinding = {
   scope: "line",
@@ -50,8 +50,7 @@ const card: LineFinding = {
 };
 
 /**
- * The specification's example, with the wrapping of the document it is printed
- * in undone. Markdown renders a soft wrap and the line it wrapped the same, and
+ * The comment `card` renders to, each field on one line. Markdown renders a soft wrap and the line it wrapped the same, and
  * the renderer leaves the reviewer's text as it was handed it.
  */
 const cardComment = comment(
@@ -65,8 +64,8 @@ const cardComment = comment(
   `> ${cardReference}`,
 );
 
-// The same comment with the reference deleted, which is what the specification
-// says it has to stand as.
+// The same comment with the reference deleted, which must still stand as a
+// comment.
 const cardCommentWithoutReference = comment(
   "**Squiz reviewer · high — Card can be placed off-screen once the explanation expands**",
   "",
@@ -127,8 +126,8 @@ test("a reference that is present and empty is quoted no differently from none",
 /**
  * A newline in a headline would split the first line out of its bold span, and
  * one in a point of reasoning would break out of its bullet. The fields below
- * carry the wrapping the specification's own document prints them with, and one
- * more in the headline.
+ * carry soft wraps where a printed document would wrap them, and one more in the
+ * headline.
  */
 test("text that carries newlines is rendered as one line rather than breaking the format", () => {
   const wrapped: LineFinding = {

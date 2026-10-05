@@ -18,8 +18,8 @@
  * reserve that starts when the review ends.
  *
  * Nothing here exits, and nothing here decides whether another round happens.
- * The exit code is the hook's, and the block-or-close arithmetic belongs to the
- * decision this calls.
+ * The exit code is the caller's, and the block-or-close arithmetic belongs to
+ * the decision this calls.
  */
 
 import { mkdirSync } from "node:fs";

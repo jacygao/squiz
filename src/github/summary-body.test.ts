@@ -95,12 +95,11 @@ function aboutTheWorktree(found: Partial<ConfinementEvidence>): string {
 }
 
 /**
- * The episode the specification's example is written from.
+ * An episode with a thread in every status.
  *
- * Its Notes carries the two the example does: a finding about the change as a
- * whole, and a file that changed while the reviewer ran. Each is one line rather
- * than the example's wrapped two, because the comment a person reads is markdown
- * and the wrap is not in it.
+ * Its Notes carries a finding about the change as a whole, and a file that
+ * changed while the reviewer ran. Each is one line rather than wrapped, because
+ * the comment a person reads is markdown and the wrap is not in it.
  */
 test("the episode renders as the specification shows", () => {
   const episode: ClosedEpisode = {

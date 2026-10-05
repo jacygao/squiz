@@ -6,12 +6,12 @@
  * Absent and unreadable are different answers, and keeping them apart is most of
  * what this module is for. A file that is not there is a first round. A file
  * that is there and does not read back is not, because a round that took the
- * two the same way would start the count again every time the hook fired, and
- * the round count is what bounds the loop.
+ * two the same way would start the count again on every round, and the round
+ * count is what bounds the loop.
  *
  * Nothing here throws. A write that fails comes back carrying the error the
- * filesystem gave, because the subagent has to finish its turn whatever the
- * state file does, and a round that stops reviewing has to say why.
+ * filesystem gave, because a round has to end whatever the state file does, and
+ * a round that stops reviewing has to say why.
  *
  * Nothing here decides anything from the state either. This reads it and writes
  * it.

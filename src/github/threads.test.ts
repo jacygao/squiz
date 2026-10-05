@@ -412,7 +412,8 @@ test("a thread GitHub named no line for is still anchored to a line", async () =
 
 test("a thread on the file as a whole is told from a thread on the first line", async () => {
   // The two are byte-identical in `line` and `originalLine`, which is why the
-  // subject type is read at all. Both nodes are as #80 answers them.
+  // subject type is read at all. Both nodes are as GitHub answered them for a
+  // real pull request.
   await withFakeGh(
     [
       threadsPage([

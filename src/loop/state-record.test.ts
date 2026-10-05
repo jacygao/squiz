@@ -21,7 +21,7 @@ const owner = {
   messagingSocket: "/tmp/claude-501/messaging-60517e1f.sock",
 };
 
-/** One record in each of the five states, each carrying all § 3 gives it. */
+/** One record in each of the five states, each carrying every field its state holds. */
 const everyState: readonly StateRecord[] = [
   { head, activity: null, status: "queued", owner, herdrWorkspace: "w2" },
   { head, activity: reply, status: "reviewing", host: { pid: 4012, startedAt: 1_791_000_000 }, round: { number: 3 } },

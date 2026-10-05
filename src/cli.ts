@@ -62,8 +62,8 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return printed.exit;
   }
 
-  // Exit 2 is how a round blocks the coding agent's turn, and a name the binary
-  // has no command for is not grounds for that.
+  // Exit 2 says threads are open, and a name the binary has no command for is
+  // not grounds for that.
   const named = command === undefined ? "no command" : `no command ${JSON.stringify(command)}`;
   reportFailure(`${named}. The commands are: ${commands.join(", ")}`);
   return 0;

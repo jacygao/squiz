@@ -166,7 +166,7 @@ test("a round that blocks keeps its exit 2, and no failure pointer joins its rea
 });
 
 test("a failure the round handles itself goes out through the same one line", async () => {
-  // How every later milestone reports a failure it saw coming: report, then
+  // How a failure the caller saw coming is reported: report, then
   // exit 0 on its own terms rather than by throwing.
   const run = await runInChild(
     hook(`() => {
