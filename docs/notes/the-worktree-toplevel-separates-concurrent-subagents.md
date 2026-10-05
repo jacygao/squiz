@@ -22,17 +22,17 @@ directory is where its dispatcher stood, which
 
 - **An episode is located by `git rev-parse --show-toplevel`, resolved from the
   hook's own working directory.** It is the only one of the three available
-  answers that is stable, normalised and different per subagent. § 3's
-  shared-tree detection already compares this value, and the same value is what
-  every other per-episode thing hangs off.
+  answers that is stable, normalised and different per subagent, and it is what
+  every other per-episode thing hangs off. § 3's shared-tree detection compared
+  this value too, until M10 removed it: each reviewer now reads a snapshot that
+  only it writes.
 - **The harness must not use `cwd` from the payload, nor the hook process's own
   working directory, as the episode's directory or as a key.** Both are the
   subagent's directory. They equal the worktree root only when the subagent was
   dispatched from the worktree root, which is the dispatcher's habit rather than
   a guarantee. Two sessions started in two subdirectories of one shared worktree
   would carry two different `cwd` values and one toplevel, so keying on `cwd`
-  would read a shared tree as two separate episodes — the exact failure § 3's
-  shared-tree detection exists to catch.
+  would read one shared tree as two separate episodes.
 - **§ 3 holds as written.** Nothing here contradicts it. The refinement is that
   "each hook resolves its own working directory" has to mean resolving that
   directory through git, not reading it.
@@ -91,9 +91,9 @@ episode can outlive the block budget being spent.
 
 ## Limits
 
-- **Two concurrent episodes in one shared worktree were not run.** The
-  shared-tree branch of § 3 is reasoned from the subdirectory result above, not
-  observed live.
+- **Two concurrent episodes in one shared worktree were not run.** What this
+  note says about a shared tree is reasoned from the subdirectory result above,
+  not observed live.
 - **The subagent could not move its own shell out of the worktree.** A bare
   `cd /private/tmp` as its own Bash call did not persist: the next `pwd` was the
   worktree again. Nothing here says what a hook's working directory would be in
