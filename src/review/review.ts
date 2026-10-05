@@ -234,9 +234,10 @@ function notReviewed(
   hops: number,
 ): Settled | undefined {
   const records = state.records ?? [];
-  const superseded = supersededBy(record);
-  if (superseded !== undefined) {
-    const newer = records.findLast((held) => !sameState(held, record) && superseded(held));
+  if (supersededName(record) !== undefined) {
+    // Followed by its full key alone. A record from before records kept it is
+    // waited out, because the reason names only a commit other states can share.
+    const newer = record.supersededBy === undefined ? undefined : recordFor(records, record.supersededBy);
     if (newer === undefined || hops >= records.length) return undefined;
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
   }
@@ -256,18 +257,11 @@ function notReviewed(
 
 type NotReviewed = Extract<StateRecord, { readonly status: "not reviewed" }>;
 
-/**
- * The state a superseded record names, as a test on records, and the name it is
- * printed by. `undefined` where the record was not superseded.
- */
-function supersededBy(record: NotReviewed): ((held: StateRecord) => boolean) & { readonly named: string } | undefined {
-  const found = /^superseded by ([0-9a-f]+)( with different replies)?$/u.exec(record.reason);
-  const commit = found?.[1];
-  if (found === null || commit === undefined) return undefined;
-  // A state on the same commit differs only in its replies, which the reason does not name.
-  const sameCommit = found[2] !== undefined;
-  const test = (held: StateRecord): boolean => (sameCommit ? held.head === record.head : held.head.startsWith(commit));
-  return Object.assign(test, { named: record.reason.slice("superseded by ".length) });
+const SUPERSEDED = "superseded by ";
+
+/** The state that superseded `record` as its reason names it, or `undefined` where none did. */
+function supersededName(record: NotReviewed): string | undefined {
+  return record.reason.startsWith(SUPERSEDED) ? record.reason.slice(SUPERSEDED.length) : undefined;
 }
 
 function compose(build: (threads: readonly ReviewThread[]) => ReviewResult): Settled {
@@ -295,11 +289,6 @@ function roundResult(
   // A record from before records kept the round's number: the count of rounds stands in.
   const round = record.round?.number ?? state.rounds.length;
   const unposted = record.unposted;
-  // A round whose every finding GitHub refused reached nothing it could hand
-  // over, so its clean exit would hide them all.
-  if (unposted !== undefined && unposted.failed === unposted.of) {
-    return { outcome: "unposted", pullRequest: waiting.pullRequest, round, findings: unposted.of };
-  }
   const lost =
     unposted === undefined
       ? []
@@ -364,7 +353,7 @@ function stillReviewing(context: Context, records: readonly StateRecord[]): Revi
     const next = underway ?? records.find((held) => held.status === "queued");
     if (next !== undefined) return { ...about, wait: "clean", commit, reviewing: next.head.slice(0, 7) };
   }
-  const superseded = record?.status === "not reviewed" ? supersededBy(record) : undefined;
-  if (superseded !== undefined) return { ...about, wait: "superseded", commit, reviewing: superseded.named };
+  const superseded = record?.status === "not reviewed" ? supersededName(record) : undefined;
+  if (superseded !== undefined) return { ...about, wait: "superseded", commit, reviewing: superseded };
   return { ...about, wait: "under review", commit };
 }

@@ -25,6 +25,7 @@ import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Verdict } from "../findings/status.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Plan, PlannedStart } from "./host-fixture.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { runReview } from "./review.ts";
 
 const NUMBER = 41;
@@ -265,7 +266,40 @@ test("a round whose only finding GitHub refused exits 1 saying it could not post
 
     assert.equal(printed.exit, 1, `${printed.stdout}${printed.stderr}\n${hostLog(fixture.episode)}`);
     assert.equal(printed.stdout, "");
-    assert.equal(printed.stderr, "squiz: round 1 found 1 finding and could not post it to PR #41\n");
+    assert.equal(printed.stderr, "squiz: review failed: round 1 found 1 finding and could not post it to PR #41\nsquiz: the failure is posted on PR #41\n");
+  });
+});
+
+test("a round whose every finding failed to post is a failed round that leaves the episode open, so the run after an exit 4 retries it rather than printing a close (#426)", async () => {
+  // The second start is the retry the next run asks for, and GitHub refuses it too.
+  const refused: PlannedStart = { findings: [FINDING], verdicts: [] };
+  await withPullRequest([{ ...refused, holdSeconds: 3 }, refused], async (fixture) => {
+    fixture.setGh({ ...fixture.gh(), rejectCreate: true });
+
+    const first = await runReview({
+      directory: fixture.worktree,
+      pullRequest: NUMBER,
+      environment: {},
+      pollMs: 100,
+      until: deadlineIn(1_500),
+      host: (pullRequest) => ({ command: process.execPath, args: [hostFixture, String(pullRequest), fixture.planFile] }),
+    });
+    assert.equal(first.exit, 4, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    for (let waited = 0; waited < 200 && ["queued", "reviewing"].includes(stateOf_ifAny(fixture.episode) ?? "queued"); waited += 1) {
+      await sleep(50);
+    }
+
+    const next = await review(fixture);
+
+    assert.equal(next.exit, 1, `${next.stdout}${next.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(next.stdout, "");
+    assert.match(next.stderr, /^squiz: review failed: round 2 found 1 finding and could not post it to PR #41\n/u);
+    assert.notEqual(stateOf(fixture.episode).closeReported, true, "the episode closed over a finding nobody saw");
+    assert.deepEqual(
+      fixture.gh().issueComments.filter((body) => !body.startsWith("**Squiz review failed")),
+      [],
+      "a summary was posted for a round that posted none of its findings",
+    );
   });
 });
 

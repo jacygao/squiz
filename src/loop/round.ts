@@ -555,6 +555,20 @@ async function reviewOn(
   if (review.outcome !== "reviewed") return salvage(review, handedOver, posting, confinement);
 
   const account = report(review, handedOver, posting);
+  // A round that put none of its findings up has handed nothing over, so its
+  // close would read as a review with nothing open. It fails instead, the episode
+  // stays open, and a new commit, reply or run of `squiz review` retries it.
+  const outcomes = account.findings.outcomes;
+  if (outcomes.length > 0 && outcomes.every((outcome) => outcome.outcome === "failed")) {
+    const them = outcomes.length === 1 ? "1 finding and could not post it" : `${outcomes.length} findings and could not post them`;
+    return {
+      outcome: "failed",
+      failure: "harness",
+      reason: `round ${recorded.rounds.length} found ${them} to PR #${pullRequest.number}`,
+      confinement,
+      salvaged: account,
+    };
+  }
   const threads = [
     ...settled(handedOver, account.verdicts.threads),
     ...threadsOpened(account.findings),

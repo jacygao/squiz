@@ -120,6 +120,7 @@ const everyState: readonly StateRecord[] = [
     ownerNoted: false,
     lines: ["the failure is posted on PR #41"],
   },
+  { head, activity: null, status: "not reviewed", reason: "superseded by 3f9c2e0 with different replies", supersededBy: { head, activity: reply } },
   // Written before records kept the round, as the next two are.
   { head, activity: null, status: "reviewed", result: "clean, episode open" },
   { head, activity: null, status: "failed", reason: "the round host died", ownerNoted: false },
@@ -243,6 +244,8 @@ const malformed: readonly [string, unknown][] = [
   ["new findings counted with a fraction", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1.5 }],
   ["a close at a bound that is neither", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "deadline" }],
   ["a move of HEAD that is not a string", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], moved: 1 }],
+  ["a successor with no activity field", { head, activity: null, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: { head: laterHead } }],
+  ["a successor that is not an object", { head, activity: null, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: "8d21a4f" }],
   ["unposted findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: "1", of: 1 } }],
   // More failed than the round posted is a writer that counted something else.
   ["more unposted findings than the round had", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: 2, of: 1 } }],

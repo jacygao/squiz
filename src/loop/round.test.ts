@@ -1910,16 +1910,17 @@ test("a diff that could not be fetched ends the round before the reviewer runs",
   assert.equal(ran.invocations.length, 0);
 });
 
-test("a finding that could not be posted is reported and does not read as clean", async () => {
+test("a round none of whose findings could be posted fails, and never closes as clean (#426)", async () => {
   const ran = await runInFixture({
     answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), summary: SUMMARY_POSTED },
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.deepEqual(ran.conclusion.posted, []);
-  assert.equal(ran.conclusion.findings.outcomes.length, 1);
-  assert.equal(ran.conclusion.findings.outcomes[0]?.outcome, "failed");
+  assert.ok(ran.conclusion.outcome === "failed", `the round concluded ${ran.conclusion.outcome}`);
+  assert.equal(ran.conclusion.reason, "round 1 found 1 finding and could not post it to PR #142");
+  assert.deepEqual(ran.conclusion.salvaged?.posted, []);
+  assert.equal(ran.conclusion.salvaged?.findings.outcomes[0]?.outcome, "failed");
+  assert.equal(ran.kinds.includes("summary"), false, "a summary was posted for a round that handed nothing over");
 });
 
 test("the posting margin bounds every call the round makes after the review", async () => {
@@ -1929,8 +1930,8 @@ test("the posting margin bounds every call the round makes after the review", as
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.ok(ran.conclusion.outcome === "close");
-  const outcome = ran.conclusion.findings.outcomes[0];
+  assert.ok(ran.conclusion.outcome === "failed", `the round concluded ${ran.conclusion.outcome}`);
+  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
   assert.equal(outcome?.outcome, "failed");
   assert.match(
     outcome?.outcome === "failed" ? outcome.reason : "",
@@ -1962,9 +1963,9 @@ test("a review that returned late leaves the posting what is left of the window,
     reviewer: answersThenHolds([finding("The flag is never read")]),
   });
 
-  assert.ok(ran.conclusion.outcome === "close");
-  const outcome = ran.conclusion.findings.outcomes[0];
-  assert.equal(outcome?.outcome, "failed", "a round that could not post is never a clean round");
+  assert.ok(ran.conclusion.outcome === "failed", "a round that could not post is never a clean round");
+  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
+  assert.equal(outcome?.outcome, "failed");
   assert.match(
     outcome?.outcome === "failed" ? outcome.reason : "",
     /ran out before this call was made/u,
@@ -1975,10 +1976,11 @@ test("a review that returned late leaves the posting what is left of the window,
     ["prlist", "threads", "diff"],
     "a call made past the end of the window is one the runtime kills the hook during",
   );
+  assert.ok(ran.conclusion.failureComment?.posting.outcome === "failed", "the failure comment was posted past the window");
   assert.match(
-    summaryReason(ran.conclusion.summary),
+    ran.conclusion.failureComment.posting.reason,
     /ran out before this call was made/u,
-    "the episode closed without its summary, and the round has to say so for the pointer to name it",
+    "the round has to say why its failure went unposted for the pointer to name it",
   );
 });
 

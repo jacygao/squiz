@@ -147,6 +147,8 @@ export type StateRecord = Shared &
     | {
         readonly status: "not reviewed";
         readonly reason: string;
+        /** The state that superseded this one, where one did. `reason` names it for a person, and only by its commit. */
+        readonly supersededBy?: StateKey;
       }
   );
 
@@ -226,7 +228,14 @@ export function recordFrom(entry: unknown): ReadRecord {
     case "not reviewed": {
       const reason = entry["reason"];
       if (!isText(reason)) return { problem: `has "reason" as ${render(reason)}` };
-      return { record: { ...shared, status, reason } };
+      const by = entry["supersededBy"];
+      if (by === undefined) return { record: { ...shared, status, reason } };
+      const byHead = isObject(by) ? by["head"] : undefined;
+      const byActivity = isObject(by) ? by["activity"] : undefined;
+      if (!isText(byHead) || (byActivity !== null && !isText(byActivity))) {
+        return { problem: `has "supersededBy" as ${render(by)} rather than a state's head and activity` };
+      }
+      return { record: { ...shared, status, reason, supersededBy: { head: byHead, activity: byActivity } } };
     }
     default:
       return { problem: `has "status" as ${render(status)}, which is none of the five a record can be in` };

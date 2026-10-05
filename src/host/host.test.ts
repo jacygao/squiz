@@ -491,6 +491,7 @@ test("a state superseded by a later commit is recorded not reviewed, and only th
     activity: null,
     status: "not reviewed",
     reason: `superseded by ${newer.slice(0, 7)}`,
+    supersededBy: { head: newer, activity: null },
   });
   assert.ok(second?.status === "reviewed", `the newest state is recorded as ${JSON.stringify(second)}`);
 });
@@ -505,6 +506,8 @@ test("a state superseded by a later reply on the same commit is recorded not rev
   const [first, second] = recordsOf(ran.state);
   assert.ok(first?.status === "not reviewed", `the older state is recorded as ${JSON.stringify(first)}`);
   assert.equal(first.reason, `superseded by ${ran.firstHead.slice(0, 7)} with different replies`);
+  // The reason names the successor by its commit alone, which another state can share.
+  assert.deepEqual(first.supersededBy, { head: ran.firstHead, activity: null });
   assert.equal(second?.status, "reviewed");
 });
 

@@ -288,7 +288,9 @@ function resultOf(
     }
     case "superseded": {
       const reason = `superseded by ${supersededBy(taken, conclusion.by)}`;
-      return { records: () => inOrder([notReviewed(key, reason)]), line: `${named(taken)} not reviewed: ${reason}` };
+      const by = { head: conclusion.by.head, activity: conclusion.by.activity };
+      const record = { ...notReviewed(key, reason), supersededBy: by };
+      return { records: () => inOrder([record]), line: `${named(taken)} not reviewed: ${reason}` };
     }
     case "episode-over":
       return {

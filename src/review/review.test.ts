@@ -289,7 +289,7 @@ test("a state left not reviewed by the cap is handed the close, with the line sa
 test("a state superseded before its round started follows to the state that superseded it, and returns its result", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [
-      { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f" },
+      { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER },
       { ...LATER, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
     ], { rounds: [NO_COST] });
 
@@ -300,9 +300,29 @@ test("a state superseded before its round started follows to the state that supe
   });
 });
 
+test("a state superseded by a reply not yet queued waits for that reply's state, never an older record on its commit", async () => {
+  await withWorktree(async (fixture) => {
+    const replyA: StateKey = { head: OWN.head, activity: "PRRC_replyA" };
+    const replyB: StateKey = { head: OWN.head, activity: "PRRC_replyB" };
+    records(fixture, [
+      { ...OWN, status: "failed", reason: "the provider refused the credential", ownerNoted: false },
+      { ...replyA, status: "not reviewed", reason: "superseded by 3f9c2e0 with different replies", supersededBy: replyB },
+    ]);
+    const triggered = { ...decided(fixture, { outcome: "queue", startHost: false }), state: replyA };
+
+    const printed = await runReview(request(fixture, { triggered, until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz is reviewing PR #41 at 3f9c2e0 with different replies instead of 3f9c2e0. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
 test("a superseded state whose wait runs out before the newer state's round ends exits 4, naming both", async () => {
   await withWorktree(async (fixture) => {
-    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f" }, reviewing(LATER)]);
+    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }, reviewing(LATER)]);
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
 
@@ -311,20 +331,6 @@ test("a superseded state whose wait runs out before the newer state's round ends
       printed.stdout.split("\n")[1],
       "Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.",
     );
-  });
-});
-
-test("a round whose findings all failed to post exits 1 saying so, and never reads as nothing open", async () => {
-  await withWorktree(async (fixture) => {
-    records(fixture, [
-      { ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, unposted: { failed: 1, of: 1 }, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-    ], { closeReported: true, rounds: [NO_COST] });
-
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
-
-    assert.equal(printed.exit, 1, printed.stdout);
-    assert.equal(printed.stdout, "");
-    assert.equal(printed.stderr, "squiz: round 1 found 1 finding and could not post it to PR #41\n");
   });
 });
 
