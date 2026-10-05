@@ -18,13 +18,14 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-c
 ## Decisions
 
 - **Read a Copilot round's tokens from the end of the run, not from its calls.**
-  No event in `--output-format json` carries usage for one model call.
   `model.call_start`, `model.call_finished`, `assistant.message` and
-  `assistant.turn_end` carry none. The totals arrive once, as the run ends.
+  `assistant.turn_end` carry no usage, so no event reports a call as it happens.
+  The totals arrive once, as the run ends.
 - **Pass `--usage-output-file` and read the file, rather than the stream.** It
-  holds tokens by kind and by model, which the stream's last events do not. The
-  stream's `session.usage_checkpoint` carries AI credits and premium requests
-  without tokens, and `result` carries premium requests alone.
+  holds the run's tokens by kind and by model, which the stream does not. The
+  stream's `session.usage_checkpoint` carries the run's AI credits and premium
+  requests, and the last call's `prompt_tokens` and `cache_read` alone. `result`
+  carries premium requests alone.
 - **Treat a Copilot round stopped by `SIGTERM` as reporting its total, and one
   stopped by `SIGKILL` as reporting nothing.** On `SIGTERM` Copilot wrote the
   usage file and emitted its final events before exiting. After `SIGKILL` there
@@ -41,8 +42,8 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-c
 - **Whether AI credits should be recorded beside tokens.** Copilot reports no
   dollars. It reports AI credits, as `totalNanoAiu` (10⁹ to a credit), and
   premium requests. Recommended: record `totalNanoAiu` as the round's cost, and
-  leave premium requests out. They counted one prompt per run whatever the
-  number of calls: 0.33 for a seven-call run on `claude-haiku-4.5`, and 0 on
+  leave premium requests out. They are one figure per run, set by the model
+  and not by the number of calls: 0.33 for a seven-call run on `claude-haiku-4.5`, and 0 on
   `gpt-5-mini`.
 
 ## Reference
