@@ -7,20 +7,29 @@
  *   is known.
  * - **Refused**: Herdr opened no pane, for certain, so the caller can start the
  *   command somewhere else without running it twice.
- * - **Failed**: anything else. A pane may have opened and the command may have
- *   run. A pane this module opened is closed before it says so, and named where
+ * - **Failed**: anything else. A pane may have opened, but the command never
+ *   ran. A pane this module opened is closed before it says so, and named where
  *   the close could not be confirmed.
  *
- * **The leader is the pane's foreground group, read while the command runs.**
- * `shell_pid` is the pane's shell, whose group does not hold the command. Once
- * the command exits, the foreground group is the shell's again, so a group equal
- * to the shell's is never returned.
+ * **The start returns once the command is running, however long it runs.**
+ * The command is typed into the pane's shell behind a gate: a `/bin/sh` that
+ * writes its pid, waits for the gate to open, and then becomes the command. The
+ * gate opens only once the leader has been read, so a command that would exit
+ * at once is still running when it is read, and a start that fails never lets
+ * the command run.
+ *
+ * **The leader is the pane's foreground group, read while the gate is shut.**
+ * `shell_pid` is the pane's shell, whose group does not hold the command, so a
+ * group equal to the shell's is never returned.
  *
  * Herdr is before 1.0. Each answer is read field by field, and one that cannot
  * be read is a failure, never a pane. Nothing here throws.
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { identityOf, type ProcessIdentity } from "./process.ts";
 
@@ -38,13 +47,13 @@ export type HerdrOptions = {
 
 export type PaneCommand = {
   readonly directory: string;
-  /** The tab's label and the agent's name. Herdr refuses a name not matching `[a-z][a-z0-9_-]{0,31}`. */
+  /** The tab's label. */
   readonly name: string;
-  /** The agent kind Herdr starts, which also names the executable it runs. */
-  readonly kind: string;
+  /** The executable, found on the path of the pane's shell. */
+  readonly program: string;
   readonly arguments: readonly string[];
-  /** How long Herdr waits for the command to be ready, on top of the bound. */
-  readonly readyWithinMs: number;
+  /** How long the command may take to start running once the pane's shell has it. */
+  readonly startsWithinMs: number;
   /** The workspace the tab opens in. Absent, it opens in the focused one. */
   readonly workspace?: string;
   /**
@@ -79,11 +88,69 @@ export function isHerdrWorkspace(id: string): boolean {
  * refusal cannot mean some other workspace.
  */
 export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): PaneStart {
-  // Herdr refuses to start a command with a newline or a tab in any argument,
-  // and says so only once the tab is open. Refused here, nothing opens.
-  const unsafe = command.arguments.findIndex((argument) => /[\n\t]/u.test(argument));
+  // The pane's shell reads the command as typed, so a control character in it
+  // would be a key: a newline would end the line early, and a tab would complete.
+  const unsafe = command.arguments.findIndex((argument) => CONTROL.test(argument));
   if (unsafe !== -1) {
-    return { outcome: "refused", reason: `Herdr cannot start argument ${unsafe + 1}, which holds a newline or a tab` };
+    const reason = `argument ${unsafe + 1} holds a control character, which a pane's shell would read as a key`;
+    return { outcome: "refused", reason };
+  }
+  let gate: string;
+  try {
+    gate = mkdtempSync(join(tmpdir(), "squiz-gate-"));
+  } catch (cause) {
+    return { outcome: "refused", reason: `no gate could be made to hold the command back: ${String(cause)}` };
+  }
+  const started = startBehind(gate, command, options);
+  // An opened gate is the command's to remove, on its way to running.
+  if (started.outcome !== "started") rmSync(gate, { recursive: true, force: true });
+  return started;
+}
+
+/** Close `pane`, and confirm with Herdr that it no longer has it. */
+export function closeHerdrPane(pane: string, options: HerdrOptions): PaneClose {
+  // What the close said is not trusted either way. Only asking for the pane afterwards confirms it.
+  const close = herdr(["pane", "close", pane], options.environment, options.boundMs);
+  const after = herdr(["pane", "get", pane], options.environment, options.boundMs);
+  if (after.outcome === "refused" && after.code === "pane_not_found") return { outcome: "closed" };
+  const closeSaid = close.outcome === "answered" ? "closed" : describe(close);
+  const afterSaid = after.outcome === "answered" ? "Herdr still has the pane" : describe(after);
+  return { outcome: "failed", reason: `herdr pane close: ${closeSaid}; then herdr pane get: ${afterSaid}` };
+}
+
+/**
+ * What the pane's shell runs: `/bin/sh -c GATE <gate> <polls> <program> <arguments…>`.
+ *
+ * It writes its pid to `<gate>/pid`, or `<gate>/absent` where the program is not
+ * on its path. It then waits for `<gate>/go`, and becomes the program. It gives
+ * up after `<polls>` waits without ever running the program, so a start that
+ * failed and could not close its pane still runs nothing.
+ */
+const GATE = [
+  'd=$0; n=$1; shift',
+  'command -v "$1" >/dev/null 2>&1 || { : > "$d/absent"; exit 127; }',
+  'echo $$ > "$d/pid.part" && mv "$d/pid.part" "$d/pid" || exit 125',
+  'while [ ! -e "$d/go" ]; do n=$((n - 1)); [ "$n" -gt 0 ] || exit 125; sleep 0.05; done',
+  'rm -f "$d/go"; rmdir "$d" 2>/dev/null',
+  'exec "$@"',
+].join("; ");
+
+const GATE_POLL_MS = 50;
+
+// Longer than every step between the pid appearing and the gate opening, each
+// of which is bounded once.
+const GATE_HOLDS_BOUNDS = 4;
+
+// Any C0 control character, and DEL.
+const CONTROL = /[\u0000-\u001f\u007f]/u;
+
+function startBehind(gate: string, command: PaneCommand, options: HerdrOptions): PaneStart {
+  const polls = Math.ceil((GATE_HOLDS_BOUNDS * options.boundMs) / GATE_POLL_MS);
+  const line = ["/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments]
+    .map(quoted)
+    .join(" ");
+  if (CONTROL.test(line)) {
+    return { outcome: "refused", reason: `the gate ${JSON.stringify(gate)} holds a control character` };
   }
   const variables = Object.entries(command.variables ?? {}).flatMap(([name, value]) => ["--env", `${name}=${value}`]);
   const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus", ...variables];
@@ -110,44 +177,27 @@ export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): P
     return { outcome: "failed", reason: `herdr tab create named no pane: ${JSON.stringify(created.result)}` };
   }
 
-  const start = [
-    "agent",
-    "start",
-    command.name,
-    "--kind",
-    command.kind,
-    "--pane",
-    pane,
-    "--timeout",
-    String(command.readyWithinMs),
-    "--",
-    ...command.arguments,
-  ];
-  // A new pane's shell is busy with its own startup for a while, and Herdr
-  // refuses with `agent_pane_busy` until it is at its prompt. That refusal is
-  // given before Herdr sends the pane anything, so asking again cannot start
-  // the command twice.
-  const busyUntil = Date.now() + options.boundMs;
-  let agent = herdr(start, options.environment, command.readyWithinMs + options.boundMs);
-  while (agent.outcome === "refused" && agent.code === "agent_pane_busy" && Date.now() < busyUntil) {
-    pause(BUSY_RETRY_MS);
-    agent = herdr(start, options.environment, command.readyWithinMs + options.boundMs);
-  }
-  if (agent.outcome === "refused" && agent.code === "agent_pane_busy") {
-    const reason = `herdr agent start: ${describe(agent)}, still after ${options.boundMs}ms of asking again`;
-    return abandon(pane, reason, options);
-  }
-  if (agent.outcome !== "answered") return abandon(pane, `herdr agent start: ${describe(agent)}`, options);
-  if (field(agent.result, "type") !== "agent_started") {
-    return abandon(pane, `herdr agent start did not say it started: ${JSON.stringify(agent.result)}`, options);
-  }
+  // A new pane's shell runs its own startup first, and a line typed meanwhile
+  // can be lost to it.
+  const notReady = atPrompt(pane, options);
+  if (notReady !== undefined) return abandon(pane, notReady, options);
 
+  // `pane run` types the line and returns at once. Whatever it answered, the
+  // line may have been typed, which is safe only because the gate is still shut.
+  const sent = herdr(["pane", "run", pane, line], options.environment, options.boundMs);
+  if (sent.outcome !== "answered") return abandon(pane, `herdr pane run: ${describe(sent)}`, options);
+
+  const pid = gatedPid(gate, command);
+  if (pid.outcome !== "read") return abandon(pane, pid.reason, options);
+  // The gate becomes the command without changing its pid, group or start
+  // time, so the identity read now is the command's.
   const group = foregroundGroup(pane, options);
   if (group.outcome !== "read") return abandon(pane, group.reason, options);
-  const leader = identityOf(group.group, options.boundMs);
-  if (leader.outcome === "gone") {
-    return abandon(pane, `the foreground group's leader ${group.group} had gone when it was read`, options);
+  if (group.group !== pid.pid) {
+    return abandon(pane, `the pane's foreground group is ${group.group}, not the command's ${pid.pid}`, options);
   }
+  const leader = identityOf(pid.pid, options.boundMs);
+  if (leader.outcome === "gone") return abandon(pane, `the command ${pid.pid} had gone before its gate opened`, options);
   if (leader.outcome === "unknown") return abandon(pane, leader.reason, options);
   // A group id is not reused while the group has a member, so the same group
   // afterwards means the identity read in between is its leader's, not a stranger's.
@@ -157,18 +207,12 @@ export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): P
     const changed = `the pane's foreground group changed from ${group.group} to ${again.group} while it was read`;
     return abandon(pane, changed, options);
   }
+  try {
+    writeFileSync(join(gate, "go"), "");
+  } catch (cause) {
+    return abandon(pane, `the gate could not be opened: ${String(cause)}`, options);
+  }
   return { outcome: "started", pane, leader: leader.identity };
-}
-
-/** Close `pane`, and confirm with Herdr that it no longer has it. */
-export function closeHerdrPane(pane: string, options: HerdrOptions): PaneClose {
-  // What the close said is not trusted either way. Only asking for the pane afterwards confirms it.
-  const close = herdr(["pane", "close", pane], options.environment, options.boundMs);
-  const after = herdr(["pane", "get", pane], options.environment, options.boundMs);
-  if (after.outcome === "refused" && after.code === "pane_not_found") return { outcome: "closed" };
-  const closeSaid = close.outcome === "answered" ? "closed" : describe(close);
-  const afterSaid = after.outcome === "answered" ? "Herdr still has the pane" : describe(after);
-  return { outcome: "failed", reason: `herdr pane close: ${closeSaid}; then herdr pane get: ${afterSaid}` };
 }
 
 /** Close a pane a start opened and could not finish, and say why the start failed. */
@@ -178,11 +222,52 @@ function abandon(pane: string, reason: string, options: HerdrOptions): PaneStart
   return { outcome: "failed", reason: `${reason}; and ${closed.reason}`, paneLeftOpen: pane };
 }
 
-const BUSY_RETRY_MS = 100;
+const RETRY_MS = 100;
 
 /** Block this thread for `ms`. The start is synchronous throughout, so there is nothing to yield to. */
 function pause(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Wait for the pane's shell to hold the foreground alone, and say why not where it never did. */
+function atPrompt(pane: string, options: HerdrOptions): string | undefined {
+  const until = Date.now() + options.boundMs;
+  for (;;) {
+    const info = processInfo(pane, options);
+    if (info.outcome !== "read") return info.reason;
+    if (info.group === info.shell) return undefined;
+    if (Date.now() >= until) {
+      return `the pane's shell was still running ${info.group} in the foreground after ${options.boundMs}ms`;
+    }
+    pause(RETRY_MS);
+  }
+}
+
+type PidRead = { readonly outcome: "read"; readonly pid: number } | { readonly outcome: "unknown"; readonly reason: string };
+
+/** The pid the gate wrote, once it has. */
+function gatedPid(gate: string, command: PaneCommand): PidRead {
+  const until = Date.now() + command.startsWithinMs;
+  for (;;) {
+    if (existsSync(join(gate, "absent"))) {
+      return { outcome: "unknown", reason: `the pane's shell found no ${command.program} on its path` };
+    }
+    let written: string | undefined;
+    try {
+      written = readFileSync(join(gate, "pid"), "utf8").trim();
+    } catch {
+      written = undefined;
+    }
+    if (written !== undefined) {
+      const pid = Number(written);
+      if (isPid(pid)) return { outcome: "read", pid };
+      return { outcome: "unknown", reason: `the gate wrote ${JSON.stringify(written)}, which is no pid` };
+    }
+    if (Date.now() >= until) {
+      return { outcome: "unknown", reason: `the command did not start in the pane within ${command.startsWithinMs}ms` };
+    }
+    pause(GATE_POLL_MS);
+  }
 }
 
 type GroupRead =
@@ -191,6 +276,20 @@ type GroupRead =
 
 /** The pane's foreground process group, where it is not the shell's. */
 function foregroundGroup(pane: string, options: HerdrOptions): GroupRead {
+  const info = processInfo(pane, options);
+  if (info.outcome !== "read") return info;
+  if (info.group === info.shell) {
+    const reason = `the pane's foreground group ${info.group} is its shell's, so the command was not running`;
+    return { outcome: "unknown", reason };
+  }
+  return { outcome: "read", group: info.group };
+}
+
+type InfoRead =
+  | { readonly outcome: "read"; readonly group: number; readonly shell: number }
+  | { readonly outcome: "unknown"; readonly reason: string };
+
+function processInfo(pane: string, options: HerdrOptions): InfoRead {
   const answer = herdr(["pane", "process-info", "--pane", pane], options.environment, options.boundMs);
   if (answer.outcome !== "answered") {
     return { outcome: "unknown", reason: `herdr pane process-info: ${describe(answer)}` };
@@ -202,11 +301,17 @@ function foregroundGroup(pane: string, options: HerdrOptions): GroupRead {
     const said = JSON.stringify(answer.result);
     return { outcome: "unknown", reason: `herdr pane process-info named no group and shell: ${said}` };
   }
-  if (group === shell) {
-    const reason = `the pane's foreground group ${group} is its shell's, so the command was not running`;
-    return { outcome: "unknown", reason };
-  }
-  return { outcome: "read", group };
+  return { outcome: "read", group, shell };
+}
+
+/**
+ * `text` as one word to a POSIX shell, zsh or fish.
+ *
+ * Inside single quotes all three take every character literally but the quote,
+ * which closes the quotes, is written escaped, and opens them again.
+ */
+function quoted(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
 type Answer =
@@ -218,7 +323,8 @@ type Answer =
 /**
  * Run `herdr` with `args`, and read its answer.
  *
- * - **Answered**: it exited 0 with a `result` and no `error`.
+ * - **Answered**: it exited 0 with a `result` and no `error`, or exited 0 and
+ *   printed nothing at all, as `pane run` does.
  * - **Refused**: it exited non-zero with an `error` carrying a `code`, and no `result`.
  * - **Absent**: there is no `herdr` to run, so it did nothing.
  * - **Unknown**: anything else, which may have done anything.
@@ -241,6 +347,7 @@ function herdr(args: readonly string[], environment: HerdrEnvironment, boundMs: 
 
   // Herdr prints an answer on stdout and a refusal on stderr.
   const said = run.stdout.trim() === "" ? run.stderr.trim() : run.stdout.trim();
+  if (run.status === 0 && said === "") return { outcome: "answered", result: null };
   let parsed: unknown;
   try {
     parsed = JSON.parse(said);
