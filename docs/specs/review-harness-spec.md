@@ -20,10 +20,8 @@ two directions at once:
    have skimmed, which is the same failure arriving quietly.
 
 A reviewing agent reads the change and leaves its findings on the pull request,
-and the two agents work through them there. A review starts when the coding agent
-finishes its work, or when it runs one command. The reviewer runs as a session of
-its own, and the coding agent reads the findings off the pull request. A person
-opens a pull request that has already been reviewed.
+and the two agents work through them there. A person opens a pull request that
+has already been reviewed.
 
 ## 2. Dependencies
 
@@ -41,68 +39,46 @@ A terminal multiplexer is optional. Where tmux or Herdr is running, each
 reviewer runs in a pane of it, where a person can watch it. Where neither is,
 the reviewer runs detached, and a log holds its progress.
 
-### Verified against
-
-The versions the design was checked against, and the command that re-checks
-each.
-
-| | Version | Re-check with |
-|---|---|---|
-| `git` | 2.50.1 | `git --version` |
-| `gh` | 2.97.0, authenticated against github.com | `gh --version`, `gh auth status` |
-| `pi` | 0.84.2 | `pi --version` |
-| GitHub Copilot CLI | 1.0.91 | `copilot --version` |
-| Claude Code | 2.1.261 | `claude --version` |
-
-These behaviours were established rather than assumed:
+### Behaviour the design rests on
 
 - **`gh pr comment` and `gh pr review` take a body only.** Neither accepts a
-  path or a line, so every inline comment goes through `gh api`. Re-check with
-  `gh pr review --help`.
+  path or a line, so every inline comment goes through `gh api`.
 - **Claude Code runs a shell command under a timeout, and moves a command that
   reaches it to the background rather than stopping it.** The timeout is 120
   seconds where the agent passes none, and at most 600 where it passes one, read
   from `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`. The agent is told the
   command moved, with the file its output goes to. Where background tasks are
   disabled the command is stopped instead, and a command a foreground subagent
-  moved stops when that subagent's run ends. Documented, in Claude Code's tools
-  reference under the Bash tool.
+  moved stops when that subagent's run ends.
 - **A foreground subagent often ends its run while its moved command is still
-  running, and the command is stopped with it.** The runtime tells the subagent
-  not to end its turn; three of five foreground subagents ended it anyway.
-  Background subagents waited. Measured against 2.1.288.
+  running, and the command is stopped with it.**
 - **A command stopped from outside gets `SIGTERM`, and so does every process
   under it, in the same instant**, including one started in a session of its
   own. `SIGKILL` follows one to two seconds later for whatever ignored it.
-  Moving a command to the background sends nothing. Measured against 2.1.288.
+  Moving a command to the background sends nothing.
 - **Claude Code fails a subagent that makes no progress for 600 seconds, and a
   subagent waiting on a shell command is making progress.** A hook that holds a
   subagent is not. The threshold is read from
-  `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`. Measured against 2.1.270 and 2.1.288.
+  `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS`.
 - **A long command output reaches the agent shortened, in a way that depends on
-  the shell call's exit status.** Measured against 2.1.289:
+  the shell call's exit status.**
   - A call that exits non-zero is cut to a head-and-tail excerpt of about 10,000
     characters, with no path to the rest. Over about 30,000 characters it is
     first cut to 30,000, so its real end is lost as well as its middle.
   - A call that exits 0 with a long output is saved to a file, and the agent is
     shown a preview of about 2 KB that names the file.
   - A coding agent that runs `squiz review 41; echo "EXIT=$?"` makes the call
-    exit 0, so its output is never cut. Most subagents ran it that way.
+    exit 0, so its output is never cut.
 - **A process outlives Claude Code stopping a command or a hook only if it leaves
   both the command's process tree and its process group.** A double fork with
-  `setsid` between the forks does. A plain `&`, `setsid` alone,
-  `nohup … & disown` and `( nohup … & )` do not. A tmux window, a Herdr pane and
-  an agent `herdr agent start` started all outlive it as well, because the
-  multiplexer's server is their parent, and so does a tmux server the call itself
-  started. Measured against 2.1.288 on macOS.
+  `setsid` between the forks does. A tmux window, a Herdr pane and an agent
+  `herdr agent start` started all outlive it as well, because the multiplexer's
+  server is their parent, and so does a tmux server the call itself started.
 - **An `asyncRewake` hook's exit 2 and a post to the session's
   `CLAUDE_CODE_MESSAGING_SOCKET` each start a turn in an idle interactive
   session**, ten minutes after its turn ended as well as one. The runtime enforces
   an `asyncRewake` hook's `timeout`, and a hook stopped at it wakes nothing. Every
   socket post reaches the agent as "Another Claude session sent a message".
-  Measured against 2.1.288.
-- **A `SubagentStop` payload's `session_id` is the session that dispatched the
-  subagent**, and its `agent_id` is the subagent's own. Measured against 2.1.261.
 
 ### GitHub access
 
