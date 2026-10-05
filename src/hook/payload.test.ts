@@ -54,6 +54,10 @@ test("the key is the subagent's id", () => {
   assert.equal(idIn(payloadText()), AGENT_ID);
 });
 
+test("a SubagentStop with an empty agent_type is no subagent's work", () => {
+  assert.deepEqual(readPayload(payloadText({ agent_type: "" })), { outcome: "no subagent's work" });
+});
+
 test("the key is never prompt_id, which two subagents share", () => {
   // `prompt_id` is per user turn in the parent session: the same string for two
   // subagents at once, and a different one between one subagent's own stops.

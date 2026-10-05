@@ -15,10 +15,15 @@
  * means to block, so reading it as a reason to stop would cap every episode at
  * one round.
  *
+ * A `SubagentStop` whose `agent_type` is the empty string is no subagent's
+ * work, on the terms `readFiring` sets.
+ *
  * Nothing here throws, and no failure carries the payload's text: a subagent's
  * last message is in there, and the one line a failure is reported as has no
  * room for it.
  */
+
+import { readFiring } from "../sessions/firing.ts";
 
 /** What the harness reads from one firing. */
 export type Payload = {
@@ -29,6 +34,7 @@ export type Payload = {
 /** The payload read, or why nothing could be read from it. */
 export type PayloadRead =
   | { readonly outcome: "read"; readonly payload: Payload }
+  | { readonly outcome: "no subagent's work" }
   | { readonly outcome: "unreadable"; readonly reason: string };
 
 /** The hook's stdin. The payload arrives on it and nothing else does. */
@@ -65,6 +71,8 @@ export async function readPayloadFrom(stream: PayloadStream): Promise<PayloadRea
 /** Read `text` as a payload, on the same terms as reading it from stdin. */
 export function readPayload(text: string): PayloadRead {
   if (text.trim() === "") return unreadable("the hook was given no payload on stdin");
+  // The environment only supplies the owner's socket, which nothing here reads.
+  if (readFiring(text, {}).outcome === "no subagent's work") return { outcome: "no subagent's work" };
 
   let parsed: unknown;
   try {
