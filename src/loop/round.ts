@@ -200,9 +200,9 @@ export type RoundAccount = {
 /** What the readings taken around the reviewer established. */
 export type AroundTheReviewer = {
   /**
-   * What the reviewer did to its snapshot, and which other episodes were live in
-   * the worktree. Absent where no reviewer ran, which is every conclusion reached
-   * before the review.
+   * What the reviewer did to the tracked files and `HEAD` of its snapshot.
+   * Absent where no reviewer ran, which is every conclusion reached before the
+   * review.
    *
    * The round reports none of this itself. The summary comment, or a failed
    * round's failure comment, names what the readings found, and the round host
