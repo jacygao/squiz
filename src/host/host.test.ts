@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,8 +27,9 @@ import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf, type ProcessIdentity } from "../sessions/process.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
-import { putRecord, type StateRecord } from "../loop/state-record.ts";
+import { putRecord, type Owner, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
+import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 
@@ -56,10 +57,13 @@ index d3d0cb2..6db135b 100644
 
 type Kind = "prlist" | "diff" | "threads" | "create" | "lookup" | "summary" | "failure";
 
-/** One state of the pull request, queued. */
-function queued(head: string, activity: string | null = null): StateRecord {
-  return { head, activity, status: "queued" };
+/** One state of the pull request, queued, with the owner its trigger recorded where it had one. */
+function queued(head: string, activity: string | null = null, owner?: Owner): StateRecord {
+  return { head, activity, ...(owner === undefined ? {} : { owner }), status: "queued" };
 }
+
+const MAIN: Owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
+const PARENT: Owner = { sessionId: "7a2c9e41-0b3d-4f85-a6e2-1c9d8b7f6e50", subagent: "a402ef8f56c1b2ed1" };
 
 /** What a test can do to the pull request and its episode while the host runs. */
 type Fixture = {
@@ -91,6 +95,8 @@ type Hosted = {
   readonly worktreeLeft: boolean;
   /** What the run beside the summary request printed, empty where none ran. */
   readonly summaryHook: string;
+  /** The notes waiting in the episode's notes/, by session id. */
+  readonly notes: Readonly<Record<string, readonly NoteFields[]>>;
 };
 
 type Arrangement = {
@@ -214,12 +220,28 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       firstHead,
       worktreeLeft: existsSync(worktree),
       summaryHook: existsSync(join(binaries, "on-summary.out")) ? readFileSync(join(binaries, "on-summary.out"), "utf8") : "",
+      notes: notesIn(episode),
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
     await rm(root, { recursive: true, force: true });
   }
+}
+
+function notesIn(episode: Episode): Record<string, readonly NoteFields[]> {
+  const directory = join(episode.directory, "notes");
+  const notes: Record<string, readonly NoteFields[]> = {};
+  if (!existsSync(directory) || !statSync(directory).isDirectory()) return notes;
+  for (const session of readdirSync(directory)) {
+    const listed = waitingNotes(directory, session);
+    assert.ok(listed.outcome === "listed", `the notes for ${session} were not listed: ${JSON.stringify(listed)}`);
+    notes[session] = listed.notes.map((note) => {
+      assert.ok(note.outcome === "read", `a note for ${session} did not read: ${JSON.stringify(note)}`);
+      return note.fields;
+    });
+  }
+  return notes;
 }
 
 function git(directory: string, args: readonly string[]): void {
@@ -610,5 +632,257 @@ test("the host writes what it did to host.log", async () => {
 
   assert.match(ran.log, new RegExp(ran.firstHead.slice(0, 7), "u"));
   assert.match(ran.log, /nothing is left queued/u);
+});
+
+/** The one note waiting for `owner`, failing where there is not exactly one. */
+function onlyNote(ran: Hosted, owner: Owner): NoteFields {
+  const notes = ran.notes[owner.sessionId] ?? [];
+  assert.equal(notes.length, 1, `${owner.sessionId} should have one note; notes/ holds ${JSON.stringify(ran.notes)}`);
+  return notes[0] ?? {};
+}
+
+test("a round that leaves threads open writes its owner a note naming the pull request, the head and the subagent, which points to squiz review", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, PARENT)],
+    findings: [[finding("The name says nothing.")]],
+  });
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.deepEqual(onlyNote(ran, PARENT), {
+    to: PARENT.sessionId,
+    pr: String(PULL_REQUEST),
+    head: ran.firstHead,
+    subagent: "a402ef8f56c1b2ed1",
+    text: `Squiz reviewed PR #${PULL_REQUEST} at ${short}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
+  });
+});
+
+test("a round that closes the episode with nothing open writes its owner a note with no subagent field, which points to squiz review", async () => {
+  const ran = await host({ records: (fixture) => [queued(fixture.head(), null, MAIN)] });
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.deepEqual(onlyNote(ran, MAIN), {
+    to: MAIN.sessionId,
+    pr: String(PULL_REQUEST),
+    head: ran.firstHead,
+    text: `Squiz reviewed PR #${PULL_REQUEST} at ${short}: nothing is open, and the episode has closed. Run \`squiz review ${PULL_REQUEST}\` to read the close.`,
+  });
+});
+
+test("a round that closes the episode with threads open writes its owner a note counting them", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    config: { rounds: 1 },
+    findings: [[finding("The name says nothing.")]],
+  });
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz reviewed PR #${PULL_REQUEST} at ${short}: the episode has closed with 1 thread open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
+  );
+});
+
+test("a state with no owner recorded gets no note", async () => {
+  const ran = await host({ records: atHead, findings: [[finding("The name says nothing.")]] });
+
+  assert.equal(recordsOf(ran.state)[0]?.status, "reviewed");
+  assert.deepEqual(ran.notes, {});
+});
+
+test("a round reviewed clean with the episode open writes no note for its state's owner", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, PARENT)],
+    onStart: (index, fixture) => {
+      if (index === 0) queueNow(fixture.episode, queued(fixture.push(), null, MAIN));
+    },
+  });
+
+  const [first] = recordsOf(ran.state);
+  assert.ok(first?.status === "reviewed" && first.result === "clean, episode open", `recorded as ${JSON.stringify(first)}`);
+  assert.equal(ran.notes[PARENT.sessionId], undefined, `the clean state's owner was noted: ${JSON.stringify(ran.notes)}`);
+  assert.match(onlyNote(ran, MAIN)["text"] ?? "", /the episode has closed/u);
+});
+
+test("a failed round writes its owner a note giving the reason, naming squiz status and saying how it is retried, and records that it did", async () => {
+  const ran = await host({ records: (fixture) => [queued(fixture.head(), null, MAIN)], listedNumber: 143 });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.ownerNoted, true);
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz could not review PR #${PULL_REQUEST} at ${short}: ${record.reason}. \`squiz status\` lists it. A new commit, or running \`squiz review ${PULL_REQUEST}\` once, retries it.`,
+  );
+});
+
+test("a failed state with no owner recorded is recorded as not noted", async () => {
+  const ran = await host({ records: atHead, listedNumber: 143 });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.ownerNoted, false);
+  assert.deepEqual(ran.notes, {});
+});
+
+test("a state that fails, is queued again by squiz review and fails again gets one note", async () => {
+  let requeued = false;
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    listedNumber: 143,
+    host: {
+      update: (episode, change, options) => {
+        const written = updateState(episode, change, options);
+        const read = readState(episode);
+        const [record] = read.outcome === "read" ? recordsOf(read.state) : [];
+        if (!requeued && record?.status === "failed") {
+          requeued = true;
+          // As `squiz review` queues a failed state again: with no owner, because it records none.
+          queueNow(episode, queued(record.head));
+        }
+        return written;
+      },
+    },
+  });
+
+  assert.equal(requeued, true, "the fixture never queued the failed state again");
+  assert.equal(ran.log.match(/ failed: /gu)?.length, 2, `the state should have failed twice; the log says:\n${ran.log}`);
+  assert.equal(ran.notes[MAIN.sessionId]?.length, 1, `notes/ holds ${JSON.stringify(ran.notes)}`);
+});
+
+test("a reviewing record that cannot be written leaves the state failed, and its owner a note", async () => {
+  let calls = 0;
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    host: {
+      update: (episode, change, options) => {
+        calls += 1;
+        return calls === 1 ? { outcome: "failed", reason: "the disk said no" } : updateState(episode, change, options);
+      },
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed" && record.ownerNoted, `recorded as ${JSON.stringify(record)}`);
+  assert.match(onlyNote(ran, MAIN)["text"] ?? "", /the disk said no/u);
+});
+
+test("each state a close leaves not reviewed gets a note for its owner saying why", async () => {
+  let pushed = "";
+  const ran = await host({
+    records: atHead,
+    config: { rounds: 1 },
+    onStart: (index, fixture) => {
+      if (index !== 0) return;
+      pushed = fixture.push();
+      queueNow(fixture.episode, queued(pushed, null, PARENT));
+    },
+  });
+
+  assert.deepEqual(onlyNote(ran, PARENT), {
+    to: PARENT.sessionId,
+    pr: String(PULL_REQUEST),
+    head: pushed,
+    subagent: "a402ef8f56c1b2ed1",
+    text: `Squiz did not review PR #${PULL_REQUEST} at ${pushed.slice(0, 7)}, the work of subagent a402ef8f56c1b2ed1: the episode closed at the round cap, after reviewing ${ran.firstHead.slice(0, 7)}.`,
+  });
+});
+
+test("a superseded state's owner gets a note naming the state that superseded it", async () => {
+  let older = "";
+  let newer = "";
+  const ran = await host({
+    records: (fixture) => {
+      older = fixture.head();
+      newer = fixture.push();
+      return [queued(older, null, MAIN), queued(newer)];
+    },
+  });
+
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz did not review PR #${PULL_REQUEST} at ${older.slice(0, 7)}: superseded by ${newer.slice(0, 7)}.`,
+  );
+});
+
+test("a state queued on a closed episode gets a note naming it as the state with different replies where its commit repeats", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, PARENT), queued(fixture.head(), "PRRC_reply", MAIN)],
+    rounds: [COST],
+    closeReported: true,
+  });
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz did not review PR #${PULL_REQUEST} at ${short} with different replies: the episode had closed before a round took this state.`,
+  );
+  assert.equal(ran.notes[PARENT.sessionId]?.length, 1);
+});
+
+test("the note is written only once the result it points to is recorded", async () => {
+  const notesBeforeEachWrite: number[] = [];
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    findings: [[finding("The name says nothing.")]],
+    host: {
+      // Counted once the change has run and before the file takes it, which is
+      // the last moment a note could be there without its result.
+      update: (episode, change, options) =>
+        updateState(
+          episode,
+          (state) => {
+            const next = change(state);
+            notesBeforeEachWrite.push(Object.values(notesIn(episode)).flat().length);
+            return next;
+          },
+          options,
+        ),
+    },
+  });
+
+  assert.deepEqual(notesBeforeEachWrite, [0, 0], "a note was there before the result it points to was written");
+  assert.equal(ran.notes[MAIN.sessionId]?.length, 1);
+});
+
+test("a result that cannot be recorded writes no note", async () => {
+  let calls = 0;
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    findings: [[finding("The name says nothing.")]],
+    host: {
+      // The first write is the reviewing record's, and the second the result's,
+      // which fails as a disk does: after the change has been worked out.
+      update: (episode, change, options) => {
+        calls += 1;
+        if (calls !== 2) return updateState(episode, change, options);
+        const read = readState(episode);
+        if (read.outcome === "read") change(read.state);
+        return { outcome: "failed", reason: "the disk said no" };
+      },
+    },
+  });
+
+  assert.equal(ran.end.outcome, "state unwritable");
+  assert.deepEqual(ran.notes, {});
+});
+
+test("a note that cannot be written is reported in host.log, and changes neither the result nor what the host does next", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    findings: [[finding("The name says nothing.")]],
+    before: ({ episode }) => {
+      mkdirSync(episode.directory, { recursive: true });
+      // A file where the notes directory goes refuses every note.
+      writeFileSync(join(episode.directory, "notes"), "", "utf8");
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 2);
+  assert.deepEqual(ran.end, { outcome: "nothing queued" });
+  assert.match(ran.log, /the note for 60517e1f-e1dc-49b1-8e39-6fcbe686f3fb was not written/u);
 });
 

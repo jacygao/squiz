@@ -13,6 +13,10 @@
  *
  * What it did goes to `host.log` in the episode's directory, one line each,
  * because nothing waits on the host to be told.
+ *
+ * **A note for a state's owner is written only once its result is recorded**,
+ * because the note sends the owner to read that result. A note that cannot be
+ * written goes to `host.log` and changes nothing else.
  */
 
 import { appendFileSync, existsSync } from "node:fs";
@@ -20,13 +24,15 @@ import { join } from "node:path";
 
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
-import { decideRoundEnd, type QueuedRecord, type RoundEnd } from "../loop/round-end.ts";
+import { decideRoundEnd, namedStates, type QueuedRecord, type RoundEnd } from "../loop/round-end.ts";
 import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
 import { putRecord, sameState, type ReviewerPlace, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 import { takeHostLock, type HostLock } from "./lock.ts";
+import { ownerNote } from "./owner-note.ts";
 
 // Each `ps` run that tells whether the lock's holder is still running.
 const LOCK_BOUND_MS = 5_000;
@@ -113,15 +119,15 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
 
     const startedAt = nowSeconds();
     let taken: { readonly record: QueuedRecord; readonly number: number } | undefined;
-    let closed = 0;
+    let closed: readonly Recorded[] = [];
     const took = write((state) => {
       taken = undefined;
+      closed = [];
       // The close is checked again here, under the state lock, so a round that
       // closed the episode after this host read the file runs nothing more.
       if (state.closeReported === true) {
-        const queued = queuedIn(state);
-        closed = queued.length;
-        return withRecords(state, queued.map((record) => notReviewed(keyOf(record), ALREADY_CLOSED)));
+        closed = inOrder(queuedIn(state).map((record) => notReviewed(keyOf(record), ALREADY_CLOSED)));
+        return withRecords(state, closed.map(({ record }) => record));
       }
       const record = queuedIn(state)[0];
       if (record === undefined) return state;
@@ -138,19 +144,26 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     if (took.outcome === "failed") {
       const reason = `no review ran: the reviewing record could not be written: ${took.reason}`;
       log(`${named(oldest)}: ${reason}`);
+      let failed: readonly Recorded[] = [];
       const recorded = write((state) => {
+        failed = [];
         const record = queuedIn(state).find((queued) => sameState(queued, oldest));
         if (record === undefined) return state;
-        return withRecords(state, [{ ...keyOf(record), status: "failed", reason, ownerNoted: false }]);
+        failed = inOrder([failedRecord(keyOf(record), reason)]);
+        return withRecords(state, failed.map(({ record: written }) => written));
       });
       if (recorded.outcome === "failed") {
         log(`${named(oldest)}: could not be recorded failed either: ${recorded.reason}`);
         return { outcome: "state unwritable", reason: recorded.reason };
       }
       log(`${named(oldest)}: recorded failed`);
+      noteOwners(episode, failed, log);
       continue;
     }
-    if (closed > 0) log(`${closed === 1 ? "1 queued state" : `${closed} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
+    if (closed.length > 0) {
+      log(`${closed.length === 1 ? "1 queued state" : `${closed.length} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
+      noteOwners(episode, closed, log);
+    }
     const round = taken;
     if (round === undefined) continue;
 
@@ -179,20 +192,51 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       startedAt,
       endedAt: nowSeconds(),
     });
-    const recorded = write((state) => result.change(state));
+    let written: readonly Recorded[] = [];
+    const recorded = write((state) => {
+      written = result.records(state);
+      return withRecords(state, written.map(({ record }) => record));
+    });
     if (recorded.outcome === "failed") {
       log(`round ${round.number}: ${result.line}, and could not be recorded: ${recorded.reason}`);
       return { outcome: "state unwritable", reason: recorded.reason };
     }
     log(`round ${round.number}: ${result.line}`);
+    noteOwners(episode, written, log);
+  }
+}
+
+/** A record the host wrote, and how a note to its owner names its state. */
+type Recorded = { readonly record: StateRecord; readonly name: string };
+
+/**
+ * `records` with the name each is told apart by, in order: its short commit,
+ * and where a state before it has that commit, how its replies differ.
+ *
+ * `after` is the state reviewed before them, where one was.
+ */
+function inOrder(records: readonly StateRecord[], after?: StateKey): Recorded[] {
+  const [first, ...rest] = records;
+  if (first === undefined) return [];
+  const names = after === undefined ? [first.head.slice(0, 7), ...namedStates(first, rest)] : namedStates(after, records);
+  return records.map((record, index) => ({ record, name: names[index] ?? record.head.slice(0, 7) }));
+}
+
+/** Write a note for the owner of each of `recorded` that gets one. */
+function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log): void {
+  for (const { record, name } of recorded) {
+    const note = ownerNote(Number(episode.id), record, name);
+    if (note === undefined) continue;
+    const written = writeNote(join(episode.directory, "notes"), note.sessionId, note.fields);
+    log(written.outcome === "written" ? `${named(record)}: noted its owner, ${note.sessionId}` : `${named(record)}: ${written.reason}`);
   }
 }
 
 /** When a round started and ended, and its number. */
 type Timing = { readonly number: number; readonly startedAt: number; readonly endedAt: number };
 
-/** What a round's conclusion records, and the line host.log says it in. */
-type Result = { readonly change: (state: EpisodeState) => EpisodeState; readonly line: string };
+/** The records a round's conclusion writes into the state it finds, and the line host.log says it in. */
+type Result = { readonly records: (state: EpisodeState) => readonly Recorded[]; readonly line: string };
 
 /**
  * The records a round's conclusion leaves, for its own state and for the states
@@ -216,25 +260,26 @@ function resultOf(
         const at = conclusion.outcome === "close" && conclusion.because === "token-bound" ? "the token bound" : "the round cap";
         const reason = `the episode closed at ${at} before a round took this state`;
         return {
-          change: (state) => withRecords(state, [key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, reason))),
+          records: (state) => inOrder([key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, reason))),
           line: `${named(taken)} not reviewed: ${reason}`,
         };
       }
       const round = { ...timing, reviewer: REVIEWER };
-      const reviewed: StateRecord = { ...ended.record, round };
-      const behind = ended.outcome === "closed" ? (ended.leftNotReviewed?.states ?? []) : [];
+      const reviewed: Recorded = { record: { ...ended.record, round }, name: taken.head.slice(0, 7) };
+      const left = ended.outcome === "closed" ? ended.leftNotReviewed : null;
+      const behind = left === null ? [] : inOrder(left.states, left.after);
       return {
-        change: (state) => withRecords(state, [reviewed, ...behind]),
+        records: () => [reviewed, ...behind],
         line: `${named(taken)} ${endedLine(ended)}`,
       };
     }
     case "superseded": {
       const reason = `superseded by ${supersededBy(taken, conclusion.by)}`;
-      return { change: (state) => withRecords(state, [notReviewed(key, reason)]), line: `${named(taken)} not reviewed: ${reason}` };
+      return { records: () => inOrder([notReviewed(key, reason)]), line: `${named(taken)} not reviewed: ${reason}` };
     }
     case "episode-over":
       return {
-        change: (state) => withRecords(state, [key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, ALREADY_CLOSED))),
+        records: (state) => inOrder([key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, ALREADY_CLOSED))),
         line: `${named(taken)} not reviewed: ${ALREADY_CLOSED}`,
       };
     case "failed":
@@ -245,8 +290,7 @@ function resultOf(
       // where a reviewer ran.
       const ran = conclusion.outcome === "failed" && conclusion.confinement !== undefined;
       const round = ran ? { ...timing, reviewer: REVIEWER } : timing;
-      const failed: StateRecord = { ...key, status: "failed", reason, ownerNoted: false, round };
-      return { change: (state) => withRecords(state, [failed]), line: `${named(taken)} failed: ${reason}` };
+      return { records: () => inOrder([{ ...failedRecord(key, reason), round }]), line: `${named(taken)} failed: ${reason}` };
     }
   }
 }
@@ -317,6 +361,18 @@ function keyOf(record: QueuedRecord): Omit<QueuedRecord, "status"> {
 
 function notReviewed(key: Omit<QueuedRecord, "status">, reason: string): StateRecord {
   return { ...key, status: "not reviewed", reason };
+}
+
+/**
+ * A failed record, marked noted wherever it has an owner.
+ *
+ * The mark goes in with the failure, before the note is written, so a note that
+ * then cannot be written leaves it set. The state is queued again only by
+ * `squiz review`, which records no owner, so a retry that fails again gets no
+ * second note.
+ */
+function failedRecord(key: Omit<QueuedRecord, "status">, reason: string): Extract<StateRecord, { readonly status: "failed" }> {
+  return { ...key, status: "failed", reason, ownerNoted: key.owner !== undefined };
 }
 
 function withRecords(state: EpisodeState, records: readonly StateRecord[]): EpisodeState {
