@@ -314,16 +314,17 @@ Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, aft
 Where the token bound closed the episode, its reason reads "the episode closed at
 the token bound, after reviewing 3f9c2e0".
 
-**A state left not reviewed is named by its short head commit, and by its reply
-where an earlier state has the same commit.** The earlier states are the one the
-closing round reviewed and those queued ahead of it. A reply with no commit after
-it is a state with the head of the state before it, and is named "with a newer
-reply". A state whose head two earlier states have is named "with a second newer
-reply", one with three "with a third newer reply", and so on. Where B is a reply
-on A's commit, the line reads:
+**A state left not reviewed is named by its short head commit, and by its
+replies where an earlier state has the same commit.** The earlier states are the
+one the closing round reviewed and those queued ahead of it. A state with the head
+of an earlier state differs from it only in its replies: a reply was added or
+deleted, and the record cannot say which. Such a state is named "with different
+replies". A state whose head two earlier states have is named "with different
+replies a second time", one with three "with different replies a third time", and
+so on. Where B has A's commit and different replies, the line reads:
 
 ```
-Squiz did not review PR #41 at 3f9c2e0 with a newer reply: the episode closed at the round cap, after reviewing 3f9c2e0.
+Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.
 ```
 
 The summary's Notes name each state the same way (§ 5 What the comment carries).
@@ -1522,8 +1523,8 @@ writes where nothing was queued. Each state is named as § 3 The state file name
 it:
 
 ```markdown
-- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f or 8d21a4f with a newer reply
-- The episode ended at the token bound with nothing left open, and did not review 3f9c2e0 with a newer reply
+- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f or 8d21a4f with different replies
+- The episode ended at the token bound with nothing left open, and did not review 3f9c2e0 with different replies
 ```
 
 The second is a last round that left nothing open, with a state queued behind it

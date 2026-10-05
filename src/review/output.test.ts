@@ -390,19 +390,19 @@ test("a state the close left unreviewed adds the line saying why", () => {
   }
 });
 
-test("a state the close left unreviewed is printed as it was named, a newer reply included", () => {
+test("a state the close left unreviewed is printed as it was named, its different replies included", () => {
   const printed = composeReview(
     reviewed({
       exit: 0,
       commit: "3f9c2e0",
       round: 3,
-      notReviewed: { state: "3f9c2e0 with a newer reply", closedAt: "round cap" },
+      notReviewed: { state: "3f9c2e0 with different replies", closedAt: "round cap" },
     }),
     PATH,
   );
   assert.equal(
     printed.stdout.split("\n")[2],
-    "Squiz did not review PR #41 at 3f9c2e0 with a newer reply: the episode closed at the round cap, after reviewing 3f9c2e0.",
+    "Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.",
     printed.stdout,
   );
 });

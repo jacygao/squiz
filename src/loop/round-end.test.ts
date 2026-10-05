@@ -158,9 +158,17 @@ test("a state is named by its short head commit where no state before it shares 
   );
 });
 
-test("a state with the head of the reviewed state is named with a newer reply", () => {
+// The reviewed state's reply was deleted, so the queued state has no reply at
+// all. A shared head says the replies changed, not which way.
+test("a state whose reply was deleted is named with different replies", () => {
+  assert.deepEqual(namedStates({ head: reviewedHead, activity: reply }, [{ head: reviewedHead, activity: null }]), [
+    "3f9c2e0 with different replies",
+  ]);
+});
+
+test("a state with the head of the reviewed state and a reply after it is named with different replies", () => {
   assert.deepEqual(namedStates({ head: reviewedHead, activity: null }, [{ head: reviewedHead, activity: reply }]), [
-    "3f9c2e0 with a newer reply",
+    "3f9c2e0 with different replies",
   ]);
 });
 
@@ -176,9 +184,9 @@ test("states sharing a head are counted apart by how many before them share it",
     ]),
     [
       "8d21a4f",
-      "8d21a4f with a newer reply",
-      "8d21a4f with a second newer reply",
-      "3f9c2e0 with a newer reply",
+      "8d21a4f with different replies",
+      "8d21a4f with different replies a second time",
+      "3f9c2e0 with different replies",
     ],
   );
 });

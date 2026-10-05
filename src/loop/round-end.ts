@@ -150,17 +150,20 @@ function notReviewed(
 
 /**
  * How a person is told each of `states` apart, in order: its short head commit,
- * and, where states before it share that head, which newer reply it is.
+ * and, where states before it share that head, how many times its replies
+ * differ from theirs.
  *
  * `after` is the state reviewed before them, and counts as before every one of
  * them. A state sharing a head with one before it differs from it only in its
- * latest reply, because no two records are for the same state. Counting the
- * states before it, rather than marking it once, keeps two replies on one commit
- * from reading as one state named twice:
+ * replies, because no two records are for the same state. A reply added and a
+ * reply deleted both do that, and nothing here can tell which, so the name says
+ * only that they differ. Counting the states before it, rather than marking it
+ * once, keeps two such states on one commit from reading as one state named
+ * twice:
  *
  * - `8d21a4f`, where no state before it has that head
- * - `8d21a4f with a newer reply`, where one does
- * - `8d21a4f with a second newer reply`, where two do
+ * - `8d21a4f with different replies`, where one does
+ * - `8d21a4f with different replies a second time`, where two do
  */
 export function namedStates(after: StateKey, states: readonly StateKey[]): string[] {
   const line = [after, ...states];
@@ -168,7 +171,8 @@ export function namedStates(after: StateKey, states: readonly StateKey[]): strin
     const before = line.slice(0, index + 1).filter((earlier) => earlier.head === state.head).length;
     const commit = state.head.slice(0, 7);
     if (before === 0) return commit;
-    return `${commit} with a ${before === 1 ? "" : `${ordinal(before)} `}newer reply`;
+    if (before === 1) return `${commit} with different replies`;
+    return `${commit} with different replies a ${ordinal(before)} time`;
   });
 }
 
