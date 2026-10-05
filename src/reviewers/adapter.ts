@@ -201,7 +201,7 @@ export type Confinement =
   | { readonly outcome: "prepared"; readonly environment: Readonly<Record<string, string>> }
   | { readonly outcome: "failed"; readonly reason: string };
 
-/** The four parts of driving one reviewer CLI. */
+/** The parts of driving one reviewer CLI. */
 export type Adapter = {
   /** Build the command line for one round, from what the harness set for it. */
   readonly argv: (invocation: Invocation) => CommandLine;
@@ -246,4 +246,11 @@ export type Adapter = {
    * round was allowed to do is readable without parsing the arguments back.
    */
   readonly grants: Readonly<Record<Depth, readonly string[]>>;
+  /**
+   * The command that resumes the session the reviewer kept in
+   * `sessionDirectory`, with that directory written as `spelled`. Undefined
+   * where there is no session to resume, or none that could be read. An adapter
+   * whose CLI keeps no session has no resume.
+   */
+  readonly resume?: (sessionDirectory: string, spelled: string) => readonly string[] | undefined;
 };

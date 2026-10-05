@@ -16,7 +16,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 
-import { identityOf, type ProcessIdentity } from "./process.ts";
+import { identityOf, type IdentityRead, type ProcessIdentity } from "./process.ts";
 
 export type ChildCommand = {
   readonly program: string;
@@ -34,12 +34,14 @@ export type ChildStart =
 /**
  * Start `command` in `environment`, which is its whole environment.
  *
- * `boundMs` bounds the `ps` that reads the child's identity.
+ * `boundMs` bounds the `ps` that reads the child's identity, which `identify`
+ * reads where it is given.
  */
 export async function startChild(
   command: ChildCommand,
   environment: NodeJS.ProcessEnv,
   boundMs: number,
+  identify: (pid: number, boundMs: number) => IdentityRead = identityOf,
 ): Promise<ChildStart> {
   let child: ChildProcessHandle;
   try {
@@ -61,8 +63,14 @@ export async function startChild(
   const pid = child.pid;
   if (pid === undefined) return { outcome: "failed", reason: `${command.program} started with no pid` };
 
-  const read = identityOf(pid, boundMs);
+  const read = identify(pid, boundMs);
   if (read.outcome === "read") return { outcome: "started", identity: read.identity, child };
+  // A child that has exited ran, and what it said on the way out is the
+  // caller's to read. Nothing needs to find it again, so the second it was
+  // found exited stands in for its start, and names no process running now.
+  if (read.outcome === "gone") {
+    return { outcome: "started", identity: { pid, startedAt: Math.floor(Date.now() / 1_000) }, child };
+  }
   // A child that cannot be named cannot be found again, so it is stopped here,
   // while the handle still says which process it is.
   try {
@@ -70,8 +78,7 @@ export async function startChild(
   } catch {
     // Its group has already gone.
   }
-  const why = read.outcome === "gone" ? "it exited before its identity could be read" : read.reason;
-  return { outcome: "failed", reason: `${command.program} started as pid ${pid}, and was stopped: ${why}` };
+  return { outcome: "failed", reason: `${command.program} started as pid ${pid}, and was stopped: ${read.reason}` };
 }
 
 function messageOf(cause: unknown): string {

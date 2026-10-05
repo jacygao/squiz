@@ -7,7 +7,7 @@
  * obtain a path under the episode's directory, and nothing but a positive whole
  * number reaches the filesystem as a key.
  *
- * The reviewer's session directory and its scratch space hang off the episode's
+ * Each round's directory and the reviewer's scratch space hang off the episode's
  * own directory and are derived here too. A second place that computed them
  * would be a second place for them to drift from the state file's.
  *
@@ -35,8 +35,6 @@ export type Episode = {
   readonly directory: string;
   /** The pull request, what each round spent, and what was spent outside them. */
   readonly stateFile: string;
-  /** What the reviewer's CLI is told to write its own session into. */
-  readonly sessionDirectory: string;
   /**
    * What `TMPDIR` points at while the reviewer runs, so that a probe script or
    * a temporary file cannot land in the tree under review.
@@ -78,9 +76,17 @@ export function episodeAt(worktree: string, pullRequest: number): Episode {
     id,
     directory,
     stateFile: join(directory, stateFileName),
-    sessionDirectory: join(directory, "session"),
     scratchDirectory: join(directory, "scratch"),
   };
+}
+
+/**
+ * `<worktree>/.squiz/<number>/rounds/<round>`, which holds what one round
+ * wrote: its report file, the reviewer's session under `session/`, its
+ * `resume.txt` and its snapshot.
+ */
+export function roundDirectory(episode: Episode, round: number): string {
+  return join(episode.directory, "rounds", String(round));
 }
 
 /**

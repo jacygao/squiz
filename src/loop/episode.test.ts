@@ -15,7 +15,6 @@ test("everything an episode owns hangs off one directory named for its pull requ
     id: "41",
     directory,
     stateFile: join(directory, "state.json"),
-    sessionDirectory: join(directory, "session"),
     scratchDirectory: join(directory, "scratch"),
   });
 });
