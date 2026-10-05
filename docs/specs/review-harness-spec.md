@@ -1973,8 +1973,8 @@ rest of it at the first space.
 
 `squiz review <number>` runs from the worktree pull request `<number>`'s branch is
 checked out in. It acts on the record for the pull request's state as § 3 The
-state file sets out, and waits for that state's round within one deadline for the
-whole invocation (§ 7). The exit status says what the coding agent does next:
+state file sets out, and waits for the review within one deadline for the whole
+invocation (§ 7). The exit status says what the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
