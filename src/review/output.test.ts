@@ -451,6 +451,20 @@ squiz: the failure could not be posted on PR #142: GitHub answered 502
   );
 });
 
+test("exit 1 for a failed round with no comment named prints its reason and its items alone", () => {
+  const printed = composeReview(
+    {
+      outcome: "failed",
+      pullRequest: 41,
+      reason: "the round host 4242 for PR #41 stopped before its round ended",
+      items: [],
+    },
+    PATH,
+  );
+
+  assert.equal(printed.stderr, "squiz: review failed: the round host 4242 for PR #41 stopped before its round ended\n");
+});
+
 test("exit 1 before any round, or with findings it could not post, prints one line", () => {
   const notRun = composeReview(
     {

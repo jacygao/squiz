@@ -106,6 +106,8 @@ type Arrangement = {
   readonly closeReported?: boolean;
   /** What each reviewer start reports, in order. An empty review where there is none. */
   readonly findings?: readonly (readonly Finding[])[];
+  /** Where given, every reviewer start completes no message, for this reason. */
+  readonly incomplete?: string;
   readonly config?: Partial<Config>;
   /** The pull request `gh pr list` answers with, where it is not the host's. */
   readonly listedNumber?: number;
@@ -192,6 +194,9 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       },
       parse: async (stdout): Promise<ParsedRun> => {
         for await (const chunk of stdout) void chunk;
+        if (arranged.incomplete !== undefined) {
+          return { cost: COST, result: { kind: "incomplete", reason: arranged.incomplete } };
+        }
         return {
           cost: COST,
           result: { kind: "reviewed", findings: arranged.findings?.[started - 1] ?? [], verdicts: [] },
@@ -486,6 +491,7 @@ test("a state superseded by a later commit is recorded not reviewed, and only th
     activity: null,
     status: "not reviewed",
     reason: `superseded by ${newer.slice(0, 7)}`,
+    supersededBy: { head: newer, activity: null },
   });
   assert.ok(second?.status === "reviewed", `the newest state is recorded as ${JSON.stringify(second)}`);
 });
@@ -500,6 +506,8 @@ test("a state superseded by a later reply on the same commit is recorded not rev
   const [first, second] = recordsOf(ran.state);
   assert.ok(first?.status === "not reviewed", `the older state is recorded as ${JSON.stringify(first)}`);
   assert.equal(first.reason, `superseded by ${ran.firstHead.slice(0, 7)} with different replies`);
+  // The reason names the successor by its commit alone, which another state can share.
+  assert.deepEqual(first.supersededBy, { head: ran.firstHead, activity: null });
   assert.equal(second?.status, "reviewed");
 });
 
@@ -536,6 +544,31 @@ test("the host runs no round for an episode whose close is recorded, and records
   assert.deepEqual(ran.kinds, [], "nothing should have been asked of GitHub");
   const [record] = recordsOf(ran.state);
   assert.equal(record?.status, "not reviewed", `recorded as ${JSON.stringify(record)}`);
+});
+
+test("a reviewed round's record counts the threads its findings opened", async () => {
+  const ran = await host({ records: atHead, findings: [[finding("The name says nothing.")]] });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.newFindings, 1);
+});
+
+test("a round that closes at the cap with a thread open records the cap as what closed it", async () => {
+  const ran = await host({ records: atHead, config: { rounds: 1 }, findings: [[finding("The name says nothing.")]] });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 3);
+  assert.equal(record.closedAt, "round cap");
+});
+
+test("a failed round records what squiz review prints after its reason, ending where its failure comment went", async () => {
+  const ran = await host({ records: atHead, incomplete: "the provider refused the credential" });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.lines?.at(-1), `the failure is posted on PR #${PULL_REQUEST}`);
 });
 
 test("a host whose pull request is not the branch's records the state failed, and runs no reviewer", async () => {

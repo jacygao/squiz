@@ -80,10 +80,12 @@ type ClosedOpen = RoundResult &
  * - `queued`: the run's state waits behind the round of `reviewing`.
  * - `clean`: the run's state was reviewed clean, and `reviewing` was queued
  *   behind it, so the episode has not closed.
+ * - `superseded`: the pull request moved on to `reviewing` before a round took
+ *   the run's state.
  */
 type StillReviewing = About & { readonly outcome: "reviewing" } & (
     | { readonly wait: "under review"; readonly commit: string }
-    | { readonly wait: "queued" | "clean"; readonly commit: string; readonly reviewing: string }
+    | { readonly wait: "queued" | "clean" | "superseded"; readonly commit: string; readonly reviewing: string }
   );
 
 /** A run on an episode whose close is already recorded, exiting as the close did. */
@@ -100,7 +102,8 @@ type Failed = About & {
   readonly reason: string;
   /** What else the round established, each an item of the failure comment's list. */
   readonly items: readonly string[];
-  readonly comment: { readonly posted: true } | { readonly posted: false; readonly reason: string };
+  /** Absent where the items already say where the comment went, or none was attempted. */
+  readonly comment?: { readonly posted: true } | { readonly posted: false; readonly reason: string };
 };
 
 /** A run that failed before any round, exit 1. */
@@ -256,6 +259,8 @@ function stillReviewing(result: StillReviewing): string {
       return `Squiz is reviewing ${pr} at ${result.reviewing} first, and ${result.commit} is next. ${again}`;
     case "clean":
       return `Squiz found nothing open in ${pr} at ${result.commit}, and is reviewing ${result.reviewing} before it closes the review. ${again}`;
+    case "superseded":
+      return `Squiz is reviewing ${pr} at ${result.reviewing} instead of ${result.commit}. ${again}`;
   }
 }
 
@@ -270,10 +275,16 @@ function closedBlocks(result: AlreadyClosed): readonly string[] {
 
 /** The reason the failure comment gives, each item it lists, then where it went. */
 function failedLines(result: Failed): string {
-  const went = result.comment.posted
-    ? `the failure is posted on PR #${result.pullRequest}`
-    : `the failure could not be posted on PR #${result.pullRequest}: ${result.comment.reason}`;
-  return [`review failed: ${result.reason}`, ...result.items, went].map(failureLine).join("");
+  const { comment } = result;
+  const went =
+    comment === undefined
+      ? []
+      : [
+          comment.posted
+            ? `the failure is posted on PR #${result.pullRequest}`
+            : `the failure could not be posted on PR #${result.pullRequest}: ${comment.reason}`,
+        ];
+  return [`review failed: ${result.reason}`, ...result.items, ...went].map(failureLine).join("");
 }
 
 function unpostedLine(result: Unposted): string {

@@ -11,6 +11,7 @@ import { standIn } from "./testing/stand-in.ts";
 const shim = fileURLToPath(new URL("../bin/squiz", import.meta.url));
 const cliEntry = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
+const reviewModule = new URL("./review/review.ts", import.meta.url).href;
 
 // Anywhere that is not the plugin. The hook runs in the subagent's directory,
 // which is not even the worktree root, so every run here starts somewhere the
@@ -169,7 +170,7 @@ test("a command the binary does not have is named on stderr, and still exits 0",
   assert.equal(result.code, 0, "the binary is the hook entry point, and only exit 2 may block a turn");
   assert.equal(
     result.stderr,
-    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host\n',
+    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review\n',
     "the list backs the message, so a command the binary has must be on it",
   );
   assert.equal(result.stdout, "");
@@ -179,7 +180,7 @@ test("no command at all is reported the same way", async () => {
   const result = await run(shim, [], { cwd: elsewhere });
 
   assert.equal(result.code, 0);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review\n");
   assert.equal(result.stdout, "");
 });
 
@@ -506,5 +507,58 @@ test("squiz host with nothing queued exits, and says so in host.log", async () =
     assert.match(log, /exiting: nothing is left queued\n$/u);
   } finally {
     await rm(join(onABranch, ".squiz"), { recursive: true, force: true });
+  }
+});
+
+test("squiz review without a pull request's number exits 1, reporting how it is called", async () => {
+  const result = await run(shim, ["review"], { cwd: onABranch });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stderr, "squiz: no review ran: squiz review <number>, where <number> is the pull request's\n");
+  assert.equal(result.stdout, "");
+});
+
+test("squiz review on a detached HEAD exits 1 with the gate's line, and prints nothing on stdout", async () => {
+  const result = await run(shim, ["review", "41"], { cwd: elsewhere });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stderr, detachedHere());
+  assert.equal(result.stdout, "");
+});
+
+test("a throw inside squiz review exits 1, which never reads as a result", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "squiz-cli-"));
+  try {
+    const fixture = join(directory, "throwing-review.mjs");
+    await writeFile(
+      fixture,
+      [
+        'import { registerHooks } from "node:module";',
+        "registerHooks({",
+        "  load(url, context, nextLoad) {",
+        `    if (url === ${JSON.stringify(reviewModule)}) {`,
+        "      return {",
+        '        format: "module",',
+        "        shortCircuit: true,",
+        '        source: \'export async function runReview() { throw new Error("the wait exploded"); }\',',
+        "      };",
+        "    }",
+        "    return nextLoad(url, context);",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await run(process.execPath, ["--import", pathToFileURL(fixture).href, cliEntry, "review", "41"], {
+      cwd: onABranch,
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr, "squiz: the review failed: Error: the wait exploded\n");
+    assert.equal(result.stdout, "");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

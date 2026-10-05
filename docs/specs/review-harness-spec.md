@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.67 (draft)
+**Version:** 0.68 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -330,6 +330,16 @@ superseded by 3f9c2e0 with different replies
 The newer state is queued by the trigger that read it, and reviewed in its turn.
 The state a round reviews is the one its result is recorded against: the reviewer
 reads a snapshot of that state's head commit (§ 4 The snapshot).
+
+The record also holds the head commit and latest activity of the state that
+superseded it, because the reason names that state only by its short commit, and
+other states can share a commit.
+
+A run of `squiz review` whose own state was superseded goes on waiting, for the
+state with that head and activity, and returns that state's result. Where that
+state was superseded in turn, the run follows it to the next. It exits 4 where
+its wait runs out first, or where no record for that state has been written yet,
+as § 6 shows.
 
 **A round decides its close and records it in one step.** It reads the queue
 under `state.lock`, decides from it as the table above sets out, and writes the
@@ -1680,7 +1690,7 @@ invocation (§ 7). The exit status says what the coding agent does next:
 | 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
 | 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
-| 4 | Still reviewing. The run's deadline came before the review of this state was done, or before the review of a state queued behind a clean one. The round goes on in the round host. | Runs the command again. |
+| 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
 
 Exit 4 is neither an outcome nor a failure: nothing about the pull request was
@@ -1797,6 +1807,15 @@ Full output: /work/squiz/.squiz/41/review.txt
 Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.
 ```
 
+A run whose own state was superseded before a round took it (§ 3 The state
+file), and whose wait ran out before the newer state's round ended. The newer
+state is named as the reason for superseding names it:
+
+```
+Full output: /work/squiz/.squiz/41/review.txt
+Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.
+```
+
 A run on an episode that has already closed, exit 0 or 3 as the close was:
 
 ```
@@ -1825,12 +1844,19 @@ squiz: `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4
 squiz: the failure is posted on PR #41
 ```
 
+A round that could post none of its findings is a round that failed, and prints
+the same way:
+
+```
+squiz: review failed: round 2 found 3 findings and could not post them to PR #41
+squiz: the failure is posted on PR #41
+```
+
 A run that failed before any round, or could not reach GitHub, prints one line:
 
 ```
 squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
 squiz: no review ran: PR #41 is closed
-squiz: round 2 found 3 findings and could not post them to PR #41
 squiz: no review ran: whether round host 4242 for PR #41 is still running could not be told: ps did not answer within 2000ms
 ```
 
@@ -1978,6 +2004,7 @@ nothing retries one.
 | The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch and the add could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
+| No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode, so a new commit, a new reply or a run of `squiz review` retries it. |
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. |
 | The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub answered or that the reserve was spent. Nothing is retried: posting is a create, so a second attempt is a second comment. |
 | The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 5 says: with the summary, the open threads and exit 3 or 0 where those attempts left any of the reviewer's threads, and with exit 0 and a line on stderr where they left none. |
