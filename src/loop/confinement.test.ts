@@ -647,6 +647,7 @@ function commentOn(found: ConfinementEvidence | undefined): string {
     findings: { outcomes: [] },
     because: "nothing-open",
     confinement: found ?? nothingEstablished,
+    leftNotReviewed: null,
   });
 }
 

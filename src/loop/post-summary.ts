@@ -25,6 +25,7 @@ import type { ConfinementEvidence } from "./confinement.ts";
 import type { EpisodeState, RoundRecord } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
+import type { LeftNotReviewed } from "./round-end.ts";
 import type { AppliedVerdicts } from "./verdicts.ts";
 
 /**
@@ -81,6 +82,11 @@ export type ClosingRound = {
    * worktree of one round as the worktree of the whole episode.
    */
   readonly confinement: ConfinementEvidence;
+  /**
+   * The queued states the close recorded not reviewed, and the bound that
+   * stopped them, as the round's end decided. `null` where nothing was queued.
+   */
+  readonly leftNotReviewed: LeftNotReviewed | null;
 };
 
 /**
@@ -98,6 +104,7 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Comment
     findings: closing.findings,
     because: closing.because,
     confinement: closing.confinement,
+    leftNotReviewed: closing.leftNotReviewed,
   });
   return postSummary(closing.pullRequest, body, call);
 }

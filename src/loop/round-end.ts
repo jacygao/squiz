@@ -22,6 +22,24 @@ export type ReviewedRecord = Extract<StateRecord, { readonly status: "reviewed" 
 
 export type NotReviewedRecord = Extract<StateRecord, { readonly status: "not reviewed" }>;
 
+/** A bound that can stop a queued state from being reviewed. */
+export type StoppingBound = Exclude<ClosingReason, "nothing-open">;
+
+/**
+ * The queued states a close recorded not reviewed, in queue order, the bound
+ * that left no round for them, and the state reviewed before them.
+ *
+ * The bound is not always the close's reason. A last round that left nothing
+ * open closes as `nothing-open`, and the cap or the token bound still stopped
+ * the states behind it.
+ */
+export type LeftNotReviewed = {
+  readonly bound: StoppingBound;
+  /** The state the closing round reviewed, which `namedStates` names the others after. */
+  readonly after: StateKey;
+  readonly states: readonly NotReviewedRecord[];
+};
+
 /** The round that has just finished, as its own state's record needs it. */
 export type EndedRound = {
   /** The state the round reviewed, with the owner its record carries where it has one. */
@@ -45,12 +63,15 @@ export type RoundEnd =
    * is no close, no summary and no note for the owner.
    */
   | { readonly outcome: "reviewed clean, episode open"; readonly record: ReviewedRecord }
-  /** The episode closes. Each queued state is recorded not reviewed, in queue order. */
+  /**
+   * The episode closes. Each queued state is recorded not reviewed, and
+   * `leftNotReviewed` is `null` exactly where nothing was queued.
+   */
   | {
       readonly outcome: "closed";
       readonly because: ClosingReason;
       readonly record: ReviewedRecord;
-      readonly notReviewed: readonly NotReviewedRecord[];
+      readonly leftNotReviewed: LeftNotReviewed | null;
     };
 
 /**
@@ -73,7 +94,7 @@ export function decideRoundEnd(
   if (decision.because !== "nothing-open") {
     return closed(round, decision.because, notReviewed(queued, decision.because, round));
   }
-  if (queued.length === 0) return closed(round, "nothing-open", []);
+  if (queued.length === 0) return closed(round, "nothing-open", null);
 
   // Asked as though the round had left work, the decision says whether the cap
   // and the bound allow the round the queued state needs.
@@ -97,10 +118,10 @@ export function decideRoundEnd(
 function closed(
   round: EndedRound,
   because: ClosingReason,
-  stopped: readonly NotReviewedRecord[],
+  leftNotReviewed: LeftNotReviewed | null,
 ): RoundEnd {
   const exitStatus = round.openThreads.length === 0 ? 0 : 3;
-  return { outcome: "closed", because, record: exited(round, exitStatus), notReviewed: stopped };
+  return { outcome: "closed", because, record: exited(round, exitStatus), leftNotReviewed };
 }
 
 function exited(round: EndedRound, exitStatus: 0 | 2 | 3): ReviewedRecord {
@@ -115,10 +136,53 @@ function exited(round: EndedRound, exitStatus: 0 | 2 | 3): ReviewedRecord {
 
 function notReviewed(
   queued: readonly QueuedRecord[],
-  bound: Exclude<ClosingReason, "nothing-open">,
+  bound: StoppingBound,
   round: EndedRound,
-): NotReviewedRecord[] {
+): LeftNotReviewed | null {
+  if (queued.length === 0) return null;
   const at = bound === "round-cap" ? "the round cap" : "the token bound";
   const reason = `the episode closed at ${at}, after reviewing ${round.state.head.slice(0, 7)}`;
-  return queued.map(({ status: _queued, ...state }) => ({ ...state, status: "not reviewed", reason }));
+  const states = queued.map(
+    ({ status: _queued, ...state }): NotReviewedRecord => ({ ...state, status: "not reviewed", reason }),
+  );
+  return { bound, after: { head: round.state.head, activity: round.state.activity }, states };
+}
+
+/**
+ * How a person is told each of `states` apart, in order: its short head commit,
+ * and, where states before it share that head, how many times its replies
+ * differ from theirs.
+ *
+ * `after` is the state reviewed before them, and counts as before every one of
+ * them. A state sharing a head with one before it differs from it only in its
+ * replies, because no two records are for the same state. A reply added and a
+ * reply deleted both do that, and nothing here can tell which, so the name says
+ * only that they differ. Counting the states before it, rather than marking it
+ * once, keeps two such states on one commit from reading as one state named
+ * twice:
+ *
+ * - `8d21a4f`, where no state before it has that head
+ * - `8d21a4f with different replies`, where one does
+ * - `8d21a4f with different replies a second time`, where two do
+ */
+export function namedStates(after: StateKey, states: readonly StateKey[]): string[] {
+  const line = [after, ...states];
+  return states.map((state, index) => {
+    const before = line.slice(0, index + 1).filter((earlier) => earlier.head === state.head).length;
+    const commit = state.head.slice(0, 7);
+    if (before === 0) return commit;
+    if (before === 1) return `${commit} with different replies`;
+    return `${commit} with different replies a ${ordinal(before)} time`;
+  });
+}
+
+const ordinalWords = ["second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+
+/** `2` as `second`, and so on, in figures past `tenth`. */
+function ordinal(n: number): string {
+  const word = ordinalWords[n - 2];
+  if (word !== undefined) return word;
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${suffix}`;
 }

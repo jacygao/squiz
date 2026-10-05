@@ -370,7 +370,7 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 
 test("a state the close left unreviewed adds the line saying why", () => {
   const atCap = composeReview(
-    reviewed({ exit: 3, commit: "3f9c2e0", round: 3, threads: [skewThread], notReviewed: { commit: "8d21a4f" } }),
+    reviewed({ exit: 3, commit: "3f9c2e0", round: 3, threads: [skewThread], notReviewed: { state: "8d21a4f" } }),
     PATH,
   );
   const clean = composeReview(
@@ -378,7 +378,7 @@ test("a state the close left unreviewed adds the line saying why", () => {
       exit: 0,
       commit: "3f9c2e0",
       round: 3,
-      notReviewed: { commit: "8d21a4f", closedAt: "round cap" },
+      notReviewed: { state: "8d21a4f", closedAt: "round cap" },
     }),
     PATH,
   );
@@ -388,6 +388,23 @@ test("a state the close left unreviewed adds the line saying why", () => {
   for (const printed of [atCap, clean]) {
     assert.equal(printed.stdout.split("\n")[2], line, printed.stdout);
   }
+});
+
+test("a state the close left unreviewed is printed as it was named, its different replies included", () => {
+  const printed = composeReview(
+    reviewed({
+      exit: 0,
+      commit: "3f9c2e0",
+      round: 3,
+      notReviewed: { state: "3f9c2e0 with different replies", closedAt: "round cap" },
+    }),
+    PATH,
+  );
+  assert.equal(
+    printed.stdout.split("\n")[2],
+    "Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.",
+    printed.stdout,
+  );
 });
 
 test("exit 1 for a failed round prints nothing on stdout, and on stderr its reason, each item, and where the comment went", () => {
