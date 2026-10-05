@@ -1,86 +1,40 @@
 /**
- * What one firing of the hook comes to: the exit code, and which of the two
- * stderr channels the round's words left on.
+ * What a round's conclusion is reported as, and what one firing of the hook
+ * does.
  *
- * Every failure the harness controls exits 0, so the failures are arranged here
- * one row at a time and each is asserted to say what failed. A test that only
- * showed the hook not crashing would show nothing: the top-level trap turns any
- * throw into exit 0, and a hook that did no work at all would pass it.
- *
- * The rounds are run as processes. An exit code, the stream a line landed on,
- * and whether a line arrived at all are properties of a process, and none of
- * them is observable from inside this one. The fixtures run the hook without
- * the trap around it, so a throw that escapes the hook fails the test instead
- * of being turned into the exit code the test was expecting.
- *
- * Some of the failures need an environment rather than a value: a GitHub that
- * answers one call and refuses the next, a state file that will not take a write
- * after the review, a posting margin that runs out mid-flight, a reviewer that
- * stops without finishing. A scripted `gh` and a scripted reviewer, earlier on
- * `PATH` than the real ones, produce each of those on demand, and the whole hook
- * runs around them: the gate, the round, the posting, the exit code and stderr.
+ * A firing runs as a process. An exit code, the stream a line landed on, and
+ * whether the process ended while the host it started still runs are properties
+ * of a process, and none of them is observable from inside this one. The
+ * fixtures run the hook without the top-level trap, so a throw that escapes the
+ * hook fails the test instead of being turned into the exit 0 it expects.
  */
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import {
-  accessSync,
-  constants,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import type { Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { CommentPosting } from "../github/summary.ts";
 import type { RoundConfinement } from "../loop/confinement.ts";
-import type { StateWrite } from "../loop/episode-state.ts";
+import { readState, type StateWrite } from "../loop/episode-state.ts";
+import { episodeAt } from "../loop/episode.ts";
 import type { FindingOutcome } from "../loop/post-findings.ts";
 import type { EpisodeSummary } from "../loop/post-summary.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
-import type { RoundConclusion, RoundFailure, RoundSetup } from "../loop/round.ts";
+import type { RoundConclusion, RoundFailure } from "../loop/round.ts";
 import type { AppliedVerdict } from "../loop/verdicts.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { MarkWrite } from "../worktree/shared-tree.ts";
 import { failureIn, unreviewedIn } from "./hook.ts";
 import { failureLine } from "./report.ts";
 
-const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
-const hookModule = new URL("./hook.ts", import.meta.url).href;
-const roundModule = new URL("../loop/round.ts", import.meta.url).href;
-
 const PULL_REQUEST = 142;
-const BRANCH = "review/the-round";
-
-/** The subagent's id, in the shape every id the runtime has emitted holds. */
-const AGENT_ID = "a1e3196c5ad0f2410";
-
-/** The id of the user turn in the parent session, which is never the key. */
-const PROMPT_ID = "59893e32-bf05-4243-8b68-062d0f8767ef";
-
-/** One firing, as the runtime writes it to the hook's stdin. */
-function payload(over: Readonly<Record<string, unknown>> = {}): string {
-  return JSON.stringify({
-    session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
-    cwd: "/work/session-directory",
-    prompt_id: PROMPT_ID,
-    agent_id: AGENT_ID,
-    agent_type: "general-purpose",
-    hook_event_name: "SubagentStop",
-    stop_hook_active: false,
-    last_assistant_message: "The change is on the branch.",
-    ...over,
-  });
-}
 
 // § 7's rows arrive here as conclusions, because the round reports every one of
 // them as a value rather than by throwing.
@@ -674,144 +628,65 @@ test("every pointer the hook composes is one line", () => {
   }
 });
 
-/** What the round was handed, read back from the process that ran it. */
-type HandedOver = {
-  readonly worktree: string;
-  readonly config: Config;
-  readonly charterFile: string;
-  /** The command the adapter the hook chose would start. */
-  readonly reviewer: string;
-};
+const hookModule = new URL("./hook.ts", import.meta.url).href;
+const triggerModule = new URL("../host/trigger.ts", import.meta.url).href;
+const episodeModule = new URL("../loop/episode.ts", import.meta.url).href;
+const standInHost = fileURLToPath(new URL("../host/host-stand-in.ts", import.meta.url));
 
-type Fired = {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-  /** `null` where no round ran, which is what a firing that failed first leaves. */
-  readonly handed: HandedOver | null;
-};
+const NUMBER = 41;
+const BRANCH = "feature-a";
+const HEAD = "3f9c2e0a1b2c3d4e5f60718293a4b5c6d7e8f901";
+const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
+const AGENT_ID = "a1e3196c5ad0f2410";
+const SOCKET = "/tmp/claude-code-messaging.sock";
+const BOUND_MS = 10_000;
 
-/** What the round does when the hook calls it. */
-type FakeRound =
-  | { readonly returns: RoundConclusion }
-  /** A defect in the harness, which the round's own contract says cannot happen. */
-  | { readonly throws: string };
-
-type Firing = {
-  /** The worktree the hook fires in, which a repository has been made in. */
-  readonly directory: string;
-  readonly payload?: string;
-  readonly round?: FakeRound;
-};
-
-/**
- * Fire the hook in a child process and collect everything it left behind.
- *
- * The round is handed over rather than run: what a reviewer, GitHub or a state
- * file did to a round is the round's own to report, and the hook is judged on
- * what it does with the report.
- */
-async function fire(setup: Firing): Promise<Fired> {
-  const root = await mkdtemp(join(tmpdir(), "squiz-firing-"));
-  try {
-    const handedFile = join(root, "handed.json");
-    const source = join(root, "fire.mjs");
-    await writeFile(source, fixture(setup, handedFile), "utf8");
-    const run = await runInChild(source);
-    return {
-      ...run,
-      handed: existsSync(handedFile)
-        ? (JSON.parse(readFileSync(handedFile, "utf8")) as HandedOver)
-        : null,
-    };
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-}
-
-/**
- * The module the child runs: the hook, called directly, with the round faked.
- *
- * No trap around it. The trap turns a throw into exit 0, which is the exit half
- * of these tests expect, so running under it would hide a hook that threw.
- */
-function fixture(setup: Firing, handedFile: string): string {
-  const text = setup.payload ?? payload();
-  const round = setup.round ?? { returns: { outcome: "episode-over" } };
-  const body =
-    "throws" in round
-      ? `throw new Error(${JSON.stringify(round.throws)});`
-      : `return ${JSON.stringify(round.returns)};`;
-  return [
-    `import { writeFileSync } from "node:fs";`,
-    `import { Readable } from "node:stream";`,
-    `import { runHook } from ${JSON.stringify(hookModule)};`,
-    ``,
-    `const round = async (given) => {`,
-    `  const invocation = {`,
-    `    directory: given.worktree,`,
-    `    charterFile: given.charterFile,`,
-    `    prompt: "",`,
-    `    sessionDirectory: given.worktree,`,
-    `    scratchDirectory: given.worktree,`,
-    `    depth: given.config.depth,`,
-    `    thinking: given.config.thinking,`,
-    `  };`,
-    `  writeFileSync(${JSON.stringify(handedFile)}, JSON.stringify({`,
-    `    worktree: given.worktree,`,
-    `    config: given.config,`,
-    `    charterFile: given.charterFile,`,
-    `    reviewer: given.adapter.argv(invocation).command,`,
-    `  }));`,
-    `  ${body}`,
-    `};`,
-    ``,
-    `process.exitCode = await runHook({`,
-    `  stdin: Readable.from(${JSON.stringify(text === "" ? [] : [text])}),`,
-    `  directory: ${JSON.stringify(setup.directory)},`,
-    `  round,`,
-    `});`,
-    ``,
-  ].join("\n");
-}
-
-type Run = {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-};
-
-async function runInChild(file: string): Promise<Run> {
-  return await new Promise<Run>((resolve, reject) => {
-    // Pipes, which is how Claude Code runs the hook, and the case where output
-    // written but not flushed is lost.
-    const child = spawn(process.execPath, [file]);
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code, stdout, stderr });
-    });
+/** A firing as the runtime writes it to the hook's stdin. */
+function stopPayload(over: Readonly<Record<string, unknown>> = {}): string {
+  return JSON.stringify({
+    session_id: SESSION_ID,
+    cwd: "/work/session-directory",
+    hook_event_name: "Stop",
+    stop_hook_active: false,
+    last_assistant_message: "The change is on the branch.",
+    ...over,
   });
 }
 
-/** A repository with one commit on `BRANCH`, and its path as git resolves it. */
-async function withRepository<T>(body: (worktree: string) => Promise<T> | T): Promise<T> {
-  const directory = await mkdtemp(join(tmpdir(), "squiz-hook-"));
-  try {
-    commitOn(directory, BRANCH);
-    return await body(realpathSync(directory));
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+function subagentStopPayload(over: Readonly<Record<string, unknown>> = {}): string {
+  return stopPayload({ hook_event_name: "SubagentStop", agent_id: AGENT_ID, agent_type: "general-purpose", ...over });
+}
+
+/** A worktree on `BRANCH`, a `gh` answering for it, and a file for whatever reports back. */
+type Place = {
+  readonly worktree: string;
+  readonly bin: string;
+  /** Where the stand-in hosts write `took <pid>`, and a recording trigger its request. */
+  readonly log: string;
+};
+
+/**
+ * The fake `gh`. `gh pr list` prints `list.out` and exits with `list.status`.
+ * Every GraphQL call is a threads listing with no threads.
+ */
+function fakeGh(directory: string): string {
+  const at = `'${directory.replaceAll("'", `'\\''`)}'`;
+  const noThreads = JSON.stringify({
+    data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } },
+  });
+  return [
+    "#!/bin/sh",
+    "cat > /dev/null",
+    'for arg in "$@"; do',
+    '  if [ "$arg" = graphql ]; then',
+    `    printf 'HTTP/2.0 200 OK\\nContent-Type: application/json; charset=utf-8\\r\\n\\r\\n%s' '${noThreads}'`,
+    "    exit 0",
+    "  fi",
+    "done",
+    `cat ${at}/list.out`,
+    `exit "$(cat ${at}/list.status 2>/dev/null || echo 0)"`,
+    "",
+  ].join("\n");
 }
 
 function git(directory: string, ...args: readonly string[]): void {
@@ -819,1405 +694,276 @@ function git(directory: string, ...args: readonly string[]): void {
   assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
 }
 
-/**
- * The commit `commitOn` makes, which the pull request names as its head. Every
- * input to it is fixed, the dates included, so a round can snapshot it.
- */
-const HEAD_COMMIT = "8e453b0911a073d01dd027140becb7c063df3a46";
-
-function commitOn(directory: string, branch: string): void {
-  git(directory, "init", "--quiet", "--initial-branch", branch);
-  // Ignored, as adopting the harness asks: the reviewer's report file is
-  // written there, and the confinement reading would take it for a change.
-  writeFileSync(join(directory, ".git", "info", "exclude"), ".squiz/\n");
-  const committed = spawnSync(
-    "git",
-    [
-      "-c",
-      "user.email=squiz@example.invalid",
-      "-c",
-      "user.name=Squiz",
-      "-c",
-      "commit.gpgsign=false",
-      "commit",
-      "--quiet",
-      "--allow-empty",
-      "--message",
-      "the change under review",
-    ],
-    {
-      cwd: directory,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GIT_AUTHOR_DATE: "2026-09-06T07:13:05Z",
-        GIT_COMMITTER_DATE: "2026-09-06T07:13:05Z",
-      },
-    },
-  );
-  assert.equal(committed.status, 0, `git commit: ${committed.stderr}`);
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
-  assert.equal(head.stdout.trim(), HEAD_COMMIT, "the fixture's commit is not the one the pull request names");
+async function withPlace(body: (place: Place) => Promise<void>): Promise<void> {
+  // Real paths, because git answers the toplevel with symlinks resolved.
+  const worktree = realpathSync(await mkdtemp(join(tmpdir(), "squiz-hook-")));
+  const bin = await mkdtemp(join(tmpdir(), "squiz-hook-gh-"));
+  const place: Place = { worktree, bin, log: join(bin, "reported.log") };
+  try {
+    git(worktree, "init", "--quiet", "--initial-branch", BRANCH);
+    git(worktree, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false",
+      "commit", "--quiet", "--allow-empty", "--message", "a commit to hang a branch off");
+    const row = { number: NUMBER, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName: BRANCH, headRefOid: HEAD, body: "" };
+    writeFileSync(join(bin, "list.out"), JSON.stringify([row]), "utf8");
+    standIn(bin, "gh", fakeGh(bin));
+    await body(place);
+  } finally {
+    for (const pid of hostsThatTook(place)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    await rm(worktree, { recursive: true, force: true });
+    await rm(bin, { recursive: true, force: true });
+  }
 }
 
-/** The blocking reason of a round that found something, as the round composes it. */
-const REASON = [
-  "Squiz reviewed the change on this branch and left 1 comment on PR #142.",
-  "",
-  "1 thread is open on it:",
-  "PRRT_kwDOA src/ui/card.ts:88",
-  "",
-  "The commands that work them:",
-  "  squiz threads",
-  "  squiz reply <id> <text>",
-  "",
-  "Address what applies, reply on anything you disagree with, then finish.",
-  "",
-].join("\n");
+function reported(place: Place): string {
+  return existsSync(place.log) ? readFileSync(place.log, "utf8") : "";
+}
 
-test("a blocked round exits 2 with the blocking reason, and nothing else on stderr", async () => {
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      round: { returns: blockedRound(REASON) },
-    });
+function hostsThatTook(place: Place): number[] {
+  return reported(place).split("\n").filter((line) => line.startsWith("took ")).map((line) => Number(line.slice(5)));
+}
 
-    assert.equal(fired.code, 2, "only exit 2 blocks the coding agent's turn");
-    assert.equal(fired.stderr, REASON, "the reason left changed, or something left beside it");
-    assert.equal(fired.stdout, "", "the runtime reads exit 2 from stderr alone");
-  });
-});
+/** Which trigger the firing calls, as source the child evaluates. */
+type TriggerAs =
+  /** The real one, with the stand-in host in place of `squiz host`. */
+  | { readonly as: "real" }
+  /** The real one, starting `command` as the host. */
+  | { readonly as: "real"; readonly hostCommand: string }
+  /** One that writes the request it was given to the log, and found no pull request. */
+  | { readonly as: "recording" }
+  | { readonly as: "throwing"; readonly message: string };
 
-test("stop_hook_active does not end a round", async () => {
-  // It is true from the second firing of an episode onward, which is every
-  // firing where the loop means to block. A hook that stopped on it would cap
-  // every episode at one round.
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      payload: payload({ stop_hook_active: true }),
-      round: { returns: blockedRound(REASON) },
-    });
-
-    assert.equal(fired.code, 2);
-    assert.equal(fired.stderr, REASON);
-  });
-});
-
-test("a firing while another round holds the episode exits 0 and says so in one line", async () => {
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      round: { returns: { outcome: "round-running", pullRequest: PULL_REQUEST } },
-    });
-
-    assert.equal(fired.code, 0, "a round already running must not stop the coding agent finishing");
-    assert.equal(
-      fired.stderr,
-      `squiz: no review ran: a round is already running on PR #${PULL_REQUEST}\n`,
-    );
-    assert.equal(fired.stdout, "");
-  });
-});
-
-test("a closing round exits 0 and says nothing", async () => {
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      round: { returns: closedRound("round-cap", [threaded("the anchor is off")]) },
-    });
-
-    assert.equal(fired.code, 0);
-    assert.equal(fired.stderr, "", "an episode that closed at its cap has not failed");
-    assert.equal(fired.stdout, "");
-  });
-});
-
-test("a closing round that carried a failure exits 0 and is not silent", async () => {
-  // The exit code was never the bug: a close exits 0 and looks like the end of a
-  // healthy episode, so a failure it carried out with it reads as a clean
-  // review. Both shapes of that are here.
-  const cases = [
-    {
-      conclusion: closedRound("nothing-open", [], [applied("PRRT_1"), refused("PRRT_2")]),
-      pointer:
-        "squiz: the round closed the episode on PR #142 having failed to apply 1 of 2 verdicts\n",
-    },
-    {
-      conclusion: closedRound("round-cap", [threaded("one"), unpostable("two")]),
-      pointer:
-        "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings\n",
-    },
-    {
-      conclusion: closedRound("nothing-open", [threaded("one")], [], undefined, SUMMARY_REFUSED),
-      pointer:
-        "squiz: the round closed the episode on PR #142 having failed to post the episode's " +
-        "summary: gh answered HTTP 502 without posting the summary\n",
-    },
-  ];
-
-  await withRepository(async (worktree) => {
-    for (const { conclusion, pointer } of cases) {
-      const fired = await fire({ directory: worktree, round: { returns: conclusion } });
-
-      assert.equal(fired.code, 0, "a round that closed must not stop the coding agent finishing");
-      assert.equal(fired.stderr, pointer);
-      assert.equal(fired.stdout, "");
-    }
-  });
-});
-
-test("a round that failed exits 0 with the pointer on stderr", async () => {
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      round: { returns: failedRound("timed-out", "the reviewer was killed at its 480-second bound") },
-    });
-
-    assert.equal(fired.code, 0, "a failed round must not stop the coding agent finishing");
-    assert.equal(
-      fired.stderr,
-      "squiz: the reviewer was killed at its 480-second bound\n",
-      "the failure pointer is one line, prefixed, and alone",
-    );
-    assert.equal(fired.stdout, "");
-  });
-});
-
-test("a throw inside a round does not reach the runtime", async () => {
-  // The round reports its failures as values, so a throw from it is a defect in
-  // the harness. The hook ends the round with it rather than the turn, and the
-  // top-level trap is not what catches it here: this fixture runs without one.
-  await withRepository(async (worktree) => {
-    const fired = await fire({
-      directory: worktree,
-      round: { throws: "the round read a thread that was not there" },
-    });
-
-    assert.equal(fired.code, 0);
-    assert.equal(
-      fired.stderr,
-      "squiz: the round could not be run: the round read a thread that was not there\n",
-    );
-  });
-});
-
-test("every way a round can fail exits 0", async () => {
-  // The harness may fail in any way except by preventing the coding agent from
-  // finishing, and a round is the only thing here that can fail in many ways.
-  const rounds: readonly FakeRound[] = [
-    { returns: failedRound("setup", "the reviewer could not run: spawn pi ENOENT") },
-    { returns: failedRound("setup", "the reviewer could not run: the model refused the request") },
-    { returns: failedRound("unavailable", "the review did not run: pi exited 1: 429 rate limited") },
-    { returns: failedRound("unavailable", "the review did not run: the last message was not a review") },
-    { returns: failedRound("timed-out", "the reviewer was killed at its 480-second bound") },
-    { returns: failedRound("harness", "no review ran: gh exited 1: HTTP 503") },
-    { returns: failedRound("harness", "nothing was posted: EACCES: permission denied") },
-    { returns: closedRound("round-cap", [threaded("the anchor is off")]) },
-    { returns: closedRound("token-bound") },
-    { returns: closedRound("nothing-open", [unpostable("the anchor is off")]) },
-    { returns: closedRound("nothing-open", [threaded("one"), unpostable("two")]) },
-    { returns: closedRound("nothing-open", [], [refused("PRRT_1")]) },
-    { returns: closedRound("nothing-open", [noted("one")], [], new Error("no hunk header")) },
-    { returns: closedRound("nothing-open", [], [], undefined, SUMMARY_REFUSED) },
-    { returns: closedBeforeTheReview("round-cap", NO_SUMMARY) },
-    { returns: { outcome: "episode-over" } },
-    {
-      returns: closedRound("nothing-open", [], [], undefined, { outcome: "posted" }, {
-        outcome: "failed",
-        reason: "state.json could not be written: ENOSPC: no space left on device",
-      }),
-    },
-    { throws: "the round read a thread that was not there" },
-  ];
-
-  await withRepository(async (worktree) => {
-    for (const round of rounds) {
-      const fired = await fire({ directory: worktree, round });
-
-      assert.equal(fired.code, 0, `exit for ${JSON.stringify(round)}`);
-      assert.equal(fired.stdout, "");
-      if (fired.stderr !== "") assertOneLine(fired.stderr);
-    }
-  });
-});
-
-test("two subagents' firings on one pull request hand the round the same setup", async () => {
-  // The round keys the episode by the pull request it finds in the worktree, so
-  // nothing that tells two subagents apart may reach it.
-  await withRepository(async (worktree) => {
-    const one = await fire({ directory: worktree });
-    const other = await fire({
-      directory: worktree,
-      payload: payload({ agent_id: "ad5b06227fb235983", prompt_id: "another-turn" }),
-    });
-
-    assert.notEqual(one.handed, null, "no round ran");
-    assert.deepEqual(other.handed, one.handed);
-    for (const id of [AGENT_ID, PROMPT_ID]) {
-      assert.equal(JSON.stringify(one.handed).includes(id), false, `${id} reached the round`);
-    }
-  });
-});
-
-test("the worktree is resolved rather than read off the directory the hook fired in", async () => {
-  // The hook fires in the subagent's working directory, which is somewhere
-  // inside the worktree and not necessarily its root.
-  await withRepository(async (worktree) => {
-    const inside = join(worktree, "src", "deep");
-    await mkdir(inside, { recursive: true });
-
-    const fired = await fire({ directory: inside });
-
-    assert.equal(fired.handed?.worktree, worktree);
-  });
-});
-
-test("a subagent id no directory name can be made of still runs the round", async () => {
-  // Nothing is keyed by the subagent's id, so nothing about it can stop a round.
-  await withRepository(async (worktree) => {
-    const fired = await fire({ directory: worktree, payload: payload({ agent_id: "../.." }) });
-
-    assert.equal(fired.code, 0);
-    assert.notEqual(fired.handed, null, "no round ran");
-    assert.equal(fired.stderr, "");
-  });
-});
-
-test("a payload that cannot be read is not a round that found nothing", async () => {
-  await withRepository(async (worktree) => {
-    for (const text of ["", "{ not json", '{"prompt_id":"59893e32"}']) {
-      const fired = await fire({ directory: worktree, payload: text });
-
-      assert.equal(fired.code, 0, `exit for ${JSON.stringify(text)}`);
-      assert.equal(fired.handed, null, `a round ran on ${JSON.stringify(text)}`);
-      assert.match(fired.stderr, /^squiz: no review ran: /u);
-      assertOneLine(fired.stderr);
-    }
-  });
-});
-
-test("a block with nothing to say does not block", async () => {
-  // Exit 2 hands the coding agent whatever is on stderr as its next
-  // instruction, and an empty one spends a round of the cap on nothing.
-  await withRepository(async (worktree) => {
-    const fired = await fire({ directory: worktree, round: { returns: blockedRound("  \n ") } });
-
-    assert.equal(fired.code, 0);
-    assert.equal(fired.stderr, "squiz: the round blocked on PR #142 with nothing to say\n");
-  });
-});
-
-test("the project's settings and the charter that ships reach the round", async () => {
-  await withRepository(async (worktree) => {
-    await writeFile(join(worktree, ".squiz.json"), JSON.stringify({ rounds: 1 }), "utf8");
-
-    const fired = await fire({ directory: worktree });
-
-    assert.equal(fired.handed?.config.rounds, 1);
-    assert.equal(fired.handed?.reviewer, "pi", "the round was handed an adapter for another CLI");
-    assert.equal(existsSync(fired.handed?.charterFile ?? ""), true, "the charter was not found");
-  });
-});
-
-test("a .squiz.json that cannot be read runs no round", async () => {
-  await withRepository(async (worktree) => {
-    await writeFile(join(worktree, ".squiz.json"), '{"rounds": 99}', "utf8");
-
-    const fired = await fire({ directory: worktree });
-
-    assert.equal(fired.code, 0);
-    assert.equal(fired.handed, null, "a round ran on settings nothing could read");
-    assert.match(fired.stderr, /^squiz: no review ran: .*rounds/u);
-    assertOneLine(fired.stderr);
-  });
-});
-
-/** Which call to `gh` the fake was asked for, and what it answers with. */
-type Answers = {
-  readonly pullRequests?: string;
-  readonly diff?: string;
-  /** The threads listing every round makes. One naming none by default. */
-  readonly threads?: string;
-  readonly status?: number;
-  readonly stderr?: string;
+type HookFiring = {
+  readonly payload: string;
+  readonly environment?: Readonly<Record<string, string>>;
+  readonly trigger?: TriggerAs;
 };
 
-/**
- * One answer from `gh api --include`: the status line, the headers, a blank
- * line, then the body.
- *
- * The line endings are the fixture. The status line ends in a bare newline and
- * the headers in CRLF, which is what the reader has to split on either way.
- */
-function response(status: string, body: unknown): string {
-  return [
-    `HTTP/2.0 ${status}`,
-    "Content-Type: application/json; charset=utf-8\r",
-    "",
-    JSON.stringify(body),
-  ].join("\n");
-}
+type Fired = { readonly code: number | null; readonly stderr: string; readonly elapsedMs: number };
 
-/** A threads listing that names no thread. */
-const NO_THREADS = response("200 OK", {
-  data: {
-    node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
-  },
-});
-
-type Tools = {
-  /** A `PATH` holding git, and the fake `gh` where there is one. */
-  readonly path: string;
-  readonly ghWasRun: () => boolean;
-  readonly ghArguments: () => readonly string[];
-};
-
-/**
- * A `PATH` carrying git and ps and nothing else that matters.
- *
- * The system's own `PATH` is left out so that a reviewer installed on the
- * machine running the tests cannot be started by one of them. ps stays, because
- * a round without it cannot mark itself as running and says so.
- */
-async function toolsIn(directory: string, gh: Answers | null): Promise<Tools> {
-  const path = join(directory, "tools");
-  const argumentLog = join(directory, "gh-arguments");
-  mkdirSync(path);
-  symlinkSync(onSystemPath("git"), join(path, "git"));
-  symlinkSync(onSystemPath("ps"), join(path, "ps"));
-
-  if (gh !== null) {
-    standIn(
-      path,
-      "gh",
-      [
-        "#!/bin/sh",
-        'for argument in "$@"; do',
-        `  printf '%s\\n' "$argument" >> ${quote(argumentLog)}`,
-        "done",
-        // Every call reads its stdin, or a call carrying a body signals the
-        // writer instead of answering it. A call carrying none sees an empty
-        // stdin, so there is nothing to tell the two apart for. `read` does it
-        // because it is a builtin: `PATH` here holds git, ps and gh alone.
-        "while read -r line; do :; done",
-        "case $1 in",
-        `  pr) printf '%s' ${quote(gh.pullRequests ?? "")} ;;`,
-        `  api) if [ "$2" = graphql ]; then printf '%s' ${quote(gh.threads ?? NO_THREADS)}; else printf '%s' ${quote(gh.diff ?? "")}; fi ;;`,
-        "esac",
-        `printf '%s' ${quote(gh.stderr ?? "")} >&2`,
-        `exit ${gh.status ?? 0}`,
-        "",
-      ].join("\n"),
-    );
-  }
-
-  return {
-    path,
-    ghWasRun: () => existsSync(argumentLog),
-    ghArguments: () =>
-      existsSync(argumentLog)
-        ? readFileSync(argumentLog, "utf8")
-            .split("\n")
-            .filter((line) => line !== "")
-        : [],
-  };
-}
-
-function onSystemPath(name: string): string {
-  for (const entry of (process.env["PATH"] ?? "").split(":")) {
-    if (entry === "") continue;
-    const candidate = join(entry, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Not this entry. The next one, or none at all.
+function triggerSource(place: Place, trigger: TriggerAs): string {
+  const log = JSON.stringify(place.log);
+  switch (trigger.as) {
+    case "real": {
+      const host =
+        "hostCommand" in trigger
+          ? `() => ({ command: ${JSON.stringify(trigger.hostCommand)}, args: [] })`
+          : `(number) => ({ command: process.execPath, args: [${JSON.stringify(standInHost)}, episodeAt(${JSON.stringify(place.worktree)}, number).directory, ${log}] })`;
+      return `(request) => trigger({ ...request, host: ${host} })`;
     }
+    case "recording":
+      return [
+        "(request) => {",
+        `  writeFileSync(${log}, JSON.stringify({ ...request, remainingMs: request.until.remaining() }));`,
+        '  return { outcome: "no review", reason: "the recording trigger looked for nothing" };',
+        "}",
+      ].join("\n");
+    case "throwing":
+      return `() => { throw new Error(${JSON.stringify(trigger.message)}); }`;
   }
-  return assert.fail(`${name} is not on PATH, and every fixture here needs it`);
 }
 
-function quote(text: string): string {
-  return `'${text.replaceAll("'", `'\\''`)}'`;
-}
-
-/** Run `squiz hook` as the registration does, with `text` on its stdin. */
-function squizHook(directory: string, path: string, text: string): Run {
-  const result = spawnSync(process.execPath, [cli, "hook"], {
-    cwd: directory,
-    encoding: "utf8",
-    input: text,
-    env: { ...process.env, PATH: path },
-  });
-  assert.equal(result.error, undefined, `the hook could not be run: ${String(result.error)}`);
-  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
-}
-
-/** The shares of a round's window a test lowers so as not to wait the real ones out. */
-type Lowered = Pick<RoundSetup, "marginMs" | "preReviewMs">;
-
-/**
- * Run the hook as `squizHook` does, with the round's shares lowered.
- *
- * Through the hook's own seam for the round, so the gate, the posting, the exit
- * code and stderr are the real ones and only the shares are the test's. No trap
- * around it, as in `fire`.
- */
-function squizHookLowered(fixture: Fixture, path: string, text: string, lowered: Lowered): Run {
-  const source = join(fixture.beside, "lowered-hook.mjs");
-  writeFileSync(
+/** Fire the hook in `place` as a process of its own, and collect what it left behind. */
+async function fire(place: Place, firing: HookFiring): Promise<Fired> {
+  const source = join(place.bin, "fire.mjs");
+  await writeFile(
     source,
     [
+      `import { writeFileSync } from "node:fs";`,
+      `import { Readable } from "node:stream";`,
       `import { runHook } from ${JSON.stringify(hookModule)};`,
-      `import { runRound } from ${JSON.stringify(roundModule)};`,
+      `import { trigger } from ${JSON.stringify(triggerModule)};`,
+      `import { episodeAt } from ${JSON.stringify(episodeModule)};`,
       ``,
-      `const lowered = ${JSON.stringify(lowered)};`,
       `process.exitCode = await runHook({`,
-      `  stdin: process.stdin,`,
-      `  directory: process.cwd(),`,
-      `  round: (setup) => runRound({ ...setup, ...lowered }),`,
+      `  stdin: Readable.from([${JSON.stringify(firing.payload)}]),`,
+      `  directory: ${JSON.stringify(place.worktree)},`,
+      `  environment: ${JSON.stringify(firing.environment ?? {})},`,
+      `  trigger: ${triggerSource(place, firing.trigger ?? { as: "real" })},`,
       `});`,
       ``,
     ].join("\n"),
     "utf8",
   );
-  const result = spawnSync(process.execPath, [source], {
-    cwd: fixture.worktree,
-    encoding: "utf8",
-    input: text,
-    env: { ...process.env, PATH: path },
+  const started = Date.now();
+  return await new Promise<Fired>((resolve, reject) => {
+    // Pipes, which is how Claude Code runs the hook. A host that kept either
+    // open would hold this until it exited.
+    const child = spawn(process.execPath, [source], {
+      env: { ...process.env, PATH: `${place.bin}:${process.env["PATH"] ?? ""}` },
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.stdout.resume();
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code, stderr, elapsedMs: Date.now() - started });
+    });
   });
-  assert.equal(result.error, undefined, `the hook could not be run: ${String(result.error)}`);
-  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-/** The pointer is one line, whatever it had to say. */
-function assertOneLine(stderr: string): void {
-  assert.equal(stderr.split("\n").length, 2, `the pointer is not one line: ${stderr}`);
-}
-
-const LISTING = JSON.stringify([
-  {
-    number: PULL_REQUEST,
-    id: "PR_kwDOUEd2qM8AAAABDNPXSA",
-    baseRefName: "main",
-    headRefName: BRANCH,
-    headRefOid: HEAD_COMMIT,
-    body: "",
-  },
-]);
-
-/** The file the change under review touches, as the host project spells it. */
-const REVIEWED_FILE = "src/ui/card.ts";
-
-/**
- * The change under review.
- *
- * Lines 86 and 87 are the two it added, so they are the only two a finding can
- * be anchored to and the only two the router places inline.
- */
-const DIFF = [
-  `diff --git a/${REVIEWED_FILE} b/${REVIEWED_FILE}`,
-  "index d3d0cb2..6db135b 100644",
-  `--- a/${REVIEWED_FILE}`,
-  `+++ b/${REVIEWED_FILE}`,
-  "@@ -85,2 +85,4 @@",
-  " // the card's header",
-  "+// the reason is dropped here",
-  "+// and the outcome returned alone",
-  " // the card's footer",
-  "",
-].join("\n");
-
-test("a reviewer that is not installed ends the round at exit 0, saying so", async () => {
-  // The whole hook, end to end: the payload on stdin, git and `gh` as the
-  // registration gives them, and a reviewer nothing can start.
-  await withRepository(async (worktree) => {
-    const tools = await toolsIn(worktree, { pullRequests: LISTING, diff: DIFF });
-
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(result.code, 0, "a reviewer that is missing must not stop the turn");
-    assert.equal(result.stdout, "");
-    const [failure, announced, ...rest] = result.stderr.split("\n");
-    assert.match(failure ?? "", /^squiz: the reviewer could not run: /u);
-    assert.match(announced ?? "", /^squiz: the failure (is|could not be) posted on PR #142/u);
-    assert.deepEqual(rest, [""], "one line for the failure and one for its comment");
-  });
-});
-
-test("a branch with no pull request posts nothing, runs nothing, and says which branch and where", async () => {
-  await withRepository(async (worktree) => {
-    const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
-
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(result.code, 0, "only exit 2 blocks a turn, and no round ran");
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(worktree)}\n`,
-      "a pass for want of a pull request must not read like a subagent reviewed against the wrong tree",
-    );
-    assert.ok(tools.ghWasRun(), "the branch was never asked about");
-    assert.equal(
-      existsSync(join(worktree, ".squiz")),
-      false,
-      "an episode was opened with no pull request to key it",
-    );
-  });
-});
-
-test("the directory a pass names keeps every space in its path", async () => {
-  const root = await mkdtemp(join(tmpdir(), "squiz-hook-"));
-  try {
-    const worktree = join(realpathSync(root), "two  spaces");
-    mkdirSync(worktree);
-    commitOn(worktree, BRANCH);
-    const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
-
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(
-      result.stderr,
-      `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(worktree)}\n`,
-      "a path with its spaces collapsed names a directory that does not exist",
-    );
-  } finally {
-    await rm(root, { recursive: true, force: true });
+async function eventually(done: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + BOUND_MS;
+  while (!done()) {
+    if (Date.now() > deadline) assert.fail(`${what} did not happen within ${BOUND_MS}ms`);
+    await sleep(50);
   }
-});
+}
 
-test("a gh that failed says so, where a branch with no pull request would say nothing", async () => {
-  await withRepository(async (worktree) => {
-    // It prints an empty list as well as failing, so nothing but the exit
-    // status stands between a broken install and a silent round.
-    const tools = await toolsIn(worktree, {
-      pullRequests: "[]\n",
-      status: 1,
-      stderr: "HTTP 401: Bad credentials\nTry authenticating with: gh auth login\n",
+function recordsIn(place: Place): readonly unknown[] {
+  const read = readState(episodeAt(place.worktree, NUMBER));
+  assert.equal(read.outcome, "read", `state read as ${JSON.stringify(read)}`);
+  return read.outcome === "read" ? (read.state.records ?? []) : [];
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a Stop firing queues the state, owned by the session and its socket, and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: stopPayload(),
+      environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, HERDR_WORKSPACE_ID: "w2" },
     });
 
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(result.code, 0, "a broken gh must not stop the coding agent finishing its turn");
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      `squiz: no review ran: the pull request for "${BRANCH}" could not be looked up: ` +
-        "gh exited 1: HTTP 401: Bad credentials\n",
-    );
-  });
-});
-
-test("a gh that is not installed says so", async () => {
-  await withRepository(async (worktree) => {
-    const tools = await toolsIn(worktree, null);
-
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /^squiz: no review ran: .*gh could not be run/u);
-    assertOneLine(result.stderr);
-  });
-});
-
-test("a detached HEAD asks gh nothing, and says it was detached and where", async () => {
-  await withRepository(async (worktree) => {
-    git(worktree, "checkout", "--quiet", "--detach");
-    const tools = await toolsIn(worktree, { pullRequests: LISTING });
-
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      `squiz: no review ran: HEAD is detached in ${JSON.stringify(worktree)}, so no pull request has it as its head\n`,
-    );
-    assert.equal(tools.ghWasRun(), false, "a detached HEAD is not a branch to ask GitHub about");
-  });
-});
-
-test("a directory that is no repository says so, and asks gh nothing", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "squiz-hook-"));
-  try {
-    const tools = await toolsIn(directory, { pullRequests: LISTING });
-
-    const result = squizHook(directory, tools.path, payload());
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.match(
-      result.stderr,
-      /^squiz: no review ran: the worktree could not be resolved: git exited 128: fatal: not a git repository/u,
-    );
-    assertOneLine(result.stderr);
-    assert.equal(tools.ghWasRun(), false);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test("a hook fired with no payload runs no round", async () => {
-  await withRepository(async (worktree) => {
-    const tools = await toolsIn(worktree, { pullRequests: LISTING, diff: DIFF });
-
-    const result = squizHook(worktree, tools.path, "");
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /^squiz: no review ran: the hook was given no payload/u);
-    assertOneLine(result.stderr);
-    assert.equal(tools.ghWasRun(), false, "a round ran on a firing nothing is known about");
-  });
-});
-
-/**
- * One of the firings an interactive session makes after a turn ends, which no
- * dispatched subagent caused: an empty `agent_type`, a fresh `agent_id`, no last
- * message, and no tasks.
- */
-const PHANTOM = JSON.stringify({
-  session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
-  transcript_path: "/transcripts/60517e1f-e1dc-49b1-8e39-6fcbe686f3fb.jsonl",
-  cwd: "/work/session-directory",
-  prompt_id: PROMPT_ID,
-  permission_mode: "default",
-  agent_id: "a52d5fd4b5ef193bc",
-  agent_type: "",
-  hook_event_name: "SubagentStop",
-  stop_hook_active: false,
-  agent_transcript_path:
-    "/transcripts/60517e1f-e1dc-49b1-8e39-6fcbe686f3fb/subagents/agent-a52d5fd4b5ef193bc.jsonl",
-  background_tasks: [],
-  session_crons: [],
-});
-
-test("a SubagentStop with an empty agent_type asks gh nothing, writes nothing and says nothing", async () => {
-  await withRepository(async (worktree) => {
-    const tools = await toolsIn(worktree, { pullRequests: LISTING, diff: DIFF });
-
-    const result = squizHook(worktree, tools.path, PHANTOM);
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "", "a firing no subagent caused is not a pass to report");
-    assert.deepEqual(tools.ghArguments(), [], "a firing no subagent caused looked up a pull request");
-    assert.equal(existsSync(join(worktree, ".squiz")), false, "a firing no subagent caused wrote state");
-  });
-});
-
-test("a SubagentStop with no agent_type, or a named one, still looks for a pull request", async () => {
-  const absent: Record<string, unknown> = JSON.parse(payload());
-  delete absent["agent_type"];
-  for (const text of [JSON.stringify(absent), payload({ agent_type: "Explore" })]) {
-    await withRepository(async (worktree) => {
-      const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
-
-      const result = squizHook(worktree, tools.path, text);
-
-      assert.equal(result.code, 0);
-      assert.equal(
-        result.stderr,
-        `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(worktree)}\n`,
-        `a subagent's firing was taken for no subagent's work: ${text}`,
-      );
-      assert.ok(tools.ghWasRun(), "a subagent's firing never asked about its branch");
-    });
-  }
-});
-
-test("nothing in a branch name reaches a shell", async () => {
-  // `>pwned` writes a file if any of this is ever parsed by one, and the whole
-  // name arriving as one argument is what says it was not.
-  const directory = await mkdtemp(join(tmpdir(), "squiz-hook-"));
-  try {
-    const branch = "evil/$(id);>pwned";
-    const worktree = realpathSync(directory);
-    commitOn(worktree, branch);
-    const tools = await toolsIn(worktree, { pullRequests: "[]\n" });
-
-    const result = squizHook(worktree, tools.path, payload());
-
-    assert.equal(result.code, 0);
-    assert.deepEqual(tools.ghArguments().slice(-2), ["--head", branch]);
-    assert.equal(existsSync(join(worktree, "pwned")), false, "the branch name reached a shell");
-    assert.equal(
-      result.stderr,
-      `squiz: no review ran: no open pull request has ${JSON.stringify(branch)} as its head, in ${JSON.stringify(worktree)}\n`,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-/**
- * A call to the fake `gh`, named for what the harness was doing when it made it.
- *
- * The arguments do not tell these apart on their own: the threads listing, the
- * read-back a create makes, one thread's later comments and a verdict's mutation
- * are all `gh api graphql --include --input -`, and they differ only in the query
- * on stdin. Naming the call is what lets a plan land one create and refuse the
- * next.
- */
-type GhCallKind =
-  | "pull-request"
-  | "threads"
-  | "diff"
-  | "create"
-  | "read-back"
-  | "thread-comments"
-  | "verdict"
-  | "summary";
-
-/** What the fake `gh` does for one call. */
-type Answer = {
-  /**
-   * How long it takes to answer.
-   *
-   * Slept after the request has been read and before anything is written, so the
-   * call spends the share it was made in having done what was asked of it.
-   */
-  readonly sleepMs?: number;
-  readonly status?: number;
-  readonly stdout?: string;
-  readonly stderr?: string;
-  /** A directory the call takes the write permission off before it answers. */
-  readonly seals?: string;
-};
-
-/**
- * What the fake `gh` answers, per kind of call.
- *
- * A kind's answers are taken in order and the last one repeats, so two entries
- * are one create that lands and every create after it refused. A kind with no
- * entry at all is a call the test did not plan for, and the fake fails loudly
- * rather than answering it.
- */
-type GhPlan = Readonly<Partial<Record<GhCallKind, readonly Answer[]>>>;
-
-/** What the fake reviewer reports, and whether it says the review is done. */
-type ReviewerPlan = {
-  /** The prose of its one assistant message. */
-  readonly said: string;
-  /** What that message stopped for. `stop` is a reviewer that answered and stopped. */
-  readonly stopReason: string;
-  readonly findings: readonly Finding[];
-  /** Whether it calls the reporting tool that declares the review complete. */
-  readonly finish: boolean;
-};
-
-/** One call the fake `gh` made, as it recorded it. */
-type GhCallRecord = {
-  readonly kind: GhCallKind | "other";
-  readonly argv: readonly string[];
-  /** The request body, which arrived on stdin and was read whole before answering. */
-  readonly body: string;
-};
-
-/** The `PATH` the hook is given, and what the two fakes recorded on it. */
-type Harness = {
-  readonly path: string;
-  /** Every call to `gh`, in the order they were made. */
-  readonly ghCalls: () => readonly GhCallRecord[];
-  /** How many times the reviewer was started, which a retry moves to 2. */
-  readonly reviewerRuns: () => number;
-};
-
-/** A worktree on `BRANCH`, and a directory beside it that the round never reads. */
-type Fixture = {
-  readonly worktree: string;
-  readonly beside: string;
-};
-
-/**
- * A repository with one commit on `BRANCH`, and a sibling directory for the
- * fakes and their logs.
- *
- * Beside the worktree rather than inside it: what a fake writes must not land in
- * the tree under review, and one of these tests seals the episode's own
- * directory against writing.
- */
-async function withWorktree<T>(body: (fixture: Fixture) => Promise<T>): Promise<T> {
-  const under = await mkdtemp(join(tmpdir(), "squiz-forced-"));
-  try {
-    const worktree = join(under, "tree");
-    mkdirSync(worktree);
-    commitOn(worktree, BRANCH);
-    return await body({ worktree: realpathSync(worktree), beside: under });
-  } finally {
-    await rm(under, { recursive: true, force: true });
-  }
-}
-
-/**
- * A `PATH` carrying git, ps, a fake `gh` and a fake reviewer, and the logs the
- * two fakes write.
- *
- * The system's own `PATH` is left out so that a `gh` or a reviewer installed on
- * the machine running the tests cannot be reached by one of them. ps stays,
- * because a round without it cannot mark itself as running and says so.
- */
-async function harnessIn(
-  beside: string,
-  plan: { readonly gh: GhPlan; readonly reviewer: ReviewerPlan },
-): Promise<Harness> {
-  const path = join(beside, "tools");
-  const ghLog = join(beside, "gh-calls");
-  const reviewerLog = join(beside, "reviewer-runs");
-  mkdirSync(path);
-  symlinkSync(onSystemPath("git"), join(path, "git"));
-  symlinkSync(onSystemPath("ps"), join(path, "ps"));
-  await writeFile(ghLog, "", "utf8");
-  await writeFile(reviewerLog, "", "utf8");
-  standIn(path, "gh", ghScript(plan.gh, ghLog), "node");
-  standIn(path, "pi", reviewerScript(plan.reviewer, reviewerLog), "node");
-
-  return {
-    path,
-    ghCalls: () => recorded(ghLog).map((line) => JSON.parse(line) as GhCallRecord),
-    reviewerRuns: () => recorded(reviewerLog).length,
-  };
-}
-
-function recorded(file: string): readonly string[] {
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => line !== "");
-}
-
-/**
- * The fake `gh`: it names the call it was asked for, records it, and answers what
- * the plan says.
- *
- * **It reads the whole of its stdin before it answers anything.** A `gh` that
- * exits 0 on a request it had not finished reading is reported as never having
- * reached GitHub, whatever it printed, so a fake that raced the write would
- * sometimes answer with that instead of what the plan says. Draining first is
- * what makes every answer here the plan's.
- *
- * Plain CommonJS, because it is written to a file and run by a fresh process
- * rather than type-stripped and imported.
- */
-function ghScript(plan: GhPlan, log: string): string {
-  return `#!/usr/bin/env node
-"use strict";
-const fs = require("node:fs");
-
-const plan = ${JSON.stringify(plan)};
-const log = ${JSON.stringify(log)};
-const argv = process.argv.slice(2);
-
-function kindOf(body) {
-  if (argv[0] === "pr") return "pull-request";
-  if (argv[0] !== "api") return "other";
-  if (argv[1] === "graphql") {
-    if (body.indexOf("mutation(") !== -1) return "verdict";
-    if (body.indexOf("$pullRequest") !== -1) return "threads";
-    if (body.indexOf("$comment") !== -1) return "read-back";
-    if (body.indexOf("$thread") !== -1) return "thread-comments";
-    return "other";
-  }
-  let path = "";
-  for (const argument of argv) {
-    if (argument.indexOf("repos/") === 0) path = argument;
-  }
-  if (path.indexOf("/issues/") !== -1) return "summary";
-  if (path.indexOf("/pulls/") === -1) return "other";
-  return path.slice(-9) === "/comments" ? "create" : "diff";
-}
-
-function answer(body) {
-  const kind = kindOf(body);
-  const before = fs.readFileSync(log, "utf8").split("\\n").filter((line) => line !== "");
-  const made = before.filter((line) => JSON.parse(line).kind === kind).length;
-  fs.appendFileSync(log, JSON.stringify({ kind: kind, argv: argv, body: body }) + "\\n");
-
-  const answers = plan[kind];
-  if (answers === undefined || answers.length === 0) {
-    fs.writeSync(2, "fake gh: nothing was planned for a " + kind + " call\\n");
-    process.exit(97);
-  }
-  const given = answers[Math.min(made, answers.length - 1)];
-  if (given.seals !== undefined) fs.chmodSync(given.seals, 0o555);
-  setTimeout(() => {
-    if (given.stdout !== undefined) fs.writeSync(1, given.stdout);
-    if (given.stderr !== undefined) fs.writeSync(2, given.stderr);
-    process.exit(given.status === undefined ? 0 : given.status);
-  }, given.sleepMs === undefined ? 0 : given.sleepMs);
-}
-
-const chunks = [];
-process.stdin.on("data", (chunk) => chunks.push(chunk));
-process.stdin.on("error", () => answer(Buffer.concat(chunks).toString("utf8")));
-process.stdin.on("end", () => answer(Buffer.concat(chunks).toString("utf8")));
-`;
-}
-
-/**
- * The fake reviewer: one assistant message, then the reporting calls the plan
- * gives it, written to the report file as the extension would write them.
- *
- * It records that it ran, which is how a retry is read back. Nothing about the
- * command line it was handed is checked here; what reaches the reviewer is
- * established where the reviewer is.
- */
-function reviewerScript(plan: ReviewerPlan, log: string): string {
-  return `#!/usr/bin/env node
-"use strict";
-const fs = require("node:fs");
-
-const plan = ${JSON.stringify(plan)};
-fs.appendFileSync(${JSON.stringify(log)}, "ran\\n");
-
-const record = (line) => fs.appendFileSync(process.env.SQUIZ_REPORTS, JSON.stringify(line) + "\\n");
-
-record({
-  type: "usage",
-  model: "stand-in",
-  stopReason: plan.stopReason,
-  usage: {
-    input: 1000,
-    output: 200,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 1200,
-    cost: { input: 0.0008, output: 0.0002, cacheRead: 0, cacheWrite: 0, total: 0.001 },
-  },
-});
-
-for (const finding of plan.findings) record({ type: "report", call: "report_finding", value: finding });
-if (plan.finish) record({ type: "finish" });
-process.exit(0);
-`;
-}
-
-/** A finding the fake reviewer confirms, anchored to a line the change added. */
-function confirmed(line: number, severity: Finding["severity"], headline: string): Finding {
-  return {
-    scope: "line",
-    file: REVIEWED_FILE,
-    line,
-    severity,
-    headline,
-    reasoning: ["the caller has no way to tell the two apart"],
-    suggestedFix: "return the reason beside the outcome",
-  };
-}
-
-/** A reviewer that reports `findings` and declares its review complete. */
-function reviews(findings: readonly Finding[]): ReviewerPlan {
-  return {
-    said: "Read the change and reported what it found.",
-    stopReason: "toolUse",
-    findings,
-    finish: true,
-  };
-}
-
-/** The comment GitHub creates, and the thread the read-back then matches to it. */
-const COMMENT_ID = 9001;
-const THREAD_ID = "PRRT_kwDOA1";
-
-const CREATED = response("201 Created", {
-  id: COMMENT_ID,
-  node_id: "PRRC_kwDOA1",
-  html_url: `https://github.com/squiz/squiz/pull/${PULL_REQUEST}#discussion_r${COMMENT_ID}`,
-});
-
-/** The read-back finding the thread the created comment opened. */
-const THREAD_READ_BACK = response("200 OK", {
-  data: {
-    node: {
-      pullRequest: {
-        reviewThreads: {
-          pageInfo: { hasNextPage: false, endCursor: null },
-          nodes: [{ id: THREAD_ID, comments: { nodes: [{ databaseId: COMMENT_ID }] } }],
-        },
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(recordsIn(place), [
+      {
+        head: HEAD,
+        activity: null,
+        owner: { sessionId: SESSION_ID, messagingSocket: SOCKET },
+        herdrWorkspace: "w2",
+        status: "queued",
       },
-    },
-  },
+    ]);
+  });
 });
 
-const SUMMARY_UP = response("201 Created", { id: 7001 });
-
-/** A call GitHub refused, which `gh` reports by its exit status and its stderr. */
-const GATEWAY_REFUSED: Answer = {
-  status: 1,
-  stdout: response("502 Bad Gateway", { message: "Bad gateway" }),
-  stderr: "gh: HTTP 502: Bad gateway\n",
-};
-
-/** The one line the harness reports a call GitHub refused as. */
-const GATEWAY_REASON = "gh exited 1 on HTTP 502: gh: HTTP 502: Bad gateway";
-
-/**
- * A page of the read-back that names no thread and claims another page follows.
- *
- * It is what makes a create's read-back page: one create is a create and up to
- * twenty pages of read-back, so the posting margin is split for two calls and
- * spent by however many the walk takes.
- */
-function readBackPageBefore(cursor: string): string {
-  return response("200 OK", {
-    data: {
-      node: {
-        pullRequest: {
-          reviewThreads: { pageInfo: { hasNextPage: true, endCursor: cursor }, nodes: [] },
-        },
-      },
-    },
-  });
-}
-
-/** A page of the threads listing carrying one thread, with another page to come. */
-function threadsPageBefore(cursor: string): string {
-  return response("200 OK", {
-    data: {
-      node: {
-        reviewThreads: {
-          pageInfo: { hasNextPage: true, endCursor: cursor },
-          nodes: [
-            {
-              id: "PRRT_kwDOEarlier",
-              isResolved: false,
-              isOutdated: false,
-              path: REVIEWED_FILE,
-              line: 86,
-              originalLine: 86,
-              subjectType: "LINE",
-              comments: {
-                pageInfo: { hasNextPage: false, endCursor: null },
-                nodes: [
-                  {
-                    id: "PRRC_kwDOEarlier",
-                    databaseId: 11,
-                    author: { login: "squiz" },
-                    body: "an earlier finding",
-                    createdAt: "2026-09-06T07:13:05Z",
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      },
-    },
-  });
-}
-
-/** The pre-review calls of a round that gets as far as reviewing. */
-const REACHES_THE_REVIEW: GhPlan = {
-  "pull-request": [{ stdout: LISTING }],
-  threads: [{ stdout: NO_THREADS }],
-  diff: [{ stdout: DIFF }],
-};
-
-/** What each call to `gh` was, in order, which is the whole of what reached GitHub. */
-function callKinds(harness: Harness): readonly string[] {
-  return harness.ghCalls().map((call) => call.kind);
-}
-
-/** The request body of `call`, parsed as the JSON it was sent as. */
-function sentBy(call: GhCallRecord): Readonly<Record<string, unknown>> {
-  return JSON.parse(call.body) as Readonly<Record<string, unknown>>;
-}
-
-const LANDED = "the reason is dropped and the outcome returned alone";
-const LOST = "the retry runs on a bound that is already spent";
-
-test("a create GitHub refuses leaves the comment that landed where it is", async () => {
-  // The round closes rather than blocks, so what it could not post is on its
-  // stderr and in its summary comment. A blocked round says neither, and a later
-  // round makes the missing comment again.
-  await withWorktree(async ({ worktree, beside }) => {
-    await writeFile(join(worktree, ".squiz.json"), JSON.stringify({ rounds: 1 }), "utf8");
-    const harness = await harnessIn(beside, {
-      gh: {
-        ...REACHES_THE_REVIEW,
-        create: [{ stdout: CREATED }, GATEWAY_REFUSED],
-        "read-back": [{ stdout: THREAD_READ_BACK }],
-        summary: [{ stdout: SUMMARY_UP }],
-      },
-      reviewer: reviews([confirmed(86, "high", LANDED), confirmed(87, "medium", LOST)]),
+test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: subagentStopPayload(),
+      environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET },
     });
 
-    const result = squizHook(worktree, harness.path, payload());
-
-    assert.equal(result.code, 0, "a round that lost a comment must not stop the turn");
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings\n",
-    );
-
-    assert.deepEqual(
-      callKinds(harness),
-      ["pull-request", "threads", "diff", "create", "read-back", "create", "summary"],
-      "the comment that landed was re-read, re-posted or taken down",
-    );
-
-    const creates = harness.ghCalls().filter((call) => call.kind === "create");
-    assert.equal(sentBy(creates[0] as GhCallRecord)["line"], 86);
-    assert.equal(sentBy(creates[1] as GhCallRecord)["line"], 87);
-
-    const summary = harness.ghCalls().find((call) => call.kind === "summary");
-    const body = String(sentBy(summary as GhCallRecord)["body"]);
-    assert.ok(
-      body.includes(`\`${REVIEWED_FILE}:86\` — ${LANDED} (open)`),
-      `the summary does not report the comment that landed as a thread: ${body}`,
-    );
-    assert.ok(
-      body.includes(`\`${REVIEWED_FILE}:87\` — ${LOST} (raised, and its comment could not be posted)`),
-      `the summary does not report the finding nothing on the pull request holds: ${body}`,
-    );
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(recordsIn(place), [
+      {
+        head: HEAD,
+        activity: null,
+        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET },
+        status: "queued",
+      },
+    ]);
   });
 });
 
-test("a state file that will not take the round after the review posts nothing", async () => {
-  // The write happens after the review, and it stops what the round found from
-  // being posted. The reviewer's own directories are made before the episode's
-  // directory is sealed, and it is sealed by the diff call, once the round holds
-  // the episode's lock. So the round reaches the review and fails on the write
-  // that follows it rather than on the read or the lock that precede it.
-  await withWorktree(async ({ worktree, beside }) => {
-    const episode = join(worktree, ".squiz", String(PULL_REQUEST));
-    await mkdir(join(episode, "session"), { recursive: true });
-    await mkdir(join(episode, "scratch"), { recursive: true });
-    await mkdir(join(episode, "rounds", "1"), { recursive: true });
-    const harness = await harnessIn(beside, {
-      gh: {
-        ...REACHES_THE_REVIEW,
-        diff: [{ stdout: DIFF, seals: episode }],
-        summary: [{ stdout: SUMMARY_UP }],
-      },
-      reviewer: reviews([confirmed(86, "high", LANDED)]),
-    });
+test("the hook returns while the host it started is still running", async () => {
+  await withPlace(async (place) => {
+    // The stand-in host holds the lock for a minute, as a host running a round would.
+    const fired = await fire(place, { payload: stopPayload() });
 
-    try {
-      const result = squizHook(worktree, harness.path, payload());
+    assert.equal(fired.code, 0);
+    assert.ok(fired.elapsedMs < 30_000, `the hook took ${fired.elapsedMs}ms`);
+    await eventually(() => hostsThatTook(place).length === 1, "a host taking the episode");
+    const [host = 0] = hostsThatTook(place);
+    assert.ok(alive(host), "the host had exited by the time the hook returned");
+  });
+});
 
-      assert.equal(result.code, 0, "a state file nothing can write must not stop the turn");
-      assert.equal(result.stdout, "");
-      assert.match(
-        result.stderr,
-        /^squiz: nothing the reviewer found was posted: .*state\.json could not be written: .*\b[A-Z]+: /u,
-        "the pointer must carry the filesystem's own error rather than the word failed",
-      );
-      assert.match(result.stderr, /\nsquiz: the failure is posted on PR #142\n$/u);
+test("the trigger is asked as a hook, from the directory the hook fired in, with its environment", async () => {
+  await withPlace(async (place) => {
+    const environment = { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, HERDR_WORKSPACE_ID: "w2" };
+    await fire(place, { payload: subagentStopPayload(), environment, trigger: { as: "recording" } });
 
-      assert.equal(harness.reviewerRuns(), 1, "the review has to have run for this to be the write");
-      assert.deepEqual(
-        callKinds(harness),
-        ["pull-request", "threads", "diff", "summary"],
-        "a finding reached the pull request on a round that recorded nothing",
-      );
-    } finally {
-      // Sealed against writing, so it cannot be removed while it stays that way.
-      await chmod(episode, 0o755);
+    const request = JSON.parse(reported(place)) as Record<string, unknown>;
+    assert.equal(request["trigger"], "hook");
+    assert.equal(request["directory"], place.worktree);
+    assert.deepEqual(request["environment"], environment);
+    assert.equal(request["pullRequest"], undefined, "a hook names no pull request, and reviews the branch's");
+    assert.ok(Number(request["remainingMs"]) > 0, "the trigger was given no time");
+  });
+});
+
+test("a trigger that throws exits 0 with one line naming what it threw", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: stopPayload(), trigger: { as: "throwing", message: "the trigger exploded" } });
+
+    assert.equal(fired.code, 0);
+    assert.match(fired.stderr, /^squiz: [^\n]*the trigger exploded\n$/u);
+  });
+});
+
+test("a SubagentStop with an empty agent_type asks the trigger nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: subagentStopPayload({ agent_type: "" }), trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(reported(place), "", "the trigger was asked");
+  });
+});
+
+test("a payload that cannot be read asks the trigger nothing, exits 0, and says why in one line", async () => {
+  await withPlace(async (place) => {
+    for (const payload of ["", "{not json", subagentStopPayload({ agent_id: "" })]) {
+      const fired = await fire(place, { payload, trigger: { as: "recording" } });
+
+      assert.equal(fired.code, 0);
+      assert.match(fired.stderr, /^squiz: [^\n]+\n$/u, `for ${JSON.stringify(payload)}`);
+      assert.equal(reported(place), "", `the trigger was asked for ${JSON.stringify(payload)}`);
     }
   });
 });
 
-/** A round that reviews, finds nothing, and closes the episode with its summary up. */
-const CLOSES_CLEAN: GhPlan = { ...REACHES_THE_REVIEW, summary: [{ stdout: SUMMARY_UP }] };
+test("a branch with no pull request writes the line naming the branch and the directory, and nothing else", async () => {
+  await withPlace(async (place) => {
+    writeFileSync(join(place.bin, "list.out"), "[]", "utf8");
 
-test("a marker the round could not write is named on stderr and nowhere on the pull request", async () => {
-  // A directory where the marker goes: the rename that would put it there fails,
-  // and nothing else the round writes is in its way.
-  await withWorktree(async ({ worktree, beside }) => {
-    const marker = join(worktree, ".squiz", String(PULL_REQUEST), "running.json");
-    await mkdir(join(marker, "occupied"), { recursive: true });
-    const harness = await harnessIn(beside, { gh: CLOSES_CLEAN, reviewer: reviews([]) });
+    const fired = await fire(place, { payload: stopPayload() });
 
-    const result = squizHook(worktree, harness.path, payload());
-
-    assert.equal(result.code, 0, "a round no other episode can find must not stop the turn");
-    assert.equal(result.stdout, "");
-    assert.ok(
-      result.stderr.startsWith(
-        "squiz: the round closed the episode on PR #142 having failed to mark itself as " +
-          `running for the other episodes of the worktree: ${marker} could not be written: `,
-      ),
-      `the pointer does not name the marker and why it was not written: ${result.stderr}`,
-    );
-    assertOneLine(result.stderr);
-
-    const summary = harness.ghCalls().find((call) => call.kind === "summary");
-    const body = String(sentBy(summary as GhCallRecord)["body"]);
-    assert.ok(!body.includes("running.json"), `the marker reached the summary: ${body}`);
-  });
-});
-
-test("a marker the round wrote is not mentioned anywhere", async () => {
-  await withWorktree(async ({ worktree, beside }) => {
-    const harness = await harnessIn(beside, { gh: CLOSES_CLEAN, reviewer: reviews([]) });
-
-    const result = squizHook(worktree, harness.path, payload());
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stderr, "", "a round that marked itself reported a marker anyway");
-    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff", "summary"]);
-  });
-});
-
-test("a posting margin spent by one read-back leaves the rest unposted and unattempted", async () => {
-  // The margin is split for one create and one read-back per finding, and the
-  // read-back walks as many pages as GitHub claims. Four pages that answer slowly
-  // and a fifth killed by what is left of the margin spend the whole of it, and
-  // every call after that is one the round does not make at all.
-  //
-  // A tenth of the real margin and of each page, so a page still answers inside
-  // its share of the margin and the fifth is still killed by what is left.
-  const slow = 2_500;
-  await withWorktree(async (fixture) => {
-    const { worktree, beside } = fixture;
-    await writeFile(join(worktree, ".squiz.json"), JSON.stringify({ rounds: 1 }), "utf8");
-    const harness = await harnessIn(beside, {
-      gh: {
-        ...REACHES_THE_REVIEW,
-        create: [{ stdout: CREATED }],
-        "read-back": [
-          { sleepMs: slow, stdout: readBackPageBefore("page-2") },
-          { sleepMs: slow, stdout: readBackPageBefore("page-3") },
-          { sleepMs: slow, stdout: readBackPageBefore("page-4") },
-          { sleepMs: slow, stdout: readBackPageBefore("page-5") },
-          { sleepMs: slow, stdout: readBackPageBefore("page-6") },
-        ],
-      },
-      reviewer: reviews([confirmed(86, "high", LANDED), confirmed(87, "medium", LOST)]),
-    });
-
-    const result = squizHookLowered(fixture, harness.path, payload(), { marginMs: 12_000 });
-
-    assert.equal(result.code, 0, "a window that closed must not stop the turn");
-    assert.equal(result.stdout, "");
+    assert.equal(fired.code, 0);
     assert.equal(
-      result.stderr,
-      "squiz: the round closed the episode on PR #142 having failed to post 1 of 2 findings " +
-        "and to post the episode's summary: " +
-        "the time left for GitHub ran out before this call was made\n",
+      fired.stderr,
+      `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(place.worktree)}\n`,
     );
-
-    assert.deepEqual(
-      callKinds(harness),
-      [
-        "pull-request",
-        "threads",
-        "diff",
-        "create",
-        "read-back",
-        "read-back",
-        "read-back",
-        "read-back",
-        "read-back",
-      ],
-      "a call was made past the end of the window, where the runtime kills the hook",
-    );
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false, "a firing with no pull request wrote state");
   });
 });
 
-test("a threads listing that cannot be finished runs no reviewer and posts nothing", async () => {
-  // The page that arrived is dropped with the rest. A reviewer handed a subset of
-  // the threads rules on a subset, and the round would then apply verdicts that
-  // close nothing while reading as a round that settled everything.
-  await withWorktree(async ({ worktree, beside }) => {
-    const harness = await harnessIn(beside, {
-      gh: {
-        "pull-request": [{ stdout: LISTING }],
-        threads: [{ stdout: threadsPageBefore("page-2") }, GATEWAY_REFUSED],
-        summary: [{ stdout: SUMMARY_UP }],
-      },
-      reviewer: reviews([confirmed(86, "high", LANDED)]),
-    });
+test("a trigger that could not read what it decides from says so in one line", async () => {
+  await withPlace(async (place) => {
+    writeFileSync(join(place.bin, "list.status"), "1", "utf8");
 
-    const result = squizHook(worktree, harness.path, payload());
+    const fired = await fire(place, { payload: stopPayload() });
 
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      `squiz: no review ran: the threads on PR #142 could not be listed: ${GATEWAY_REASON}\n` +
-        "squiz: the failure is posted on PR #142\n",
-    );
-
-    assert.equal(harness.reviewerRuns(), 0, "a reviewer ran on a subset of the threads");
-    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "threads", "summary"]);
+    assert.equal(fired.code, 0);
+    assert.match(fired.stderr, /^squiz: nothing was queued: the pull request for "feature-a" could not be looked up: [^\n]*\n$/u);
   });
 });
 
-test("the calls before the review spending their share leave the last of them nothing", async () => {
-  // One deadline over the whole phase, not a bound on each of its calls. The
-  // lookup and the listing answer slowly enough that the diff is bounded by what
-  // they left rather than by the ceiling on a single call, which is what says the
-  // phase ran out rather than one call hanging.
-  //
-  // A tenth of the real share and of each call, so the first two still answer
-  // and the diff is still left less than it needs.
-  const slow = 2_500;
-  await withWorktree(async (fixture) => {
-    const harness = await harnessIn(fixture.beside, {
-      gh: {
-        "pull-request": [{ sleepMs: slow, stdout: LISTING }],
-        threads: [{ sleepMs: slow, stdout: NO_THREADS }],
-        diff: [{ sleepMs: slow, stdout: DIFF }],
-        summary: [{ stdout: SUMMARY_UP }],
-      },
-      reviewer: reviews([confirmed(86, "high", LANDED)]),
+test("a host that could not be started says so in one line, the state queued", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: stopPayload(),
+      trigger: { as: "real", hostCommand: join(place.bin, "no-such-host") },
     });
 
-    const result = squizHookLowered(fixture, harness.path, payload(), { preReviewMs: 6_000 });
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    const spent =
-      /^squiz: no review ran: the diff of PR #142 could not be fetched: gh did not answer within (\d+(?:\.\d+)?) seconds, so GitHub could not be reached\nsquiz: the failure is posted on PR #142\n$/u.exec(
-        result.stderr,
-      );
-    assert.notEqual(spent, null, `the pointer does not name the call that ran out: ${result.stderr}`);
-    assert.ok(
-      Number(spent?.[1]) * 1_000 < slow,
-      `the diff was bounded by something other than what the phase left it: ${result.stderr}`,
-    );
-
-    assert.equal(harness.reviewerRuns(), 0);
-    assert.deepEqual(
-      callKinds(harness),
-      ["pull-request", "threads", "diff", "summary"],
-      "the posting reserve is the round's own, so the failure goes up after the phase before it ran out",
-    );
-  });
-});
-
-test("a reviewer that writes prose and stops is retried once and reported as no review", async () => {
-  // Nothing declares a review complete but the reviewer, so prose and a clean
-  // exit is a review that did not finish rather than one that found nothing. The
-  // round runs a fresh process once before it reports it.
-  await withWorktree(async ({ worktree, beside }) => {
-    const harness = await harnessIn(beside, {
-      gh: { ...REACHES_THE_REVIEW, summary: [{ stdout: SUMMARY_UP }] },
-      reviewer: {
-        said: "Nothing here looks wrong to me.",
-        stopReason: "stop",
-        findings: [],
-        finish: false,
-      },
-    });
-
-    const result = squizHook(worktree, harness.path, payload());
-
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      "squiz: the review did not run: the reviewer reported nothing and did not finish its review\n" +
-        "squiz: the failure is posted on PR #142\n",
-    );
-
-    assert.equal(harness.reviewerRuns(), 2, "the round is allowed one retry and has to take it");
-    assert.deepEqual(callKinds(harness), ["pull-request", "threads", "diff", "summary"]);
+    assert.equal(fired.code, 0);
+    assert.match(fired.stderr, new RegExp(`^squiz: the round host for PR #${NUMBER} could not be started: [^\\n]*\\n$`, "u"));
+    assert.equal(recordsIn(place).length, 1);
   });
 });

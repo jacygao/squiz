@@ -1,89 +1,111 @@
 /**
- * The `SubagentStop` entry point: one round, and the exit code it decides.
+ * The `Stop` and `SubagentStop` entry point, and the lines a round's conclusion
+ * is reported as.
  *
- * Exit 2 is the only exit that blocks the coding agent, and a round that means
- * to block is the only thing that reaches it. Every other end of every other
- * path is exit 0, because a non-zero exit that is not a block is the one thing
- * that stops the coding agent finishing its turn.
- *
- * The two stderr channels stay apart. A blocked round writes the reason it
- * composed and nothing else, because the runtime hands that text to the coding
- * agent as its next instruction. A round that exits 0 having failed writes one
- * line for each thing that failed, and `failureIn` is the only place those lines
- * are composed. A pass for want of a pull request writes one line of the same
- * shape, composed by `unreviewedIn`.
+ * A firing queues the pull request's state for the round host and returns. It
+ * never runs a round and never waits on one, and it exits 0 on every path: a
+ * non-zero exit is the one thing that stops the coding agent finishing its turn.
+ * What it could not do, and a branch with no pull request, it says in one line
+ * on stderr. Exiting 0 in silence over a failure would read as a state queued.
  */
 
-import { fileURLToPath } from "node:url";
-
-import { loadConfig } from "../config/config.ts";
+import { trigger, type TriggerRequest, type Triggered } from "../host/trigger.ts";
 import { failureReport } from "../loop/failure-comment.ts";
-import {
-  runRound,
-  type AroundTheReviewer,
-  type RoundAccount,
-  type RoundConclusion,
-  type RoundSetup,
-} from "../loop/round.ts";
-import { pi } from "../reviewers/pi/adapter.ts";
-import { worktreeToplevel } from "../worktree/toplevel.ts";
-import { readPayloadFrom, type PayloadRead, type PayloadStream } from "./payload.ts";
+import type { AroundTheReviewer, RoundAccount, RoundConclusion } from "../loop/round.ts";
+import type { Owner } from "../loop/state-record.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
+import type { Firing, HookEnvironment } from "../sessions/firing.ts";
+import { readPayloadFrom, type PayloadStream } from "./payload.ts";
 import { reportFailure } from "./report.ts";
-import { writeToStderr } from "./stderr.ts";
 import type { HookExit } from "./trap.ts";
 
-// The charter ships beside the code, so it is found from this file rather than
-// from a working directory that belongs to the project under review.
-const charterFile = fileURLToPath(new URL("../../charter.md", import.meta.url));
+// Queuing is a few git and gh calls. One that hangs past this costs the review,
+// not the turn.
+const QUEUE_BUDGET_MS = 30_000;
 
-/** One firing of the hook. */
-export type Firing = {
+export type HookCall = {
   /** The hook's stdin, which the runtime wrote the payload to. */
   readonly stdin: PayloadStream;
   /** The directory the hook fired in, which the worktree is resolved from. */
   readonly directory: string;
-  /**
-   * What runs the round. The harness's own unless a test hands over another,
-   * because what a reviewer or GitHub did to a round cannot be arranged from
-   * here.
-   */
-  readonly round?: (setup: RoundSetup) => Promise<RoundConclusion>;
+  /** `process.env` where not given. */
+  readonly environment?: HookEnvironment;
+  /** `trigger` where not given. */
+  readonly trigger?: (request: TriggerRequest) => Triggered;
 };
 
-/**
- * Run one round for `firing`, and return the exit it decides.
- *
- * Never throws, whatever the payload, the filesystem, git, `gh` or the reviewer
- * does.
- */
-export async function runHook(firing: Firing): Promise<HookExit> {
-  const read = await readPayloadFrom(firing.stdin);
-  // Claude Code fires these after an interactive turn ends, with no subagent
-  // behind them, so there is nothing to review and nothing to report.
-  if (read.outcome === "no subagent's work") return 0;
+/** Queue the state `call`'s firing ended on. Never throws, and always resolves 0. */
+export async function runHook(call: HookCall): Promise<HookExit> {
+  try {
+    const environment = call.environment ?? process.env;
+    const read = await readPayloadFrom(call.stdin, environment);
+    // Claude Code fires these after an interactive turn ends, with no subagent
+    // behind them, so there is no work to queue a review of.
+    if (read.outcome === "no subagent's work") return 0;
+    if (read.outcome === "unreadable") {
+      reportFailure(`nothing was queued: ${read.reason}`);
+      return 0;
+    }
 
-  const conclusion = await concluded(firing, read);
-
-  if (conclusion.outcome === "block") {
-    writeToStderr(ending(conclusion.reason));
-    return 2;
-  }
-
-  const unreviewed = unreviewedIn(conclusion);
-  for (const line of unreviewed === null ? failureIn(conclusion) : [unreviewed]) {
-    reportFailure(line);
+    const triggered = (call.trigger ?? trigger)({
+      directory: call.directory,
+      trigger: "hook",
+      owner: ownerOf(read.firing),
+      environment,
+      until: deadlineIn(QUEUE_BUDGET_MS),
+    });
+    const line = lineFor(triggered);
+    if (line !== null) reportFailure(line);
+  } catch (cause) {
+    reportFailure(`nothing was queued: the hook failed: ${reasonFor(cause)}`);
   }
   return 0;
+}
+
+function ownerOf(firing: Firing): Owner {
+  return {
+    sessionId: firing.owner.sessionId,
+    ...(firing.event === "SubagentStop" ? { subagent: firing.subagent } : {}),
+    ...(firing.owner.socket === undefined ? {} : { messagingSocket: firing.owner.socket }),
+  };
+}
+
+/**
+ * The one line a trigger's outcome is reported as, or `null` where there is
+ * nothing to say.
+ *
+ * A state the trigger chose not to queue says nothing: a turn that pushed
+ * nothing, or a state already queued or reviewed, is the common case. A host
+ * that did not start is said, because the state it was started for waits on the
+ * next trigger.
+ */
+function lineFor(triggered: Triggered): string | null {
+  switch (triggered.outcome) {
+    case "no review":
+      return `no review ran: ${triggered.reason}`;
+    case "failed":
+      return `nothing was queued: ${triggered.reason}`;
+    case "decided": {
+      const { host, pullRequest } = triggered;
+      if (host.outcome === "failed") {
+        return `the round host for PR #${pullRequest.number} could not be started: ${host.reason}`;
+      }
+      if (host.outcome === "unknown") {
+        return `the round host for PR #${pullRequest.number} may not have started: ${host.reason}`;
+      }
+      return null;
+    }
+  }
 }
 
 /**
  * The lines a conclusion that exits 0 is reported as, one for each thing that
  * failed, and none where there is nothing to report.
  *
- * Every failure pointer the hook writes is composed here. One place is what
- * holds each pointer to one line and one shape, and it decides once what counts
- * as a failure rather than leaving each path that might be one to decide for
- * itself.
+ * Every failure pointer a round's conclusion is reported as is composed here.
+ * One place is what holds each pointer to one line and one shape, and it decides
+ * once what counts as a failure rather than leaving each path that might be one
+ * to decide for itself.
  */
 export function failureIn(conclusion: RoundConclusion): readonly string[] {
   switch (conclusion.outcome) {
@@ -298,72 +320,6 @@ function unreportedBy(round: RoundAccount): string | null {
     ...(unapplied === 0 ? [] : [`apply ${unapplied} of ${ruled.length} verdicts`]),
   ];
   return failures.join(" and to ");
-}
-
-/**
- * What one firing came to, before anything is written and before an exit code
- * is chosen.
- *
- * The payload, the worktree and the settings are read in turn, and a firing that
- * loses any of them runs no round at all. A payload that cannot be read is not a
- * round that found nothing: nothing about the firing is known, and half a firing
- * is not something to review against.
- *
- * The episode is not opened here. Its key is the number of the pull request the
- * round finds, so the round opens it once it has found one.
- */
-async function concluded(firing: Firing, read: SubagentsPayload): Promise<RoundConclusion> {
-  if (read.outcome === "unreadable") return harness(`no review ran: ${read.reason}`);
-
-  const worktree = worktreeToplevel(firing.directory);
-  if (worktree.outcome === "failed") {
-    return harness(`no review ran: the worktree could not be resolved: ${worktree.reason}`);
-  }
-
-  let setup: RoundSetup;
-  try {
-    setup = {
-      worktree: worktree.path,
-      config: loadConfig(worktree.path),
-      adapter: pi,
-      charterFile,
-    };
-  } catch (cause) {
-    // The settings refuse a value they cannot use by throwing.
-    return harness(`no review ran: ${reasonFor(cause)}`);
-  }
-
-  try {
-    return honoured(await (firing.round ?? runRound)(setup));
-  } catch (cause) {
-    // The round reports what went wrong as a value, so a throw from it is a
-    // defect in the harness. It ends the round and not the coding agent's turn.
-    return harness(`the round could not be run: ${reasonFor(cause)}`);
-  }
-}
-
-/**
- * The conclusion as the hook acts on it, which is the round's own unless it
- * asked to block with nothing to say.
- *
- * Exit 2 hands the coding agent whatever stderr carried as its next
- * instruction, so an empty one spends a round of the cap and asks for nothing.
- */
-function honoured(conclusion: RoundConclusion): RoundConclusion {
-  if (conclusion.outcome !== "block" || conclusion.reason.trim() !== "") return conclusion;
-  return harness(`the round blocked on PR #${conclusion.pullRequest} with nothing to say`);
-}
-
-type SubagentsPayload = Exclude<PayloadRead, { readonly outcome: "no subagent's work" }>;
-
-/** A failure of the harness's own, as the conclusion a pointer is composed from. */
-function harness(reason: string): RoundConclusion {
-  return { outcome: "failed", failure: "harness", reason };
-}
-
-/** The reason as the runtime takes it: one trailing newline, added where absent. */
-function ending(reason: string): string {
-  return reason.endsWith("\n") ? reason : `${reason}\n`;
 }
 
 function reasonFor(cause: unknown): string {

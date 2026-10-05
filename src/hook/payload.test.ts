@@ -2,28 +2,21 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 
-import { readPayload, readPayloadFrom, type PayloadStream } from "./payload.ts";
+import type { Firing, FiringRead, HookEnvironment } from "../sessions/firing.ts";
+import { readPayloadFrom, type PayloadStream } from "./payload.ts";
 
 /** The subagent's id, in the shape every id the runtime has emitted holds. */
 const AGENT_ID = "a1e3196c5ad0f2410";
 
-/** The id of the user turn in the parent session, which is never the key. */
-const PROMPT_ID = "59893e32-bf05-4243-8b68-062d0f8767ef";
+const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 
-/**
- * A firing as the runtime writes it, every field included.
- *
- * The fields that are not read are here because they are what a reader of this
- * module reaches for by mistake: `prompt_id` is one string for every subagent
- * in a session, `cwd` is where the hook already runs, and `stop_hook_active` says
- * what happened before this firing.
- */
+/** A firing as the runtime writes it, every field included. */
 function payloadText(over: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
-    session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
+    session_id: SESSION_ID,
     transcript_path: "/transcripts/60517e1f.jsonl",
     cwd: "/work/session-directory",
-    prompt_id: PROMPT_ID,
+    prompt_id: "59893e32-bf05-4243-8b68-062d0f8767ef",
     permission_mode: "acceptEdits",
     agent_id: AGENT_ID,
     agent_type: "general-purpose",
@@ -38,89 +31,33 @@ function payloadText(over: Readonly<Record<string, unknown>> = {}): string {
   });
 }
 
-/** What `readPayload` established, or the assertion that it established nothing. */
-function idIn(text: string): string {
-  const read = readPayload(text);
+/** The firing read from `stream`, or the assertion that one was read. */
+async function firingFrom(stream: PayloadStream, environment: HookEnvironment = {}): Promise<Firing> {
+  const read = await readPayloadFrom(stream, environment);
   assert.equal(read.outcome, "read", `the payload was not read: ${JSON.stringify(read)}`);
-  return read.outcome === "read" ? read.payload.agentId : "";
+  if (read.outcome !== "read") throw new Error("unreachable");
+  return read.firing;
 }
 
-function reasonFrom(read: ReturnType<typeof readPayload>): string {
+function reasonFrom(read: FiringRead): string {
   assert.equal(read.outcome, "unreadable", `the payload was read: ${JSON.stringify(read)}`);
   return read.outcome === "unreadable" ? read.reason : "";
 }
 
-test("the key is the subagent's id", () => {
-  assert.equal(idIn(payloadText()), AGENT_ID);
-});
-
-test("a SubagentStop with an empty agent_type is no subagent's work", () => {
-  assert.deepEqual(readPayload(payloadText({ agent_type: "" })), { outcome: "no subagent's work" });
-});
-
-test("the key is never prompt_id, which two subagents share", () => {
-  // `prompt_id` is per user turn in the parent session: the same string for two
-  // subagents at once, and a different one between one subagent's own stops.
-  // Keying on it would merge two episodes and split one.
-  const id = idIn(payloadText());
-
-  assert.notEqual(id, PROMPT_ID);
-  assert.equal(
-    reasonFrom(readPayload(JSON.stringify({ prompt_id: PROMPT_ID, cwd: "/work" }))).includes(
-      "agent_id",
-    ),
-    true,
-  );
-});
-
-test("stop_hook_active is not read, whatever it says", () => {
-  // It is true from the second firing of an episode onward, which is every
-  // firing where the loop means to block.
-  assert.equal(idIn(payloadText({ stop_hook_active: true })), AGENT_ID);
-  assert.equal(idIn(payloadText({ stop_hook_active: false })), AGENT_ID);
-});
-
-test("an id the runtime never emits is still the id that arrived", () => {
-  // Nothing is asserted about the id's shape here: what a directory name may
-  // hold is decided where the id becomes a path, and a payload this refused
-  // would be a firing the harness could not explain.
-  assert.equal(idIn(payloadText({ agent_id: "../../etc/passwd" })), "../../etc/passwd");
-});
-
-test("a payload carrying no agent_id is unreadable", () => {
-  const text = JSON.stringify({ session_id: "60517e1f", hook_event_name: "SubagentStop" });
-
-  assert.match(reasonFrom(readPayload(text)), /agent_id/u);
-});
-
-test("an agent_id that is not a string is unreadable", () => {
-  for (const id of [42, null, true, ["a1e3196c5ad0f2410"], { id: "a1e3196c5ad0f2410" }, ""]) {
-    assert.match(reasonFrom(readPayload(payloadText({ agent_id: id }))), /agent_id/u);
-  }
-});
-
-test("a payload that is not a JSON object is unreadable", () => {
-  for (const text of ["[]", '"a1e3196c5ad0f2410"', "42", "null", "[{}]"]) {
-    assert.match(reasonFrom(readPayload(text)), /not a JSON object/u);
-  }
-});
-
-test("an empty stdin is unreadable rather than an empty episode", () => {
+test("an empty stdin is unreadable rather than an empty firing", async () => {
   for (const text of ["", "   ", "\n"]) {
-    assert.match(reasonFrom(readPayload(text)), /no payload/u);
+    assert.match(reasonFrom(await readPayloadFrom(Readable.from([text]), {})), /no payload/u);
   }
 });
 
-test("nothing the payload carried reaches the reason", () => {
-  // The reason leaves on stderr, where Claude Code shows it. The payload holds
-  // the subagent's last message, which is not the hook's to repeat.
-  const secret = "SQUIZ-SECRET-fd41b0";
-  const truncated = `{"agent_id":"${AGENT_ID}","last_assistant_message":"${secret}`;
+test("the hook's environment names the owner's socket", async () => {
+  const firing = await firingFrom(Readable.from([payloadText()]), { CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/cc.sock" });
 
-  const reason = reasonFrom(readPayload(truncated));
-
-  assert.equal(reason.includes(secret), false, reason);
-  assert.match(reason, /not valid JSON/u);
+  assert.deepEqual(firing, {
+    event: "SubagentStop",
+    owner: { sessionId: SESSION_ID, socket: "/tmp/cc.sock" },
+    subagent: AGENT_ID,
+  });
 });
 
 test("a payload arriving in pieces is read whole", async () => {
@@ -131,10 +68,9 @@ test("a payload arriving in pieces is read whole", async () => {
   const bytes = Buffer.from(text, "utf8");
   const pieces = [bytes.subarray(0, 40), bytes.subarray(40, 41), bytes.subarray(41)];
 
-  const read = await readPayloadFrom(Readable.from(pieces));
+  const firing = await firingFrom(Readable.from(pieces));
 
-  assert.equal(read.outcome, "read");
-  assert.equal(read.outcome === "read" ? read.payload.agentId : "", AGENT_ID);
+  assert.equal(firing.event === "SubagentStop" ? firing.subagent : "", AGENT_ID);
 });
 
 test("a stdin that is a terminal is nobody's payload, and is not waited on", async () => {
@@ -149,7 +85,7 @@ test("a stdin that is a terminal is nobody's payload, and is not waited on", asy
     },
   };
 
-  const result = await readPayloadFrom(terminal);
+  const result = await readPayloadFrom(terminal, {});
 
   assert.equal(result.outcome, "unreadable");
   assert.equal(read, false, "a terminal was read from");
@@ -163,7 +99,7 @@ test("a stdin that fails mid-read is unreadable rather than a throw", async () =
     })(),
   );
 
-  const read = await readPayloadFrom(broken);
+  const read = await readPayloadFrom(broken, {});
 
   assert.match(reasonFrom(read), /the pipe was closed/u);
 });

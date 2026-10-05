@@ -1,41 +1,11 @@
 /**
- * The `SubagentStop` payload, as the runtime writes it to the hook's stdin.
+ * The hook's payload, read from the stdin the runtime wrote it to.
  *
- * One field is read from it. `agent_id` is the subagent's own: the same string
- * every time that subagent stops, and different for every subagent. It names the
- * subagent and keys nothing. An episode is keyed by its pull request, which two
- * subagents can share.
- *
- * Three other fields look usable and are not. `prompt_id` is per user turn in
- * the parent session, so it is one string for every subagent running under that
- * turn and a different one between one subagent's own stops. `cwd` is the
- * directory the hook already runs in, so it says nothing the hook does not
- * know. `stop_hook_active` is true from
- * the second firing of an episode onward, which is every firing where the loop
- * means to block, so reading it as a reason to stop would cap every episode at
- * one round.
- *
- * A `SubagentStop` whose `agent_type` is the empty string is no subagent's
- * work, on the terms `readFiring` sets.
- *
- * Nothing here throws, and no failure carries the payload's text: a subagent's
- * last message is in there, and the one line a failure is reported as has no
- * room for it.
+ * What the payload says is `readFiring`'s to read. This only gets the whole of
+ * it off the stream, and never throws.
  */
 
-import { readFiring } from "../sessions/firing.ts";
-
-/** What the harness reads from one firing. */
-export type Payload = {
-  /** The subagent's id, exactly as it arrived. */
-  readonly agentId: string;
-};
-
-/** The payload read, or why nothing could be read from it. */
-export type PayloadRead =
-  | { readonly outcome: "read"; readonly payload: Payload }
-  | { readonly outcome: "no subagent's work" }
-  | { readonly outcome: "unreadable"; readonly reason: string };
+import { readFiring, type FiringRead, type HookEnvironment } from "../sessions/firing.ts";
 
 /** The hook's stdin. The payload arrives on it and nothing else does. */
 export type PayloadStream = AsyncIterable<string | Uint8Array> & {
@@ -43,14 +13,13 @@ export type PayloadStream = AsyncIterable<string | Uint8Array> & {
 };
 
 /**
- * Read the payload `stream` carries.
+ * Read the firing `stream` carries, with `environment`, the hook's own.
  *
  * A stdin that is a terminal is nobody's payload: the hook was run by hand, and
- * reading to the end of input would hold the coding agent's turn open until the
- * runtime killed the hook. It comes back as unreadable without anything being
- * read.
+ * reading to the end of input would hold it open until the runtime killed it.
+ * It comes back as unreadable without anything being read.
  */
-export async function readPayloadFrom(stream: PayloadStream): Promise<PayloadRead> {
+export async function readPayloadFrom(stream: PayloadStream, environment: HookEnvironment): Promise<FiringRead> {
   if (stream.isTTY === true) {
     return unreadable("the hook was given no payload, because its stdin is a terminal");
   }
@@ -65,35 +34,10 @@ export async function readPayloadFrom(stream: PayloadStream): Promise<PayloadRea
   }
   // Decoded once the whole of it has arrived. A character spanning two chunks
   // decoded per chunk would come out as two replacements.
-  return readPayload(Buffer.concat(chunks).toString("utf8"));
+  return readFiring(Buffer.concat(chunks).toString("utf8"), environment);
 }
 
-/** Read `text` as a payload, on the same terms as reading it from stdin. */
-export function readPayload(text: string): PayloadRead {
-  if (text.trim() === "") return unreadable("the hook was given no payload on stdin");
-  // The environment only supplies the owner's socket, which nothing here reads.
-  if (readFiring(text, {}).outcome === "no subagent's work") return { outcome: "no subagent's work" };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // What the parser says about it quotes the text it choked on, which is the
-    // one thing this may not put on stderr.
-    return unreadable("the payload is not valid JSON");
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return unreadable("the payload is not a JSON object");
-  }
-
-  const agentId: unknown = (parsed as Readonly<Record<string, unknown>>)["agent_id"];
-  if (typeof agentId !== "string" || agentId === "") {
-    return unreadable('the payload carries no "agent_id", which names the subagent that stopped');
-  }
-  return { outcome: "read", payload: { agentId } };
-}
-
-function unreadable(reason: string): PayloadRead {
+function unreadable(reason: string): FiringRead {
   return { outcome: "unreadable", reason };
 }
 

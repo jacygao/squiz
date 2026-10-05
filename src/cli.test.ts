@@ -27,13 +27,10 @@ let onABranch = "";
 
 const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz"];
 
-/**
- * One firing, as the runtime writes it to the hook's stdin.
- *
- * Only the subagent's id is read from it.
- */
+/** One firing, as the runtime writes it to the hook's stdin. */
 const PAYLOAD = JSON.stringify({
   hook_event_name: "SubagentStop",
+  session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
   agent_id: "a1e3196c5ad0f2410",
   stop_hook_active: false,
 });

@@ -1,12 +1,23 @@
 {
   "hooks": {
-    "SubagentStop": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook",
-            "timeout": 600
+            "asyncRewake": true,
+            "timeout": 86400
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook"
           }
         ]
       }
