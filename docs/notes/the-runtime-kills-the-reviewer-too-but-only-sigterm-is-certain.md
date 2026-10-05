@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — what becomes of a detached reviewer when the runtime kills the hook, what is left to stop it, and what sets the 600-second ceiling"
+settles: "§ 2 — what the runtime sends the processes under a hook it kills, and what fails a subagent at 600 seconds; § 4 — that a reviewer CLI must exit on SIGTERM"
 issue: 142
 recorded: 2026-09-25
 versions: { claude-code: 2.1.270, node: 24.15.0, pi: 0.85.1 }
@@ -7,6 +7,10 @@ recheck-when: Claude Code changes how it kills a hook that reaches its timeout, 
 ---
 
 # The runtime kills the reviewer too, but only its `SIGTERM` is certain
+
+2026-10-05: since M7 no reviewer runs under a hook. The round host starts it,
+outside every trigger's process, so a hook the runtime kills no longer reaches
+the reviewer (§ 3 The round host).
 
 ## Intent
 

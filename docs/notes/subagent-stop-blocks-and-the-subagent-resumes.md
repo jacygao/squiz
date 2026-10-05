@@ -1,5 +1,5 @@
 ---
-settles: "§ 8 — whether SubagentStop fires, exit 2 feeds the reason back, and the subagent resumes"
+settles: "§ 3 — whether SubagentStop fires, exit 2 feeds the reason back, and the subagent resumes"
 issue: 9
 recorded: 2026-09-05
 versions: { claude-code: 2.1.261, node: 24.15.0 }
@@ -17,6 +17,10 @@ Two things § 3 and § 7 do not cover came out of it: the runtime rewrites the
 blocking reason before the agent sees it, and the agent that dispatched the
 subagent sees only the final message, which made blocked-and-resumed work look
 like tampering.
+
+2026-10-05: since M7 the hooks never block. They queue the state and exit 0,
+and the result reaches the owner as a note and a wake (§ 3 The Claude Code
+hooks, The report).
 
 ## Decisions
 

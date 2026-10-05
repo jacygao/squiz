@@ -48,7 +48,9 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   finding the reviewer was told had landed.
 - **Answer with a short line and carry the report in `details`.** No provider
   serialises `details`, so the report goes back to the harness whole without
-  being paid for a second time in the reviewer's context.
+  being paid for a second time in the reviewer's context. 2026-10-05: since M7
+  the extension appends each accepted report to the round's report file, and
+  the round reads that file rather than `pi`'s stream (§ 4 The `pi` adapter).
 - **End the run from the round, once the reviewer has reported the review
   complete, and ask `pi` for nothing.** `terminate: true` on a tool's result ends
   the run only where every call of the same assistant message carries it, so a
@@ -62,6 +64,9 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   that was accepted a moment later, and reading the pipe afterwards cannot
   recover it: those bytes never left the process. Bound the wait, because a call
   that never answers would otherwise hold a review that is already complete.
+  2026-10-05: since M7 the extension ends the reviewer with `ctx.shutdown()`
+  after `finish_review`, and the round waits for the process to exit (§ 4 The
+  `pi` adapter).
 - **Write the extension against structural types and a plain JSON Schema
   object.** `pi` validates a schema that is not a TypeBox value through its own
   JSON Schema path, so `typebox` need not be imported and the harness keeps no

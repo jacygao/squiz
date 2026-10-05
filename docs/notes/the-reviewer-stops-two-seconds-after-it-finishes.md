@@ -1,6 +1,6 @@
 ---
 settles: "§ 4 — whether the round has to end the run on the reviewer's declaration"
-issue: 175
+issue: 165
 recorded: 2026-09-26
 versions: { pi: 0.85.1, model: deepseek-v4-pro, node: 24.15.0 }
 recheck-when: pi upgrades, or the reviewer's model changes

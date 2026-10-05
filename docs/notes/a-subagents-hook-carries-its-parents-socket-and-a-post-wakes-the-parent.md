@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether the socket wake reaches a subagent's parent; § 8 — the open prerequisite on the socket wake"
+settles: "§ 3 — whether the socket wake reaches a subagent's parent; § 8 — the prerequisite on the socket wake"
 issue: 301
 recorded: 2026-10-04
 versions: { claude-code: 2.1.289, tmux: 3.7b, macos: 26.6.2 }
@@ -31,7 +31,8 @@ it.
   process, at `/tmp/cc-socks/<pid of claude>.sock`. The subagent runs inside the
   parent's process and has none of its own, so the value the hook sees is the
   parent's. The § 3 table records only `session_id` and `agent_id` for
-  `SubagentStop`; the socket can be recorded there too.
+  `SubagentStop`; the socket can be recorded there too. 2026-10-05: § 3's table
+  now records the socket for both events.
 - **Carry the token with the socket, though macOS did not need it.** Posts with
   and without the token both woke the parent. The token is in the same
   environment, costs nothing to record, and is what a platform that checks it

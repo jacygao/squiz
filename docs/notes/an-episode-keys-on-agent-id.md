@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether the hook payload carries a subagent id stable enough to key an episode on"
+settles: "§ 3 — whether the hook payload carries a subagent id stable enough to key an episode on, and to name the subagent that did the work"
 issue: 13
 recorded: 2026-09-06
 versions: { claude-code: 2.1.261, node: 24.15.0 }
@@ -25,7 +25,9 @@ running, so it would have both merged two episodes and split one.
 
 - **The episode key is `agent_id`, exactly as § 3 says.** No fallback is needed,
   so the worktree toplevel, the branch and the pull request number stay
-  unused for this purpose.
+  unused for this purpose. 2026-10-05: M7 keys the episode on the pull
+  request's number instead (§ 3 The state file). `agent_id` now names the
+  subagent that did the work, in the owner the `SubagentStop` hook records.
 - **Never key on `prompt_id`.** It is per user turn in the parent session, not
   per subagent. In the two-subagent run it was the same string for both agents,
   and it changed between one agent's second and third stop.

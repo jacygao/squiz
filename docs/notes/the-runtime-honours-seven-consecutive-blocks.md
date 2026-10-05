@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether the runtime caps consecutive blocks below the round cap's maximum of 8; § 8 — whether stop_hook_active is set when the hook re-enters"
+settles: "§ 3 — whether the runtime caps consecutive blocks below the round cap's maximum of 8, and whether stop_hook_active is set when the hook re-enters"
 issue: 14
 recorded: 2026-09-06
 versions: { claude-code: 2.1.261, node: 24.15.0 }
@@ -20,7 +20,9 @@ on every firing after it, but nothing in the runtime acted on it.
 - **§ 3's round cap keeps its range of 1 to 8.** The maximum cap of 8 asks for
   7 consecutive blocks, and 7 consecutive blocks were honoured in full, twice.
   Nothing above 7 was tried, so the ceiling is known to be at least 7 and is not
-  known to be finite.
+  known to be finite. 2026-10-05: since M7 no hook blocks, so the cap's range no
+  longer rests on this. The round host runs the rounds, and the cap bounds how
+  many (§ 3).
 - **The hook does not read `stop_hook_active`, and must not exit 0 because of
   it.** The flag is `true` from the second firing of an episode onward, which is
   every firing where the loop wants to block. A hook that stopped at `true`

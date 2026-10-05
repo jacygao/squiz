@@ -46,7 +46,7 @@ Nothing.
 
 ## Reference
 
-The call, which is the one § 6 and `post-thread.ts` make:
+The call, which is the one § 4 and `post-thread.ts` make:
 
 ```
 gh api repos/{owner}/{repo}/pulls/{n}/comments \

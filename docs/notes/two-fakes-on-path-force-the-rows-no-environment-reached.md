@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — how each of the six rows a live run could not reach is forced through the real hook, what each one writes on stderr, and which shape of the window row and the pre-review row this method reaches; § 3 — what spends the posting share"
+settles: "§ 7 — how each of the six rows a live run could not reach is forced through the real hook, what each one writes on stderr, and which shape of the posting row and the pre-review row this method reaches, and what spends the posting share"
 issue: 224
 recorded: 2026-09-28
 versions: { node: 24.15.0 }
@@ -182,6 +182,10 @@ open. The second is in **Notes**, because nothing on the pull request holds it.
 
 ### What the fake reviewer has to emit
 
+2026-10-05: M7 reads the reviewer's reports from the report file its extension
+writes, not from its stream (§ 4 The `pi` adapter), so a fake reviewer now has
+to write that file.
+
 - Every line's first key is `type`, because the stream reader decides a line's
   type from its first bytes before parsing it.
 - One `message_end` with `message.role` of `assistant` and a `usage` object is
@@ -196,6 +200,10 @@ open. The second is in **Notes**, because nothing on the pull request holds it.
   carries nothing and is the only thing that says a review is done.
 
 ### The arithmetic the two timed rows rest on
+
+2026-10-05: M7 replaced the window with three parts, each bounded on its own: at
+most 30 seconds before the review, the time bound for the review, and a posting
+reserve of 60 seconds (§ 7 The review budget).
 
 The window is 600 seconds. The posting share is 120 and the pre-review share is
 60, and neither is configurable. The moment the review has to be over by is the

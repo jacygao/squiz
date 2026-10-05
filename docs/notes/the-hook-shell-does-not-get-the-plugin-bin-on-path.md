@@ -1,6 +1,6 @@
 ---
-settles: "§ 6 — whether the SubagentStop registration can name the `squiz` binary directly; § 9 — whether a marketplace install puts the plugin's bin/ on the Bash tool's PATH"
-issue: 39, 54
+settles: "§ 3 — whether the hook registration can name the `squiz` binary directly; § 6 and § 9 — whether a marketplace install puts the plugin's bin/ on the Bash tool's PATH"
+issue: [39, 54]
 recorded: 2026-09-09
 versions: { claude-code: 2.1.263 and 2.1.285, node: 24.15.0 }
 recheck-when: Claude Code changes how a plugin's bin/ reaches PATH
@@ -34,7 +34,8 @@ exited 0.
 ## Needs your input
 
 Nothing. § 6 now says which `PATH` each caller gets and registers the hook
-through `${CLAUDE_PLUGIN_ROOT}`.
+through `${CLAUDE_PLUGIN_ROOT}`. 2026-10-05: the registration is now in § 3 The
+Claude Code hooks, on `Stop` as well as `SubagentStop`.
 
 ## Reference
 

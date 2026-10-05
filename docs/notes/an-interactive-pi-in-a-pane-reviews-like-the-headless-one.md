@@ -1,5 +1,5 @@
 ---
-settles: "multi-agent design § 10, spike S2 — whether interactive pi in a pane can be the reviewer, and migration step 4"
+settles: "§ 4 — whether interactive pi in a pane can be the reviewer, how its reports reach the round, and how it ends; § 8 — the prerequisite on an interactive pi in a pane"
 issue: 277
 recorded: 2026-10-03
 versions: { pi: "0.85.1 and 1.0.0", model: deepseek-v4-pro, tmux: 3.7b, node: 24.15.0 }
@@ -47,8 +47,8 @@ after `finish_review`.
 - **Read the findings from a file the extension writes, not from `pi`'s output.**
   In interactive mode stdout is the screen. The extension's tool `execute`
   receives the same `details` the JSON stream carries, and a wrapper that
-  appended them to a file recorded every report and every refusal in order. This
-  is migration step 2's report file, and step 4 depends on it.
+  appended them to a file recorded every report and every refusal in order. A
+  reviewer in a pane depends on that report file.
 
 - **Have the extension end the session. `pi` does not end it.** Interactive `pi`
   waits for input when the agent settles, indefinitely. Two calls end it:

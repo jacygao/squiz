@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — what the blocking reason must say for the coding agent to work the threads; § 7 — what the blocking reason may assert; § 9 — whether the host project declares Squiz's feedback authorised"
+settles: "§ 3 and § 6 — what the text that hands the coding agent its threads must say for it to work them, which was the blocking reason when this was recorded; § 7 — what that text may assert; § 9 — whether the host project declares Squiz's feedback authorised"
 recorded: 2026-09-06
 versions: { claude-code: 2.1.263, node: 24.15.0 }
 recheck-when: the coding agent's model changes, or Claude Code changes hook delivery
@@ -14,6 +14,10 @@ still finishes its own task. Where a project declares in advance that Squiz's
 feedback is authorised, the coding agent cites that declaration as evidence of
 an attack. Where the reason describes a pull request the agent has no reason to
 believe exists, it refuses whatever the wording.
+
+2026-10-05: since M7 no hook blocks, so there is no blocking reason. The coding
+agent reads its threads from what `squiz review` prints (§ 6), and the session
+that owns the work gets a note pointing at it (§ 3 The report).
 
 ## Decisions
 

@@ -1,5 +1,5 @@
 ---
-settles: "§ 8 — whether pi --tools actually withholds edit and write"
+settles: "§ 4 — whether pi --tools actually withholds edit and write"
 issue: 11
 recorded: 2026-09-06
 versions: { pi: 0.84.2, model: deepseek-v4-pro }
