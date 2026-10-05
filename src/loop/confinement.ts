@@ -2,12 +2,13 @@
  * The two readings taken around the reviewer, and the other episodes that were in
  * the worktree while it ran.
  *
- * A shell is itself a write primitive, and two readings of the worktree are the
- * only thing that names a file the reviewer changed through one. One is taken
- * before the reviewer starts and one when it exits, whichever way it ended. A
- * reviewer killed at its time bound is the one most likely to have left a write
- * behind, so a second reading taken only where the review finished would be
- * missing from the case it exists for.
+ * A shell is itself a write primitive, and two readings of the reviewer's snapshot
+ * are the only thing that names a file the reviewer changed through one. The
+ * coding agent may be editing its own worktree meanwhile, so neither reading looks
+ * there. One is taken before the reviewer starts and one when it exits, whichever
+ * way it ended. A reviewer killed at its time bound is the one most likely to have
+ * left a write behind, so a second reading taken only where the review finished
+ * would be missing from the case it exists for.
  *
  * **Where another episode was in the worktree, no comparison is taken.** A
  * reading taken around one reviewer, in a tree a second episode is also writing,
@@ -103,7 +104,7 @@ type NotTaken = { readonly outcome: "not-taken"; readonly reason: string };
  */
 export type TrackedFilesAnswer = TrackedFilesComparison | NotTaken;
 
-/** What the round established about the worktree its reviewer ran in. */
+/** What the round established about the snapshot its reviewer ran in. */
 export type RoundConfinement = {
   /** What the reviewer did to the paths a commit could carry, and to `HEAD`. */
   readonly trackedFiles: TrackedFilesAnswer;
@@ -296,6 +297,8 @@ type EpisodesRecorded =
 /** What the round holds between the two readings. */
 export type BeforeTheReviewer = {
   readonly episode: Episode;
+  /** The snapshot the reviewer runs in, which both readings are taken in. */
+  readonly tree: string;
   readonly marked: MarkWrite;
   /** The live episodes at the first asking, which is one half of the answer. */
   readonly otherEpisodes: OtherEpisodes;
@@ -307,7 +310,8 @@ export type BeforeTheReviewer = {
 
 /**
  * Mark this round as running, ask which other episodes are in the worktree, and
- * take the reading the reviewer will be compared against.
+ * take the reading of `tree`, the reviewer's snapshot, that the reviewer will be
+ * compared against.
  *
  * `until` is the moment all of that has to be inside. What it spends comes off
  * the reviewer's own bound, so a slow phase shortens the review rather than
@@ -317,7 +321,11 @@ export type BeforeTheReviewer = {
  * reading that failed are each carried rather than raised, and none of them stops
  * the round.
  */
-export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeTheReviewer {
+export function readBeforeReviewer(
+  episode: Episode,
+  tree: string,
+  until: Deadline,
+): BeforeTheReviewer {
   const marked = markRoundRunning(episode);
 
   const phase = phaseInside(until);
@@ -325,6 +333,7 @@ export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeThe
     const reason = "the round had too little of its window left to read the worktree";
     return {
       episode,
+      tree,
       marked,
       otherEpisodes: { outcome: "unknown", reason },
       recorded: { read: false, reason },
@@ -338,6 +347,7 @@ export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeThe
   if (shared !== null) {
     return {
       episode,
+      tree,
       marked,
       otherEpisodes,
       recorded,
@@ -346,10 +356,11 @@ export function readBeforeReviewer(episode: Episode, until: Deadline): BeforeThe
   }
   return {
     episode,
+    tree,
     marked,
     otherEpisodes,
     recorded,
-    reading: readTrackedFiles(episode.worktree, phase),
+    reading: readTrackedFiles(tree, phase),
   };
 }
 
@@ -379,7 +390,7 @@ function compared(
   otherEpisodes: OtherEpisodes,
   phase: Deadline | null,
 ): TrackedFilesAnswer {
-  const { episode, reading } = before;
+  const { episode, tree, reading } = before;
   if (reading.outcome === "not-taken") return reading;
 
   // The tree turned out to have been shared after the first reading was taken, so
@@ -400,7 +411,7 @@ function compared(
   // A first reading that failed leaves nothing for a second one to be compared
   // against, and the comparison says which of the two could not be taken.
   const after =
-    reading.outcome === "failed" ? reading : readTrackedFiles(episode.worktree, phase);
+    reading.outcome === "failed" ? reading : readTrackedFiles(tree, phase);
   return compareTrackedFiles(reading, after);
 }
 

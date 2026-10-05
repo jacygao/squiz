@@ -77,7 +77,7 @@ async function around(
   between: () => Promise<void> | void,
   windowMs = WINDOW_MS,
 ): Promise<RoundConfinement> {
-  const before = readBeforeReviewer(episode, deadlineIn(windowMs));
+  const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(windowMs));
   await between();
   return readAfterReviewer(before, deadlineIn(windowMs));
 }
@@ -123,7 +123,7 @@ function markerIn(episode: Episode): string {
 
 test("a file the reviewer wrote to is named, and the round is marked while it runs", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     assert.equal(before.marked.outcome, "written");
     assert.ok(existsSync(markerIn(episode)), "the round is marked for as long as it runs");
 
@@ -154,7 +154,7 @@ test("the round is marked before the worktree is asked about", async () => {
   await withWorktree(async (episode) => {
     const witness = join(episode.worktree, "witness");
     await withGitThatRecords(markerIn(episode), witness, async () => {
-      readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+      readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     });
     const seen = (await readLines(witness))[0];
     assert.equal(seen, "marked", "a round that read first could miss a round that marked after it");
@@ -271,7 +271,7 @@ test("a marker that could not be written is carried out, and the comparison is t
  */
 test("an episode that became live after the first reading is not compared against", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
 
     otherRoundStarts(episode.worktree, OTHER_KEY);
@@ -294,7 +294,7 @@ test("an episode that became live after the first reading is not compared agains
  */
 test("an episode that came and went inside the review is not compared against", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" });
 
     episodeRanRounds(episode.worktree, OTHER_KEY, 1);
@@ -321,7 +321,7 @@ test("an episode that came and went inside the review is not compared against", 
  */
 test("a reading that runs past its bound is cut short and answered as one that failed", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     assert.equal(before.reading.outcome, "read");
 
     const started = Date.now();
@@ -357,7 +357,7 @@ test("an episode that ran and closed inside the review is not compared against",
   await withWorktree(async (episode) => {
     episodeRanRounds(episode.worktree, OTHER_KEY, 1);
 
-    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     assert.deepEqual(before.otherEpisodes, { outcome: "alone" }, "the other episode has closed");
 
     episodeRanRounds(episode.worktree, OTHER_KEY, 2);
@@ -405,7 +405,7 @@ test("an episode with nothing recorded is not a tree this round had to itself", 
  */
 test("a lookup that runs past its bound is cut short and establishes nothing", async () => {
   await withWorktree(async (episode) => {
-    const before = readBeforeReviewer(episode, deadlineIn(WINDOW_MS));
+    const before = readBeforeReviewer(episode, episode.worktree, deadlineIn(WINDOW_MS));
     assert.equal(before.reading.outcome, "read");
 
     const started = Date.now();
