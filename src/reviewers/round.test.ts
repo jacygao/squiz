@@ -617,7 +617,7 @@ test("an adapter that throws before it returns still stops the reviewer", async 
 
     const round = await runRound(throwingSynchronously, at(tree), 10);
     assert.equal(round.outcome, "unavailable", "a throw is output that could not be read");
-    assert.deepEqual(round.cost, { dollars: 0.008, tokens: 200, messages: 2 });
+    assert.deepEqual(round.cost, { dollars: 0.008, tokens: 200, messages: 2, floor: true });
     assert.equal(starts, 2);
     assert.ok(await nothingRuns(marker), "the reviewer was left running");
   });
@@ -869,6 +869,43 @@ test("usage that could not be read keeps the cost a floor through a retry that r
     const second = writing(called(FINISH_REVIEW, {}) + closing);
     const round = await runRound(reviewer(first, second).adapter, at(tree), 10);
     assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+  });
+});
+
+/** A last line cut short at exit may have been a message's usage, like any line that cannot be read. */
+test("a last line cut short keeps the cost a floor through a retry that reviewed", async () => {
+  await inATree(async (tree) => {
+    const first = writing(reportingMessage + said("cut", "stop", 0.01).slice(0, 40));
+    const second = writing(called(FINISH_REVIEW, {}) + closing);
+    const round = await runRound(reviewer(first, second).adapter, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+  });
+});
+
+/**
+ * A report file that could not be read to its end leaves spend uncounted, so
+ * the cost of an attempt whose read failed is a floor.
+ */
+test("an attempt whose report file could not be read has a cost that is a floor", async () => {
+  await inATree(async (tree) => {
+    const throwing: Adapter = {
+      ...reviewer(reviewing).adapter,
+      parse: async (_reports, soFar) => {
+        soFar?.({
+          cost: spentOnce,
+          findings: [],
+          verdicts: [],
+          refusals: 0,
+          finished: false,
+          broken: undefined,
+        });
+        throw new Error("the file went away");
+      },
+    };
+    const round = await runRound(throwing, at(tree), 10);
+    assert.equal(round.outcome, "unavailable", accountOf(round));
     assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
   });
 });

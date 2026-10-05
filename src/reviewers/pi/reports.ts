@@ -106,7 +106,7 @@ export async function readReports(
   }
   pending += decoder.decode();
   if (pending !== "") {
-    tally.broken ??= `the report file ends partway through a line: ${excerptOf(pending)}`;
+    markUnreadable(tally, `the report file ends partway through a line: ${excerptOf(pending)}`);
     tell();
   }
   return { cost: costOf(tally), result: resultOf(tally) };
@@ -114,10 +114,8 @@ export async function readReports(
 
 /** Count one whole line, newline taken off. */
 function take(tally: Tally, text: string, number: number): void {
-  const unreadable = (why: string): void => {
-    tally.lost = true;
-    tally.broken ??= `line ${number} of the report file could not be read: ${why}: ${excerptOf(text)}`;
-  };
+  const unreadable = (why: string): void =>
+    markUnreadable(tally, `line ${number} of the report file could not be read: ${why}: ${excerptOf(text)}`);
 
   let parsed: unknown;
   try {
@@ -214,6 +212,15 @@ function take(tally: Tally, text: string, number: number): void {
  * a failed run: `pi` retries a failed request itself, so one sits among the
  * working messages of a round that reviewed.
  */
+/**
+ * Record a line that could not be read. It may have been a message's usage, so
+ * the sum is missing spend from here on, whatever lines follow.
+ */
+function markUnreadable(tally: Tally, reason: string): void {
+  tally.lost = true;
+  tally.broken ??= reason;
+}
+
 function resultOf(tally: Tally): RunResult {
   if (tally.broken !== undefined) return { kind: "unparsed", reason: tally.broken };
   if (tally.finished) {

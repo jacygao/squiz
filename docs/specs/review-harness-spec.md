@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.59 (draft)
+**Version:** 0.62 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1093,8 +1093,10 @@ things leave it unconfirmed:
   say so.
 - **The time bound stopped the reviewer.** A request in flight at the stop was
   spent and is never reported, whatever the file ends on.
-- **A line of the file could not be read.** It may have been a message's usage,
-  so the sum may be missing that spend, whatever lines follow it.
+- **A line of the file could not be read, or the file could not be read to its
+  end.** A last line with no newline is such a line. What was not read may have
+  been a message's usage, so the sum may be missing that spend, whatever lines
+  follow it.
 
 A round that ran the reviewer twice has a floor where either run does.
 

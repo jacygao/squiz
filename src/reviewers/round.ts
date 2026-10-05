@@ -401,8 +401,9 @@ async function attempt(
       reported: reportedIn(progress),
       ...run.result,
     }),
+    // A read that failed left the rest of the file uncounted.
     (cause): Attempt => ({
-      cost: progress.cost,
+      cost: { ...progress.cost, floor: true },
       refusals: progress.refusals,
       reported: reportedIn(progress),
       kind: "unparsed",
