@@ -23,9 +23,9 @@ import type { Adapter, Invocation } from "./adapter.ts";
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { pi } from "./pi/adapter.ts";
 import { grants } from "./pi/argv.ts";
-import { REPORTS_VARIABLE } from "./pi/report-file.ts";
+import { REPORTS_VARIABLE } from "./report-file.ts";
 import { readReports as parse } from "./pi/reports.ts";
-import { FINISH_REVIEW, REPORT_FINDING } from "./pi/reporting.ts";
+import { FINISH_REVIEW, REPORT_FINDING } from "./reporting.ts";
 import { type Round, runRound, type Sessions } from "./round.ts";
 
 const finding = {

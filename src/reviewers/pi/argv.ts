@@ -36,8 +36,8 @@ import { fileURLToPath } from "node:url";
 
 import type { Depth } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
-import { REPORTS_VARIABLE } from "./report-file.ts";
-import { reportingTools } from "./reporting.ts";
+import { REPORTS_VARIABLE } from "../report-file.ts";
+import { reportingTools } from "../reporting.ts";
 
 const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
 

@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { REPORTS_VARIABLE } from "../report-file.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
 import reportAsYouGo, {
   type Context,
   type MessageEnd,
@@ -23,8 +25,6 @@ import reportAsYouGo, {
   reportInto,
 } from "./extension.ts";
 import type { Refusal, ToolCall } from "./refusals.ts";
-import { REPORTS_VARIABLE } from "./report-file.ts";
-import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "./reporting.ts";
 
 type Tool = Parameters<Registrar["registerTool"]>[0];
 type Handler = (call: ToolCall) => Refusal | undefined;

@@ -2,10 +2,10 @@
  * The calls the reviewer reports through, named in one place.
  *
  * Three parts need the same names and cannot derive them from one another: the
- * grant on the command line, the extension that registers the calls inside
- * `pi`, and the read of the stream they arrive in. A name spelled twice is a
- * reporting tool the grant withholds, which `pi` does silently and which leaves
- * the reviewer with no way to report at all.
+ * grant on the command line, what serves the calls to the reviewer's CLI, and
+ * the read of the report file. A name spelled twice is a reporting call the
+ * grant can withhold, which leaves the reviewer with no way to report at all.
+ * `pi` withholds one silently.
  */
 
 /** One finding, reported as the reviewer confirms it. */

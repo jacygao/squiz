@@ -33,7 +33,7 @@ import type {
   RunResult,
   ThreadVerdict,
 } from "../adapter.ts";
-import { REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
+import { REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 
 /** As much of a line as a reason quotes. A line has no length this can rely on. */
 const EXCERPT_LIMIT = 120;

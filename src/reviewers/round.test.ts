@@ -9,8 +9,8 @@ import { type Adapter, type Confinement, type Invocation, unspent } from "./adap
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { grants } from "./pi/argv.ts";
 import { readReports as parse } from "./pi/reports.ts";
-import { REPORTS_VARIABLE } from "./pi/report-file.ts";
-import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./pi/reporting.ts";
+import { REPORTS_VARIABLE } from "./report-file.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import { type Round, runRound } from "./round.ts";
 
 /** The scratch space, named relative to the work tree as the harness names it. */
