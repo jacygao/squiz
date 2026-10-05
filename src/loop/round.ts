@@ -596,6 +596,7 @@ async function reviewOn(
           { depth: config.depth, command: config.test },
         ),
         sessionDirectory,
+        promptFile: join(ownDirectory, "prompt.md"),
         reportsFile: join(ownDirectory, "reports.jsonl"),
         scratchDirectory: episode.scratchDirectory,
         thinking: config.thinking,

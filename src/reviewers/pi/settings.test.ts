@@ -230,6 +230,7 @@ function at(roundSpace: RoundSpace | undefined, directory = "/tmp/squiz/worktree
     charterFile: "/tmp/squiz/plugin/charter.md",
     prompt: "Review pull request 142.",
     sessionDirectory: ".squiz/agent-7/session",
+    promptFile: ".squiz/7/rounds/1/prompt.md",
     reportsFile: ".squiz/7/rounds/1/reports.jsonl",
     scratchDirectory: ".squiz/agent-7/scratch",
     depth: roundSpace === undefined ? "read" : "deep",

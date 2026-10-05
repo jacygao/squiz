@@ -175,7 +175,15 @@ export async function runRound(
   const boundEndsAt = Math.ceil((now() + seconds * 1_000) / 1_000);
   // Absolute, so that the reviewer and the round name the same file whatever
   // directory either of them is in.
-  const invocation = { ...handed, reportsFile: resolve(handed.directory, handed.reportsFile) };
+  const invocation = {
+    ...handed,
+    reportsFile: resolve(handed.directory, handed.reportsFile),
+    promptFile: resolve(handed.directory, handed.promptFile),
+  };
+  const unwritten = writePrompt(invocation.promptFile, invocation.prompt);
+  if (unwritten !== null) {
+    return { outcome: "setup", cost: unspent, reason: unwritten, refusals: 0, ...nothingReported };
+  }
   // Absolute, so that TMPDIR still names the scratch space for a reviewer that
   // changes directory, and so the directory is made wherever the harness runs.
   const scratch = resolve(invocation.directory, invocation.scratchDirectory);
@@ -748,6 +756,17 @@ async function within(settling: Promise<void>, milliseconds: number): Promise<vo
     deadlineIn(milliseconds).whenPassed(settle);
   });
   await Promise.race([settling, waited]);
+}
+
+/** The prompt written where the reviewer reads it, or why it could not be. */
+function writePrompt(file: string, prompt: string): string | null {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, prompt, "utf8");
+    return null;
+  } catch (cause) {
+    return `the reviewer's prompt could not be written to ${file}: ${reasonFor(cause)}`;
+  }
 }
 
 /** The scratch space, made before the reviewer starts, or why it could not be. */

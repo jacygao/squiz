@@ -26,6 +26,13 @@ export type Invocation = {
   readonly charterFile: string;
   /** The task prompt, carrying the pull request and the threads already on it. */
   readonly prompt: string;
+  /**
+   * The file holding `prompt`, written by the round before the process starts.
+   *
+   * It is for a CLI that takes its prompt from a file. The prompt has newlines,
+   * and Herdr refuses to start a command with a newline in any argument.
+   */
+  readonly promptFile: string;
   readonly sessionDirectory: string;
   /**
    * The file the reviewer reports into, one line for each thing it did that the

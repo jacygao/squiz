@@ -121,6 +121,7 @@ function invocationIn(tree: string): Invocation {
     charterFile,
     prompt: "# Review pull request #1\n\nReach for the calls.",
     sessionDirectory: ".squiz/agent-1/session",
+    promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile: ".squiz/1/rounds/1/reports.jsonl",
     scratchDirectory: ".squiz/agent-1/scratch",
     depth: "deep",
@@ -287,7 +288,9 @@ async function review() {
     });
   };
 
-  const prompt = args[args.length - 1];
+  // pi reads the file an @ argument names as the first message.
+  const named = args[args.length - 1] ?? "";
+  const prompt = named.startsWith("@") ? fs.readFileSync(named.slice(1), "utf8") : undefined;
   if (prompt !== triesNothing) {
     // The reset first, so that a commit which escaped lands somewhere other
     // than where HEAD started and the repository reads as changed.

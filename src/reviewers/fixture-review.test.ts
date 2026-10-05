@@ -296,6 +296,7 @@ function invocationIn(tree: string): Invocation {
       { depth: "read", command: null },
     ),
     sessionDirectory,
+    promptFile: ".squiz/104/rounds/1/prompt.md",
     reportsFile,
     scratchDirectory,
     depth: "read",
@@ -507,8 +508,10 @@ function review() {
   const charter = fs.readFileSync(charterFile, "utf8");
   if (charter.trim() === "") refuse("the charter is empty");
 
-  const prompt = args[args.length - 1];
-  if (prompt === undefined) refuse("the command line carries no prompt");
+  // pi reads the file an @ argument names as the first message.
+  const promptArg = args[args.length - 1];
+  if (promptArg === undefined || !promptArg.startsWith("@")) refuse("the command line names no prompt file");
+  const prompt = fs.readFileSync(promptArg.slice(1), "utf8");
   const heading = prompt.split("\\n")[0];
   if (!/^# Review pull request #\\d+$/.test(heading)) refuse("the prompt names no pull request");
   const ruled = /^### (PRRT_\\S+)$/m.exec(prompt);

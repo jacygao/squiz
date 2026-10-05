@@ -79,6 +79,12 @@ export function isHerdrWorkspace(id: string): boolean {
  * refusal cannot mean some other workspace.
  */
 export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): PaneStart {
+  // Herdr refuses to start a command with a newline or a tab in any argument,
+  // and says so only once the tab is open. Refused here, nothing opens.
+  const unsafe = command.arguments.findIndex((argument) => /[\n\t]/u.test(argument));
+  if (unsafe !== -1) {
+    return { outcome: "refused", reason: `Herdr cannot start argument ${unsafe + 1}, which holds a newline or a tab` };
+  }
   const variables = Object.entries(command.variables ?? {}).flatMap(([name, value]) => ["--env", `${name}=${value}`]);
   const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus", ...variables];
   let created: Answer;

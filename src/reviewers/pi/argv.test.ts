@@ -18,6 +18,7 @@ const invocation: Invocation = {
   charterFile: "/tmp/squiz/plugin/charter.md",
   prompt: "Review pull request 142.",
   sessionDirectory: ".squiz/agent-7/session",
+  promptFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/prompt.md",
   reportsFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
@@ -87,7 +88,7 @@ test("the command line is the one the specification gives", () => {
       "medium",
       "--append-system-prompt",
       "/tmp/squiz/plugin/charter.md",
-      "Review pull request 142.",
+      "@/tmp/squiz/worktree/.squiz/7/rounds/1/prompt.md",
     ],
   });
 });
@@ -307,9 +308,13 @@ test("the grant table holds against a caller that would add to it", () => {
   assert.throws(() => (grants.deep as string[]).push("edit"));
 });
 
-test("the prompt is one argument, and the last", () => {
-  const { args } = argv({ ...invocation, prompt: "Review pull request 142.\n\nIts diff follows." });
-  assert.equal(args.at(-1), "Review pull request 142.\n\nIts diff follows.");
+// Herdr refuses to start a command with a newline or a tab in any argument.
+test("the prompt reaches pi as its file, and no argument carries a newline or a tab", () => {
+  for (const terminal of ["pane", "none"] as const) {
+    const { args } = argv({ ...invocation, terminal, prompt: "Review pull request 142.\n\n\tIts diff follows." });
+    assert.equal(args.at(-1), "@/tmp/squiz/worktree/.squiz/7/rounds/1/prompt.md");
+    for (const arg of args) assert.doesNotMatch(arg, /[\n\t]/u, `pi is handed ${JSON.stringify(arg)}`);
+  }
 });
 
 test("the working directory is where pi runs rather than something on its command line", () => {

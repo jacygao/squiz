@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.68 (draft)
+**Version:** 0.69 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -191,8 +191,9 @@ cost of each round, what the episode spent on attempts that were no round,
 whether the episode has reported its close and what was open at that close, and
 what its rounds established about the worktree. The directory also holds:
 
-- `rounds/<k>/`, for each round: the report file the reviewer's extension
-  writes, the reviewer's `pi` session, `resume.txt`, the command that resumes
+- `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
+  handed, the report file the reviewer's extension writes, the reviewer's `pi`
+  session, `resume.txt`, the command that resumes
   that session, and `tree/`, the snapshot the reviewer reads while the round
   runs.
 - `notes/`, the notes for the sessions that own the work, under The report.
@@ -800,6 +801,12 @@ it.** The round host starts it in the first place that applies:
 | tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<pi command line>'` |
 | Neither | As a child of the round host, with no terminal |
 
+**Herdr refuses to start a command with a newline or a tab in any argument**, and
+answers `invalid_agent_argument` only once the tab is open. The round host checks
+the arguments before it creates the tab, and treats such a command as a pane
+Herdr refused: nothing opens, and it goes on to tmux or a child. `pi`'s own line
+carries neither unless a path in it does (The `pi` adapter).
+
 In a pane, `pi` runs interactively with the pane as its terminal, and draws its
 own interface there. Detached, it runs in print mode. Either way it reports
 through the same extension, into the same report file (The `pi` adapter). The
@@ -1078,8 +1085,23 @@ pi --session-dir .squiz/<number>/rounds/<k>/session \
    --tools read,grep,find,ls,report_finding,report_verdict,finish_review \
    --thinking medium \
    --append-system-prompt <charter-file> \
-   <task-prompt>
+   @.squiz/<number>/rounds/<k>/prompt.md
 ```
+
+**The task prompt reaches `pi` as a file.** The round writes it to
+`rounds/<k>/prompt.md` before `pi` starts, and `pi` reads the file an `@`
+argument names into its first message, wrapped in a tag that names the file:
+
+```
+<file name="/…/.squiz/41/rounds/2/prompt.md">
+# Review pull request #41
+…
+</file>
+```
+
+`pi` exits 1 where the file is missing. The prompt itself has newlines, and
+Herdr refuses to start a command with a newline or a tab in any argument, so no
+argument on this line carries either.
 
 In a pane `pi` runs interactively, with the pane as its standard input and
 output. Detached, the round host adds `--print` and gives it `< /dev/null`. With

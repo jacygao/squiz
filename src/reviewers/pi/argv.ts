@@ -104,7 +104,10 @@ export function argv(invocation: Invocation): CommandLine {
       invocation.thinking,
       "--append-system-prompt",
       invocation.charterFile,
-      invocation.prompt,
+      // `pi` reads an `@` argument's file into the first message, wrapped in a
+      // `<file>` tag, and exits 1 where the file is missing. The prompt itself
+      // would put its newlines on the command line, which Herdr refuses.
+      `@${invocation.promptFile}`,
     ],
   };
 }
