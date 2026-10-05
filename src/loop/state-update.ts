@@ -18,8 +18,8 @@
 
 import { unspent } from "../reviewers/adapter.ts";
 import type { Deadline } from "../reviewers/deadline.ts";
-import { takeLock, type HeldLock } from "../sessions/lock-file.ts";
-import { identityOf, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { takeLock, type HeldLock, type Taking } from "../sessions/lock-file.ts";
+import { identityOf, stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState, writeState } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
 
@@ -77,27 +77,35 @@ export function updateState(
   if ("reason" in self) return notWritten(self.reason);
 
   // A deadline spent before the update began still gets its one attempt, and the
-  // floor lets that attempt's `ps` finish. Every other `ps`, run while waiting on
-  // a holder, is bounded by what is left, so the wait never outlasts the deadline.
+  // floor lets that attempt's `ps` finish. Otherwise each `ps` is bounded by what
+  // is left when it runs, since one attempt can ask about several holders.
   const lastAttemptOnly = until.passed();
   const boundMs = (): number => (lastAttemptOnly ? PS_FLOOR_MS : Math.max(1, until.remaining()));
+  const expired = (): boolean => !lastAttemptOnly && until.passed();
+  const ask = options.presence ?? ((identity: ProcessIdentity) => stillRunning(identity, boundMs()));
+  const presence = (identity: ProcessIdentity): Presence =>
+    expired() ? { outcome: "unknown", reason: "the deadline passed before it could be asked" } : ask(identity);
 
-  const { presence } = options;
   for (;;) {
-    const taking = takeLock(episode.directory, LOCK_NAME, {
-      boundMs: boundMs(),
-      self,
-      ...(presence === undefined ? {} : { presence }),
-    });
-    if (taking.outcome === "taken") return underLock(episode, change, taking.lock);
-    if (until.passed()) {
-      const why = taking.outcome === "held"
-        ? `process ${taking.holder.pid}, started at ${taking.holder.startedAt}, still held its lock`
-        : `its lock could not be taken: ${taking.reason}`;
-      return notWritten(why);
+    const taking = takeLock(episode.directory, LOCK_NAME, { boundMs: boundMs(), self, presence });
+    if (taking.outcome === "taken") {
+      if (!expired()) return underLock(episode, change, taking.lock);
+      // The caller's time for this write has gone, so the lock goes back unused.
+      taking.lock.release();
+      return notWritten("its lock was taken only after the deadline had passed");
     }
+    if (until.passed()) return notWritten(whyNotTaken(taking));
     pause(Math.min(until.remaining(), PAUSE_MS + Math.random() * JITTER_MS));
+    // Checked here as well, so the failure names the holder as this attempt found
+    // it rather than an attempt that would only find the deadline gone.
+    if (until.passed()) return notWritten(whyNotTaken(taking));
   }
+}
+
+function whyNotTaken(taking: Exclude<Taking, { readonly outcome: "taken" }>): string {
+  return taking.outcome === "held"
+    ? `process ${taking.holder.pid}, started at ${taking.holder.startedAt}, still held its lock`
+    : `its lock could not be taken: ${taking.reason}`;
 }
 
 function underLock(episode: Episode, change: (state: EpisodeState) => EpisodeState, lock: HeldLock): StateUpdate {

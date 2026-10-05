@@ -7,7 +7,7 @@ import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { identityOf, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { identityOf, stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState } from "./episode-state.ts";
 import { type Episode, episodeAt } from "./episode.ts";
 import { putRecord } from "./state-record.ts";
@@ -128,15 +128,7 @@ test("a wait on a live holder ends at its deadline even where ps is slow", (t) =
   const episode = episodeIn(t);
   const holder = ownIdentity();
   holdLock(episode, holder);
-  // A `ps` first on the PATH that takes 400ms to answer, far past the deadline.
-  const bin = mkdtempSync(join(tmpdir(), "squiz-slow-ps-"));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "ps"), "#!/bin/sh\nsleep 0.4\nexec /bin/ps \"$@\"\n", { mode: 0o755 });
-  const path = process.env["PATH"];
-  process.env["PATH"] = `${bin}:${path ?? ""}`;
-  t.after(() => {
-    process.env["PATH"] = path;
-  });
+  slowPs(t, 0.4);
   const started = Date.now();
 
   const updated = updateState(episode, queue("B"), { until: deadlineIn(50), self: holder });
@@ -145,6 +137,43 @@ test("a wait on a live holder ends at its deadline even where ps is slow", (t) =
   assert.equal(updated.outcome, "failed", JSON.stringify(updated));
   assert.ok(took < 50 + 200, `an update given 50ms took ${took}ms, spent waiting on ps past its deadline`);
 });
+
+test("a takeover that needs more ps checks than its deadline leaves fails at the deadline, and writes nothing", (t) => {
+  const episode = episodeIn(t);
+  const stale = goneIdentity();
+  const taker = { pid: process.pid, startedAt: stale.startedAt - 1 };
+  const lock = holdLock(episode, stale);
+  // A taker that died replacing the lock, so taking it over asks ps about two processes.
+  writeFileSync(join(episode.directory, `state.lock.${stale.pid}-${stale.startedAt}.claim`), `${JSON.stringify(taker)}\n`);
+  const self = ownIdentity();
+  slowPs(t, 0.1);
+  stillRunning(stale, 5_000);
+  // Timed once warmed, so that the deadline fits one check and not two.
+  const warmed = Date.now();
+  stillRunning(stale, 5_000);
+  const deadlineMs = Math.round(1.5 * (Date.now() - warmed));
+  const started = Date.now();
+
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(deadlineMs), self });
+
+  const took = Date.now() - started;
+  assert.equal(updated.outcome, "failed", `${JSON.stringify(updated)} after ${took}ms of ${deadlineMs}`);
+  assert.ok(took < deadlineMs + 100, `an update given ${deadlineMs}ms took ${took}ms`);
+  assert.equal(readFileSync(lock.path, "utf8"), lock.text, "the lock was replaced past the deadline");
+  assert.equal(existsSync(episode.stateFile), false, "the state file was written past the deadline");
+});
+
+/** Put a `ps` first on the PATH for the rest of the test that waits `seconds` before answering. */
+function slowPs(t: TestContext, seconds: number): void {
+  const bin = mkdtempSync(join(tmpdir(), "squiz-slow-ps-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "ps"), `#!/bin/sh\nsleep ${seconds}\nexec /bin/ps "$@"\n`, { mode: 0o755 });
+  const path = process.env["PATH"];
+  process.env["PATH"] = `${bin}:${path ?? ""}`;
+  t.after(() => {
+    process.env["PATH"] = path;
+  });
+}
 
 function ownIdentity(): ProcessIdentity {
   const read = identityOf(process.pid, 5_000);
