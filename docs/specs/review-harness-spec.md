@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.59 (draft)
+**Version:** 0.60 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -250,6 +250,11 @@ because the state is read from them.
 - **Queued:** the trigger queues nothing, and starts a round host where none is
   running.
 - **Reviewing**, by a round host that is running: the trigger queues nothing.
+- **Reviewing**, by a round host no one can tell running or gone: the trigger
+  recovers nothing, queues nothing and starts nothing, because recovering a round
+  whose host may be alive would stop a live reviewer and remove its snapshot.
+  `squiz review` exits 1 naming the host it could not check, and a hook returns.
+  The next trigger checks again.
 - **Reviewed, or not reviewed:** the trigger queues nothing. `squiz review`
   returns that result, with the threads read from the pull request as they stand
   now.
@@ -284,7 +289,7 @@ commit, is queued behind it:
 |---|---|
 | Threads open, rounds remaining | B is reviewed next, as usual. |
 | Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
-| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
+| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. Its Notes name the cap or the bound and each state left not reviewed, whether A left threads open or nothing. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
 
 The line comes right after the heading of the close the run is handed:
 
@@ -346,8 +351,14 @@ flowchart TD
     K -->|yes| D[Print the close, exit 0 or 3]
     K -->|no| R{Record for this commit<br/>and these replies?}
     R -->|reviewed| P[Print its result,<br/>exit as it did]
-    R -->|queued or reviewing| W[squiz review waits;<br/>a hook returns]
-    R -->|none, failed or killed| Q[Queue the state,<br/>start a round host]
+    R -->|queued, or reviewing<br/>by a live host| W[squiz review waits;<br/>a hook returns]
+    R -->|reviewing, host<br/>cannot be told| U[Change nothing;<br/>squiz review exits 1]
+    R -->|none| Q[Queue the state,<br/>start a round host]
+    R -->|reviewing by a<br/>host that has gone| V[Recover the round:<br/>stop its reviewer,<br/>record it failed]
+    V --> X
+    R -->|failed| X{squiz review?}
+    X -->|yes| Q
+    X -->|no, a hook| Y[Queue nothing]
     Q --> W
     Q --> H[Round host starts a<br/>reviewer session]
     H --> F[Findings posted as threads<br/>on the pull request]
@@ -1419,7 +1430,7 @@ Three blocks, in this order.
    episodes that shared the worktree; a round that could not tell whether the
    worktree was shared or what changed in it; a round whose review the time
    bound cut short, with the round's number and the bound; and a cap or bound
-   that ended the episode early.
+   that ended the episode early, with each queued state it left not reviewed.
 
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
@@ -1724,6 +1735,7 @@ A run that failed before any round, or could not reach GitHub, prints one line:
 squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
 squiz: no review ran: PR #41 is closed
 squiz: round 2 found 3 findings and could not post them to PR #41
+squiz: no review ran: whether round host 4242 for PR #41 is still running could not be told: ps did not answer within 2000ms
 ```
 
 Where the round's comparison found that `HEAD` moved while the reviewer ran, the
