@@ -1,6 +1,6 @@
 /** How many pages of `size` items `total` items fill. */
 export function pageCount(total: number, size: number): number {
-  return Math.floor(total / size);
+  return Math.ceil(total / size);
 }
 
 /** The items on 1-indexed page `page`, or an empty array when there is no such page. */

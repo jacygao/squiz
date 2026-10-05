@@ -8,3 +8,10 @@ test("ten items in pages of five", () => {
   assert.deepEqual(getPage(items, 1, 5), [1, 2, 3, 4, 5]);
   assert.deepEqual(lastPage(items, 5), [6, 7, 8, 9, 10]);
 });
+
+test("eleven items in pages of five put the eleventh on a third page", () => {
+  const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  assert.equal(pageCount(items.length, 5), 3);
+  assert.deepEqual(getPage(items, 3, 5), [11]);
+  assert.deepEqual(lastPage(items, 5), [11]);
+});
