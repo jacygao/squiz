@@ -2413,9 +2413,9 @@ The review budget bounds a review two ways. Both are configurable.
 | **Time**, per round | 900 seconds | The reviewer is stopped, the round records that the bound cut it short, and it posts the findings reported before the stop. |
 | **Tokens**, per round | 10,000,000 | The episode closes without starting another round. |
 
-A reviewer killed at the time bound yields a cost as well as its findings. For
-`pi`, the assistant messages that completed carry their own, and the round
-records that sum as its last tracked cost. The findings and the figure are read
+A `pi` reviewer killed at the time bound yields a cost as well as its findings.
+The assistant messages that completed carry their own, and the round records
+that sum as its last tracked cost. The findings and the figure are read
 from the same moment of the run, so a round never reports a cost from one moment
 beside findings from another.
 
