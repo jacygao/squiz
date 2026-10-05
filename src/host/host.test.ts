@@ -5,15 +5,20 @@
  * The round is the real one because the failure most worth catching here is
  * between the two: a host that holds the episode's lock and a round that takes
  * the same lock for itself review nothing, and say only that a round is running.
+ *
+ * A state is a real commit of the work tree. `push` commits again and has `gh`
+ * report the new commit as the pull request's head, which is how a test moves
+ * the pull request on while the host runs.
  */
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { defaultConfig, type Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
@@ -29,9 +34,9 @@ import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 
 const BRANCH = "review-me";
 const PULL_REQUEST = 142;
-const HEAD_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
 const TRACKED = "src/ui/card.ts";
 const COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
+const queueRacer = fileURLToPath(new URL("queue-racer.ts", import.meta.url));
 
 const DIFF = `
 diff --git a/src/ui/card.ts b/src/ui/card.ts
@@ -56,6 +61,17 @@ function queued(head: string, activity: string | null = null): StateRecord {
   return { head, activity, status: "queued" };
 }
 
+/** What a test can do to the pull request and its episode while the host runs. */
+type Fixture = {
+  readonly episode: Episode;
+  /** Where the fake `gh` keeps its answers. */
+  readonly binaries: string;
+  /** The pull request's head as `gh` reports it now. */
+  readonly head: () => string;
+  /** Commit again, have `gh` report the new commit as the head, and return it. */
+  readonly push: () => string;
+};
+
 /** What a run of the host left behind, read before the fixture is removed. */
 type Hosted = {
   readonly end: HostEnd;
@@ -67,13 +83,19 @@ type Hosted = {
   readonly started: number;
   /** The episode's state as each reviewer started, one entry per start. */
   readonly stateWhenStarted: readonly (EpisodeState | null)[];
+  /** The commit checked out where each reviewer started, one entry per start. */
+  readonly reviewedCommits: readonly string[];
+  /** The pull request's head before the host started. */
+  readonly firstHead: string;
   /** Whether the worktree's directory is there once the host has exited. */
   readonly worktreeLeft: boolean;
+  /** What the run beside the summary request printed, empty where none ran. */
+  readonly summaryHook: string;
 };
 
 type Arrangement = {
   /** The records on file before the host starts, oldest first. */
-  readonly records?: readonly StateRecord[];
+  readonly records?: (fixture: Fixture) => readonly StateRecord[];
   readonly rounds?: readonly RoundCost[];
   readonly closeReported?: boolean;
   /** What each reviewer start reports, in order. An empty review where there is none. */
@@ -82,9 +104,9 @@ type Arrangement = {
   /** The pull request `gh pr list` answers with, where it is not the host's. */
   readonly listedNumber?: number;
   /** Run as the reviewer starts, with the start's index from 0. */
-  readonly onStart?: (index: number, episode: Episode) => void;
+  readonly onStart?: (index: number, fixture: Fixture) => void;
   /** Run before the host starts. */
-  readonly before?: (episode: Episode) => void;
+  readonly before?: (fixture: Fixture) => void;
   readonly host?: Partial<Pick<HostSetup, "update">>;
 };
 
@@ -105,10 +127,29 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     git(worktree, ["add", "."]);
     git(worktree, ["commit", "--quiet", "--message", "the change under review"]);
 
+    const listed = arranged.listedNumber ?? PULL_REQUEST;
     const episode = episodeAt(worktree, PULL_REQUEST);
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
-    await writeFake(binaries, answers(arranged.listedNumber ?? PULL_REQUEST));
+    standIn(binaries, "gh", GH_SCRIPT);
+    for (const [kind, answer] of Object.entries(answers(listed))) {
+      writeFileSync(join(binaries, `answer-${kind}`), answer, "utf8");
+    }
+    const answerHead = (head: string): void => writeFileSync(join(binaries, "answer-prlist"), prList(listed, head), "utf8");
+    const head = (): string => execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" }).trim();
+    answerHead(head());
+    const fixture: Fixture = {
+      episode,
+      binaries,
+      head,
+      push: () => {
+        appendFileSync(join(worktree, TRACKED), "// one more line\n", "utf8");
+        git(worktree, ["commit", "--quiet", "--all", "--message", "a push"]);
+        answerHead(head());
+        return head();
+      },
+    };
+    const firstHead = head();
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     if (arranged.records !== undefined || arranged.rounds !== undefined) {
@@ -116,20 +157,24 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         rounds: arranged.rounds ?? [],
         spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 },
         ...(arranged.closeReported === undefined ? {} : { closeReported: arranged.closeReported }),
-        records: arranged.records ?? [],
+        records: arranged.records?.(fixture) ?? [],
       });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
     }
-    arranged.before?.(episode);
+    arranged.before?.(fixture);
 
     let started = 0;
     const stateWhenStarted: (EpisodeState | null)[] = [];
+    const reviewedCommits: string[] = [];
     const adapter: Adapter = {
       confine: () => ({ outcome: "prepared", environment: {} }),
       argv: (invocation) => {
         const read = readState(episode);
         stateWhenStarted.push(read.outcome === "read" ? read.state : null);
-        arranged.onStart?.(started, episode);
+        reviewedCommits.push(
+          execFileSync("git", ["rev-parse", "HEAD"], { cwd: invocation.directory, encoding: "utf8" }).trim(),
+        );
+        arranged.onStart?.(started, fixture);
         started += 1;
         return {
           command: "/bin/sh",
@@ -165,7 +210,10 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       kinds: lines(join(binaries, "kinds")) as Kind[],
       started,
       stateWhenStarted,
+      reviewedCommits,
+      firstHead,
       worktreeLeft: existsSync(worktree),
+      summaryHook: existsSync(join(binaries, "on-summary.out")) ? readFileSync(join(binaries, "on-summary.out"), "utf8") : "",
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -193,18 +241,14 @@ function included(status: string, body: string): string {
   return `HTTP/2.0 ${status}\nContent-Type: application/json; charset=utf-8\r\n\r\n${body}`;
 }
 
+function prList(listed: number, head: string): string {
+  return JSON.stringify([
+    { number: listed, id: "PR_pull", baseRefName: "main", headRefName: BRANCH, headRefOid: head, body: "What this changes." },
+  ]);
+}
+
 function answers(listed: number): Partial<Record<Kind, string>> {
   return {
-    prlist: JSON.stringify([
-      {
-        number: listed,
-        id: "PR_pull",
-        baseRefName: "main",
-        headRefName: BRANCH,
-        headRefOid: HEAD_SHA,
-        body: "What this changes.",
-      },
-    ]),
     diff: DIFF,
     threads: included(
       "200 OK",
@@ -240,14 +284,10 @@ function answers(listed: number): Partial<Record<Kind, string>> {
   };
 }
 
-async function writeFake(directory: string, answered: Partial<Record<Kind, string>>): Promise<void> {
-  standIn(directory, "gh", GH_SCRIPT);
-  for (const [kind, answer] of Object.entries(answered)) {
-    await writeFile(join(directory, `answer-${kind}`), answer, "utf8");
-  }
-}
-
-/** A `gh` that answers by which call it was asked for, and records the kind of each. */
+/**
+ * A `gh` that answers by which call it was asked for, and records the kind of
+ * each. Where `on-<kind>.sh` sits beside it, that runs before the answer.
+ */
 const GH_SCRIPT = [
   "#!/bin/sh",
   'dir="${0%/*}"',
@@ -264,6 +304,7 @@ const GH_SCRIPT = [
   "  *'v3.diff'*) kind=diff ;;",
   "esac",
   'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
+  'if [ -f "$dir/on-$kind.sh" ]; then sh "$dir/on-$kind.sh" >> "$dir/on-$kind.out" 2>&1; fi',
   'answer="$dir/answer-$kind"',
   'if [ ! -f "$answer" ]; then',
   '  printf \'no answer fixtured for %s\\n\' "$kind" >&2',
@@ -289,7 +330,7 @@ function recordsOf(state: EpisodeState | null): readonly StateRecord[] {
   return state?.records ?? [];
 }
 
-/** Queue `record` the way a trigger does: under the state lock. */
+/** Queue `record` under the state lock, as a trigger does. */
 function queueNow(episode: Episode, record: StateRecord): void {
   const written = updateState(
     episode,
@@ -299,8 +340,11 @@ function queueNow(episode: Episode, record: StateRecord): void {
   assert.equal(written.outcome, "written", `the fixture could not queue a state: ${JSON.stringify(written)}`);
 }
 
+/** The head now, queued. */
+const atHead = (fixture: Fixture): readonly StateRecord[] => [queued(fixture.head())];
+
 test("a round the host runs reviews, rather than finding the host's own lock and reporting a round already running", async () => {
-  const ran = await host({ records: [queued("aaaaaaa1")] });
+  const ran = await host({ records: atHead });
 
   assert.equal(ran.started, 1, `the reviewer should have started once; the log says:\n${ran.log}`);
   const [record] = recordsOf(ran.state);
@@ -311,7 +355,7 @@ test("a round the host runs reviews, rather than finding the host's own lock and
 
 test("the reviewing record names the host and the round's number before the reviewer starts", async () => {
   const self = ownIdentity();
-  const ran = await host({ records: [queued("aaaaaaa1")], rounds: [COST] });
+  const ran = await host({ records: atHead, rounds: [COST] });
 
   const [atStart] = ran.stateWhenStarted;
   const [record] = recordsOf(atStart ?? null);
@@ -323,7 +367,7 @@ test("the reviewing record names the host and the round's number before the revi
 
 test("a finished round's record keeps its number, its times and where its reviewer ran", async () => {
   const before = Math.floor(Date.now() / 1_000);
-  const ran = await host({ records: [queued("aaaaaaa1")] });
+  const ran = await host({ records: atHead });
   const after = Math.ceil(Date.now() / 1_000);
 
   const [record] = recordsOf(ran.state);
@@ -334,21 +378,24 @@ test("a finished round's record keeps its number, its times and where its review
 });
 
 test("a state queued while a round runs is reviewed before the host exits", async () => {
+  let pushed = "";
   const ran = await host({
-    records: [queued("aaaaaaa1")],
+    records: atHead,
     // The first round leaves a thread open, so the second has something to do
     // and the episode stays open between them.
     findings: [[finding("The name says nothing.")], []],
-    onStart: (index, episode) => {
-      if (index === 0) queueNow(episode, queued("bbbbbbb2"));
+    onStart: (index, fixture) => {
+      if (index !== 0) return;
+      pushed = fixture.push();
+      queueNow(fixture.episode, queued(pushed));
     },
   });
 
   assert.equal(ran.started, 2, `the queued state was not reviewed; the log says:\n${ran.log}`);
   const statuses = recordsOf(ran.state).map((record) => [record.head, record.status]);
   assert.deepEqual(statuses, [
-    ["aaaaaaa1", "reviewed"],
-    ["bbbbbbb2", "reviewed"],
+    [ran.firstHead, "reviewed"],
+    [pushed, "reviewed"],
   ]);
   const [first, second] = recordsOf(ran.state);
   assert.ok(first?.status === "reviewed" && first.result === "exited");
@@ -358,7 +405,12 @@ test("a state queued while a round runs is reviewed before the host exits", asyn
 });
 
 test("a round that leaves nothing open with a state queued behind it is reviewed clean with the episode open, and posts no summary", async () => {
-  const ran = await host({ records: [queued("aaaaaaa1"), queued("bbbbbbb2")] });
+  const ran = await host({
+    records: atHead,
+    onStart: (index, fixture) => {
+      if (index === 0) queueNow(fixture.episode, queued(fixture.push()));
+    },
+  });
 
   assert.equal(ran.started, 2);
   const [first, second] = recordsOf(ran.state);
@@ -371,21 +423,92 @@ test("a round that leaves nothing open with a state queued behind it is reviewed
 });
 
 test("a round that closes at the cap records each state queued behind it as not reviewed, and reviews none of them", async () => {
-  const ran = await host({ records: [queued("aaaaaaa1"), queued("bbbbbbb2")], config: { rounds: 1 } });
+  let pushed = "";
+  const ran = await host({
+    records: atHead,
+    config: { rounds: 1 },
+    onStart: (index, fixture) => {
+      if (index !== 0) return;
+      pushed = fixture.push();
+      queueNow(fixture.episode, queued(pushed));
+    },
+  });
 
   assert.equal(ran.started, 1);
   const [first, second] = recordsOf(ran.state);
   assert.ok(first?.status === "reviewed" && first.result === "exited");
   assert.deepEqual(second, {
-    head: "bbbbbbb2",
+    head: pushed,
     activity: null,
     status: "not reviewed",
-    reason: "the episode closed at the round cap, after reviewing aaaaaaa",
+    reason: `the episode closed at the round cap, after reviewing ${ran.firstHead.slice(0, 7)}`,
   });
 });
 
+test("a state superseded by a later commit is recorded not reviewed, and only the newest commit is reviewed, against its own state (#402)", async () => {
+  let older = "";
+  let newer = "";
+  const ran = await host({
+    records: (fixture) => {
+      older = fixture.head();
+      newer = fixture.push();
+      return [queued(older), queued(newer)];
+    },
+  });
+
+  assert.equal(ran.started, 1, `the reviewer should have run once, on the newest commit; the log says:\n${ran.log}`);
+  assert.deepEqual(ran.reviewedCommits, [newer], "the reviewer read a commit other than the state it was recorded against");
+  const [first, second] = recordsOf(ran.state);
+  assert.deepEqual(first, {
+    head: older,
+    activity: null,
+    status: "not reviewed",
+    reason: `superseded by ${newer.slice(0, 7)}`,
+  });
+  assert.ok(second?.status === "reviewed", `the newest state is recorded as ${JSON.stringify(second)}`);
+});
+
+test("a state superseded by a later reply on the same commit is recorded not reviewed (#402)", async () => {
+  const ran = await host({
+    // The fake lists no replies, so the latest activity is none.
+    records: (fixture) => [queued(fixture.head(), "PRRC_withdrawn"), queued(fixture.head())],
+  });
+
+  assert.equal(ran.started, 1);
+  const [first, second] = recordsOf(ran.state);
+  assert.ok(first?.status === "not reviewed", `the older state is recorded as ${JSON.stringify(first)}`);
+  assert.equal(first.reason, `superseded by ${ran.firstHead.slice(0, 7)} with different replies`);
+  assert.equal(second?.status, "reviewed");
+});
+
+test("a state queued while the summary is being posted is reviewed or refused, and never stopped by a close it arrived before (#405)", async () => {
+  const ran = await host({
+    records: atHead,
+    before: (fixture) => {
+      // A push and its trigger, landing while the summary request is in flight.
+      const worktree = fixture.episode.worktree;
+      writeFileSync(
+        join(fixture.binaries, "on-summary.sh"),
+        [
+          `cd '${worktree}' || exit 1`,
+          "git commit --quiet --allow-empty --message 'a push during the summary'",
+          'sha=$(git rev-parse HEAD)',
+          `printf '[{"number":${PULL_REQUEST},"id":"PR_pull","baseRefName":"main","headRefName":"${BRANCH}","headRefOid":"%s","body":"x"}]' "$sha" > '${fixture.binaries}/answer-prlist'`,
+          `'${process.execPath}' '${queueRacer}' '${worktree}' ${PULL_REQUEST} "$sha"`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+    },
+  });
+
+  assert.match(ran.summaryHook, /^(queued|closed)$/mu, `the trigger during the summary did not run: ${ran.summaryHook}`);
+  const stopped = recordsOf(ran.state).filter((record) => record.status === "not reviewed");
+  assert.deepEqual(stopped, [], "a state queued before the close was recorded was stopped by it");
+});
+
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {
-  const ran = await host({ records: [queued("aaaaaaa1")], rounds: [COST], closeReported: true });
+  const ran = await host({ records: atHead, rounds: [COST], closeReported: true });
 
   assert.equal(ran.started, 0);
   assert.deepEqual(ran.kinds, [], "nothing should have been asked of GitHub");
@@ -394,7 +517,7 @@ test("the host runs no round for an episode whose close is recorded, and records
 });
 
 test("a host whose pull request is not the branch's records the state failed, and runs no reviewer", async () => {
-  const ran = await host({ records: [queued("aaaaaaa1")], listedNumber: 143 });
+  const ran = await host({ records: atHead, listedNumber: 143 });
 
   assert.equal(ran.started, 0);
   const [record] = recordsOf(ran.state);
@@ -411,8 +534,8 @@ test("a host that finds the lock held by a live process exits at once and change
     const read = identityOf(pid, 5_000);
     assert.ok(read.outcome === "read");
     const ran = await host({
-      records: [queued("aaaaaaa1")],
-      before: (episode) => {
+      records: atHead,
+      before: ({ episode }) => {
         mkdirSync(episode.directory, { recursive: true });
         writeFileSync(join(episode.directory, "host.lock"), `${JSON.stringify(read.identity)}\n`, "utf8");
       },
@@ -420,7 +543,7 @@ test("a host that finds the lock held by a live process exits at once and change
 
     assert.deepEqual(ran.end, { outcome: "lock held", holder: read.identity });
     assert.equal(ran.started, 0);
-    assert.deepEqual(recordsOf(ran.state), [queued("aaaaaaa1")]);
+    assert.deepEqual(recordsOf(ran.state), [queued(ran.firstHead)]);
   } finally {
     holder.kill("SIGKILL");
   }
@@ -429,7 +552,7 @@ test("a host that finds the lock held by a live process exits at once and change
 test("a reviewing record that cannot be written runs no review, and the state is recorded failed", async () => {
   let calls = 0;
   const ran = await host({
-    records: [queued("aaaaaaa1")],
+    records: atHead,
     host: {
       // The first write is the reviewing record's.
       update: (episode, change, options) => {
@@ -448,20 +571,20 @@ test("a reviewing record that cannot be written runs no review, and the state is
 
 test("a reviewing record that cannot be written, with a failed record that cannot be written either, is reported in host.log", async () => {
   const ran = await host({
-    records: [queued("aaaaaaa1")],
+    records: atHead,
     host: { update: () => ({ outcome: "failed", reason: "the disk said no" }) },
   });
 
   assert.equal(ran.started, 0);
-  assert.deepEqual(recordsOf(ran.state), [queued("aaaaaaa1")]);
+  assert.deepEqual(recordsOf(ran.state), [queued(ran.firstHead)]);
   assert.equal(ran.end.outcome, "state unwritable");
   assert.match(ran.log, /could not be recorded failed/u);
 });
 
 test("a host whose worktree is gone exits, and makes nothing where it was", async () => {
   const ran = await host({
-    records: [queued("aaaaaaa1")],
-    before: (episode) => rmSync(episode.worktree, { recursive: true, force: true }),
+    records: atHead,
+    before: ({ episode }) => rmSync(episode.worktree, { recursive: true, force: true }),
   });
 
   assert.deepEqual(ran.end, { outcome: "worktree gone" });
@@ -471,10 +594,10 @@ test("a host whose worktree is gone exits, and makes nothing where it was", asyn
 
 test("a host whose worktree goes during a round takes nothing more", async () => {
   const ran = await host({
-    records: [queued("aaaaaaa1")],
-    onStart: (_index, episode) => {
-      queueNow(episode, queued("bbbbbbb2"));
-      rmSync(episode.worktree, { recursive: true, force: true });
+    records: atHead,
+    onStart: (_index, fixture) => {
+      queueNow(fixture.episode, queued(fixture.push()));
+      rmSync(fixture.episode.worktree, { recursive: true, force: true });
     },
   });
 
@@ -483,9 +606,9 @@ test("a host whose worktree goes during a round takes nothing more", async () =>
 });
 
 test("the host writes what it did to host.log", async () => {
-  const ran = await host({ records: [queued("aaaaaaa1")] });
+  const ran = await host({ records: atHead });
 
-  assert.match(ran.log, /aaaaaaa/u);
+  assert.match(ran.log, new RegExp(ran.firstHead.slice(0, 7), "u"));
   assert.match(ran.log, /nothing is left queued/u);
 });
 

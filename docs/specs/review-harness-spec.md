@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.66 (draft)
+**Version:** 0.67 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -235,7 +235,7 @@ Each record is in one of five states:
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
 | Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. `squiz status` prints the round's times, and labels its Session from the backend and `k` (§ 6). |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
-| Not reviewed | The episode closed before a round took this state, and why. |
+| Not reviewed | The episode closed before a round took this state, or a later commit or reply superseded it before its round started, and why. |
 
 A record also names the session that owns the work, where a trigger knew it:
 the session's identifier, the subagent that did the work where one did, and the
@@ -314,6 +314,28 @@ Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, aft
 
 Where the token bound closed the episode, its reason reads "the episode closed at
 the token bound, after reviewing 3f9c2e0".
+
+**A round reviews the pull request's newest state, and only that.** When its
+round starts, the round host checks that the state it took is still the pull
+request's: the same head commit and the same latest activity. A state the pull
+request has moved past is superseded. No review runs for it, nothing is posted,
+and it is recorded not reviewed with a reason naming the state that superseded
+it, in the form § 5's Notes use:
+
+```
+superseded by 8d21a4f
+superseded by 3f9c2e0 with different replies
+```
+
+The newer state is queued by the trigger that read it, and reviewed in its turn.
+The state a round reviews is the one its result is recorded against: the reviewer
+reads a snapshot of that state's head commit (§ 4 The snapshot).
+
+**A round decides its close and records it in one step.** It reads the queue
+under `state.lock`, decides from it as the table above sets out, and writes the
+close in that same update, before it posts the summary. A trigger that comes
+after the close finds it and queues nothing, so no state queued while the
+summary is posted is stopped by a close it arrived before.
 
 **A state left not reviewed is named by its short head commit, and by its
 replies where an earlier state has the same commit.** The earlier states are the
@@ -405,9 +427,10 @@ flowchart TD
 
 1. **Gate on the pull request.** The trigger looks up pull request `<number>`
    and checks that its head branch is the branch checked out in the directory it
-   was run in, and the round host checks again when the round starts. If the pull
-   request is not open, or that directory has another branch or a detached HEAD,
-   no review runs and nothing is posted. `squiz review` exits 1, and stderr names
+   was run in, and the round host checks again when the round starts, together
+   with whether a later state has superseded the one it took (The state file).
+   If the pull request is not open, or that directory has another branch or a
+   detached HEAD, no review runs and nothing is posted. `squiz review` exits 1, and stderr names
    what it found:
 
    ```
@@ -422,8 +445,8 @@ flowchart TD
    whether the state is queued.
 3. **Run the reviewer.** The round host starts the reviewer as a session of its
    own (§ 4), hands it the pull request for scope and intent together with
-   the threads the reviewer itself opened on it, and lets it read its snapshot
-   of the head commit directly: files the diff did not touch, callers, and git history. At
+   the threads the reviewer itself opened on it, and lets it read directly its
+   snapshot of the head commit of the state it took: files the diff did not touch, callers, and git history. At
    depth `deep` it also runs the tests. The reviewer never edits the code it is
    reviewing.
 4. **Post the findings, and act on the verdicts.** Each new finding opens a new
@@ -442,9 +465,10 @@ flowchart TD
    ends of the move, and Notes names it under § 5. A round that failed reports its
    move in its failure comment, under § 7.
 6. **Close the episode.** Otherwise, and where nothing is queued behind this
-   round or the cap or the token bound is reached, the round posts one summary
-   comment on the pull request and records the close in the episode's state. A
-   state still queued is handled as the table above sets out. A run of
+   round or the cap or the token bound is reached, the round records the close in
+   the episode's state, in the same update that read the queue, and then posts
+   one summary comment on the pull request. A state still queued is handled as
+   the table above sets out. A run of
    `squiz review` exits 0 where nothing of this review is open, and 3 where the
    round cap or the token bound closed it with threads still open, which it
    prints. What remains open is what
@@ -1957,7 +1981,7 @@ nothing retries one.
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. |
 | The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub answered or that the reserve was spent. Nothing is retried: posting is a create, so a second attempt is a second comment. |
 | The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 5 says: with the summary, the open threads and exit 3 or 0 where those attempts left any of the reviewer's threads, and with exit 0 and a line on stderr where they left none. |
-| The close cannot be written to the episode's state | The command exits as the close does, the comment stands as posted, and stderr names the write that failed. The episode then reads as one still open: the next run of the command reviews the pull request again and posts a second comment. Nothing else can be read from a state file that took no close, and a run that guessed the episode was over would drop the only report of a review that did run. |
+| The close cannot be written to the episode's state | Exit 1, and no summary is posted, because the close is written before the summary. The findings and verdicts the round posted stand, and the failure comment and stderr name the write that failed. The episode then reads as one still open: the next run of the command reviews the pull request again. Nothing else can be read from a state file that took no close, and a run that guessed the episode was over would drop the only report of a review that did run. |
 | The round cannot write its reviewing record | Exit 1, and no review runs. A round nothing records is one a second trigger cannot find, and would run a second time beside. |
 | The local state file cannot be read or written | Exit 1. The harness stops reviewing, and the failure comment and stderr give the underlying error rather than the word "failed". A read that fails ends the run before a reviewer starts; a write that fails does so after the review, where it also stops what the round found from being posted. |
 | The harness itself throws | Trapped at the top level, exit 1, on stderr only. A throw leaves nothing the round can trust to compose a comment from. |

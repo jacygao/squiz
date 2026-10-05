@@ -23,6 +23,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Config } from "../config/config.ts";
+import { latestActivity } from "../findings/activity.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import type { CommentPosting } from "../github/summary.ts";
@@ -61,7 +62,8 @@ import {
 import { episodeAt, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
 import { postFailure } from "./failure-comment.ts";
-import type { RoundEnd } from "./round-end.ts";
+import type { LeftNotReviewed, QueuedRecord, RoundEnd } from "./round-end.ts";
+import { sameState, type StateKey } from "./state-record.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
 import { blockingReason } from "./reason.ts";
@@ -126,11 +128,20 @@ export type RoundSetup = {
    */
   readonly held?: HeldLock;
   /**
-   * What the round ends on, where the caller decides it from the states queued
-   * behind this one. Asked once, after the findings and verdicts are posted and
-   * before any summary. The round's own decision stands where this is absent.
+   * The state the caller took from the queue, which is the one its result is
+   * recorded against. The round reviews this state's head, and reviews nothing
+   * where the pull request has moved past it.
    */
-  readonly endsOn?: (tally: RoundTally) => RoundEnd;
+  readonly state?: StateKey;
+  /**
+   * What the round ends on, where the caller decides it from the states queued
+   * behind this one. Asked once, after the findings and verdicts are posted,
+   * with the queue as it stands under the state lock. The close it decides is
+   * written in that same update, before any summary is posted, so no state can
+   * be queued between the decision and the close. The round's own decision
+   * stands where this is absent.
+   */
+  readonly endsOn?: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd;
 };
 
 /** An episode's lock as its caller took it, and the pull request it was taken for. */
@@ -209,6 +220,12 @@ export type RoundConclusion =
    * posted nothing.
    */
   | { readonly outcome: "round-running"; readonly pullRequest: number }
+  /**
+   * The pull request has moved past the state the caller took: a later commit,
+   * or different replies. Nothing ran and nothing was posted. `by` is the state
+   * the pull request is in now.
+   */
+  | { readonly outcome: "superseded"; readonly pullRequest: number; readonly by: StateKey }
   /** Another round. The coding agent is handed the open threads, with this reason. */
   | ({ readonly outcome: "block"; readonly reason: string } & RoundAccount & AroundTheReviewer)
   /**
@@ -432,7 +449,13 @@ async function reviewOn(
 
   const listing = handOver(pullRequest, preReview);
   if ("ended" in listing) return listing.ended;
-  const handedOver = listing.step;
+  const handedOver = listing.step.threads;
+  // The state the round would review is the pull request as it stands, and a
+  // result recorded against any other state would claim a review it never had.
+  const now: StateKey = { head: pullRequest.headSha, activity: listing.step.activity };
+  if (setup.state !== undefined && !sameState(now, setup.state)) {
+    return { outcome: "superseded", pullRequest: pullRequest.number, by: now };
+  }
 
   const fetched = fetchDiff(pullRequest.number, preReview);
   if (fetched.outcome !== "fetched") {
@@ -450,7 +473,7 @@ async function reviewOn(
   // and both readings get a tree only the reviewer writes.
   const snapshot = addSnapshot(
     directory,
-    { pullRequest: pullRequest.number, round: ordinal, commit: pullRequest.headSha },
+    { pullRequest: pullRequest.number, round: ordinal, commit: setup.state?.head ?? pullRequest.headSha },
     preReview.until,
   );
   if (snapshot.outcome === "failed") {
@@ -544,16 +567,28 @@ async function reviewOn(
     roundsRun: recorded.rounds.length,
     tokens: review.cost.tokens,
   };
-  const ends = setup.endsOn?.(tally);
-  if (ends?.outcome === "reviewed clean, episode open") {
-    return { outcome: "clean, episode open", confinement, ...account };
+  let decision: RoundDecision;
+  let closed: ClosedBefore | undefined;
+  if (setup.endsOn === undefined) {
+    decision = decideAfterRound({ ...tally, openThreads: tally.openThreads.length }, bounds);
+  } else {
+    const ended = endUnderLock(episode, setup.endsOn, tally, posting.margin);
+    if ("reason" in ended) {
+      return {
+        outcome: "failed",
+        failure: "harness",
+        reason: `the round's end could not be recorded: ${ended.reason}`,
+        confinement,
+        salvaged: account,
+      };
+    }
+    const ends = ended.ends;
+    if (ends.outcome === "reviewed clean, episode open") {
+      return { outcome: "clean, episode open", confinement, ...account };
+    }
+    decision = ends.outcome === "closed" ? { next: "close", because: ends.because } : { next: "block" };
+    if (ends.outcome === "closed") closed = { leftNotReviewed: ends.leftNotReviewed };
   }
-  const decision: RoundDecision =
-    ends === undefined
-      ? decideAfterRound({ ...tally, openThreads: tally.openThreads.length }, bounds)
-      : ends.outcome === "closed"
-        ? { next: "close", because: ends.because }
-        : { next: "block" };
 
   if (decision.next === "close") {
     return closeAfterReview(
@@ -564,6 +599,7 @@ async function reviewOn(
       handedOver,
       posting,
       confinement,
+      closed,
     );
   }
   return {
@@ -742,7 +778,10 @@ function nothingDone(pullRequest: number): RoundAccount {
  * The reviewer's own resolved threads go over with the rest, because re-opening
  * one is a verdict and a verdict only reaches a thread that was handed over.
  */
-function handOver(pullRequest: PullRequest, call: GhCall): Step<readonly ReviewThread[]> {
+function handOver(
+  pullRequest: PullRequest,
+  call: GhCall,
+): Step<{ readonly threads: readonly ReviewThread[]; readonly activity: string | null }> {
   const listed = listReviewThreads(pullRequest.nodeId, call);
   if (listed.outcome !== "listed") {
     return {
@@ -752,7 +791,7 @@ function handOver(pullRequest: PullRequest, call: GhCall): Step<readonly ReviewT
       ),
     };
   }
-  return { step: listed.threads.filter(openedByReviewer) };
+  return { step: { threads: listed.threads.filter(openedByReviewer), activity: latestActivity(listed.threads) } };
 }
 
 /**
@@ -972,6 +1011,39 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
   };
 }
 
+/** A close the caller's `endsOn` decided, and the round wrote before the summary. */
+type ClosedBefore = { readonly leftNotReviewed: LeftNotReviewed | null };
+
+/**
+ * Decide the round's end from the queue as it stands, and write the close where
+ * that is the end, in one update under the state lock.
+ *
+ * A trigger queues nothing once the close is written, so a state is either in
+ * the queue this reads, and is ruled on here, or refused because the episode
+ * has closed. Fails where the update does.
+ */
+function endUnderLock(
+  episode: Episode,
+  endsOn: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd,
+  tally: RoundTally,
+  until: Deadline,
+): { readonly ends: RoundEnd } | { readonly reason: string } {
+  let ends: RoundEnd | undefined;
+  const written = updateState(
+    episode,
+    (current) => {
+      const queued = (current.records ?? []).filter(
+        (record): record is QueuedRecord => record.status === "queued",
+      );
+      ends = endsOn(tally, queued);
+      return ends.outcome === "closed" ? { ...current, closeReported: true } : current;
+    },
+    { until: lockWait(until) },
+  );
+  if (written.outcome === "failed") return { reason: written.reason };
+  return ends === undefined ? { reason: "the state lock was never taken" } : { ends };
+}
+
 /**
  * The close of a round that reviewed, with the episode's summary comment on the
  * pull request.
@@ -997,6 +1069,7 @@ function closeAfterReview(
   handedOver: readonly ReviewThread[],
   on: Posting,
   confinement: RoundConfinement,
+  closed?: ClosedBefore,
 ): RoundConclusion {
   const summary = postEpisodeSummary(
     {
@@ -1010,12 +1083,13 @@ function closeAfterReview(
       // that blocked posted no comment, so a file it found changed is named here
       // or nowhere.
       confinement: state.confinement ?? nothingEstablished,
-      // This round reads no queue, so no state queued behind it is stopped.
-      leftNotReviewed: null,
+      // A round with no caller deciding its end reads no queue, so it stops none.
+      leftNotReviewed: closed?.leftNotReviewed ?? null,
     },
     { directory: on.directory, until: on.margin },
   );
-  return closing(episode, because, summary, on.margin, account, confinement);
+  if (closed === undefined) return closing(episode, because, summary, on.margin, account, confinement);
+  return { outcome: "close", because, summary, recorded: { outcome: "written" }, confinement, ...account };
 }
 
 /**

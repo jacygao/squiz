@@ -161,11 +161,12 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       ...setup.round,
       worktree: episode.worktree,
       held: { pullRequest: Number(episode.id), lock },
-      endsOn: (tally) => {
+      state: { head: round.record.head, activity: round.record.activity },
+      endsOn: (tally, queued) => {
         ended = decideRoundEnd(
           { ...tally, state: keyOf(round.record) },
           { rounds: config.rounds, tokens: config.tokens },
-          queuedBehind(episode),
+          queued,
         );
         return ended;
       },
@@ -227,6 +228,10 @@ function resultOf(
         line: `${named(taken)} ${endedLine(ended)}`,
       };
     }
+    case "superseded": {
+      const reason = `superseded by ${supersededBy(taken, conclusion.by)}`;
+      return { change: (state) => withRecords(state, [notReviewed(key, reason)]), line: `${named(taken)} not reviewed: ${reason}` };
+    }
     case "episode-over":
       return {
         change: (state) => withRecords(state, [key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, ALREADY_CLOSED))),
@@ -261,6 +266,15 @@ function failureOf(conclusion: Extract<RoundConclusion, { readonly outcome: "fai
   }
 }
 
+/**
+ * The state that superseded `taken`, as a person tells it apart: its short head
+ * commit, and on the same commit, that its replies differ.
+ */
+function supersededBy(taken: StateKey, by: StateKey): string {
+  const commit = by.head.slice(0, 7);
+  return by.head === taken.head ? `${commit} with different replies` : commit;
+}
+
 function endedLine(ended: RoundEnd): string {
   switch (ended.outcome) {
     case "threads open":
@@ -293,12 +307,6 @@ function endLine(end: HostEnd): string {
 /** The states still queued, oldest first, as the state file keeps them. */
 function queuedIn(state: EpisodeState): readonly QueuedRecord[] {
   return (state.records ?? []).filter((record): record is QueuedRecord => record.status === "queued");
-}
-
-/** The states queued as the round decides, read afresh, or none where the file will not read. */
-function queuedBehind(episode: Episode): readonly QueuedRecord[] {
-  const read = readState(episode);
-  return read.outcome === "read" ? queuedIn(read.state) : [];
 }
 
 /** A record's state and what the trigger knew of it, without where its review has got to. */
