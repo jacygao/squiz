@@ -27,6 +27,10 @@ const unitsPerDollar = 10_000;
  * named as unknown: nothing it spent was reported, and a zero there would say it
  * spent nothing. The dollars follow the tokens where at least one round was
  * priced, and the total covers the rounds that carry a price.
+ *
+ * A round whose cost is a floor reads "at least", and so does every total of an
+ * episode holding one, tokens and dollars alike. That includes a floor round
+ * named as unknown: it spent something the totals do not count.
  */
 export function renderSpendLine(rounds: readonly RoundCost[]): string {
   // An episode can close having run no round at all, and there is then no spend
@@ -37,9 +41,17 @@ export function renderSpendLine(rounds: readonly RoundCost[]): string {
   const reported = rounds.filter(wasReported);
   if (reported.length === 0) return `No spend was reported ${over}`;
 
+  const floor = rounds.some((round) => round.floor === true);
   const total = grouped(reported.reduce((sum, round) => sum + round.tokens, 0));
-  const each = rounds.map((round) => (wasReported(round) ? grouped(round.tokens) : "unknown"));
-  return `${total} tokens ${over}: ${each.join(", ")}${dollars(reported)}`;
+  const each = rounds.map((round) =>
+    wasReported(round) ? `${atLeast(round.floor === true)}${grouped(round.tokens)}` : "unknown",
+  );
+  const lead = floor ? "At least " : "";
+  return `${lead}${total} tokens ${over}: ${each.join(", ")}${dollars(reported, floor)}`;
+}
+
+function atLeast(floor: boolean): string {
+  return floor ? "at least " : "";
 }
 
 /**
@@ -52,15 +64,15 @@ function wasReported(round: RoundCost): boolean {
   return round.messages > 0;
 }
 
-/** ` · $0.0134`, or nothing at all where no round of the episode was priced. */
-function dollars(reported: readonly RoundCost[]): string {
+/** ` · $0.0134`, or ` · at least $0.0134` for a floor, or nothing at all where no round of the episode was priced. */
+function dollars(reported: readonly RoundCost[], floor: boolean): string {
   const spent = reported.reduce((sum, round) => sum + round.dollars, 0);
   if (spent <= 0) return "";
   // An amount smaller than the last place printed rounds up into it. Rounding it
   // down would print the one figure this line must never print.
   const units = Math.max(1, Math.round(spent * unitsPerDollar));
   const whole = Math.trunc(units / unitsPerDollar);
-  return ` · $${grouped(whole)}.${String(units % unitsPerDollar).padStart(4, "0")}`;
+  return ` · ${atLeast(floor)}$${grouped(whole)}.${String(units % unitsPerDollar).padStart(4, "0")}`;
 }
 
 // The digits are grouped here rather than by a locale, so that the line a person
