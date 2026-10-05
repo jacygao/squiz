@@ -88,3 +88,33 @@ test("tokens and dollars both carry their thousands separators", () => {
     "1,234,567 tokens over 2 rounds: 1,200,000, 34,567 · $1,235.0000",
   );
 });
+
+/**
+ * A floor is at least what the round spent. Read as a total, it is a figure the
+ * reader takes as complete, and the sum it goes into is understated by the same
+ * amount. Tokens and dollars come from the same messages, so both are marked.
+ */
+test("a round whose cost is a floor is marked as one, and so is the total that holds it", () => {
+  assert.equal(
+    renderSpendLine([round(0.0061, 20_100), { ...round(0.0044, 16_400), floor: true }]),
+    "At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.0105",
+  );
+});
+
+// A round killed before its first message completed is a floor with no figure
+// of its own. The request it had in flight was spent and goes uncounted in the
+// total, so the total is a floor even though the round reads as unknown.
+test("a floor round that reported nothing leaves the total a floor", () => {
+  assert.equal(
+    renderSpendLine([round(0.0061, 20_100), { ...unspent, floor: true }]),
+    "At least 20,100 tokens over 2 rounds: 20,100, unknown · at least $0.0061",
+  );
+});
+
+// A floor in an unpriced episode has no dollars to mark, and the tokens still are.
+test("a floor in an episode no round of which was priced marks the tokens", () => {
+  assert.equal(
+    renderSpendLine([{ ...round(0, 20_100), floor: true }]),
+    "At least 20,100 tokens over 1 round: at least 20,100",
+  );
+});

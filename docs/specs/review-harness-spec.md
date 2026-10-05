@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.61 (draft)
+**Version:** 0.64 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1534,24 +1534,37 @@ before anything is posted, and its posting time is added once posting ends:
 - `postingSeconds` is the wall clock from the first call of the posting reserve to
   the last, to a tenth of a second. It is absent where the round posted nothing,
   and where the round was stopped before posting ended.
+- `floor` is `true` where the round's cost is a floor (§ 4, The `pi` adapter),
+  and absent where it is a total.
 
-A state file written before `elapsedSeconds`, `cutShortAtSeconds` and
-`postingSeconds` existed has none of them, and reads back as rounds with no
-timing and no cut. A field that is there and does not
-hold a number of the right kind makes the file unreadable, like any other.
+A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
+`postingSeconds` and `floor` existed has none of them, and reads back as rounds
+with no timing, no cut, and costs that are totals. A field that is there and
+does not hold a value of the right kind makes the file unreadable, like any
+other.
 
 The comment leads with the tokens, because every reviewer reports them and not
 every reviewer is priced. A model run on a subscription has no dollar figure at
 all, and the line carries none for it. Where some rounds were priced and others
 were not, the dollar total covers the rounds that carry one.
 
-A round the time bound killed reports its **last tracked spend**, which covers
-the assistant messages that completed. The message in flight when the reviewer
-was killed is spent and never reported, so the figures are lower than the round
-truly spent, and the episode's totals carry the same understatement.
-
 A round that completed no assistant message is given as unknown rather than as
 zero. Nothing it spent was reported, and zero would say it spent nothing.
+
+**A figure that is a floor reads "at least".** That is a round whose cost is a
+floor, and every total of an episode holding one, its tokens and its dollars
+alike. An episode none of whose rounds is a floor reads as the format above
+shows. Here the second of two rounds is a floor:
+
+```markdown
+At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.0105
+```
+
+A round the time bound killed is one such round. It reports its **last tracked
+spend**, which covers the assistant messages that completed, and the message in
+flight when the reviewer was killed was spent and never reported. A floor round
+that completed no assistant message is given as unknown, and the totals beside it
+are still marked, because what it spent is in none of them.
 
 ## 6. Commands
 
