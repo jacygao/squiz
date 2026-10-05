@@ -21,6 +21,7 @@ import { identityOf } from "../sessions/process.ts";
 import { openWindow } from "../sessions/tmux.ts";
 import type { Adapter, Invocation } from "./adapter.ts";
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
+import { pi } from "./pi/adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { REPORTS_VARIABLE } from "./pi/report-file.ts";
 import { readReports as parse } from "./pi/reports.ts";
@@ -149,6 +150,7 @@ function invocationIn(tree: string): Invocation {
     charterFile: join(tree, "charter.md"),
     prompt: "Review pull request 142.",
     sessionDirectory: join(tree, ".squiz/142/rounds/1/session"),
+    promptFile: join(tree, ".squiz/142/rounds/1/prompt.md"),
     reportsFile: join(tree, ".squiz/142/rounds/1/reports.jsonl"),
     scratchDirectory: join(tree, ".squiz/142/scratch"),
     depth: "read",
@@ -406,6 +408,7 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
   let home = "";
   let server: ChildProcess | undefined;
   let environment: Record<string, string | undefined> = {};
+  let fakes = "";
 
   const herdr = (args: readonly string[]): string => {
     const result = spawnSync("herdr", args, { encoding: "utf8", env: environment as NodeJS.ProcessEnv, timeout: 10_000 });
@@ -414,16 +417,18 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
 
   before(async () => {
     home = mkdtempSync("/tmp/sqr-");
-    const fakes = join(home, "bin");
+    fakes = join(home, "bin");
     mkdirSync(fakes);
     const herdrPath = spawnSync("/bin/sh", ["-c", "command -v herdr"], { encoding: "utf8" }).stdout.trim();
     // Stands in for `pi`: it tells Herdr it is a ready `pi`, then becomes the
-    // Node script its first argument names, with the same pid.
+    // Node script its first argument names, with the same pid. Where
+    // STAND_IN names the script instead, every argument is passed on to it.
     writeFileSync(
       join(fakes, "pi"),
       [
         "#!/bin/sh",
         `'${herdrPath}' pane report-agent --source squiz-test --agent pi --state idle "$HERDR_PANE_ID" >/dev/null 2>&1`,
+        `[ -n "$STAND_IN" ] && exec '${process.execPath}' "$STAND_IN" "$@"`,
         `exec '${process.execPath}' "$1"`,
         "",
       ].join("\n"),
@@ -473,6 +478,50 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     assert.ok(place?.backend === "herdr", `the reviewer started in ${JSON.stringify(place)}`);
     assert.equal(place.identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
     assert.match(herdr(["pane", "get", place.pane]), /pane_not_found/u, "the reviewer's pane is still open");
+  });
+
+  test("pi's own command line starts in a pane with a prompt of many lines, and the reviewer is handed it whole", async (t) => {
+    const tree = treeFor(t);
+    const argsFile = join(tree, "args.json");
+    const standIn = join(tree, "stand-in.cjs");
+    writeFileSync(
+      standIn,
+      [
+        'const fs = require("node:fs");',
+        `fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));`,
+        "process.stdin.resume();",
+        "setTimeout(() => {",
+        `  fs.appendFileSync(process.env.${REPORTS_VARIABLE}, ${JSON.stringify(reviewLines)});`,
+        "  setTimeout(() => process.exit(0), 300);",
+        "}, 5000);",
+      ].join("\n"),
+      "utf8",
+    );
+    const adapter: Adapter = {
+      ...pi,
+      argv: (invocation) => {
+        const line = pi.argv(invocation);
+        return { ...line, environment: { ...line.environment, STAND_IN: standIn } };
+      },
+    };
+    // Herdr refuses a newline or a tab anywhere in what it starts.
+    const prompt = "# Review pull request #142\n\n\tIndented, with 'quotes', $1 and $@.\n";
+    const places: SessionPlace[] = [];
+
+    const round = await runRound(adapter, { ...invocationIn(tree), prompt }, 40, {
+      // Only the stand-in is `pi` here, wherever the reviewer runs.
+      environment: { ...environment, PATH: `${fakes}:${environment["PATH"] ?? ""}` },
+      name: "squiz-142-r1",
+      started: (place) => places.push(place),
+    });
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.outcome === "reviewed" ? round.findings : [], [finding]);
+    assert.ok(places[0]?.backend === "herdr", `the reviewer started in ${JSON.stringify(places[0])}`);
+    const handed = JSON.parse(readFileSync(argsFile, "utf8")) as string[];
+    const last = handed.at(-1) ?? "";
+    assert.ok(last.startsWith("@"), `pi was handed its prompt as ${JSON.stringify(last)}, not as a file`);
+    assert.equal(readFileSync(last.slice(1), "utf8"), prompt);
   });
 
   test("at the bound the round stops the pane's foreground group, and the pane is gone", async (t) => {

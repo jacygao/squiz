@@ -168,6 +168,17 @@ test("a pane Herdr refuses to open is refused, and nothing more is asked of it",
   });
 });
 
+test("an argument holding a newline or a tab is refused, and herdr is never run", () => {
+  for (const argument of ["line one\nline two", "a\ttab", "/path/with\na newline"]) {
+    withFakeHerdr({ "tab-create": [tabCreated("w1:p7")] }, ({ options, calls }) => {
+      const started = startInHerdrPane({ ...command, arguments: ["--first", argument] }, options);
+
+      assert.equal(started.outcome, "refused", `${JSON.stringify(argument)} read as ${JSON.stringify(started)}`);
+      assert.deepEqual(calls(), [], `herdr was run for ${JSON.stringify(argument)}`);
+    });
+  }
+});
+
 test("a command given a workspace opens its tab there", () => {
   withFakeHerdr(
     {
@@ -593,6 +604,21 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     } finally {
       assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
     }
+  });
+
+  // Herdr itself refuses the start only once the tab is open.
+  test("a command with a newline in an argument is refused, and no tab opens", () => {
+    const tabs = (): number => JSON.parse(herdr(["tab", "list"]).output).result.tabs.length;
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    const before = tabs();
+    const pidFile = join(home, "newline.pid");
+    const command = fakeCommand("squiz-newline", pidFile, 60);
+    const started = startInHerdrPane({ ...command, arguments: [...command.arguments, "line one\nline two"] }, options);
+
+    assert.equal(started.outcome, "refused", JSON.stringify(started));
+    assert.equal(tabs(), before, "a tab opened");
+    assert.equal(existsSync(pidFile), false, "the command ran");
   });
 
   test("a pane whose shell is slow to reach its prompt still starts the command, once", () => {

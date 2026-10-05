@@ -490,6 +490,26 @@ test("a scratch space that cannot be made is a setup problem, and nothing is run
   });
 });
 
+test("the prompt is in its file, whole, before the reviewer starts", async () => {
+  await inATree(async (tree) => {
+    const prompt = "# Review pull request #1\n\n\tA tab, then the diff.\n";
+    const seen = reporting(`fs.readFileSync(${JSON.stringify(join(tree, ".squiz/1/rounds/1/prompt.md"))}, "utf8")`);
+    const round = await runRound(reviewer(seen).adapter, { ...at(tree), prompt }, 10);
+    assert.equal(headlineOf(round), prompt);
+  });
+});
+
+test("a prompt that cannot be written is a setup problem, and nothing is run", async () => {
+  await inATree(async (tree) => {
+    const running = reviewer(reviewing);
+    writeFileSync(join(tree, "not-a-directory"), "");
+    const round = await runRound(running.adapter, { ...at(tree), promptFile: "not-a-directory/prompt.md" }, 10);
+    assert.equal(round.outcome, "setup");
+    assert.match(round.outcome === "setup" ? round.reason : "", /prompt could not be written/u);
+    assert.equal(running.starts(), 0);
+  });
+});
+
 /** Nothing throws: an adapter that does is a value the caller reads. */
 test("an adapter that throws reading the output is output that could not be read", async () => {
   await inATree(async (tree) => {
@@ -1118,6 +1138,7 @@ function at(tree: string): Invocation {
     charterFile: join(tree, "charter.md"),
     prompt: "Review pull request 142.",
     sessionDirectory: ".squiz/agent-1/session",
+    promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile,
     scratchDirectory,
     depth: "read",

@@ -13,6 +13,7 @@ const invocation: Invocation = {
   charterFile: "/tmp/squiz/plugin/charter.md",
   prompt: "Review pull request 142.",
   sessionDirectory: ".squiz/agent-7/session",
+  promptFile: ".squiz/7/rounds/1/prompt.md",
   reportsFile: ".squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/agent-7/scratch",
   depth: "read",
