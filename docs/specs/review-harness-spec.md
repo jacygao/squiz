@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.72 (draft)
+**Version:** 0.73 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -176,8 +176,7 @@ An episode is **live** from its first round until it closes, and its reviewer is
 reviewing or its coding agent is working on what the review said. It closes for
 one of three reasons: nothing is left open for another round to work, the round
 cap is spent, or a round reached the token bound. A round that failed closes
-nothing — it posts a failure comment under § 7, and the episode stays live. A new
-commit or reply, or a run of `squiz review`, retries it.
+nothing — it posts a failure comment under § 7, and the episode stays live.
 
 A live episode is one whose close has not been recorded. Nothing else makes an
 episode live or over: not whether a round is running at this instant, because
@@ -234,7 +233,7 @@ Each record is in one of five states:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. `squiz status` prints the round's times, and labels its Session from the backend and `k` (§ 6). |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, or a later commit or reply superseded it before its round started, and why. |
 
@@ -283,9 +282,8 @@ failure note does not bring the failure back. Failures that spend no round, such
 as a reviewer that will not start or a `gh` that cannot run, follow the same
 rule.
 
-**No failure starts a cycle.** A failed state gets one note, however many times
-it fails (The report). A retry by `squiz review` that fails again posts its
-failure comment, returns exit 1 to the run that asked for it, and writes no
+**No failure starts a cycle.** A retry by `squiz review` that fails again posts
+its failure comment, returns exit 1 to the run that asked for it, and writes no
 second note. So every attempt after the first needs someone to run the command,
 and a run that gets exit 1 is told not to run it again (§ 9).
 
@@ -361,8 +359,6 @@ so on. Where B has A's commit and different replies, the line reads:
 Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.
 ```
 
-The summary's Notes name each state the same way (§ 5 What the comment carries).
-
 **A reply is ruled on even where no commit follows it.** A coding agent that
 disputes a finding and pushes nothing asks for a review again on a new state, and
 the round reads its reply and rules on the thread: `withdrawn` where the argument
@@ -375,10 +371,9 @@ answers every finding with a dispute spends the cap doing so, and the episode
 closes at the cap with the disputes for a person. A run that returns a recorded
 result is no round and spends nothing.
 
-**A closed episode stays closed in its worktree.** A run on a state the episode
-never reviewed starts no round once the close is recorded; it prints the close,
-as § 6 shows. A second episode on the same pull request starts in another
-worktree on the same branch, which holds no state for it.
+**A closed episode stays closed in its worktree.** A second episode on the same
+pull request starts in another worktree on the same branch, which holds no state
+for it.
 
 What the rounds' comparisons established is three lists: the tracked paths any
 round found changed, each move of `HEAD` any round found, and why a round could
@@ -393,9 +388,6 @@ times one episode adds to these lists either.
 **A full list keeps the entries recorded first.** A later round adds to a list with
 room left and adds nothing to a full one, so what an earlier round established is in
 the comment the closing round posts.
-
-The state file is gitignored with the rest of `.squiz/`, so the comparison of
-tracked files under Confinement never reads it as a change.
 
 ### End-to-end workflow
 
@@ -453,8 +445,7 @@ flowchart TD
    own (§ 4), hands it the pull request for scope and intent together with
    the threads the reviewer itself opened on it, and lets it read directly its
    snapshot of the head commit of the state it took: files the diff did not touch, callers, and git history. At
-   depth `deep` it also runs the tests. The reviewer never edits the code it is
-   reviewing.
+   depth `deep` it also runs the tests.
 4. **Post the findings, and act on the verdicts.** Each new finding opens a new
    review comment thread, anchored to a file and a line or to a file as a whole.
    Each verdict the reviewer returned is applied to the thread it names: `fixed`
@@ -465,11 +456,6 @@ flowchart TD
    round tells the session that owns the work (The report). A thread a person opened is counted by neither the arithmetic
    nor the output, so it never keeps the loop going and an episode ends with one
    still open. § 6 shows what is printed.
-
-   Where the round's comparison found that `HEAD` moved in the reviewer's
-   snapshot while the reviewer ran, the output ends with a paragraph naming both
-   ends of the move, and Notes names it under § 5. A round that failed reports its
-   move in its failure comment, under § 7.
 6. **Close the episode.** Otherwise, and where nothing is queued behind this
    round or the cap or the token bound is reached, the round records the close in
    the episode's state, in the same update that read the queue, and then posts
@@ -518,12 +504,6 @@ promise to. In Claude Code the hooks start a review whether the agent follows it
 or not. An agent in a runtime with no hook that never runs the command leaves a
 pull request no round has read, which carries no comment with any of § 2
 Identity's markers.
-
-**The round runs in the round host, not in the caller.** `squiz review` waits
-inside the caller's tool call, but stopping that call stops only the wait. A
-coding agent that ended its turn may be editing its worktree while a round runs.
-The reviewer never reads that worktree: it reads a snapshot of the head commit,
-as The snapshot under § 4 sets out, so neither sees the other's changes.
 
 ### The round host
 
@@ -612,8 +592,8 @@ that pushed nothing starts nothing. A firing for a subagent the session did not
 dispatch, for a state already queued or reviewed, queues nothing.
 
 **A `SubagentStop` firing whose `agent_type` is empty is no subagent's work.** In
-an interactive session, Claude Code fires two or three of them after a turn ends,
-each with a new `agent_id`, the parent's `session_id`, and no transcript. The hook
+an interactive session, Claude Code fires several of them after a turn ends, each
+with a new `agent_id`, the parent's `session_id`, and no transcript. The hook
 does nothing for one: it resolves nothing, records no owner and queues nothing.
 
 The hook's shell does not have the plugin's `bin/` on its `PATH`, so the
@@ -688,13 +668,6 @@ caller's. A coding agent working in a worktree by path runs the command from tha
 path, and that worktree is the one reviewed. The hook runs in the subagent's
 working directory, which is fixed when the subagent is dispatched.
 
-In this repository a Claude Code subagent that opens a pull request is dispatched
-with `isolation: "worktree"`, and its first command switches to its own branch:
-
-```bash
-git switch -c <area>/<short-name> origin/main
-```
-
 ```mermaid
 flowchart TD
     R[(Repository - one object store)]
@@ -719,10 +692,9 @@ and posts to one pull request. One worktree, one branch, one pull request, one
 episode.
 
 **The harness does not remove a worktree.** The coding agent is still in it when
-the command returns. Whatever created the worktree removes it, and a round host
-whose worktree is gone exits. The episode's state
-goes with the worktree, and nothing in it outlives the worktree, because the pull
-request holds the findings.
+the command returns. Whatever created the worktree removes it. The episode's
+state goes with the worktree, and nothing in it outlives the worktree, because
+the pull request holds the findings.
 
 **A reviewer's snapshot is its own, so a tree two episodes share reaches neither
 comparison.** One tree holds two pull requests' episodes when its `HEAD` moved to
