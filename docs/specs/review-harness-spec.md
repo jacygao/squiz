@@ -1073,9 +1073,13 @@ nothing.
 **A finding reaches the harness as `read` reads it out of the report file, and
 so does the run's cost.** An adapter whose CLI has no way to report a finding
 before the run ends reports them all at the end, which is a working adapter whose
-rounds keep nothing when they are killed. An adapter whose CLI reports its cost
-only once the run is over writes the cost into the file then. A round of it that
-is killed outright, with no chance to write, keeps no cost.
+rounds keep nothing when they are killed.
+
+**A round's cost is optional.** An adapter whose CLI reports its cost only once
+the run is over, as Copilot does, records a cost only for a run that ended by
+itself. A run the round stopped has no cost at all, rather than a floor. Such an
+adapter says so as part of the contract, and the round then drops the cost of
+any attempt it stopped instead of marking it a floor.
 
 **A reviewer CLI must exit on `SIGTERM`, and so must every process it starts.**
 That is what the time bound rests on: the round signals the reviewer's process
@@ -1332,8 +1336,13 @@ The tree's `AGENTS.md` still reaches the reviewer, by the charter's instruction
 to read it, which it does with `view`.
 
 `--reasoning-effort` takes `thinking` as it is, except that `off` is `none`.
-The adapter passes no `--model`, so the round runs on Copilot's default model.
-Nothing of the user's own Copilot configuration chooses another.
+
+**The reviewer runs on the user's default model.** The adapter passes no
+`--model`. Copilot keeps the user's default as `model` in the user's own
+`settings.json`, under `~/.copilot/`, or under the `COPILOT_HOME` the user set.
+`confine` copies that one setting into a `settings.json` of its own in the
+adapter's `COPILOT_HOME`, and nothing else from the file. Where the user set no
+`model`, it writes none, and the round runs on whatever Copilot falls back to.
 
 #### Keeping the project and the user out
 
@@ -1357,8 +1366,8 @@ directory it names as trusted configuration.
 `.claude/skills/` load whether or not the folder is trusted. The grant leaves out
 `skill`, and with it disabled no skill reaches the reviewer.
 
-**None of the user's own Copilot configuration reaches the reviewer**: not its
-model, its effort level, its hooks, its MCP servers or its skills. The harness
+**None of the user's own Copilot configuration reaches the reviewer except its
+model**: not its effort level, its hooks, its MCP servers or its skills. The harness
 sets the reasoning effort on the command line every round, and the user's MCP
 servers and hooks are code that would run with the round's environment.
 
@@ -1424,9 +1433,10 @@ The adapter's read takes three figures from that line:
 | AI credits | `totalNanoAiu`, at 10⁹ to a credit. |
 | Messages | The sum, over every model, of `requests.count`. |
 
-A Copilot round has no dollar figure. A usage line whose `usage` lacks any of
-the three is a line that cannot be read, so a field Copilot renamed fails the
-round loudly rather than costing nothing.
+A Copilot round has no dollar figure. AI credits are shown where `totalNanoAiu`
+is there. A usage line whose `usage` carries no token counts the read can sum is
+a plan that reports no usable cost: the round records no cost for it, and reads
+the rest of the line as the table below does.
 
 Where Copilot could not be started at all, the runner appends a usage line
 carrying an `errorMessage` that names `copilot` and says why, with no `usage`,
@@ -1442,9 +1452,11 @@ runner appends nothing.
 | No finish, and a usage line counting at least one request | Stopped without finishing |
 | No finish, and no usage line or one counting no request | Completed no message, with the `errorMessage` where there is one |
 
-**The cost is a total only where the run ended by itself and its usage line was
-read.** A run with no usage line spent an amount nothing reported, and its cost
-is unknown, as § 5 gives it.
+**A Copilot round records a cost only where Copilot ended by itself and its
+usage line carried token counts.** That cost is Copilot's own total, and is never
+marked a floor. A round with no usage line, one whose line carried no token
+counts, and one the round stopped all record no cost: not a floor, and not a
+figure.
 
 #### Stopping
 
@@ -1455,10 +1467,11 @@ whatever is left.
 - **Copilot exits on `SIGTERM` at once, and exits 0.** Before it exits it writes
   the usage file and stops the reporting server.
 - **The runner does not exit on `SIGTERM` or `SIGHUP`.** It waits for Copilot,
-  appends the usage line, and then exits, inside the grace. So a round the time
-  bound stopped still records what Copilot spent.
-- **After `SIGKILL` nothing is recorded.** Copilot writes no usage file, and the
-  runner is gone. The round's cost is unknown.
+  appends the usage line, and then exits, inside the grace.
+- **After `SIGKILL` nothing is written.** Copilot writes no usage file, and the
+  runner is gone.
+- **A round stopped either way records no cost.** The round stopped it, so it
+  drops whatever usage line arrived, as Adapters sets out.
 
 #### Resuming
 
@@ -1477,9 +1490,9 @@ The pane prints the same identifier on its `Resume` line before it closes.
 
 These were not measured:
 
-- **Which model the reviewer runs on.** With no `--model` and a `COPILOT_HOME`
-  holding no configuration, Copilot's default was not measured. § 2 requires the
-  reviewer to run a different model from the coding agent, and nothing here
+- **Whether Copilot reads the copied `model` from the adapter's
+  `COPILOT_HOME`**, and what it falls back to where there is none. § 2 requires
+  the reviewer to run a different model from the coding agent, and nothing here
   makes sure of it.
 - **Whether every model takes every `--reasoning-effort` level**, and what
   Copilot does with one a model does not.
@@ -1492,9 +1505,6 @@ These were not measured:
   and where Copilot puts the reason. Until that is measured, such a run is read
   as completing no message, without the reason.
 - **Whether `reasoningTokens` is part of `outputTokens`**, as it is in `pi`.
-- **Whether the totals Copilot writes on `SIGTERM` count a request it abandoned
-  mid-flight.** Until that is measured, a round the time bound stopped records
-  them as a floor, as it records every stopped round's cost.
 - **Whether the resume line resumes from the coding agent's worktree**, after
   the snapshot is gone, and whether it opens the folder-trust dialog there.
 - **Copilot detached with `/dev/null` as standard input, and Copilot in a Herdr
@@ -1885,7 +1895,8 @@ before anything is posted, and its posting time is added once posting ends:
 
 - `dollars` and `tokens` are what the round spent, the dollars being zero where
   the reviewer's CLI did not price the model. `messages` is how many assistant
-  messages the two cover, or for Copilot how many model requests.
+  messages the two cover, or for Copilot how many model requests. A round with no
+  cost, which only a Copilot round can be, carries none of the three.
 - `credits` is the AI credits the round spent, where the reviewer's CLI
   reported them, as Copilot does. It is absent for a `pi` round.
 - `elapsedSeconds` is the wall clock from starting the reviewer to having it
@@ -1897,7 +1908,7 @@ before anything is posted, and its posting time is added once posting ends:
   the last, to a tenth of a second. It is absent where the round posted nothing,
   and where the round was stopped before posting ended.
 - `floor` is `true` where the round's cost is a floor (§ 4, The `pi` adapter),
-  and absent where it is a total.
+  and absent where it is a total. A Copilot round never carries it.
 
 A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
 `postingSeconds`, `floor` and `credits` existed has none of them, and reads back
@@ -1922,8 +1933,16 @@ Where some rounds carry credits and others dollars, the line gives both totals,
 each covering the rounds that carry it.
 
 A round that completed no assistant message is given as unknown rather than as
-zero. So is a Copilot round whose usage line never arrived. Nothing it spent was
-reported, and zero would say it spent nothing.
+zero. Nothing it spent was reported, and zero would say it spent nothing.
+
+**A round with no cost has no figure in the line**, neither a zero nor a floor.
+The line covers the rounds that have one, and says how many those are:
+
+```markdown
+18,200 tokens over 1 of 2 rounds · 0.36 AI credits
+```
+
+Where no round of the episode has a cost, the comment carries no spend line.
 
 **A figure that is a floor reads "at least".** That is a round whose cost is a
 floor, and every total of an episode holding one, its tokens, its dollars and
@@ -1937,7 +1956,7 @@ At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.010
 A round the time bound killed is one such round. It reports its **last tracked
 spend**, which covers the assistant messages that completed, and the message in
 flight when the reviewer was killed was spent and never reported. A Copilot
-round the bound stopped reports the totals Copilot wrote as it exited. A floor round
+round the bound stopped has no cost, and so no figure. A floor round
 that completed no assistant message is given as unknown, and the totals beside it
 are still marked, because what it spent is in none of them.
 
@@ -2384,12 +2403,10 @@ carry their own, and the round records that sum as its last tracked cost. The
 findings and the figure are read from the same moment of the run, so a round
 never reports a cost from one moment beside findings from another.
 
-**A Copilot round's cost arrives once, as Copilot exits.** Copilot reports
-nothing per call, so a Copilot round has no cost while it runs. Stopped at the
-time bound, Copilot answers `SIGTERM` by writing its totals, and the round
-records them as a floor, as it records any stopped round's cost. A round that
-needed `SIGKILL` records no cost: its cost is unknown, and it adds nothing to
-what the token bound counts. The time bound is what capped it.
+**A killed Copilot round yields no cost.** Copilot reports nothing per call,
+and a round records its totals only where Copilot ended by itself. A round the
+time bound stopped, by `SIGTERM` or `SIGKILL`, records no cost, so it counts
+nothing against the token bound, and the time bound is what capped it.
 
 **The round records that the bound cut it short.** Its entry in the episode's
 state carries the bound it ran under, and the summary the episode closes with
@@ -2485,9 +2502,11 @@ the only thing that caps a single round. An episode that reaches the bound close
 with the findings it has, and the summary comment reports that the bound was
 reached, so the round it closed does not read as a round the reviewer failed.
 
-**The token bound holds a Copilot round as it holds a `pi` one.** A Copilot
-round records what it spent as it ends, which is when the bound is read again,
-so the bound stops the next round on the same terms. Its tokens are input and
+**The token bound holds a Copilot round that has a cost as it holds a `pi`
+one.** Such a round records what it spent as it ends, which is when the bound is
+read again, so the bound stops the next round on the same terms. A Copilot round
+with no cost counts nothing against the bound, and the time bound is what caps
+it. Its tokens are input and
 output together, the input counting cache reads and writes, as `pi`'s total
 does, so one bound means the same thing whichever CLI reviews.
 
@@ -2602,6 +2621,7 @@ until something asks.
 | **P1** | A second reviewer adapter | The Copilot adapter: its runner, the reporting server, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
+| **P2** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
@@ -2679,12 +2699,11 @@ These remain open:
   Copilot at `deep` waits for it.
 - **Whether Copilot reports usage during a long run.** Its stream's
   `session.usage_checkpoint` was seen only once a run, just before the end, and
-  every run was short. Where it comes during a run, a Copilot round could keep a
-  floor when it is killed outright.
+  every run was short.
 - **`--max-ai-credits`.** Copilot's own cap on a session's credits was not
   tried.
 - **The rest of the Copilot adapter's open questions**, listed at the end of
-  § 4 The Copilot adapter: the default model, effort levels per model, the
+  § 4 The Copilot adapter: the copied model, effort levels per model, the
   charter in the first message, the size of one argument, a run that reaches
   no model, `reasoningTokens`, resuming, and a detached run.
 - **GitHub Copilot CLI, as a coding agent.** Its documentation lists `agentStop`
@@ -2815,9 +2834,11 @@ counts, when it is read, and what an episode's ceiling comes to under a given
 round cap.
 
 `reviewer` chooses the adapter, and nothing else changes with it. `copilot`
-needs the GitHub Copilot CLI installed and signed in. Under it, the user's own
-Copilot configuration does not reach the reviewer, its model included, as § 4
-The Copilot adapter sets out. `thinking` reaches Copilot as its reasoning
+needs the GitHub Copilot CLI installed and signed in. Under it, the reviewer
+runs on the user's default Copilot model, and nothing else of the user's own
+Copilot configuration reaches it, as § 4 The Copilot adapter sets out. A
+`model` setting, letting a project choose the reviewer's model and defaulting to
+the user's default, is a later addition. `thinking` reaches Copilot as its reasoning
 effort, with `off` given as `none`.
 
 A setting outside its range, or of a type the table does not give it, is
