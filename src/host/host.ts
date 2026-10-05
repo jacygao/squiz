@@ -28,7 +28,14 @@ import { headMovedIn } from "../loop/confinement.ts";
 import { failureReport } from "../loop/failure-comment.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
-import { decideRoundEnd, namedStates, type QueuedRecord, type RoundEnd } from "../loop/round-end.ts";
+import type { Config } from "../config/config.ts";
+import {
+  decideRoundEnd,
+  namedStates,
+  type EndedRound,
+  type QueuedRecord,
+  type RoundEnd,
+} from "../loop/round-end.ts";
 import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
 import {
   putRecord,
@@ -182,7 +189,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     if (round === undefined) continue;
 
     log(`round ${round.number}: reviewing ${named(round.record)}`);
-    const { config } = setup.round;
+    const endsOn = endsOnFor(keyOf(round.record), setup.round.config);
     let ended: RoundEnd | undefined;
     let reviewer: ReviewerPlace | undefined;
     const conclusion = await runRound({
@@ -204,11 +211,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       },
       paneLeftOpen: (reason) => log(`round ${round.number}: the reviewer's pane was left open: ${reason}`),
       endsOn: (tally, queued) => {
-        ended = decideRoundEnd(
-          { ...tally, state: keyOf(round.record) },
-          { rounds: config.rounds, tokens: config.tokens },
-          queued,
-        );
+        ended = endsOn(tally, queued);
         return ended;
       },
     });
@@ -234,6 +237,18 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     log(`round ${round.number}: ${result.line}`);
     await noteOwners(episode, written, log);
   }
+}
+
+/**
+ * How a round decides its end: from the state it reviewed, the configured round
+ * cap and token bound, and the states queued behind it.
+ */
+export function endsOnFor(
+  state: EndedRound["state"],
+  config: Pick<Config, "rounds" | "tokens">,
+): RoundSetup["endsOn"] {
+  return (tally, queued) =>
+    decideRoundEnd({ ...tally, state }, { rounds: config.rounds, tokens: config.tokens }, queued);
 }
 
 /** A record the host wrote, and how a note to its owner names its state. */

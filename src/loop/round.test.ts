@@ -22,7 +22,7 @@ import { test } from "node:test";
 import { defaultConfig, type Config } from "../config/config.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
-import { failureLinesOf } from "../host/host.ts";
+import { endsOnFor, failureLinesOf } from "../host/host.ts";
 import {
   unspent,
   type Adapter,
@@ -578,11 +578,15 @@ async function runInFixture(setup: Setup): Promise<Ran> {
 
     const conclusions: RoundConclusion[] = [];
     const started = Date.now();
+    const config = { ...defaultConfig, timeout: 5, ...setup.config };
     const roundSetup = {
       worktree,
-      config: { ...defaultConfig, timeout: 5, ...setup.config },
+      config,
       adapter,
       charterFile,
+      // Nothing is ever queued here, so the round's end is the cap's and the
+      // token bound's alone, decided as the round host decides it.
+      endsOn: endsOnFor({ head, activity: null }, config),
       ...(setup.postingMs === undefined ? {} : { postingMs: setup.postingMs }),
       ...(setup.preReviewMs === undefined ? {} : { preReviewMs: setup.preReviewMs }),
       ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
@@ -2349,56 +2353,48 @@ test("a close that reported its missing summary records itself, and is not repor
 });
 
 /**
- * A close whose record could not be written says so, and the comment it posted
- * still counts as posted.
+ * A close whose record could not be written posts no summary, and is a failed
+ * round rather than a close.
  *
- * The episode's directory stops taking writes once the comment has gone up, which
- * is the shape a full disk and a directory turned read-only both leave: the state
- * file is there and readable, the round's cost is in it, and the close cannot be
- * added. Two failures would be worse than the one: a comment reported as lost when
- * it is on the pull request, and a persistence failure nobody was told about.
+ * The episode's directory stops taking writes once the round's finding is up,
+ * which is after its cost is recorded and before its end is. That is the shape a
+ * full disk and a directory turned read-only both leave. A summary posted for a
+ * close nothing recorded would be followed by a second one from the next firing,
+ * which reads the episode as open.
  */
-test("a close that could not record itself reports the write and keeps the comment it posted", async () => {
+test("a close that could not record itself posts no summary, and the next firing closes it", async () => {
   const ran = await runInFixture({
+    config: { rounds: 2 },
     rounds: [ANSWER_COST],
-    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), summary: SUMMARY_POSTED },
-    lockStateAfter: "summary",
-    reviewer: reviews({}),
+    answers: POSTING,
+    lockStateAfter: "lookup",
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.deepEqual(
-    ran.conclusion.summary,
-    { outcome: "posted" },
-    "the comment is on the pull request, and a write that failed afterwards does not take it off",
-  );
-  assert.equal(ran.conclusion.recorded.outcome, "failed");
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
   assert.match(
-    ran.conclusion.recorded.outcome === "failed" ? ran.conclusion.recorded.reason : "",
-    /could not be written/u,
+    ran.conclusion.reason,
+    /the round's end could not be recorded: .*could not be written/u,
     "the filesystem's own error is what a person has to act on",
   );
-  assert.notEqual(
-    ran.state?.closeReported,
-    true,
-    "the file is readable and holds no close, which is exactly why the next firing cannot know",
-  );
+  assert.deepEqual(ran.conclusion.salvaged?.posted, ["PRRT_new"], "the finding that landed is still reported");
+  assert.ok(!ran.kinds.includes("summary"), "no summary goes up for a close nothing recorded");
+  assert.notEqual(ran.state?.closeReported, true);
 
-  // The next firing of that episode, its directory writable again. It has nothing
-  // that says the episode closed, so it reviews as an episode that never did.
+  // The next firing of that episode, its directory writable again. The cap is
+  // spent, so it closes before a reviewer starts and records the close.
   const again = await runInFixture({
+    config: { rounds: 2 },
     rounds: ran.state?.rounds ?? [],
-    closeReported: ran.state?.closeReported,
     answers: POSTING,
     reviewer: reviews({}),
   });
 
-  assert.equal(
-    again.invocations.length,
-    1,
-    "a close the harness could not record is one no later firing can read, and the round that lost it said so",
-  );
-  assert.deepEqual(again.kinds.filter((kind) => kind === "summary"), ["summary"]);
+  assert.ok(again.conclusion.outcome === "close");
+  assert.equal(again.conclusion.because, "round-cap");
+  assert.deepEqual(again.invocations, [], "a round the cap has spent runs no reviewer");
+  assert.equal(again.state?.closeReported, true);
 });
 
 test("an exhausted cap whose last recorded round failed closes the episode too", async () => {

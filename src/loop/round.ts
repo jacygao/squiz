@@ -18,8 +18,8 @@
  * reserve that starts when the review ends.
  *
  * Nothing here exits, and nothing here decides whether another round happens.
- * The exit code is the caller's, and the block-or-close arithmetic belongs to
- * the decision this calls.
+ * The exit code is the caller's, and so is the block-or-close decision, which
+ * the round asks for through `endsOn`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -71,13 +71,7 @@ import type { LeftNotReviewed, QueuedRecord, RoundEnd } from "./round-end.ts";
 import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } from "./state-record.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
-import {
-  decideAfterRound,
-  tokenBoundIsReached,
-  type ClosingReason,
-  type EpisodeBounds,
-  type RoundDecision,
-} from "./round-decision.ts";
+import { tokenBoundIsReached, type ClosingReason, type EpisodeBounds } from "./round-decision.ts";
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 
 // Each `ps` run that tells whether a lock's holder is still running. Its own
@@ -139,14 +133,13 @@ export type RoundSetup = {
    */
   readonly state?: StateKey;
   /**
-   * What the round ends on, where the caller decides it from the states queued
+   * What the round ends on, which the caller decides from the states queued
    * behind this one. Asked once, after the findings and verdicts are posted,
    * with the queue as it stands under the state lock. The close it decides is
    * written in that same update, before any summary is posted, so no state can
-   * be queued between the decision and the close. The round's own decision
-   * stands where this is absent.
+   * be queued between the decision and the close.
    */
-  readonly endsOn?: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd;
+  readonly endsOn: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd;
   /** The clock every part of the round is measured on, for a test to move. */
   readonly now?: () => number;
   /**
@@ -250,7 +243,7 @@ export type RoundConclusion =
   | ({ readonly outcome: "block" } & RoundAccount & AroundTheReviewer)
   /**
    * Nothing is open, and a later state is queued behind this one, so the episode
-   * stays open and no summary is posted. Only a caller's `endsOn` decides this.
+   * stays open and no summary is posted.
    */
   | ({ readonly outcome: "clean, episode open" } & RoundAccount & AroundTheReviewer)
   /** This round ended the episode, for the reason the decision gave. */
@@ -673,42 +666,30 @@ async function reviewOn(
     roundsRun: recorded.rounds.length,
     tokens: review.cost.tokens,
   };
-  let decision: RoundDecision;
-  let closed: ClosedBefore | undefined;
-  if (setup.endsOn === undefined) {
-    decision = decideAfterRound({ ...tally, openThreads: tally.openThreads.length }, bounds);
-  } else {
-    const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve);
-    if ("reason" in ended) {
-      return {
-        outcome: "failed",
-        failure: "harness",
-        reason: `the round's end could not be recorded: ${ended.reason}`,
-        confinement,
-        salvaged: account,
-      };
-    }
-    const ends = ended.ends;
-    if (ends.outcome === "reviewed clean, episode open") {
-      return { outcome: "clean, episode open", confinement, ...account };
-    }
-    decision = ends.outcome === "closed" ? { next: "close", because: ends.because } : { next: "block" };
-    if (ends.outcome === "closed") closed = { leftNotReviewed: ends.leftNotReviewed };
-  }
-
-  if (decision.next === "close") {
-    return closeAfterReview(
-      episode,
-      decision.because,
-      account,
-      recorded,
-      handedOver,
-      posting,
+  const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve);
+  if ("reason" in ended) {
+    return {
+      outcome: "failed",
+      failure: "harness",
+      reason: `the round's end could not be recorded: ${ended.reason}`,
       confinement,
-      closed,
-    );
+      salvaged: account,
+    };
   }
-  return { outcome: "block", confinement, ...account };
+  const ends = ended.ends;
+  if (ends.outcome === "reviewed clean, episode open") {
+    return { outcome: "clean, episode open", confinement, ...account };
+  }
+  if (ends.outcome === "threads open") return { outcome: "block", confinement, ...account };
+  return closeAfterReview(
+    ends.because,
+    account,
+    recorded,
+    handedOver,
+    posting,
+    confinement,
+    ends.leftNotReviewed,
+  );
 }
 
 /**
@@ -1143,9 +1124,6 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
   };
 }
 
-/** A close the caller's `endsOn` decided, and the round wrote before the summary. */
-type ClosedBefore = { readonly leftNotReviewed: LeftNotReviewed | null };
-
 /**
  * Decide the round's end from the queue as it stands, and write the close where
  * that is the end, in one update under the state lock.
@@ -1188,18 +1166,19 @@ function endUnderLock(
  * every finding raised before this round is. The account carries the threads this
  * round opened, and the two together are the whole episode.
  *
- * A comment that could not be posted leaves the close a close. The episode is
- * over, so nothing is retried and no later round reads the same code again.
+ * The close is already written to the episode's state, in the update that
+ * decided it. A comment that could not be posted leaves the close a close. The
+ * episode is over, so nothing is retried and no later round reads the same code
+ * again.
  */
 function closeAfterReview(
-  episode: Episode,
   because: ClosingReason,
   account: RoundAccount,
   state: EpisodeState,
   handedOver: readonly ReviewThread[],
   on: Posting,
   confinement: RoundConfinement,
-  closed?: ClosedBefore,
+  leftNotReviewed: LeftNotReviewed | null,
 ): RoundConclusion {
   const summary = timed(on.stopwatch, on.reserve, () => postEpisodeSummary(
     {
@@ -1213,27 +1192,22 @@ function closeAfterReview(
       // that blocked posted no comment, so a file it found changed is named here
       // or nowhere.
       confinement: state.confinement ?? nothingEstablished,
-      // A round with no caller deciding its end reads no queue, so it stops none.
-      leftNotReviewed: closed?.leftNotReviewed ?? null,
+      leftNotReviewed,
     },
     { directory: on.directory, until: on.reserve },
   ));
-  if (closed === undefined) return closing(episode, because, summary, on.reserve, account, confinement);
   return { outcome: "close", because, summary, recorded: { outcome: "written" }, confinement, ...account };
 }
 
 /**
- * The end of an episode: what closed it, what became of its comment, and the
- * close written to the episode's state.
+ * The close of an episode whose bounds were spent before a reviewer started,
+ * written to the episode's state.
  *
- * Every path that ends an episode comes through here, and the one write is why.
- * The mark is what stops a later firing reviewing the same pull request and
- * posting a second comment for one episode, so a path that ended an episode
- * without it is one the loop does not treat as ended at all.
+ * The mark is what stops a later firing reviewing the same pull request, so a
+ * close without it is one the loop does not treat as ended at all.
  *
  * A write that failed is carried out rather than swallowed. It leaves the episode
- * looking open to every later firing, which is worth a line of its own, and it
- * takes nothing away from a comment that posted.
+ * looking open to every later firing, which is worth a line of its own.
  */
 function closing(
   episode: Episode,
@@ -1241,7 +1215,6 @@ function closing(
   summary: EpisodeSummary,
   until: Deadline,
   account: RoundAccount,
-  confinement?: RoundConfinement,
 ): RoundConclusion {
   const updated = updateState(episode, (current) => ({ ...current, closeReported: true }), {
     until: lockWait(until),
@@ -1251,7 +1224,6 @@ function closing(
     because,
     summary,
     recorded: updated.outcome === "written" ? { outcome: "written" } : updated,
-    ...(confinement === undefined ? {} : { confinement }),
     ...account,
   };
 }
