@@ -19,7 +19,7 @@
 import { unspent } from "../reviewers/adapter.ts";
 import type { Deadline } from "../reviewers/deadline.ts";
 import { takeLock, type HeldLock, type Taking } from "../sessions/lock-file.ts";
-import { identityOf, stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { identityOf, stillRunning, type IdentityRead, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState, writeState } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
 
@@ -38,6 +38,11 @@ export type UpdateOptions = {
   readonly until: Deadline;
   /** The identity the lock names. Read from `ps` where not given. */
   readonly self?: ProcessIdentity;
+  /**
+   * Reads this process's identity within `boundMs` where `self` is not given.
+   * `identityOf` this process, read once and kept, where not given.
+   */
+  readonly identify?: (boundMs: number) => IdentityRead;
   /**
    * Whether a holder is still running, asked within `boundMs`. `stillRunning`
    * where not given.
@@ -73,18 +78,18 @@ export function updateState(
     reason: `${episode.stateFile} could not be written: ${why}`,
   });
 
-  // Reading this process's own identity waits on no other writer, and happens once
-  // per process, so it gets the floor. A round records its cost after its window
-  // has run out, and a lock no one holds must not refuse it for want of time.
-  const self = options.self ?? ownIdentity(Math.max(PS_FLOOR_MS, until.remaining()));
-  if ("reason" in self) return notWritten(self.reason);
-
   // A deadline spent before the update began still gets its one attempt, and the
-  // floor lets that attempt's `ps` finish. Otherwise each `ps` is bounded by what
-  // is left when it runs, since one attempt can ask about several holders.
+  // floor lets that attempt's `ps` finish: a round records its cost after its
+  // window has run out, and a lock no one holds must not refuse it. Decided before
+  // anything runs, so time this update spends cannot turn into that allowance.
+  // Otherwise each `ps` is bounded by what is left when it runs, since one attempt
+  // can ask about several holders.
   const lastAttemptOnly = until.passed();
   const boundMs = (): number => (lastAttemptOnly ? PS_FLOOR_MS : Math.max(1, until.remaining()));
   const expired = (): boolean => !lastAttemptOnly && until.passed();
+
+  const self = options.self ?? ownIdentity(boundMs(), options.identify);
+  if ("reason" in self) return notWritten(self.reason);
   const ask = options.presence ?? stillRunning;
   let cutShort = false;
   const presence = (identity: ProcessIdentity): Presence => {
@@ -133,11 +138,20 @@ function underLock(episode: Episode, change: (state: EpisodeState) => EpisodeSta
 
 let own: ProcessIdentity | undefined;
 
-/** This process's identity, read from `ps` once and kept, because it cannot change. */
-function ownIdentity(boundMs: number): ProcessIdentity | { readonly reason: string } {
-  if (own !== undefined) return own;
-  const read = identityOf(process.pid, boundMs);
-  if (read.outcome === "read") return (own = read.identity);
+/**
+ * This process's identity. Read from `ps` once and kept, because it cannot
+ * change. An `identify` the caller gives is asked every time.
+ */
+function ownIdentity(
+  boundMs: number,
+  identify?: (boundMs: number) => IdentityRead,
+): ProcessIdentity | { readonly reason: string } {
+  if (identify === undefined && own !== undefined) return own;
+  const read = (identify ?? ((bound: number) => identityOf(process.pid, bound)))(boundMs);
+  if (read.outcome === "read") {
+    if (identify === undefined) own = read.identity;
+    return read.identity;
+  }
   return { reason: `this process's own start time could not be read: ${read.outcome === "unknown" ? read.reason : "ps says it is gone"}` };
 }
 

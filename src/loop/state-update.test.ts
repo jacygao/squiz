@@ -7,7 +7,7 @@ import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { identityOf, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { identityOf, type IdentityRead, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState } from "./episode-state.ts";
 import { type Episode, episodeAt } from "./episode.ts";
 import { putRecord } from "./state-record.ts";
@@ -187,6 +187,32 @@ test("a takeover that needs more ps checks than its deadline leaves fails at the
   assert.deepEqual(bounds, [200, 50], "the bound each ps was given, against a deadline 200ms away");
   assert.equal(readFileSync(lock.path, "utf8"), lock.text, "the lock was replaced past the deadline");
   assert.equal(existsSync(episode.stateFile), false, "the state file was written past the deadline");
+});
+
+test("an update reading its own identity gives that ps no longer than its deadline has left, and asks no holder after", (t) => {
+  const episode = episodeIn(t);
+  const holder = ownIdentity();
+  holdLock(episode, holder);
+  const clock = fakeClock();
+  const bounds: { readonly self: number[]; readonly holder: number[] } = { self: [], holder: [] };
+  // Every ps takes 150ms, and one whose bound is shorter is cut off at it.
+  const answer = <T>(boundMs: number, answered: T, cut: T): T => {
+    clock.advance(Math.min(boundMs, 150));
+    return boundMs < 150 ? cut : answered;
+  };
+  const identify = (boundMs: number): IdentityRead => {
+    bounds.self.push(boundMs);
+    return answer<IdentityRead>(boundMs, { outcome: "read", identity: holder }, { outcome: "unknown", reason: "ps was cut off" });
+  };
+  const running = (_identity: ProcessIdentity, boundMs: number): Presence => {
+    bounds.holder.push(boundMs);
+    return answer<Presence>(boundMs, { outcome: "running" }, { outcome: "unknown", reason: "ps was cut off" });
+  };
+
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(50, clock.now), identify, presence: running });
+
+  assert.equal(updated.outcome, "failed", JSON.stringify(updated));
+  assert.deepEqual(bounds, { self: [50], holder: [] }, "the bound each ps was given, against a deadline 50ms away");
 });
 
 /** A clock that moves only when the test moves it. */
