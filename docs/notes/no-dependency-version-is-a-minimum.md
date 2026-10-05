@@ -2,7 +2,7 @@
 settles: "§ 2 — which versions of each dependency the design was checked against, how to re-check each, and that none of them is a minimum; § 2 — the source of the behaviours no other note records"
 issue: 485
 recorded: 2026-10-06
-versions: { git: 2.50.1, gh: 2.97.0, pi: 0.84.2, copilot: 1.0.91, claude-code: "2.1.261, 2.1.270, 2.1.288, 2.1.289" }
+versions: { git: 2.50.1, gh: 2.97.0, pi: 0.84.2, copilot: 1.0.91, claude-code: "2.1.261, 2.1.288" }
 recheck-when: any dependency below is upgraded past the version listed, or the setup check starts checking versions
 ---
 
