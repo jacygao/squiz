@@ -54,11 +54,11 @@ import {
   readState,
   recordRound,
   recordSpendOutsideRounds,
-  writeState,
   type EpisodeState,
   type StateWrite,
 } from "./episode-state.ts";
 import { episodeAt, type Episode } from "./episode.ts";
+import { updateState } from "./state-update.ts";
 import { postFailure } from "./failure-comment.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
@@ -373,7 +373,7 @@ async function reviewOn(
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return closing(episode, over, summaryNotComposed(state), state, nothingDone(pullRequest.number));
+    return closing(episode, over, summaryNotComposed(state), window, nothingDone(pullRequest.number));
   }
 
   const listing = handOver(pullRequest, preReview);
@@ -445,7 +445,7 @@ async function reviewOn(
   // bound is the one most likely to have left a write behind.
   const confinement = readAfterReviewer(around, window);
 
-  const recording = keepCost(episode, state, review, elapsedSeconds, confinement);
+  const recording = keepCost(episode, state, review, elapsedSeconds, confinement, window);
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
 
@@ -726,14 +726,18 @@ function keepCost(
   review: Review,
   elapsedSeconds: number,
   confinement: RoundConfinement,
+  until: Deadline,
 ): Step<EpisodeState> {
-  const recorded = withSpend(state, review, elapsedSeconds, confinement);
   // Nothing was spent and no round ran, so there is nothing to keep. Writing
   // anyway would put a write that could fail in front of the reason the reviewer
   // gave, and report the wrong failure.
-  if (recorded === null) return { step: state };
+  if (withSpend(state, review, elapsedSeconds, confinement) === null) return { step: state };
 
-  const written = writeState(episode, recorded);
+  const written = updateState(
+    episode,
+    (current) => withSpend(current, review, elapsedSeconds, confinement) ?? current,
+    { until: lockWait(until) },
+  );
   if (written.outcome === "failed") {
     // Nothing is posted on a state file that would not take the round. A round
     // that posted its findings and recorded nothing is one the next round
@@ -749,7 +753,17 @@ function keepCost(
       },
     };
   }
-  return { step: recorded };
+  return { step: written.state };
+}
+
+// Another writer holds the state lock for one read and one write. A wait longer
+// than this is a holder that has stopped, and waiting on would spend the margin
+// kept for posting.
+const STATE_LOCK_WAIT_MS = 2_000;
+
+/** How long a write of the state file may wait for its lock, within `until`. */
+function lockWait(until: Deadline): Deadline {
+  return deadlineIn(Math.min(until.remaining(), STATE_LOCK_WAIT_MS));
 }
 
 /**
@@ -923,7 +937,7 @@ function closeAfterReview(
     },
     { directory: on.directory, until: on.margin },
   );
-  return closing(episode, because, summary, state, account, confinement);
+  return closing(episode, because, summary, on.margin, account, confinement);
 }
 
 /**
@@ -943,16 +957,18 @@ function closing(
   episode: Episode,
   because: ClosingReason,
   summary: EpisodeSummary,
-  state: EpisodeState,
+  until: Deadline,
   account: RoundAccount,
   confinement?: RoundConfinement,
 ): RoundConclusion {
-  const recorded = writeState(episode, { ...state, closeReported: true });
+  const updated = updateState(episode, (current) => ({ ...current, closeReported: true }), {
+    until: lockWait(until),
+  });
   return {
     outcome: "close",
     because,
     summary,
-    recorded,
+    recorded: updated.outcome === "written" ? { outcome: "written" } : updated,
     ...(confinement === undefined ? {} : { confinement }),
     ...account,
   };

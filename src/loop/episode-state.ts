@@ -147,6 +147,9 @@ export function readState(episode: Episode): StateRead {
  * there yet.
  *
  * Never throws, whatever the filesystem does.
+ *
+ * A change goes through `updateState`, which calls this under the state lock. A
+ * write from anywhere else can drop a record another process wrote since it read.
  */
 export function writeState(episode: Episode, state: EpisodeState): StateWrite {
   const path = episode.stateFile;
