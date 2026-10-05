@@ -122,6 +122,20 @@ export function closeWindow(window: TmuxWindow, environment: Environment, boundM
   return { outcome: "unknown", reason: `tmux exited ${listing.status}: ${listing.stderr}` };
 }
 
+/**
+ * The pid of the command running in `window`, as tmux gives it now, or nothing
+ * where tmux no longer has the window or could not say.
+ *
+ * Read while the window is open, the pid is the command's own, so it names no
+ * process that took the pid over after the command exited.
+ */
+export function windowProcess(window: TmuxWindow, environment: Environment, boundMs: number): number | undefined {
+  if (!insideTmux(environment)) return undefined;
+  const ran = tmux(["display", "-p", "-t", window.id, "#{pane_pid}"], environment, boundMs);
+  if (ran.outcome !== "ran" || ran.status !== 0 || !/^\d+$/u.test(ran.stdout)) return undefined;
+  return Number(ran.stdout);
+}
+
 function insideTmux(environment: Environment): boolean {
   return (environment["TMUX"] ?? "") !== "";
 }

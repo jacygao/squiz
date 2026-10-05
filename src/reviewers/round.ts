@@ -21,7 +21,7 @@ import type { Readable } from "node:stream";
 import type { ChildProcessHandle } from "../sessions/child.ts";
 import { closeHerdrPane, insideHerdr } from "../sessions/herdr.ts";
 import { startSession, type Backends, type LeftOpen, type SessionPlace } from "../sessions/session.ts";
-import { closeWindow, type Environment } from "../sessions/tmux.ts";
+import { closeWindow, windowProcess, type Environment } from "../sessions/tmux.ts";
 
 import {
   type Adapter,
@@ -370,8 +370,9 @@ async function attempt(
     sessions.backends,
   );
   if (start.outcome === "failed") {
-    // A pane left open may be running a reviewer, so it is closed rather than
-    // another reviewer started beside it.
+    // A pane left open may be running a reviewer, so it is stopped and closed
+    // rather than another reviewer started beside it.
+    if (start.leftOpen !== undefined) await stopLeftOpen(start.leftOpen, sessions.environment, invocation.roundSpace);
     const left = start.leftOpen === undefined ? undefined : closeLeftOpen(start.leftOpen, sessions.environment);
     return unstartable(`the reviewer could not be started: ${start.reason}${left === undefined ? "" : `; ${left}`}`);
   }
@@ -830,6 +831,24 @@ function discard(stream: Readable): void {
 function closePlace(place: SessionPlace, environment: Environment): string | undefined {
   if (place.backend === "child") return undefined;
   return closeLeftOpen(place, environment);
+}
+
+/**
+ * Stop whatever a failed start left running in its pane, as a reviewer is
+ * stopped at the bound: its group, then the groups its shells recorded.
+ *
+ * tmux closes a window with one `SIGHUP`, which a command may ignore, so the
+ * window's command is found from tmux and its group signalled first. Herdr's
+ * own close escalates to `SIGKILL` across the pane's shell session, which holds
+ * the command, so a Herdr pane has only its recorded groups to stop here.
+ */
+async function stopLeftOpen(left: LeftOpen, environment: Environment, space: RoundSpace | undefined): Promise<void> {
+  const pid = left.backend === "tmux" ? windowProcess(left.window, environment, SESSION_BOUND_MS) : undefined;
+  if (pid === undefined) {
+    if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
+    return;
+  }
+  await stop({ group: pid, gone: () => !exists(pid), alone: (sent) => process.kill(pid, sent), space });
 }
 
 function closeLeftOpen(left: LeftOpen, environment: Environment): string | undefined {

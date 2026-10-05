@@ -16,6 +16,7 @@ import { after, before, describe, test, type TestContext } from "node:test";
 
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import { startChild } from "../sessions/child.ts";
+import { openWindow } from "../sessions/tmux.ts";
 import type { Adapter, Invocation } from "./adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { REPORTS_VARIABLE } from "./pi/report-file.ts";
@@ -302,6 +303,43 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     assert.match(round.outcome === "setup" ? round.reason : "", /tmux printed no window and pid/u);
     assert.equal(children, 0, "a second reviewer was started after the window failed");
     assert.ok(!server.windows().includes(window), "the window the failed start left open is still open");
+  });
+
+  // tmux started the reviewer and only reading its identity failed, so it runs.
+  // Closing the window sends it one SIGHUP, which this reviewer ignores.
+  test("a reviewer whose window started and whose identity could not be read does not outlive the round", async (t) => {
+    const server = privateTmux(t);
+    const tree = treeFor(t);
+    const noteFile = join(tree, "note.json");
+    const opened: string[] = [];
+    const backends: Backends = {
+      herdr: () => ({ outcome: "refused", reason: "not asked" }),
+      tmux: (request, environment, boundMs) => {
+        const opening = openWindow(request, environment, boundMs);
+        if (opening.outcome !== "opened") return opening;
+        opened.push(opening.window.id);
+        // As a `ps` that ran long before it failed: the reviewer is under way by the time the start gives up.
+        const until = Date.now() + 5_000;
+        while (!existsSync(noteFile) && Date.now() < until) spawnSync("sleep", ["0.05"]);
+        return { outcome: "failed", reason: "ps could not be run: a stand-in for ps failing", window: opening.window };
+      },
+      child: async () => ({ outcome: "failed", reason: "a second reviewer was started" }),
+    };
+
+    const round = await runRound(
+      adapterOf({ inPane: deafInAPane(noteFile), detached: "process.exit(3)" }),
+      invocationIn(tree),
+      60,
+      { environment: server.environment, name: "squiz-142-r1", backends },
+    );
+
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.match(round.outcome === "setup" ? round.reason : "", /a stand-in for ps failing/u);
+    assert.ok(await eventually(() => existsSync(noteFile), 5_000), "the reviewer never started in the window");
+    const note = noteIn(noteFile);
+    assert.ok(await eventually(() => !running(note.pid), 2_000), `the reviewer ${note.pid} outlived the round`);
+    assert.ok(await eventually(() => !running(note.tool ?? 0), 2_000), `the reviewer's tool ${note.tool} outlived the round`);
+    assert.ok(!server.windows().includes(opened[0] ?? ""), "the reviewer's window is still open");
   });
 
   test("a tmux that refuses opens nothing, and the reviewer runs with no terminal instead", async (t) => {
