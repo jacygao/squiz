@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.64 (draft)
+**Version:** 0.65 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -313,6 +313,20 @@ Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, aft
 
 Where the token bound closed the episode, its reason reads "the episode closed at
 the token bound, after reviewing 3f9c2e0".
+
+**A state left not reviewed is named by its short head commit, and by its reply
+where an earlier state has the same commit.** The earlier states are the one the
+closing round reviewed and those queued ahead of it. A reply with no commit after
+it is a state with the head of the state before it, and is named "with a newer
+reply". A state whose head two earlier states have is named "with a second newer
+reply", one with three "with a third newer reply", and so on. Where B is a reply
+on A's commit, the line reads:
+
+```
+Squiz did not review PR #41 at 3f9c2e0 with a newer reply: the episode closed at the round cap, after reviewing 3f9c2e0.
+```
+
+The summary's Notes name each state the same way (§ 5 What the comment carries).
 
 **A reply is ruled on even where no commit follows it.** A coding agent that
 disputes a finding and pushes nothing asks for a review again on a new state, and
@@ -1501,6 +1515,19 @@ round that closes the episode later, from the episode's state:
 A review that finished on its own has no such line, however close to the bound
 it ran. So has one that reported its review complete before the bound and was
 stopped writing its closing message after it.
+
+**A cap or bound that left queued states not reviewed is one line, naming the
+bound and each of those states.** It takes the place of the line the bound
+writes where nothing was queued. Each state is named as § 3 The state file names
+it:
+
+```markdown
+- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f or 8d21a4f with a newer reply
+- The episode ended at the token bound with nothing left open, and did not review 3f9c2e0 with a newer reply
+```
+
+The second is a last round that left nothing open, with a state queued behind it
+that the bound left no round for.
 
 A round whose review did not run closes no episode, so no summary reports one.
 The round's failure comment reports it, under § 7.

@@ -193,6 +193,7 @@ const closing: ClosingRound = {
   confinement: undisturbed,
   leftNotReviewed: {
     bound: "round-cap",
+    after: { head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", activity: null },
     states: [
       {
         head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6",

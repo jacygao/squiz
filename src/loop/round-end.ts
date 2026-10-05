@@ -26,8 +26,8 @@ export type NotReviewedRecord = Extract<StateRecord, { readonly status: "not rev
 export type StoppingBound = Exclude<ClosingReason, "nothing-open">;
 
 /**
- * The queued states a close recorded not reviewed, in queue order, and the bound
- * that left no round for them.
+ * The queued states a close recorded not reviewed, in queue order, the bound
+ * that left no round for them, and the state reviewed before them.
  *
  * The bound is not always the close's reason. A last round that left nothing
  * open closes as `nothing-open`, and the cap or the token bound still stopped
@@ -35,6 +35,8 @@ export type StoppingBound = Exclude<ClosingReason, "nothing-open">;
  */
 export type LeftNotReviewed = {
   readonly bound: StoppingBound;
+  /** The state the closing round reviewed, which `namedStates` names the others after. */
+  readonly after: StateKey;
   readonly states: readonly NotReviewedRecord[];
 };
 
@@ -143,5 +145,40 @@ function notReviewed(
   const states = queued.map(
     ({ status: _queued, ...state }): NotReviewedRecord => ({ ...state, status: "not reviewed", reason }),
   );
-  return { bound, states };
+  return { bound, after: { head: round.state.head, activity: round.state.activity }, states };
+}
+
+/**
+ * How a person is told each of `states` apart, in order: its short head commit,
+ * and, where states before it share that head, which newer reply it is.
+ *
+ * `after` is the state reviewed before them, and counts as before every one of
+ * them. A state sharing a head with one before it differs from it only in its
+ * latest reply, because no two records are for the same state. Counting the
+ * states before it, rather than marking it once, keeps two replies on one commit
+ * from reading as one state named twice:
+ *
+ * - `8d21a4f`, where no state before it has that head
+ * - `8d21a4f with a newer reply`, where one does
+ * - `8d21a4f with a second newer reply`, where two do
+ */
+export function namedStates(after: StateKey, states: readonly StateKey[]): string[] {
+  const line = [after, ...states];
+  return states.map((state, index) => {
+    const before = line.slice(0, index + 1).filter((earlier) => earlier.head === state.head).length;
+    const commit = state.head.slice(0, 7);
+    if (before === 0) return commit;
+    return `${commit} with a ${before === 1 ? "" : `${ordinal(before)} `}newer reply`;
+  });
+}
+
+const ordinalWords = ["second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+
+/** `2` as `second`, and so on, in figures past `tenth`. */
+function ordinal(n: number): string {
+  const word = ordinalWords[n - 2];
+  if (word !== undefined) return word;
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${suffix}`;
 }

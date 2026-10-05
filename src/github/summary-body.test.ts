@@ -370,12 +370,13 @@ test("the token bound is a note", () => {
   );
 });
 
-/** States queued behind the closing round, each a different head commit. */
+/** The state the closing round reviewed, and states queued behind it, each a different head commit. */
+const reviewed = { head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", activity: null };
 const later = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null };
 const laterStill = { head: "c47e19b2a0d3f5e6c7b8a9d0e1f2a3b4c5d6e7f8", activity: "PRRC_kwDOL7tYbc6OmQx7a" };
 
 /** A state the close recorded not reviewed, with the reason its record carries. */
-function stopped(state: typeof later | typeof laterStill, at: string) {
+function stopped(state: { readonly head: string; readonly activity: string | null }, at: string) {
   const reason = `the episode closed at ${at}, after reviewing 3f9c2e0`;
   return { ...state, status: "not reviewed", reason } as const;
 }
@@ -387,6 +388,7 @@ test("the round cap names each state it left not reviewed, after threads were le
     because: "round-cap",
     leftNotReviewed: {
       bound: "round-cap",
+      after: reviewed,
       states: [stopped(later, "the round cap"), stopped(laterStill, "the round cap")],
     },
   });
@@ -405,7 +407,7 @@ test("the token bound names the state it left not reviewed, after threads were l
     ...quiet,
     threads: [thread("open", "src/queue.ts:134")],
     because: "token-bound",
-    leftNotReviewed: { bound: "token-bound", states: [stopped(later, "the token bound")] },
+    leftNotReviewed: { bound: "token-bound", after: reviewed, states: [stopped(later, "the token bound")] },
   });
   assert.ok(
     comment.endsWith(
@@ -425,7 +427,7 @@ test("the round cap names the state it left not reviewed, after nothing was left
   const comment = renderSummary({
     ...quiet,
     because: "nothing-open",
-    leftNotReviewed: { bound: "round-cap", states: [stopped(later, "the round cap")] },
+    leftNotReviewed: { bound: "round-cap", after: reviewed, states: [stopped(later, "the round cap")] },
   });
   assert.equal(
     comment,
@@ -442,6 +444,7 @@ test("the token bound names each state it left not reviewed, after nothing was l
     because: "nothing-open",
     leftNotReviewed: {
       bound: "token-bound",
+      after: reviewed,
       states: [stopped(later, "the token bound"), stopped(laterStill, "the token bound")],
     },
   });
@@ -455,12 +458,36 @@ test("the token bound names each state it left not reviewed, after nothing was l
   );
 });
 
+/**
+ * A reply with no commit after it is a state of its own with the same head, so
+ * each such state is told apart by how many before it share that head.
+ */
+test("states that differ only by a newer reply are named apart from the commit and from each other", () => {
+  const firstReply = { head: reviewed.head, activity: "PRRC_kwDOL7tYbc6OmQx7a" };
+  const secondReply = { head: reviewed.head, activity: "PRRC_kwDOL7tYbc6OmQx9z" };
+  const comment = renderSummary({
+    ...quiet,
+    leftNotReviewed: {
+      bound: "round-cap",
+      after: reviewed,
+      states: [stopped(firstReply, "the round cap"), stopped(secondReply, "the round cap")],
+    },
+  });
+  assert.ok(
+    comment.endsWith(
+      "and did not review 3f9c2e0 with a newer reply or 3f9c2e0 with a second newer reply",
+    ),
+    `the replies were not told apart: ${comment}`,
+  );
+});
+
 test("three states left not reviewed are listed with a comma and an or", () => {
   const third = { head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567", activity: null };
   const comment = renderSummary({
     ...quiet,
     leftNotReviewed: {
       bound: "round-cap",
+      after: reviewed,
       states: [stopped(later, "the round cap"), stopped(laterStill, "the round cap"), stopped(third, "the round cap")],
     },
   });

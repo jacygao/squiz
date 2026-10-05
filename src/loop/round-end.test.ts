@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { renderSummary } from "../github/summary-body.ts";
 import { nothingEstablished } from "./confinement.ts";
 import { decideAfterRound, type EpisodeBounds } from "./round-decision.ts";
-import { decideRoundEnd, type EndedRound, type QueuedRecord } from "./round-end.ts";
+import { decideRoundEnd, namedStates, type EndedRound, type QueuedRecord } from "./round-end.ts";
 
 const reviewedHead = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
 const laterHead = "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6";
@@ -68,6 +68,7 @@ test("the round cap closes the episode and records each of two queued states not
     },
     leftNotReviewed: {
       bound: "round-cap",
+      after: { head: reviewedHead, activity: null },
       states: [
         {
           head: laterHead,
@@ -144,6 +145,41 @@ test("the close of a clean last round hands the summary the cap and the state it
       "- The episode ended at its round cap with nothing left open, and did not review 8d21a4f",
     ),
     `the cap and the state it stopped were not noted: ${comment}`,
+  );
+});
+
+test("a state is named by its short head commit where no state before it shares that head", () => {
+  assert.deepEqual(
+    namedStates({ head: reviewedHead, activity: null }, [
+      { head: laterHead, activity: null },
+      { head: laterStill, activity: reply },
+    ]),
+    ["8d21a4f", "c47e19b"],
+  );
+});
+
+test("a state with the head of the reviewed state is named with a newer reply", () => {
+  assert.deepEqual(namedStates({ head: reviewedHead, activity: null }, [{ head: reviewedHead, activity: reply }]), [
+    "3f9c2e0 with a newer reply",
+  ]);
+});
+
+// Two replies on one commit are two states, and a line naming both must not
+// read as one state named twice.
+test("states sharing a head are counted apart by how many before them share it", () => {
+  assert.deepEqual(
+    namedStates({ head: reviewedHead, activity: null }, [
+      { head: laterHead, activity: null },
+      { head: laterHead, activity: reply },
+      { head: laterHead, activity: "PRRC_kwDOL7tYbc6OmQx9z" },
+      { head: reviewedHead, activity: "PRRC_kwDOL7tYbc6OmQy1c" },
+    ]),
+    [
+      "8d21a4f",
+      "8d21a4f with a newer reply",
+      "8d21a4f with a second newer reply",
+      "3f9c2e0 with a newer reply",
+    ],
   );
 });
 

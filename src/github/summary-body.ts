@@ -21,7 +21,7 @@ import type { ConfinementEvidence } from "../loop/confinement.ts";
 import type { RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
-import type { LeftNotReviewed, StoppingBound } from "../loop/round-end.ts";
+import { namedStates, type LeftNotReviewed, type StoppingBound } from "../loop/round-end.ts";
 import { renderSpendLine } from "./spend-line.ts";
 
 /** What the episode came to, which is everything the comment is written from. */
@@ -365,8 +365,8 @@ function closedEarly(
   const how = closedAtBound
     ? `${boundName(because)} rather than with nothing left open`
     : `${boundName(left.bound)} with nothing left open`;
-  const heads = left.states.map((state) => state.head.slice(0, 7));
-  return [`- The episode ended at ${how}, and did not review ${eitherOf(heads)}`];
+  const named = namedStates(left.after, left.states);
+  return [`- The episode ended at ${how}, and did not review ${eitherOf(named)}`];
 }
 
 function boundName(bound: StoppingBound): string {
