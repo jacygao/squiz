@@ -1972,11 +1972,9 @@ rest of it at the first space.
 ### `squiz review`
 
 `squiz review <number>` runs from the worktree pull request `<number>`'s branch is
-checked out in. Where the pull request's state, its head commit and the replies on
-the reviewer's threads, was already reviewed, it prints that review's result and
-exits as it did, without queueing anything. Otherwise it queues the state where
-it needs a review, and waits for the round, within one deadline for the whole
-invocation (§ 7). The exit status says what the coding agent does next:
+checked out in. It acts on the record for the pull request's state as § 3 The
+state file sets out, and waits for that state's round within one deadline for the
+whole invocation (§ 7). The exit status says what the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
@@ -1992,16 +1990,14 @@ run. Every status outside the table reads the same way as 1, so a command that c
 crashed past the harness's own trap, is never read as a result.
 
 **stdout carries the outcome and stderr carries what failed.** A run that exits 0,
-2, 3 or 4 prints its outcome on stdout, and adds a line on stderr only for something
-that failed without changing the outcome, such as a summary comment that could not
-be posted. A run that exits 1 prints nothing on stdout.
+2, 3 or 4 prints its outcome on stdout, and § 7 The command's stderr sets out what
+it adds on stderr. A run that exits 1 prints nothing on stdout.
 
 **The first line names a file holding the whole output.** A run that exits 0, 2,
 3 or 4 writes everything it prints on stdout to `.squiz/<number>/review.txt`, and
 prints that path first. The file is replaced on every run. Claude Code can hand
 the agent less than the command printed, as § 2 sets out, so several open threads
-can be missing from what the agent sees. A subagent shown a shortened output reads
-the file.
+can be missing from what the agent sees.
 
 A file that cannot be written leaves the outcome and its status as they are. The
 path line still names it, and stderr adds one line:
@@ -2012,8 +2008,7 @@ squiz: the output could not be written to /work/squiz/.squiz/41/review.txt: EACC
 
 Each open thread is printed as its `squiz threads` line, followed by the thread's
 comments indented by two spaces. The first comment is given without its first
-line, which the `squiz threads` line already carries. That is the whole of what the
-coding agent needs to work the thread.
+line, which the `squiz threads` line already carries.
 
 Threads open, exit 2:
 
@@ -2137,8 +2132,7 @@ squiz: `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4
 squiz: the failure is posted on PR #41
 ```
 
-A round that could post none of its findings is a round that failed, and prints
-the same way:
+A round that could post none of its findings prints the same way:
 
 ```
 squiz: review failed: round 2 found 3 findings and could not post them to PR #41
@@ -2166,9 +2160,8 @@ back from the pull request, so the coding agent can check each one there.
 ### `squiz status`
 
 `squiz status` lists every review recorded in any worktree of the repository,
-one line per pull request state, newest first. A person reads it to watch the
-reviews, and a coordinator reads it to decide whether to wait. It starts nothing
-and asks nothing of GitHub.
+one line per pull request state, newest first. It starts nothing and asks
+nothing of GitHub.
 
 ```
 PR    Commit   Replies  State      Started           Elapsed  Result                                      Session           Worktree                          Resume
@@ -2192,8 +2185,8 @@ Each column holds:
   minute. A reviewing record shows its reviewer's start once the reviewer has
   started, and its round host's start before then.
 - **Elapsed:** the time so far for a review that is running, and the time from
-  start to end for one that finished. A killed review, and a record kept before
-  records held the round's times, show `—`.
+  start to end for one that finished. A killed review, and a record that holds
+  no round times, show `—`.
 - **Result:** for a failed state, the reason its failure comment gives. For a
   state not reviewed, why not. For a reviewed state, how many of the reviewer's
   threads it left open, and "review closed" where it closed the episode.
@@ -2237,9 +2230,7 @@ taken for none.
 
 `squiz init` adds the review section § 9 gives to the `AGENTS.md` at the root of
 the repository, creating the file where there is none. Where the section is
-already there it changes nothing and says so. It is for a project whose coding
-agents are not Claude Code, which read the instruction from `AGENTS.md` rather
-than from the plugin's skill.
+already there it changes nothing and says so.
 
 ```
 squiz: added the review section to AGENTS.md
