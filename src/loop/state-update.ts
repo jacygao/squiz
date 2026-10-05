@@ -34,7 +34,7 @@ const JITTER_MS = 15;
 const PS_FLOOR_MS = 2_000;
 
 export type UpdateOptions = {
-  /** When to give up waiting for the lock. Each `ps` run is bounded by what is left of it. */
+  /** When to give up waiting for the lock. One already passed still gets one attempt. */
   readonly until: Deadline;
   /** The identity the lock names. Read from `ps` where not given. */
   readonly self?: ProcessIdentity;
@@ -65,17 +65,22 @@ export function updateState(
   options: UpdateOptions,
 ): StateUpdate {
   const { until } = options;
-  // A deadline already spent still gets one attempt, and the floor is what lets
-  // that attempt's `ps` finish. A round records its cost after its window has
-  // run out, and a lock no one holds must not refuse it.
-  const boundMs = (): number => Math.max(PS_FLOOR_MS, until.remaining());
   const notWritten = (why: string): StateUpdate => ({
     outcome: "failed",
     reason: `${episode.stateFile} could not be written: ${why}`,
   });
 
-  const self = options.self ?? ownIdentity(boundMs());
+  // Reading this process's own identity waits on no other writer, and happens once
+  // per process, so it gets the floor. A round records its cost after its window
+  // has run out, and a lock no one holds must not refuse it for want of time.
+  const self = options.self ?? ownIdentity(Math.max(PS_FLOOR_MS, until.remaining()));
   if ("reason" in self) return notWritten(self.reason);
+
+  // A deadline spent before the update began still gets its one attempt, and the
+  // floor lets that attempt's `ps` finish. Every other `ps`, run while waiting on
+  // a holder, is bounded by what is left, so the wait never outlasts the deadline.
+  const lastAttemptOnly = until.passed();
+  const boundMs = (): number => (lastAttemptOnly ? PS_FLOOR_MS : Math.max(1, until.remaining()));
 
   const { presence } = options;
   for (;;) {

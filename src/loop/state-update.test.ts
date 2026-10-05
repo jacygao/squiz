@@ -124,6 +124,28 @@ test("an update whose wait for a live holder runs out fails at its deadline, and
   assert.equal(existsSync(episode.stateFile), false, "the state file was written without the lock");
 });
 
+test("a wait on a live holder ends at its deadline even where ps is slow", (t) => {
+  const episode = episodeIn(t);
+  const holder = ownIdentity();
+  holdLock(episode, holder);
+  // A `ps` first on the PATH that takes 400ms to answer, far past the deadline.
+  const bin = mkdtempSync(join(tmpdir(), "squiz-slow-ps-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, "ps"), "#!/bin/sh\nsleep 0.4\nexec /bin/ps \"$@\"\n", { mode: 0o755 });
+  const path = process.env["PATH"];
+  process.env["PATH"] = `${bin}:${path ?? ""}`;
+  t.after(() => {
+    process.env["PATH"] = path;
+  });
+  const started = Date.now();
+
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(50), self: holder });
+
+  const took = Date.now() - started;
+  assert.equal(updated.outcome, "failed", JSON.stringify(updated));
+  assert.ok(took < 50 + 200, `an update given 50ms took ${took}ms, spent waiting on ps past its deadline`);
+});
+
 function ownIdentity(): ProcessIdentity {
   const read = identityOf(process.pid, 5_000);
   assert.equal(read.outcome, "read", `this process's identity was not read: ${JSON.stringify(read)}`);
