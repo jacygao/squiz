@@ -775,33 +775,37 @@ it.** The round host starts it in the first place that applies:
 
 | Where | How the round host starts it |
 |---|---|
-| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus --workspace <id>` gives a pane, in the workspace the state's record names, and in the focused workspace where it names none, and `herdr pane run <pane> '<gated pi command line>'` types `pi`'s line into the pane's shell once the shell is at its prompt |
-| tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<pi command line>'` |
+| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus --workspace <id>` gives a pane, in the workspace the state's record names, and in the focused workspace where it names none, and `herdr pane run <pane> '<gated command line>'` types the reviewer's line into the pane's shell once the shell is at its prompt |
+| tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<command line>'` |
 | Neither | As a child of the round host, with no terminal |
 
-**In Herdr, the start returns once `pi` is running, and the round's bound is all
-that limits the review.** `herdr pane run` types a line and returns at once. The
-line is `pi`'s behind a gate, each word single-quoted:
+The command line is the one the adapter built: `pi`'s, or the Copilot adapter's
+runner, which starts Copilot. Below, "the reviewer" is that command.
+
+**In Herdr, the start returns once the reviewer is running, and the round's
+bound is all that limits the review.** `herdr pane run` types a line and returns
+at once. The line is the reviewer's behind a gate, each word single-quoted:
 
 ```
 '/bin/sh' '-c' '<gate>' '/tmp/squiz-gate-Xa81Qe' '400' 'pi' '--session-dir' …
 ```
 
 The gate writes its pid into the gate directory, waits for a `go` file there,
-and then becomes `pi` with the same pid, group and start time. The round host
-reads the pid and the reviewer's group while the gate is shut, and only then
-writes `go`. So a `pi` that finishes within a second of starting is still a
-review that started, and a start that fails never lets `pi` run. A gate left
-waiting gives up on its own after four times the bound on each program the start
-runs, without running `pi`. Where `pi` is not on the shell's path, the gate says
-so and the start fails at once. Where `pi` has not started 15 seconds after the
-line was typed, the start fails.
+and then becomes the reviewer with the same pid, group and start time. The
+round host reads the pid and the reviewer's group while the gate is shut, and
+only then writes `go`. So a reviewer that finishes within a second of starting is
+still a review that started, and a start that fails never lets the reviewer run.
+A gate left waiting gives up on its own after four times the bound on each
+program the start runs, without running the reviewer. Where the reviewer's
+command is not on the shell's path, the gate says so and the start fails at
+once. Where the reviewer has not started 15 seconds after the line was typed,
+the start fails.
 
 **A pane's shell reads the line as typed**, so a control character in an
 argument would be a key: a newline would end the line, and a tab would complete.
 The round host checks the arguments before it creates the tab, and treats such a
 command as a pane Herdr refused: nothing opens, and it goes on to tmux or a
-child. `pi`'s own line carries none unless a path in it does (The `pi` adapter).
+child. Neither adapter's line carries one unless a path in it does.
 
 In a pane, `pi` runs interactively with the pane as its terminal, and draws its
 own interface there. Detached, it runs in print mode. Either way it reports
@@ -845,7 +849,7 @@ the pane. It reads the reviewer's group from the backend while `pi` runs:
 | Backend | Where the reviewer's group comes from |
 |---|---|
 | tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is the one the adapter built, `pi` or the Copilot adapter's runner, so this is that command's own pid and leads its group. |
-| Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold `pi`. |
+| Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold the reviewer. |
 
 A pane close is not relied on to stop anything. tmux's `kill-window` sends one
 `SIGHUP` to the window's command and nothing more, so a command that ignores it
@@ -1420,13 +1424,15 @@ The adapter's read takes three figures from that line:
 | AI credits | `totalNanoAiu`, at 10⁹ to a credit. |
 | Messages | The sum, over every model, of `requests.count`. |
 
-A Copilot round has no dollar figure. A usage line that lacks any of the three
-is a line that cannot be read, so a field Copilot renamed fails the round loudly
-rather than costing nothing.
+A Copilot round has no dollar figure. A usage line whose `usage` lacks any of
+the three is a line that cannot be read, so a field Copilot renamed fails the
+round loudly rather than costing nothing.
 
 Where Copilot could not be started at all, the runner appends a usage line
-carrying an `errorMessage` that names `copilot` and says why, and exits 127.
-Where Copilot exited and wrote no usage file, the runner appends nothing.
+carrying an `errorMessage` that names `copilot` and says why, with no `usage`,
+and exits 127. That line counts no request and is read as the run completing no
+message, with that reason. Where Copilot exited and wrote no usage file, the
+runner appends nothing.
 
 **What the read concludes:**
 
@@ -1457,7 +1463,7 @@ whatever is left.
 #### Resuming
 
 Copilot keeps its session under `COPILOT_HOME`, in
-`session/session-state/<session id>/`. The adapter reads the session's
+`session-state/<session id>/`. The adapter reads the session's
 identifier from there, and the round writes the command that resumes it to
 `resume.txt`:
 
