@@ -2524,7 +2524,7 @@ until something asks.
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review` |
 | **P1** | `squiz init` | Adds the review section to `AGENTS.md`, for coding agents other than Claude Code |
-| **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server and the charter it serves, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
+| **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server, the custom agent that carries the charter, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
 | **P2** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
