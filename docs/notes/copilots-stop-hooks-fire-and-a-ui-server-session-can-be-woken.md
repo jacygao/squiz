@@ -12,13 +12,10 @@ Both hooks fire, registered in a project or through a plugin. `agentStop` fires
 when any turn ends, a subagent's included. `subagentStop` fires when a subagent
 ends, and its `sessionId` is the parent session's. A plugin's Claude-format
 `Stop` and `SubagentStop` fire on the same two events, with Claude Code's field
-names. Three things outside a session each started a turn in it while it was
-idle:
-
-- a prompt sent through the Copilot SDK to a session started with `--ui-server`;
-- text typed into its Herdr pane;
-- the session's own `agentStop` hook returning a block, though the session is
-  not idle while that hook runs.
+names. Two things outside a session each started a turn in it while it was
+idle: a prompt sent through the Copilot SDK to a session started with
+`--ui-server`, and text typed into its Herdr pane. An `agentStop` hook that
+blocks continues the turn instead, and the session is busy while it waits.
 
 ## Intent
 
@@ -63,8 +60,9 @@ idle:
 
 ## Needs your input
 
-- **Which wake squiz uses for a Copilot coding agent, if any.** Three started a
-  turn in an idle interactive session:
+- **Which wake squiz uses for a Copilot coding agent, if any.** The first two
+  below started a turn in an idle interactive session. The third continues a
+  turn before the session goes idle:
   - **The SDK, against a session started with `--ui-server --port <n>`.** A
     process outside the session connected to `127.0.0.1:<n>`, resumed the
     foreground session, and sent a prompt. The turn started 42 seconds after the
