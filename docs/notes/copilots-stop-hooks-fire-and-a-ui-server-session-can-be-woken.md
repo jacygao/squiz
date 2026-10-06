@@ -3,15 +3,17 @@ settles: "§ 3 — whether GitHub Copilot CLI's stop hooks can queue a state as 
 issue: 499
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, models: "gpt-5-mini (session), gpt-5.6-luna (subagents)", herdr: 0.9.3, node: 24.15.0, macos: 26.6.2 }
-recheck-when: Copilot CLI upgrades past 1.0.92, or changes its hook payloads, which session an `agentStop` firing reports, or its `--ui-server` mode
+recheck-when: Copilot CLI upgrades past 1.0.92, or changes its hook payloads, how it maps a plugin's Claude-format hooks, which session an `agentStop` firing reports, or its `--ui-server` mode
 ---
 
 # Copilot's stop hooks fire, and an idle session can be woken when it runs a UI server
 
-Both hooks fire. `agentStop` fires when any turn ends, a subagent's included.
-`subagentStop` fires when a subagent ends, and its `sessionId` is the parent
-session's. Three things outside a session each started a turn in it while it
-was idle:
+Both hooks fire, registered in a project or through a plugin. `agentStop` fires
+when any turn ends, a subagent's included. `subagentStop` fires when a subagent
+ends, and its `sessionId` is the parent session's. A plugin's Claude-format
+`Stop` and `SubagentStop` fire on the same two events, with Claude Code's field
+names. Three things outside a session each started a turn in it while it was
+idle:
 
 - a prompt sent through the Copilot SDK to a session started with `--ui-server`;
 - text typed into its Herdr pane;
@@ -20,31 +22,45 @@ was idle:
 
 ## Intent
 
-- Whether `agentStop` and `subagentStop`, registered in a project, fire.
+- Whether `agentStop` and `subagentStop` fire, registered in a project or by a
+  plugin.
 - What `subagentStop`'s payload carries, and whether it names the parent session.
 - Whether anything outside a Copilot session can start a turn in it while it is
   idle.
 
 ## Decisions
 
-- **Register `squiz hook` on `agentStop` and `subagentStop`, and have both queue
-  and exit 0, as the Claude Code hooks do.** Both fired in every run, from
-  `.github/hooks/*.json` in a trusted folder. Copilot waits for a hook before it
-  goes idle, so the hook must return as soon as it has queued.
-- **Take the owner from `sessionId` on both events, and the subagent from
-  `subagentStop`'s `agentId`.** On `subagentStop`, `sessionId` was the parent
-  session's id and `agentId` was the subagent's own session id. That matches
-  what § 3's table records from Claude Code's `session_id` and `agent_id`.
-- **Ignore an `agentStop` firing whose `sessionId` is not the session named in
-  its `transcriptPath`.** Copilot fires `agentStop` for a subagent's turn too,
-  just before that subagent's `subagentStop`. That firing carries the subagent's
-  id as `sessionId` and the parent's `events.jsonl` as `transcriptPath`. Queued
+- **Let the plugin's own `Stop` and `SubagentStop` registrations serve Copilot,
+  and have both queue and exit 0, as under Claude Code.** Copilot loads the
+  plugin's `hooks/hooks.json` under `--plugin-dir`, as
+  `copilot-loads-the-plugin-directory-but-leaves-bin-off-path.md` records. Its
+  `Stop` fired on every `agentStop` and its `SubagentStop` on every
+  `subagentStop`, with Claude Code's payload shape. Copilot waits for a hook
+  before it goes idle, so the hook must return as soon as it has queued.
+- **Take the owner and the subagent from the same fields as under Claude Code.**
+  On `SubagentStop`, `session_id` was the parent session's id and `agent_id` was
+  the subagent's own session id. The project-registered `subagentStop` gave the
+  same two ids as `sessionId` and `agentId`.
+- **Resolve the pull request from the payload's `cwd`, not the hook's working
+  directory.** Under Copilot the plugin's hook runs in the plugin root, while
+  the payload's `cwd` is the session's directory. `squiz hook` resolves the
+  branch from `process.cwd()`, so under Copilot it would read the plugin
+  checkout's branch. Claude Code's payload carries `cwd` too.
+- **Ignore a `Stop` firing whose `session_id` is not the session named in its
+  `transcript_path`.** Copilot fires `Stop` for a subagent's turn too, just
+  before that subagent's `SubagentStop`. That firing carries the subagent's id
+  as `session_id` and the parent's `events.jsonl` as `transcript_path`. Queued
   as it stands, it would record a subagent as the owner, and nothing is left
   alive to wake when it ends. Claude Code's `Stop` never fires for a subagent,
   so § 3 has no rule for this case.
-- **Expect no messaging socket.** No hook's environment named a socket, a port,
-  or a token. The wake has to come from one of the routes under Needs your
-  input, or the coding agent runs `squiz review` itself and waits for it.
+- **Under Copilot, record no messaging socket, even where the environment holds
+  one.** Copilot puts no socket, port or token in a hook's environment. A
+  Copilot started from inside a Claude Code session passes that session's
+  `CLAUDE_CODE_MESSAGING_SOCKET` down to its hooks, and a hook that recorded it
+  would wake the Claude Code session with the Copilot session's result. The
+  hook can tell it runs under Copilot by `COPILOT_CLI=1`. The wake has to come
+  from one of the routes under Needs your input, or the coding agent runs
+  `squiz review` itself and waits for it.
 
 ## Needs your input
 
@@ -77,23 +93,56 @@ was idle:
 
 ### Registration
 
-`.github/hooks/<any>.json`, loaded only where Copilot trusts the folder, as
-`a-project-copilot-trusts-runs-its-hooks-and-mcp-servers.md` records:
+Two registrations were run side by side, and both fired on every stop:
+
+- **The plugin's Claude-format `hooks/hooks.json`**, under `--plugin-dir`, with
+  `Stop` and `SubagentStop` entries in Claude Code's format. The hook ran in the
+  plugin root, with `CLAUDE_PLUGIN_ROOT`, `COPILOT_PLUGIN_ROOT` and
+  `PLUGIN_ROOT` set to it.
+- **The project's `.github/hooks/<any>.json`**, loaded only where Copilot trusts
+  the folder, as `a-project-copilot-trusts-runs-its-hooks-and-mcp-servers.md`
+  records. The hook ran in the project root.
+
+  ```json
+  {
+    "version": 1,
+    "hooks": {
+      "agentStop":    [{ "type": "command", "bash": "<command>", "timeoutSec": 10 }],
+      "subagentStop": [{ "type": "command", "bash": "<command>", "timeoutSec": 10 }]
+    }
+  }
+  ```
+
+Each hook ran as a child of the `copilot` process, with the payload on stdin.
+On one event, the project hook fired before the plugin's.
+
+### Payloads through the plugin, as logged
+
+`Stop`, for a subagent's turn. The `session_id` is the subagent's, and the
+`transcript_path` is the parent's:
 
 ```json
-{
-  "version": 1,
-  "hooks": {
-    "agentStop":    [{ "type": "command", "bash": "<command>", "timeoutSec": 10 }],
-    "subagentStop": [{ "type": "command", "bash": "<command>", "timeoutSec": 10 }]
-  }
-}
+{"hook_event_name":"Stop","session_id":"829422d1-…",
+ "timestamp":"2026-10-06T05:34:54.854Z","cwd":"…/repo",
+ "transcript_path":"<COPILOT_HOME>/session-state/57444f75-…/events.jsonl",
+ "stop_reason":"end_turn","stop_hook_active":false}
 ```
 
-The hook ran as a child of the `copilot` process, with the payload on stdin and
-the working directory at the project root.
+`SubagentStop`:
 
-### Payloads, as logged
+```json
+{"hook_event_name":"SubagentStop","session_id":"57444f75-…",
+ "timestamp":"2026-10-06T05:34:55.034Z","cwd":"…/repo",
+ "transcript_path":"<COPILOT_HOME>/session-state/57444f75-…/events.jsonl",
+ "agent_id":"829422d1-…","agent_type":"explore","agent_name":"explore",
+ "last_assistant_message":"PONG","stop_reason":"end_turn"}
+```
+
+`Stop` for the session's own turn is the first shape with the parent's id as
+`session_id`. `timestamp` is an ISO string here and milliseconds in the
+project hook's payload.
+
+### Payloads through the project, as logged
 
 `agentStop`, for the session's own turn:
 
@@ -128,9 +177,13 @@ was `true` on the `agentStop` firing that followed a block.
 ### The hook's environment
 
 `COPILOT_CLI=1`, `COPILOT_CLI_BINARY_VERSION`, `COPILOT_HOME`,
-`COPILOT_PROJECT_DIR`, and in interactive sessions `COPILOT_LOADER_PID`, the pid
-of the `copilot` process. A session in a Herdr pane passed on Herdr's
-`HERDR_PANE_ID`, `HERDR_SOCKET_PATH` and the rest.
+`COPILOT_PROJECT_DIR`, `CLAUDE_PROJECT_DIR`, and in interactive sessions
+`COPILOT_LOADER_PID`, the pid of the `copilot` process. A session in a Herdr
+pane passed on Herdr's `HERDR_PANE_ID`, `HERDR_SOCKET_PATH` and the rest.
+
+The run that settles what Copilot itself adds was started with every `CLAUDE*`
+variable removed. Its hooks then held no `CLAUDE_CODE_*` variable, and no
+variable naming a socket or port of Copilot's.
 
 ### Starting a subagent
 
@@ -150,7 +203,9 @@ Agent "sleep-pong" (task) has finished processing and is now idle.
 
 A sync subagent, in `-p`: `preToolUse` (`task`), `subagentStart`,
 `userPromptSubmitted` (the subagent's id), `agentStop` (the subagent's id),
-`subagentStop`, `agentStop` (the parent's id), `sessionEnd`.
+`subagentStop`, `agentStop` (the parent's id), `sessionEnd`. With the plugin
+loaded, each `Stop` and `SubagentStop` followed the matching project firing
+within 0.1 seconds.
 
 ### The SDK wake
 
@@ -179,6 +234,8 @@ The idle session's pane never showed it. Both processes wrote the same
 ## Limits
 
 - **One run per case**, on macOS, with `gpt-5-mini` as the session's model.
+  The plugin registration ran once, in `-p`, with a sync subagent. The block,
+  the wakes and the background subagent ran with the project registration only.
 - **The scratch folder was not a git repository.** Hooks loaded from
   `.github/hooks/` under the working directory, which a trusted folder in an
   adapter-owned `COPILOT_HOME` named.
@@ -194,5 +251,9 @@ The idle session's pane never showed it. Both processes wrote the same
   - a wake that arrives while a turn is running;
   - a session that prompts for tool permissions. Every run carried
     `--allow-all-tools`.
-- **Only short probes were typed into a pane.** macOS cuts a line typed into a
-  terminal at 1024 bytes, so a long note sent this way would arrive cut.
+- **Only short probes were typed into a pane.** How long a line a running
+  Copilot prompt takes from `herdr pane send-text` was not measured.
+- **The earlier runs did not log `CLAUDE*` variables.** The first `-p` run and
+  the `--resume` probe were started from inside a Claude Code session and may
+  have carried its variables. The payloads come from Copilot's stdin, and their
+  ids are Copilot's own session ids, so the variables could not reach them.
