@@ -1,7 +1,8 @@
 /**
  * `squiz init`: add the review section to the `AGENTS.md` at the repository's
  * root, for coding agents that read their instructions there rather than from
- * the plugin's skill.
+ * the plugin's skill, and link `squiz` onto `PATH` for the shells of coding
+ * agents that do not put the plugin's `bin/` there.
  *
  * The file is only ever appended to. What it held before is left byte for byte
  * as it was, because it is the host project's and squiz has no say in it.
@@ -13,6 +14,7 @@ import { join } from "node:path";
 import { failureLine } from "../hook/report.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
+import { linkOntoPath, type LinkEnvironment } from "./path-link.ts";
 
 const GIT_BOUND_MS = 10_000;
 
@@ -41,6 +43,23 @@ wait for it to finish and read its output before you do anything else.
 export type InitPrinted = { readonly stdout: string; readonly stderr: string; readonly exit: 0 | 1 };
 
 /**
+ * Add the section for the repository holding `directory`, and link `target`
+ * onto `PATH`.
+ *
+ * Each is done whether or not the other could be. Exits 1 where either could
+ * not, with what each did in its own line.
+ */
+export function squizInit(directory: string, environment: LinkEnvironment, target: string): InitPrinted {
+  const section = addReviewSection(directory);
+  const link = linkOntoPath(target, environment, directory);
+  return {
+    stdout: section.stdout + link.stdout,
+    stderr: section.stderr + link.stderr,
+    exit: section.exit === 0 && link.exit === 0 ? 0 : 1,
+  };
+}
+
+/**
  * Add the section to the `AGENTS.md` of the repository holding `directory`,
  * creating the file where there is none.
  *
@@ -48,7 +67,7 @@ export type InitPrinted = { readonly stdout: string; readonly stderr: string; re
  * repository or the file cannot be read or written. A person runs this, so the
  * exit says whether it worked. Never throws.
  */
-export function squizInit(directory: string): InitPrinted {
+export function addReviewSection(directory: string): InitPrinted {
   const toplevel = worktreeToplevel(directory, deadlineIn(GIT_BOUND_MS));
   if (toplevel.outcome === "failed") {
     return failed(`the repository's root could not be found: ${toplevel.reason}`);

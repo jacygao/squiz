@@ -4,7 +4,7 @@
  * `squiz review` and `squiz init` exits 0 whatever it is handed, and says on
  * stderr what failed. `squiz review` exits with the status its result gives,
  * and 1 where it could not run. `squiz init` is run by a person, and exits 1
- * where it could not add the section.
+ * where it could not add the section or link squiz onto PATH.
  *
  * stdout carries the answer to a command and nothing else. Everything that is
  * not an answer — a failure, a usage line, a branch with no pull request — goes
@@ -23,6 +23,7 @@ import { reportFailure } from "./hook/report.ts";
 import { runUnderTrap, type HookExit, type Trapped } from "./hook/trap.ts";
 import { hostCommand } from "./host/command.ts";
 import { squizInit } from "./review/init.ts";
+import { thisSquiz } from "./review/path-link.ts";
 import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 
@@ -56,7 +57,7 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return hostCommand(argv.slice(1), process.cwd());
   }
   if (command === "init") {
-    const printed = squizInit(process.cwd());
+    const printed = squizInit(process.cwd(), process.env, thisSquiz());
     process.stdout.write(printed.stdout);
     process.stderr.write(printed.stderr);
     return printed.exit;
