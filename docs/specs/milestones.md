@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.29 (draft)
+**Version:** 0.30 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -218,20 +218,32 @@ how much of the rest M13 builds:
 
 ## M11 — Depth `deep`
 
-The `bash` grant, on the snapshot M7 gives every reviewer.
+The reviewer at `deep` runs the project's tests and reads its history, through
+tools that do one thing each, on the snapshot M7 gives every reviewer. It is
+granted no shell.
 
 The snapshot holds no installed dependencies, so the configured test command
 installs or builds what it needs before the tests run. What that adds to a round
-is measured before M11 is planned.
+is measured before M11 is planned (#496).
 
 ### Acceptance criteria
 
-- [ ] Depth `deep` produces a command line with `bash`, and the configured test
-      command reaches the reviewer.
-- [ ] A write the reviewer makes through the shell is detected on its snapshot
-      and named in the summary.
+- [ ] Depth `deep` grants the `read` tools and these, and no shell, for `pi` and
+      for Copilot:
+  - `run_tests`, which takes no argument and runs the configured test command;
+  - `git_log_search`, `git_blame` and `git_show`, which take a term, a file and
+    line, and a commit, and run only that `git` subcommand.
+- [ ] No argument reaches a shell: each tool runs its command with its arguments
+      as separate words.
+- [ ] The reviewer's environment carries no GitHub token or `gh` credential.
+- [ ] A write the configured test command makes is detected on the snapshot and
+      named in the summary.
 - [ ] A configured test command that works in a fresh checkout runs to
       completion in the snapshot.
+- [ ] The harness specification's § 4 Confinement says what remains: the test
+      command runs the project's code at the commit under review with the user's
+      access, as the coding agent's own test runs do, and nothing confines it.
+      An operating-system sandbox is held as #529.
 
 ## M8 — Episode boundaries
 
