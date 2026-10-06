@@ -788,6 +788,9 @@ function plus(total: RoundCost, more: RoundCost): RoundCost {
     dollars: total.dollars + more.dollars,
     tokens: total.tokens + more.tokens,
     messages: total.messages + more.messages,
+    ...(total.credits === undefined && more.credits === undefined
+      ? {}
+      : { credits: (total.credits ?? 0) + (more.credits ?? 0) }),
   };
   return total.floor === true || more.floor === true ? { ...sum, floor: true } : sum;
 }
