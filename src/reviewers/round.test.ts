@@ -964,6 +964,27 @@ setInterval(() => {}, 1000);`;
   });
 });
 
+/**
+ * Copilot writes its usage line only once it has exited by itself, so a usage
+ * line read before the stop is the run's whole cost and not a floor.
+ */
+test("a Copilot round whose usage line was read before the stop keeps that cost", async () => {
+  await inATree(async (tree) => {
+    const usage = {
+      type: "usage",
+      usage: {
+        totalNanoAiu: 360_000_000,
+        modelMetrics: { "gpt-5-mini": { requests: { count: 5 }, usage: { inputTokens: 18_000, outputTokens: 200 } } },
+      },
+    };
+    const finishedThenHanging = `${writing(`${JSON.stringify({ type: "finish" })}\n${JSON.stringify(usage)}\n`)}
+setInterval(() => {}, 1000);`;
+    const round = await runRound(asCopilot(reviewer(finishedThenHanging).adapter), at(tree), BOUND);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0, tokens: 18_200, messages: 5, credits: 0.36 });
+  });
+});
+
 test("a Copilot round stopped before it reported anything has no cost either", async () => {
   await inATree(async (tree) => {
     const stopped = asCopilot(reviewer(silent).adapter);

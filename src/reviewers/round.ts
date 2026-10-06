@@ -562,10 +562,11 @@ function reportedIn(progress: RoundProgress): RoundOutput {
  *
  * The cost is a floor whatever the attempt came to. A request in flight when the
  * process was stopped was spent and is never reported. A CLI that reports its
- * cost only as it exits by itself, `costAtExit`, reported none.
+ * cost only as it exits by itself, `costAtExit`, has either reported the whole
+ * of it or none.
  */
 function atTheBound(progress: RoundProgress, costAtExit: boolean): Attempt {
-  const cost = costAtExit ? undefined : atLeast(progress.cost);
+  const cost = costAtExit ? progress.cost : atLeast(progress.cost);
   const refusals = progress.refusals;
   const reported = reportedIn(progress);
   const { broken } = progress;
