@@ -9,6 +9,17 @@
  * subagent runs inside its parent's process, so on `SubagentStop` the socket is
  * the parent's.
  *
+ * A hook whose environment carries `COPILOT_CLI` runs under Copilot, and its
+ * owner has no socket. Copilot puts none in a hook's environment, so one found
+ * there belongs to a Claude Code session that started Copilot, and a wake
+ * through it would reach that session instead.
+ *
+ * A `Stop` whose `session_id` is not the session its transcript path names is a
+ * subagent's turn. Copilot fires one just before that subagent's
+ * `SubagentStop`, with the subagent's id and the parent's transcript. The
+ * `SubagentStop` names the work, and read as it stands this firing would make
+ * the subagent the owner.
+ *
  * A `SubagentStop` whose `agent_type` is the empty string is none of the
  * session's subagents: an interactive session fires a few after a turn ends,
  * with no transcript behind them. One with no `agent_type` at all is read as a
@@ -31,6 +42,7 @@ export type Firing =
 export type FiringRead =
   | { readonly outcome: "read"; readonly firing: Firing }
   | { readonly outcome: "no subagent's work" }
+  | { readonly outcome: "a subagent's turn" }
   | { readonly outcome: "unreadable"; readonly reason: string };
 
 export type HookEnvironment = Readonly<Record<string, string | undefined>>;
@@ -68,16 +80,38 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   if (typeof sessionId !== "string" || sessionId === "") {
     return unreadable('the payload carries no "session_id", which names the owner');
   }
-  const socket = environment["CLAUDE_CODE_MESSAGING_SOCKET"];
+  const socket = underCopilot(environment) ? undefined : environment["CLAUDE_CODE_MESSAGING_SOCKET"];
   const owner: Owner = socket === undefined || socket === "" ? { sessionId } : { sessionId, socket };
 
-  if (event === "Stop") return { outcome: "read", firing: { event, owner } };
+  if (event === "Stop") {
+    const named = transcriptSession(payload["transcript_path"]);
+    if (named !== undefined && named !== sessionId) return { outcome: "a subagent's turn" };
+    return { outcome: "read", firing: { event, owner } };
+  }
 
   const agentId = payload["agent_id"];
   if (typeof agentId !== "string" || agentId === "") {
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
   return { outcome: "read", firing: { event, owner, subagent: agentId } };
+}
+
+function underCopilot(environment: HookEnvironment): boolean {
+  const flag = environment["COPILOT_CLI"];
+  return flag !== undefined && flag !== "";
+}
+
+/**
+ * The session a Copilot transcript path, `.../session-state/<id>/events.jsonl`,
+ * names, or `undefined` for any other path.
+ *
+ * A Claude Code path names none. Its file is named for the session, but Claude
+ * Code fires no `Stop` for a subagent's turn, so reading it could only drop a
+ * turn whose file was named for another session.
+ */
+function transcriptSession(path: unknown): string | undefined {
+  if (typeof path !== "string") return undefined;
+  return /\/session-state\/([^/]+)\/events\.jsonl$/u.exec(path)?.[1];
 }
 
 function unreadable(reason: string): FiringRead {
