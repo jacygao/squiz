@@ -9,13 +9,13 @@
  *
  * The path is resolved as `pi` resolves it before opening it: a leading `@`
  * dropped, `~` taken as the home directory, a `file://` URL as its path, and the
- * rest against the snapshot. `read` also tries the spellings macOS gives a
- * screenshot's name where the path as given does not exist, and every one of
- * those is checked too. A spelling `pi` comes to expand that this does not is a
+ * rest against the snapshot. Where the path does not exist, `read` opens the
+ * first of the spellings macOS gives a screenshot's name that does, and that is
+ * the one checked. A spelling `pi` comes to expand that this does not is a
  * way out this does not see.
  */
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,13 +50,13 @@ export function refuseRead(call: ToolCall, snapshot: string): Refusal | undefine
     return refusal(`the snapshot ${snapshot} could not be resolved, so no path could be checked against it.`);
   }
 
-  for (const spelling of spellingsOf(resolvedAs(path, snapshot))) {
-    const real = realOf(spelling);
-    if (real === undefined || !(real === root || real.startsWith(root + sep))) {
-      return refusal(
-        `\`${path}\` is outside the code under review. Read only what is in the working directory.`,
-      );
-    }
+  const resolved = resolvedAs(path, snapshot);
+  const opened = call.toolName === "read" ? spellingReadOpens(resolved) : resolved;
+  const real = realOf(opened);
+  if (real === undefined || !(real === root || real.startsWith(root + sep))) {
+    return refusal(
+      `\`${path}\` is outside the code under review. Read only what is in the working directory.`,
+    );
   }
   return undefined;
 }
@@ -85,16 +85,20 @@ function resolvedAs(path: string, cwd: string): string {
   return isAbsolute(normalized) ? resolve(normalized) : resolve(cwd, normalized);
 }
 
-/** The path, and each other spelling `read` tries where it does not exist. */
-function spellingsOf(path: string): readonly string[] {
+/**
+ * The spelling `read` opens: the path where it exists, and otherwise the first
+ * other spelling that does, in the order `read` tries them.
+ */
+function spellingReadOpens(path: string): string {
+  if (existsSync(path)) return path;
   const decomposed = path.normalize("NFD");
-  return [
-    path,
-    path.replace(/ (AM|PM)\./giu, " $1."),
+  const others = [
+    path.replace(/ (AM|PM)\./giu, "\u202F$1."),
     decomposed,
-    path.replaceAll("'", "’"),
-    decomposed.replaceAll("'", "’"),
+    path.replaceAll("'", "\u2019"),
+    decomposed.replaceAll("'", "\u2019"),
   ];
+  return others.find((other) => other !== path && existsSync(other)) ?? path;
 }
 
 /**

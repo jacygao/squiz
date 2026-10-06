@@ -92,6 +92,18 @@ test("a read inside the snapshot runs, however it is spelled", (t) => {
   }
 });
 
+test("a snapshot under a directory with an apostrophe in its name is read like any other", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "squiz-reads-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const snapshot = join(base, "alice's-project", "tree");
+  mkdirSync(snapshot, { recursive: true });
+  writeFileSync(join(snapshot, "package.json"), "{}\n");
+  assert.equal(refuseRead(call("read", { path: "package.json" }), snapshot), undefined);
+  for (const tool of ["grep", "find", "ls"]) {
+    assert.equal(refuseRead(call(tool, { pattern: "x" }), snapshot), undefined, `${tool} with no path was refused`);
+  }
+});
+
 test("a call that is not a read is not read", (t) => {
   const { snapshot, decoy } = fixture(t);
   assert.equal(refuseRead(call("report_finding", { path: decoy }), snapshot), undefined);

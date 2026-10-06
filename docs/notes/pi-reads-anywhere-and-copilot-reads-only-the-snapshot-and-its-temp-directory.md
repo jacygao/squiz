@@ -75,8 +75,10 @@ same way:
 
 **`read` then tries four other spellings where the path does not exist**: a
 narrow no-break space before `AM.` or `PM.`, the NFD form, a curly apostrophe for
-`'`, and NFD with the curly apostrophe. A link named `it’s` is reached by asking
-for `it's`, so every spelling is checked.
+`'`, and NFD with the curly apostrophe. It opens the first that exists. A link
+named `it’s` is reached by asking for `it's`, so the check resolves the spelling
+`read` would open. Checking every spelling instead refuses every read in a
+snapshot whose path has an apostrophe in it.
 
 **A recursive search does not follow a link.** `rg` and `fd`, under `pi`'s
 `grep` and `find`, and Copilot's `rg` searched the snapshot without descending
