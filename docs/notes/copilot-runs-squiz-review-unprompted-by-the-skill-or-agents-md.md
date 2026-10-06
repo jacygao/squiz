@@ -113,14 +113,6 @@ The control is route 2's command without `squiz init`.
   to compare with the session's call, and the debug log carries the hook's
   stderr as `[hook stderr]`.
 
-### Cost
-
-| Run | Coding session | Reviewer round |
-| --- | --- | --- |
-| Route 1, the skill | 36.4 AI credits | 8.73 |
-| Route 2, `AGENTS.md` | 22.58 | 8.48 |
-| Control | 19.34 | none |
-
 ## Limits
 
 - **Only exit 0 was seen.** The reviewer found nothing on a three-line script, so
