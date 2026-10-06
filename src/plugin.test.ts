@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,7 @@ const manifest = readJson("../.claude-plugin/plugin.json") as {
   name?: string;
   version?: string;
   description?: string;
+  extensions?: string;
 };
 
 const registration = readJson("../hooks/hooks.json") as {
@@ -26,6 +27,13 @@ const packageVersion = (readJson("../package.json") as { version?: string }).ver
 test("the manifest names the plugin", () => {
   assert.equal(manifest.name, "squiz", "the name is what `/plugin install` and the binary share");
   assert.ok((manifest.description ?? "").length > 0, "the description is what a marketplace lists");
+});
+
+test("the manifest names the directory of Copilot extensions, and the wake extension is in it", () => {
+  // Copilot reads the field and Claude Code ignores it. Copilot starts each
+  // subdirectory's extension.mjs.
+  assert.equal(manifest.extensions, "extensions");
+  assert.ok(existsSync(fileURLToPath(new URL("../extensions/squiz-wake/extension.mjs", import.meta.url))));
 });
 
 test("the manifest's version is the package's", () => {

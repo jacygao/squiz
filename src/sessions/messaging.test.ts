@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { postMessage } from "./messaging.ts";
+import { listening, postMessage } from "./messaging.ts";
 
 const BOUND_MS = 2_000;
 
@@ -129,5 +129,32 @@ test("a socket that accepts and never reads fails once the bound has passed", as
       for (const socket of held) socket.destroy();
       await closed(server);
     }
+  });
+});
+
+test("a socket something listens on is listening, and the check sends it nothing", async () => {
+  await withDirectory(async (directory) => {
+    const path = join(directory, "s.sock");
+    const { server, received } = await reader(path);
+    try {
+      assert.equal(await listening(path, BOUND_MS), true);
+
+      for (let waited = 0; received().length === 0 && waited < BOUND_MS; waited += 10) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.deepEqual(received(), [""]);
+    } finally {
+      await closed(server);
+    }
+  });
+});
+
+test("a path with nothing at it, or a file nothing listens on, is not listening", async () => {
+  await withDirectory(async (directory) => {
+    const stale = join(directory, "stale.sock");
+    writeFileSync(stale, "", "utf8");
+
+    assert.equal(await listening(join(directory, "gone.sock"), BOUND_MS), false);
+    assert.equal(await listening(stale, BOUND_MS), false);
   });
 });
