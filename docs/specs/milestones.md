@@ -194,8 +194,10 @@ is measured before M11 is planned.
 
 - [ ] The reviewer at `deep`, and every process it starts, runs inside a sandbox the
       operating system enforces: writes only to the round's own files, network only
-      to the model and the package registries, no credentials. Where the sandbox
-      cannot start, `deep` refuses to run. `deep` does not ship without it (#529).
+      to the model and the package registries, and none of the user's credentials
+      (no `gh` token, SSH keys or git credentials) beyond the one the reviewer needs
+      to reach its model. Where the sandbox cannot start, `deep` refuses to run.
+      `deep` does not ship without it (#529).
 - [ ] Depth `deep` produces a command line with `bash`, and the configured test
       command reaches the reviewer.
 - [ ] A write the reviewer makes through the shell is detected on its snapshot
