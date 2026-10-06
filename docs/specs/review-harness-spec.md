@@ -834,12 +834,14 @@ runs on with the window gone. Herdr's `pane close` sends `SIGHUP`, then `SIGTERM
 then `SIGKILL`, to every process in the pane's shell session. Neither reaches a
 process in a session of its own.
 
-**A process the test command moves into a group or a session of its own is
-reached by nothing**: not the pane close, not the signal to the reviewer's
-group, and not a recorded group, which names the group the test command was
-started in. It runs on after the round, and nothing in this version detects it.
-Only `run_tests` starts a process the reviewer CLI does not, so only a round at
-`deep` can leave one.
+**A process the test command moves out of the group it was started in is
+reached by neither the signal to the reviewer's group nor a recorded group**,
+which names that starting group. In a Herdr pane, the pane close still reaches
+it while it stays in the pane's session. A process moved into a session of its
+own is reached by nothing, in any backend. Either runs on after the round where
+nothing reaches it, and nothing in this version detects it. Only `run_tests`
+starts a process the reviewer CLI does not, so only a round at `deep` can leave
+one.
 
 ### The snapshot
 
@@ -1001,8 +1003,9 @@ settled** (#547). Started in the reviewer's group, the test command is reached
 by the round's signal to that group, and nothing is recorded. Started in a group
 of its own, it can be stopped at the end of its own run without stopping the
 reviewer, and the round reaches it at the end only through the record below.
-Either way, a process the test command moves into a group or a session of its
-own is reached by nothing, as The reviewer session sets out.
+Either way, a process the test command moves into a group of its own is
+reached by no signal to a group, and one moved into a session of its own by
+nothing at all, as The reviewer session sets out.
 
 Where the test command leads a group of its own, that group is written into a
 file the round names before the command runs, so a test command started in the
