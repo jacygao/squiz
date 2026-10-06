@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.99 (draft)
+**Version:** 1.00 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1181,10 +1181,7 @@ round's own signal does not.
 
 **No shell command is refused.** A refused call is one of the reviewer's own,
 and no depth grants the reviewer a call that runs a command line. What the test
-command runs passes through nothing that reads it. `pi`'s extension still
-carries code that matches shell commands, and the `pi` adapter still writes a
-settings line that has each shell record its group. Nothing in this
-specification needs either, and their removal is #557.
+command runs passes through nothing that reads it.
 
 **At `deep` the round also compares the git files the coding agent's commits
 read.** A test command cannot write them through the snapshot, but it can by
