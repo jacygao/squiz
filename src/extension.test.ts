@@ -150,6 +150,31 @@ test("the socket is removed when Copilot stops the extension", async () => {
   });
 });
 
+test("a session directory too long for a socket path gets a warning in the session, and no socket", async () => {
+  const home = mkdtempSync("/tmp/squiz-ex-");
+  // Past the 104 bytes macOS allows a socket path, and the 108 Linux allows.
+  const workspace = join(home, "x".repeat(60), "session-state", SESSION_ID);
+  mkdirSync(workspace, { recursive: true });
+  const child = spawn(process.execPath, ["--import", sdkHooks, extension], {
+    env: { ...process.env, SQUIZ_STAND_IN_WORKSPACE: workspace },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  try {
+    let printed = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => (printed += chunk));
+    await until(() => printed.includes("\n"), "the extension logged nothing");
+
+    const call = JSON.parse(printed.split("\n")[0] ?? "") as Record<string, unknown>;
+    assert.match(String(call["log"]), /^squiz cannot wake this session: /u);
+    assert.deepEqual(call["options"], { level: "warning" });
+    assert.equal(existsSync(join(workspace, "squiz.sock")), false);
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("the hook records the socket the shipped extension listens on", async () => {
   await withExtension(async ({ socket, workspace }) => {
     const payload = JSON.stringify({
