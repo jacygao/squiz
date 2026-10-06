@@ -48,7 +48,7 @@ test("the adapter reads the report file, not pi's output", async () => {
   };
   const run = await pi.parse(oneChunk(`${JSON.stringify(usage)}\n{"type":"finish"}\n`));
   assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [] });
-  assert.equal(run.cost.tokens, 100);
+  assert.equal(run.cost?.tokens, 100);
 });
 
 test("the adapter resumes the session the reviewer kept, under the directory's name it is given", () => {

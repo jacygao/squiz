@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { type Adapter, type Confinement, type Invocation, unspent } from "./adapter.ts";
+import { type Adapter, type Confinement, type Invocation, type ParsedRun, unspent } from "./adapter.ts";
+import { copilot } from "./copilot/adapter.ts";
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { grants } from "./pi/argv.ts";
 import { readReports as parse } from "./pi/reports.ts";
@@ -241,7 +242,7 @@ test("a killed round keeps what was reported and is still not a review", async (
 test("a killed round records the cost of the messages that completed", async () => {
   await inATree(async (tree) => {
     const round = await runRound(reviewer(flooding).adapter, at(tree), BOUND);
-    assert.ok(round.cost.dollars > 0, "a kill records a floor rather than nothing");
+    assert.ok((round.cost?.dollars ?? 0) > 0, "a kill records a floor rather than nothing");
   });
 });
 
@@ -880,7 +881,7 @@ test("a review the bound ended after its finish has a cost that is a floor", asy
     const output = reportingMessage + reported + closing;
     const round = await runRound(reviewer(hanging(tree, output)).adapter, at(tree), BOUND);
     assert.equal(round.outcome, "reviewed", accountOf(round));
-    assert.equal(round.cost.floor, true);
+    assert.equal(round.cost?.floor, true);
   });
 });
 
@@ -907,7 +908,7 @@ test("usage that could not be read keeps the cost a floor through a retry that r
     const second = writing(called(FINISH_REVIEW, {}) + closing);
     const round = await runRound(reviewer(first, second).adapter, at(tree), 10);
     assert.equal(round.outcome, "reviewed", accountOf(round));
-    assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+    assert.equal(round.cost?.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
   });
 });
 
@@ -918,7 +919,7 @@ test("a last line cut short keeps the cost a floor through a retry that reviewed
     const second = writing(called(FINISH_REVIEW, {}) + closing);
     const round = await runRound(reviewer(first, second).adapter, at(tree), 10);
     assert.equal(round.outcome, "reviewed", accountOf(round));
-    assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+    assert.equal(round.cost?.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
   });
 });
 
@@ -938,6 +939,76 @@ test("the AI credits of two attempts are added up with the rest of their cost", 
     const round = await runRound(crediting, at(tree), 10);
     assert.equal(round.outcome, "reviewed", accountOf(round));
     assert.deepEqual(round.cost, { dollars: 0, tokens: 200, messages: 2, credits: 0.75 });
+  });
+});
+
+/**
+ * Copilot reports its cost once, as it exits by itself, so one stopped at the
+ * bound reported none. A zero marked a floor would read as "unknown" in the
+ * summary and as a round that spent nothing against the token bound.
+ */
+test("a Copilot round stopped at its bound has no cost, rather than a floor", async () => {
+  await inATree(async (tree) => {
+    const reportingThenHanging = `${writing(`${JSON.stringify({ type: "report", call: REPORT_FINDING, value: review.findings[0] })}\n`)}
+setInterval(() => {}, 1000);`;
+    const stopped = asCopilot(reviewer(reportingThenHanging).adapter);
+    const round = await runRound(stopped, at(tree), BOUND);
+    assert.deepEqual(round, {
+      outcome: "timed-out",
+      cost: undefined,
+      seconds: BOUND,
+      refusals: 0,
+      findings: review.findings,
+      verdicts: [],
+    });
+  });
+});
+
+test("a Copilot round stopped before it reported anything has no cost either", async () => {
+  await inATree(async (tree) => {
+    const stopped = asCopilot(reviewer(silent).adapter);
+    const round = await runRound(stopped, at(tree), BOUND);
+    assert.equal(round.outcome, "timed-out", accountOf(round));
+    assert.equal(round.cost, undefined, `a stopped Copilot round recorded ${JSON.stringify(round.cost)}`);
+  });
+});
+
+/**
+ * An attempt with no cost adds nothing to one that has a cost. The round keeps
+ * the figure it has rather than losing it, and has no cost only where no attempt
+ * had one.
+ */
+test("an attempt with no cost leaves the round the cost of the attempt that had one", async () => {
+  await inATree(async (tree) => {
+    const runs: readonly ParsedRun[] = [
+      { cost: { dollars: 0, tokens: 100, messages: 1, credits: 0.5 }, result: { kind: "unparsed", reason: "the reviewer did not finish its review" } },
+      { cost: undefined, result: { kind: "reviewed", findings: [], verdicts: [] } },
+    ];
+    let reads = 0;
+    const answering: Adapter = {
+      ...reviewer(sayingNothing).adapter,
+      parse: async () => {
+        const run = runs[Math.min(reads, runs.length - 1)];
+        reads += 1;
+        if (run === undefined) throw new Error("the fixture ran out of attempts to answer with");
+        return run;
+      },
+    };
+    const round = await runRound(answering, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0, tokens: 100, messages: 1, credits: 0.5 });
+  });
+});
+
+test("a round no attempt of which had a cost has none", async () => {
+  await inATree(async (tree) => {
+    const costless: Adapter = {
+      ...reviewer(sayingNothing).adapter,
+      parse: async () => ({ cost: undefined, result: { kind: "unparsed", reason: "the reviewer did not finish its review" } }),
+    };
+    const round = await runRound(costless, at(tree), 10);
+    assert.equal(round.outcome, "unavailable", accountOf(round));
+    assert.equal(round.cost, undefined);
   });
 });
 
@@ -963,7 +1034,7 @@ test("an attempt whose report file could not be read has a cost that is a floor"
     };
     const round = await runRound(throwing, at(tree), 10);
     assert.equal(round.outcome, "unavailable", accountOf(round));
-    assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+    assert.equal(round.cost?.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
   });
 });
 
@@ -1194,6 +1265,11 @@ function atDeep(tree: string): Invocation {
     depth: "deep",
     roundSpace: made.outcome === "made" ? made.space : undefined,
   };
+}
+
+/** The Copilot adapter, running the test's command line in place of Copilot's. */
+function asCopilot(running: Adapter): Adapter {
+  return { ...copilot, argv: running.argv, confine: handsNothingOver };
 }
 
 /** An adapter whose CLI is handed nothing outside its command line. */

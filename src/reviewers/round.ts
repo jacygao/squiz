@@ -29,10 +29,10 @@ import {
   type Invocation,
   type ParsedRun,
   type ProgressSoFar,
-  type RoundCost,
   type RoundOutput,
   type RoundProgress,
   type RunResult,
+  type Spend,
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
@@ -81,7 +81,7 @@ const INSPECTION_MS = 5_000;
  */
 export type Round = { readonly refusals: number } & (
   /** The reviewer ran and returned a review. Empty findings is a review that found nothing. */
-  | ({ readonly outcome: "reviewed"; readonly cost: RoundCost } & RoundOutput)
+  | ({ readonly outcome: "reviewed"; readonly cost: Spend } & RoundOutput)
   /**
    * The time bound passed on a review the reviewer had not finished, and it was
    * killed.
@@ -90,11 +90,12 @@ export type Round = { readonly refusals: number } & (
    * the reviewer had reported by then: those findings were confirmed and
    * reported before the kill, and the review they belong to is the one that did
    * not finish. Its cost is a floor, because the messages that completed carry
-   * theirs and the request in flight is spent and never reported.
+   * theirs and the request in flight is spent and never reported. A CLI that
+   * reports its cost only as it exits leaves it no cost at all.
    */
   | ({
       readonly outcome: "timed-out";
-      readonly cost: RoundCost;
+      readonly cost: Spend;
       readonly seconds: number;
     } & RoundOutput)
   /**
@@ -104,7 +105,7 @@ export type Round = { readonly refusals: number } & (
    */
   | ({
       readonly outcome: "unavailable";
-      readonly cost: RoundCost;
+      readonly cost: Spend;
       readonly reason: string;
     } & RoundOutput)
   /**
@@ -116,7 +117,7 @@ export type Round = { readonly refusals: number } & (
    */
   | ({
       readonly outcome: "setup";
-      readonly cost: RoundCost;
+      readonly cost: Spend;
       readonly reason: string;
     } & RoundOutput));
 
@@ -208,7 +209,7 @@ export async function runRound(
 
   const variables = variablesOf(invocation, scratch, confinement.environment);
 
-  let spent = unspent;
+  let spent: Spend = undefined;
   // Added up rather than replaced, unlike the reports below: each refusal is a
   // call that was stopped, and a second attempt does not undo one.
   let refused = 0;
@@ -298,7 +299,7 @@ function variablesOf(
 
 /** How one attempt ended, what it spent getting there, and what it got through. */
 type Attempt = {
-  readonly cost: RoundCost;
+  readonly cost: Spend;
   /** How many of the reviewer's calls this attempt refused before they ran. */
   readonly refusals: number;
   /**
@@ -409,7 +410,7 @@ async function attempt(
   // is tracked here rather than taken from the parse's return, which a killed
   // attempt may not reach.
   let progress: RoundProgress = {
-    cost: unspent,
+    cost: adapter.costAtExit === true ? undefined : unspent,
     refusals: 0,
     finished: false,
     broken: undefined,
@@ -444,9 +445,10 @@ async function attempt(
       reported: reportedIn(progress),
       ...run.result,
     }),
-    // A read that failed left the rest of the file uncounted.
+    // A read that failed left the rest of the file uncounted. A cost reported at
+    // exit is the file's last line, so one that was read is whole.
     (cause): Attempt => ({
-      cost: { ...progress.cost, floor: true },
+      cost: adapter.costAtExit === true ? progress.cost : atLeast(progress.cost),
       refusals: progress.refusals,
       reported: reportedIn(progress),
       kind: "unparsed",
@@ -471,7 +473,7 @@ async function attempt(
       // grace to read is left where the read had got to.
       await within(parsing.then(() => {}), GRACE_MS);
       abandoned.abort();
-      return atTheBound(progress);
+      return atTheBound(progress, adapter.costAtExit === true);
     }
 
     // The reviewer is stopped before its account is read, and whatever the
@@ -487,7 +489,7 @@ async function attempt(
     // A run that completed a message explained itself in the report file, and
     // stderr would only say the same thing a second way.
     const said = complaint();
-    if (ended.cost.messages > 0 || said === "") return ended;
+    if ((ended.cost?.messages ?? 0) > 0 || said === "") return ended;
     return {
       ...ended,
       reason: `${ended.reason}: ${endedAs(detached.command, child)}, and said: ${said}`,
@@ -559,10 +561,11 @@ function reportedIn(progress: RoundProgress): RoundOutput {
  * hung. Either way the reports that were readable are kept.
  *
  * The cost is a floor whatever the attempt came to. A request in flight when the
- * process was stopped was spent and is never reported.
+ * process was stopped was spent and is never reported. A CLI that reports its
+ * cost only as it exits by itself, `costAtExit`, reported none.
  */
-function atTheBound(progress: RoundProgress): Attempt {
-  const cost: RoundCost = { ...progress.cost, floor: true };
+function atTheBound(progress: RoundProgress, costAtExit: boolean): Attempt {
+  const cost = costAtExit ? undefined : atLeast(progress.cost);
   const refusals = progress.refusals;
   const reported = reportedIn(progress);
   const { broken } = progress;
@@ -779,11 +782,20 @@ function makeScratch(directory: string): string | null {
   }
 }
 
+/** `cost` marked a floor, where there is a cost to mark. */
+function atLeast(cost: Spend): Spend {
+  return cost === undefined ? undefined : { ...cost, floor: true };
+}
+
 /**
  * Two attempts' costs added: a retry spends a second process on the same round.
- * A floor added to anything is a floor.
+ *
+ * A floor added to anything is a floor. No cost adds nothing, so a round has no
+ * cost only where none of its attempts had one.
  */
-function plus(total: RoundCost, more: RoundCost): RoundCost {
+function plus(total: Spend, more: Spend): Spend {
+  if (total === undefined) return more;
+  if (more === undefined) return total;
   const sum = {
     dollars: total.dollars + more.dollars,
     tokens: total.tokens + more.tokens,

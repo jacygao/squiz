@@ -118,3 +118,53 @@ test("a floor in an episode no round of which was priced marks the tokens", () =
     "At least 20,100 tokens over 1 round: at least 20,100",
   );
 });
+
+/** A Copilot round: AI credits and no dollars, its messages being model requests. */
+function copilotRound(tokens: number, credits: number): RoundCost {
+  return { dollars: 0, tokens, messages: 5, credits };
+}
+
+test("Copilot rounds carry AI credits in place of dollars", () => {
+  const line = renderSpendLine([copilotRound(18_200, 0.36), copilotRound(13_200, 0.48)]);
+  assert.equal(line, "31,400 tokens over 2 rounds: 18,200, 13,200 · 0.84 AI credits");
+  assert.ok(!line?.includes("$"), `a round Copilot priced in credits showed dollars: ${line}`);
+});
+
+/**
+ * A round with no cost is not a round that spent nothing. Summed as zero, the
+ * line would read "over 2 rounds" and claim a total for a round nothing was
+ * reported for.
+ */
+test("a round with no cost is left out of the line, which says how many rounds it covers", () => {
+  assert.equal(
+    renderSpendLine([copilotRound(18_200, 0.36), undefined]),
+    "18,200 tokens over 1 of 2 rounds · 0.36 AI credits",
+  );
+  assert.equal(
+    renderSpendLine([undefined, copilotRound(18_200, 0.36)]),
+    "18,200 tokens over 1 of 2 rounds · 0.36 AI credits",
+  );
+});
+
+// No figure at all is not a figure of nothing, so "0 tokens" is the line this
+// must never print.
+test("an episode no round of which has a cost carries no spend line", () => {
+  assert.equal(renderSpendLine([undefined, undefined]), null);
+});
+
+// An episode whose reviewer changed between rounds holds rounds priced each way,
+// and each total covers the rounds that carry it.
+test("credits sit beside dollars where some rounds carry each", () => {
+  assert.equal(
+    renderSpendLine([round(0.0061, 20_100), copilotRound(18_200, 0.36)]),
+    "38,300 tokens over 2 rounds: 20,100, 18,200 · $0.0061 · 0.36 AI credits",
+  );
+});
+
+// The one credit figure the line must never print for credits reported is 0.00.
+test("a credit total smaller than the last place printed rounds up into it", () => {
+  assert.equal(
+    renderSpendLine([copilotRound(400, 0.004)]),
+    "400 tokens over 1 round: 400 · 0.01 AI credits",
+  );
+});

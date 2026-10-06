@@ -86,7 +86,7 @@ test("a file with nothing in it is a run that completed nothing, not an empty re
 test("a run with no message that stopped and no finish reports the errored message's reason", async () => {
   const { run } = await read(fileOf(usage("error", 0, "503 from the provider"), usage("error", 0, "no credential")));
   assert.deepEqual(run.result, { kind: "incomplete", reason: "no credential" });
-  assert.equal(run.cost.messages, 2, "an errored message is a message, carrying zero usage");
+  assert.equal(run.cost?.messages, 2, "an errored message is a message, carrying zero usage");
 });
 
 test("errored messages among the working ones leave the run reviewed", async () => {
@@ -216,7 +216,7 @@ test("a last line with no newline after it cannot be read, and the reports befor
 test("each progress carries the cost and the reports of the same point in the file", async () => {
   const { told } = await read(reviewed);
   assert.deepEqual(
-    told.map((progress) => [progress.cost.messages, progress.findings.length, progress.finished]),
+    told.map((progress) => [progress.cost?.messages, progress.findings.length, progress.finished]),
     [
       [1, 0, false],
       [1, 1, false],
@@ -238,15 +238,15 @@ test("a finish with no message's usage after it is a cost that is a floor", asyn
   assert.deepEqual(lost.run.cost, { dollars: 0.002, tokens: 100, messages: 1, floor: true });
 
   const written = await read(fileOf(usage("toolUse", 0.002), findingLine, finish, usage("stop", 0.001)));
-  assert.equal(written.run.cost.floor, undefined, "the closing message's usage was written");
+  assert.equal(written.run.cost?.floor, undefined, "the closing message's usage was written");
 });
 
 test("a file ending on a report with no message after it is a cost that is a floor", async () => {
   const { run } = await read(fileOf(usage("toolUse", 0.002), findingLine));
-  assert.equal(run.cost.floor, true);
+  assert.equal(run.cost?.floor, true);
 });
 
 test("an unfinished end after the last message's usage does not make the cost a floor", async () => {
   const { run } = await read(fileOf(usage("toolUse", 0.002), findingLine, usage("stop", 0.001), { type: "unfinished" }));
-  assert.equal(run.cost.floor, undefined);
+  assert.equal(run.cost?.floor, undefined);
 });

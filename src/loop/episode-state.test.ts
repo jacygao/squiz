@@ -78,6 +78,58 @@ test("a cost that is a floor comes back as a floor, in a round and outside the r
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
+test("AI credits come back as written, in a round and outside the rounds", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [{ dollars: 0, tokens: 18_200, messages: 5, credits: 0.36 }],
+    spentOutsideRounds: { dollars: 0, tokens: 900, messages: 1, credits: 0.02 },
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
+/**
+ * A round with no cost is written with no figures. Zeros would be read back as
+ * a round that spent nothing, and summed into the spend line as one.
+ */
+test("a round with no cost is written with no figures and comes back with none", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [firstRound, { elapsedSeconds: 900.4, cutShortAtSeconds: 900 }],
+    spentOutsideRounds: unspent,
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
+// A file written before credits and rounds with no cost existed.
+test("a round entry of dollars, tokens and messages alone reads as it always did", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(
+    episode.stateFile,
+    `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": 41.3}], "spentOutsideRounds": {"dollars": 0, "tokens": 0, "messages": 0}}`,
+  );
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: {
+      rounds: [{ dollars: 0.01, tokens: 100, messages: 1, elapsedSeconds: 41.3 }],
+      spentOutsideRounds: unspent,
+    },
+  });
+});
+
+test("spend outside the rounds adds up AI credits with the rest", () => {
+  const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
+  const after = recordSpendOutsideRounds(
+    recordSpendOutsideRounds(start, { dollars: 0, tokens: 100, messages: 1, credits: 0.25 }),
+    { dollars: 0, tokens: 100, messages: 1, credits: 0.5 },
+  );
+  assert.deepEqual(after.spentOutsideRounds, { dollars: 0, tokens: 200, messages: 2, credits: 0.75 });
+});
+
 test("spend outside the rounds is a floor once any of it is", () => {
   const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
   const after = recordSpendOutsideRounds(
@@ -138,6 +190,14 @@ const unreadableContents: readonly string[] = [
   // A floor that is there and cannot be read must not stand in for a total.
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "floor": false}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "floor": "true"}]}`,
+  // Credits that are there and cannot be read must not be dropped, and a round
+  // with no cost carries no figure of any kind.
+  `{"rounds": [{"dollars": 0, "tokens": 100, "messages": 1, "credits": "0.36"}]}`,
+  `{"rounds": [{"dollars": 0, "tokens": 100, "messages": 1, "credits": -1}]}`,
+  `{"rounds": [{"credits": 0.36}]}`,
+  `{"rounds": [{"floor": true}]}`,
+  `{"rounds": [{"tokens": 100, "messages": 1}]}`,
+  `{"rounds": [], "spentOutsideRounds": {}}`,
   // A spend that is there and cannot be read must not stand in for zero: the
   // token bound would then let the episode spend past a bound it had reached.
   `{"rounds": [], "spentOutsideRounds": 0.04}`,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type ParsedRun, type RoundProgress, unspent } from "../adapter.ts";
+import { type ParsedRun, type RoundProgress } from "../adapter.ts";
 import { REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 import { readReports } from "./reports.ts";
 
@@ -68,7 +68,7 @@ test("a finish is a review, and its cost is the usage line's tokens, requests an
 test("a finish with no usage line is still a review, with no cost", async () => {
   const run = await read(reported, finished);
   assert.equal(run.result.kind, "reviewed");
-  assert.deepEqual(run.cost, unspent);
+  assert.equal(run.cost, undefined);
 });
 
 test("no finish, and a usage line counting a request, is a review that stopped without finishing", async () => {
@@ -77,25 +77,25 @@ test("no finish, and a usage line counting a request, is a review that stopped w
     kind: "unparsed",
     reason: "the reviewer reported 1 finding and 0 verdicts and did not finish its review",
   });
-  assert.equal(run.cost.tokens, 62_307);
+  assert.equal(run.cost?.tokens, 62_307);
 });
 
 test("no finish and no usage line is a run that completed no message", async () => {
   assert.deepEqual((await read()).result, { kind: "incomplete", reason: "the reviewer completed no message" });
-  assert.deepEqual((await read()).cost, unspent);
+  assert.equal((await read()).cost, undefined);
 });
 
 test("no finish, and a usage line counting no request, is a run that completed no message", async () => {
   const run = await read(modelless);
   assert.deepEqual(run.result, { kind: "incomplete", reason: "the reviewer completed no message" });
-  assert.deepEqual(run.cost, unspent);
+  assert.equal(run.cost, undefined);
 });
 
 test("a usage line with no token counts gives no cost, and its requests still say a message completed", async () => {
   const run = await read(tokenless);
-  assert.deepEqual(run.cost, unspent, "a plan reporting no tokens recorded a cost");
+  assert.equal(run.cost, undefined, "a plan reporting no tokens recorded a cost");
   assert.equal(run.result.kind, "unparsed");
-  assert.deepEqual((await read(finished, tokenless)).cost, unspent);
+  assert.equal((await read(finished, tokenless)).cost, undefined);
 });
 
 test("a usage line one model of which carries no token counts gives no cost", async () => {
@@ -103,7 +103,7 @@ test("a usage line one model of which carries no token counts gives no cost", as
   delete parsed.usage.modelMetrics["claude-haiku-4.5"]?.usage;
   const run = await read(finished, JSON.stringify(parsed));
   assert.equal(run.result.kind, "reviewed");
-  assert.deepEqual(run.cost, unspent);
+  assert.equal(run.cost, undefined);
 });
 
 test("a line that cannot be read fails the run, finish or not", async () => {
@@ -145,9 +145,9 @@ test("the caller is told after each line, the cost arriving with the usage line"
   await readReports(chunks(bytes.slice(0, 40), bytes.slice(40, 41), bytes.slice(41)), (each) => progress.push(each));
   assert.equal(progress.length, 3);
   assert.deepEqual(progress[0]?.findings, [finding]);
-  assert.deepEqual(progress[1]?.cost, unspent);
+  assert.equal(progress[1]?.cost, undefined);
   assert.equal(progress[1]?.finished, true);
-  assert.equal(progress[2]?.cost.tokens, 62_307);
+  assert.equal(progress[2]?.cost?.tokens, 62_307);
 });
 
 test("a last line with no newline fails the run", async () => {
