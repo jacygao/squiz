@@ -984,7 +984,9 @@ reviewer has started. Before then, the record's round number gives the same path
 it before the reviewer starts and again when the reviewer exits. Scratch space
 stays at `.squiz/<number>/scratch/`, outside it. Once the snapshot is made, only
 the test command `run_tests` starts can write it, so a change the comparison
-finds was made by a test command the reviewer ran.
+finds was made by a test command the reviewer ran. The snapshot shares the
+repository's git config and hooks with every other worktree, and at `deep` those
+are compared as well, as Confinement sets out.
 
 **What it costs:**
 
@@ -1108,12 +1110,12 @@ credential store stays readable, and on macOS `gh auth token` still finds the
 login `gh` keeps there. An operating-system sandbox around the reviewer and
 every process it starts is held as #529.
 
-**The comparison sees the snapshot and nothing else.** A write the test command
-makes anywhere else is neither prevented nor detected. That includes:
+**The comparison sees the snapshot and nothing else.** Apart from the shared git
+config and hooks compared below, a write the test command makes anywhere else is
+neither prevented nor detected. That includes:
 
-- the git directory the snapshot shares with the coding agent's worktree: its
-  config, such as the `core.hooksPath` that a `husky` install sets (#540), and
-  its branches, tags and other refs;
+- the branches, tags and other refs of the git directory the snapshot shares
+  with the coding agent's worktree;
 - the coding agent's worktree, the user's home directory, and other
   repositories;
 - a remote, reached by `git push` or any other network call, with any credential
@@ -1139,6 +1141,35 @@ command runs passes through nothing that reads it. `pi`'s extension still
 carries code that matches shell commands, and the `pi` adapter still writes a
 settings line that has each shell record its group. Nothing in this
 specification needs either, and their removal is #557.
+
+**At `deep` the round also compares the git files the snapshot shares with the
+coding agent's worktree.** A test command can write them from the snapshot, and
+the coding agent's next commit reads what it wrote: `husky`, run as a `prepare`
+script, sets `core.hooksPath` in the repository's config, and the coding agent's
+own hooks are then skipped. The files are:
+
+- the repository's local `config`;
+- the main worktree's `config.worktree`;
+- the coding agent's own `config.worktree`, where it works in a linked worktree;
+- `info/exclude`;
+- everything under `hooks/`.
+
+They are read beside the comparison in the snapshot, before the reviewer starts
+and when it exits, and compared by content. A file that is not there is read as
+absent, so one that appears or goes away is a change. A link is followed, and
+compared by both where it points and what stands there. A config is named by each
+key whose values changed, and by the file alone where no key did. A key is named
+with its subsection written as `*`, as in `branch.*.merge`, and a value is never
+named, because a URL in either can carry a credential. A file that cannot be read
+makes the comparison one that could not be taken.
+
+These files are not the reviewer's alone. The coding agent writes them too, with
+`git push -u` for one, and so does every other worktree of the repository. The
+summary therefore names the reviewer's tests as one possible writer, and never as
+the writer. At `read` the reviewer runs nothing, and they are not read.
+
+**The write is prevented once the snapshot has a git directory of its own
+(#570), and until then it is detected as above.**
 
 **A move of `HEAD` is detected, and not prevented.** A test that commits,
 amends, resets or switches branch in the snapshot moves the snapshot's `HEAD`.
@@ -2004,8 +2035,10 @@ Three blocks, in this order.
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
    finding carries; a tracked file that changed while the reviewer ran; a `HEAD`
-   that moved while the reviewer ran, with what it was and what it became; a
-   round that could take no comparison, with why; a round whose review the time
+   that moved while the reviewer ran, with what it was and what it became; at
+   `deep`, a key or file of the git config and hooks the worktrees share that
+   changed while the reviewer ran; a round that could take no comparison, of
+   either kind, with why; a round whose review the time
    bound cut short, with the round's number and the bound; and a cap or bound
    that ended the episode early, with each queued state it left not reviewed.
 
@@ -2029,6 +2062,13 @@ comparison read them:
 
 ```markdown
 - `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
+```
+
+Every key and file of the shared git config and hooks that the episode's rounds
+found changed is on one line, which does not say the reviewer changed them:
+
+```markdown
+- The git config or hooks this repository's worktrees share changed while the reviewer ran. The reviewer's tests may have changed them, or anything else using the repository may have: `core.hookspath` in `config`, `hooks/pre-commit`
 ```
 
 **A round whose review the time bound cut short is a line of its own.** Its

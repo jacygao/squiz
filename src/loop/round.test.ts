@@ -3377,3 +3377,39 @@ test("each kind of failure says the same reason and items on the pull request an
     }
   }
 });
+
+/** A reviewer whose test command set `core.hooksPath` from the snapshot, as `husky` does. */
+function setsTheHooksPathThenReviews(): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", "git config core.hooksPath .husky/_"],
+    parse: reviews({}).parse,
+  };
+}
+
+test("at deep, a key set in the config the snapshot shares is named in the summary", async () => {
+  const ran = await runInFixture({
+    config: { depth: "deep" },
+    answers: POSTING,
+    reviewer: setsTheHooksPathThenReviews(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
+  assert.match(
+    summaryBody(ran),
+    /\n- The git config or hooks this repository's worktrees share changed while the reviewer ran\. .*: `core\.hookspath` in `config`$/u,
+  );
+});
+
+test("at read, the config the snapshot shares is not compared and the summary has no notes", async () => {
+  const ran = await runInFixture({
+    config: { depth: "read" },
+    answers: POSTING,
+    reviewer: setsTheHooksPathThenReviews(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.confinement?.sharedConfig, undefined);
+  assert.doesNotMatch(summaryBody(ran), /Notes/u);
+});

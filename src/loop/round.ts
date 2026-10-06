@@ -553,7 +553,13 @@ async function reviewOn(
   opened.snapshot = snapshot.path;
   const tree = snapshot.path;
 
-  const around = readBeforeReviewer(tree, preReview.until);
+  // Only at `deep` does the reviewer run anything that could write the git files
+  // the snapshot shares with `directory`.
+  const around = readBeforeReviewer(
+    tree,
+    preReview.until,
+    config.depth === "deep" ? directory : undefined,
+  );
 
   // Only `deep` grants a shell, and only a shell detaches, so at `read` there is
   // nothing for a round to record and nothing for it to reach. One value says
