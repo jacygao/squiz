@@ -6,7 +6,7 @@ versions: { pr-agent: 8175540f, claude-code: 8e60c4ca, claude-code-security-revi
 recheck-when: a vendor publishes a measurement that separates running code from reading it, or Copilot, CodeRabbit or Claude Code Review documents what its reviewer runs
 ---
 
-# Reviewers that run code sandbox it, or run it only for trusted authors
+# Few reviewers run code, and none measures what running it adds
 
 ## Intent
 
@@ -42,17 +42,21 @@ recheck-when: a vendor publishes a measurement that separates running code from 
   catching more critical issues and raising fewer false alarms". Its figure
   compares a diff-only reviewer with an agentic one (unverified: read from a
   summary of the figure, which was not seen). The only cross-vendor benchmark,
-  Greptile's own, ranks first a tool that executes nothing. `deep`'s value is
+  Greptile's own, ranks Greptile first. Whether Greptile runs code is not
+  documented either way, so the ranking says nothing about execution. `deep`'s value is
   therefore unmeasured, and #529's sandbox is what makes the experiment safe to
   run on squiz.
-- **The tools that run code either refuse a stranger's pull request or take
-  every secret away from it.** Claude Code Review reviews a fork only on a
-  comment from someone with write access to the base repository. claude-code-action
-  and Gemini CLI's workflow likewise require a trusted trigger or skip forks.
-  CodeRabbit and Codex cloud run in a sandbox holding no secret beyond a
-  short-lived token for that one repository. claude-code-action also restores
-  its own configuration files from the base branch before the review starts.
-  Squiz does none of these. It reviews whatever pull request is checked out
+- **Where a tool documents how it handles a stranger's pull request, it either
+  waits for a trusted person to ask or takes every secret away.** Claude Code
+  Review reviews a fork only on a comment from someone with write access to the
+  base repository. claude-code-action and Gemini CLI's workflow likewise require
+  a trusted trigger or skip forks. CodeRabbit runs in a sandbox holding no secret
+  beyond a short-lived token for that one repository. Codex cloud is said to
+  remove secrets before its agent runs (unverified). claude-code-action also
+  restores its own configuration files from the base branch before the review
+  starts. Codex's local review, Ellipsis, Kodus and Bito do not say. no-mistakes
+  reviews only its user's own pushes, unconfined. Squiz does none of the
+  documented things. It reviews whatever pull request is checked out
   where it runs, with the user's own access, and nothing in § 4 or § 6 asks who
   wrote it. The `AGENTS.md` it treats as authoritative is read from the head
   commit, so whoever wrote the pull request also wrote those rules.
@@ -147,7 +151,7 @@ ignored, which raised the share of comments addressed from 19% to over 55%
 |---|---|---|
 | OpenAI | Repository access plus execution beats a diff-only GPT-5. 52.7% of comments lead to a code change ([alignment blog][oai-verif]) | No |
 | Anthropic | Pull requests with substantive review comments went from 16% to 54%, and under 1% of findings are marked incorrect ([blog][cc-blog]) | No |
-| Greptile | Its own benchmark of 50 reintroduced bugs: Greptile 82%, Copilot 54%, CodeRabbit 44%. False positives are not counted ([benchmarks][gr-bench]) | No; the leader executes nothing |
+| Greptile | Its own benchmark of 50 reintroduced bugs: Greptile 82%, Copilot 54%, CodeRabbit 44%. False positives are not counted ([benchmarks][gr-bench]) | No; whether Greptile runs code is not documented |
 | Kodus | A nightly recall eval with a gated floor; numbers not in its README ([evals][ko-evals]) | No |
 | no-mistakes | Schema conformance only: "not a finding-accuracy or recall evaluation" ([results][nm-bench]) | No |
 
