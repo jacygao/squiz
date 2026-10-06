@@ -90,9 +90,15 @@ export const runTestsTool = {
  * worker left holding the output pipes cannot keep the runner from seeing the
  * command end. It then waits on its own standard input, which the runner never
  * writes, until the runner's signal ends it.
+ *
+ * The prefix runs in a subshell that has closed descriptor 3, because the keeper
+ * it starts would otherwise hold the status pipe open for its whole sleep. A
+ * redirection on a group would not do: bash keeps a copy of the descriptor while
+ * the group runs, and the keeper inherits that. `$$` in the subshell is still the
+ * leader's own identifier.
  */
 const LEADER = [
-  shellPrefix,
+  `(\nexec 3>&-\n${shellPrefix}\n)`,
   `/bin/sh -c "$1" </dev/null 3>&-`,
   `printf '%s\\n' "$?" >&3`,
   `exec 3>&-`,
@@ -125,12 +131,19 @@ export async function runTests(input: RunTestsInput): Promise<TestsRun> {
   const bound = deadlineIn(left - STOP_MARGIN_MS);
   const started = Date.now();
 
-  const child = spawn(LEADER_SHELL, ["-c", LEADER, "squiz-run-tests", input.command], {
-    cwd: input.snapshot,
-    env: environmentFor(input),
-    detached: true,
-    stdio: ["pipe", "pipe", "pipe", "pipe"],
-  });
+  let child: ChildProcess;
+  try {
+    child = spawn(LEADER_SHELL, ["-c", LEADER, "squiz-run-tests", input.command], {
+      cwd: input.snapshot,
+      env: environmentFor(input),
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe", "pipe"],
+    });
+  } catch (cause) {
+    // Node refuses some arguments before any process exists, a NUL byte among them.
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return { outcome: "not run", reason: `The test command could not be started: ${reason}` };
+  }
   const output = tailOf(child);
   const ended = await endOf(child, bound);
 

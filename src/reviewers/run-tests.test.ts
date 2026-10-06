@@ -172,6 +172,37 @@ test("a run the round ends from outside is reached through the round's record", 
   });
 });
 
+test("a run in the round's environment ends when the command does", async () => {
+  await inPlace(async (place) => {
+    const made = makeRoundSpace(place.scratch);
+    assert.equal(made.outcome, "made");
+    if (made.outcome !== "made") return;
+    try {
+      const run = await runTests({
+        ...place,
+        deadline: deadlineIn(STOP_MARGIN_MS + 5_000),
+        environment: {
+          ...place.environment,
+          [RECORD_VARIABLE]: made.space.shellRecord,
+          [KEEPER_VARIABLE]: made.space.keeperName,
+        },
+        command: "true",
+      });
+      assert.equal(run.outcome, "exited", "the keeper held the run open until the round's time ran out");
+    } finally {
+      discardRoundSpace(made.space);
+    }
+  });
+});
+
+test("a command node cannot hand to a process is a run that could not start", async () => {
+  await inPlace(async (place) => {
+    const run = await runTests({ ...place, command: "true\0" });
+    assert.equal(run.outcome, "not run");
+    assert.ok(describeTestsRun(run).isError);
+  });
+});
+
 test("a snapshot that is not there is a run that could not start", async () => {
   await inPlace(async (place) => {
     const run = await runTests({ ...place, snapshot: join(place.scratch, "absent"), command: "true" });
