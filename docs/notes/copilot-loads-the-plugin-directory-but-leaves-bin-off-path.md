@@ -1,6 +1,6 @@
 ---
 settles: "§ 6 — how the `squiz` binary reaches a Copilot session's shell; § 9 — whether Copilot loads squiz's plugin directory as it is"
-issue: 534
+issue: [534, 553]
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-5-mini, node: 24.15.0, macos: 26.6.2 }
 recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin's manifest, skills, hooks or bin/
@@ -30,21 +30,16 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin
   the plugin loaded as without it. Copilot's help, its plugin reference and its
   changelog name no `bin/` directory and no manifest field or setting that adds
   one, so there is nothing to put in its place.
+- **`squiz init` links `bin/squiz` into a directory already on `PATH`
+  (decided 2026-10-06).** The owner chose the link over naming the binary by
+  path in the skill, on the condition that it never makes two coding agents on
+  one machine run different squizzes. It keeps one skill text for both
+  runtimes, and `squiz review` and `squiz reply` keep the same names under
+  both. § 6 `squiz init` says which directory and which conflicts.
 
 ## Needs your input
 
-- **How `squiz` reaches a Copilot session's shell.** Two ways are open, and
-  neither was tried:
-  - The person links `<checkout>/bin/squiz` into a directory already on their
-    `PATH`, such as `~/.local/bin`. The shim follows a symlink to its real
-    location, so the link needs nothing else.
-  - The skill names the binary by path. Copilot opens the loaded skill with
-    `Base directory for this skill: <checkout>/skills/squiz-review`, so the
-    binary sits at `../../bin/squiz` from the line the model is given.
-
-  Recommended: the link, set up by § 9 for Copilot. It keeps one skill text
-  for both runtimes, and the commands the skill names (`squiz review`, `squiz
-  reply`) stay the same names under both.
+Nothing.
 
 ## Reference
 
