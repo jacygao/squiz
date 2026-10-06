@@ -31,7 +31,7 @@ export type LinkPrinted = { readonly stdout: string; readonly stderr: string; re
 
 /** The real path of the `bin/squiz` in the plugin this module belongs to. */
 export function thisSquiz(): string {
-  return realpathSync(fileURLToPath(new URL("../../bin/squiz", import.meta.url)));
+  return realpathSync.native(fileURLToPath(new URL("../../bin/squiz", import.meta.url)));
 }
 
 /** What one `squiz` on `PATH` is, measured against the squiz being linked. */
@@ -50,7 +50,9 @@ export type Found =
 export function squizzesOnPath(target: string, environment: LinkEnvironment, directory: string): Found[] {
   const found: Found[] = [];
   for (const searched of searchedDirectories(environment, directory)) {
-    const entry = join(searched, "squiz");
+    // Joined as text: path.join would fold `..` before the system follows the
+    // symlink ahead of it.
+    const entry = `${searched}/squiz`;
     let stat;
     try {
       stat = lstatSync(entry);
@@ -163,13 +165,15 @@ export function linkOntoPath(
 
 /**
  * Every directory a shell searches for `squiz`, in order and each once. An empty
- * entry is the working directory, and a relative one is resolved from it.
+ * entry is the working directory, and a relative one is read from it. Each is
+ * left as text for the system to resolve, since folding its `..` first would
+ * name a different directory wherever a symlink precedes it.
  */
 function searchedDirectories(environment: LinkEnvironment, directory: string): string[] {
   const seen = new Set<string>();
   const directories: string[] = [];
   for (const entry of (environment.PATH ?? "").split(":")) {
-    const searched = resolve(directory, entry);
+    const searched = entry === "" ? directory : isAbsolute(entry) ? entry : `${directory}/${entry}`;
     const key = realOrResolved(searched);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -193,6 +197,13 @@ function absoluteDirectories(environment: LinkEnvironment): string[] {
  * missing path can be named and compared.
  */
 function followLinks(path: string): { final: string; exists: boolean } {
+  // The native call throughout this file, because the JavaScript one folds `..`
+  // before it follows the links ahead of it.
+  try {
+    return { final: realpathSync.native(path), exists: true };
+  } catch {
+    // Followed by hand below, to name where the chain breaks.
+  }
   let current = path;
   for (let hops = 0; hops < 40; hops += 1) {
     let stat;
@@ -201,10 +212,9 @@ function followLinks(path: string): { final: string; exists: boolean } {
     } catch {
       return { final: realParent(current), exists: false };
     }
-    if (!stat.isSymbolicLink()) return { final: realpathSync(current), exists: true };
-    // From the directory's real place, as the system resolves it: `..` in a
-    // link inside a symlinked directory climbs out of the directory's target.
-    current = resolve(realOrResolved(dirname(current)), readlinkSync(current));
+    if (!stat.isSymbolicLink()) return { final: realpathSync.native(current), exists: true };
+    const link = readlinkSync(current);
+    current = isAbsolute(link) ? link : `${realOrResolved(dirname(current))}/${link}`;
   }
   return { final: current, exists: false };
 }
@@ -212,7 +222,7 @@ function followLinks(path: string): { final: string; exists: boolean } {
 /** `path` with its directory's links resolved, for a file that is not there. */
 function realParent(path: string): string {
   try {
-    return join(realpathSync(dirname(path)), basename(path));
+    return join(realpathSync.native(dirname(path)), basename(path));
   } catch {
     return path;
   }
@@ -262,7 +272,7 @@ function isWritableDirectory(path: string): boolean {
 
 function realOrResolved(path: string): string {
   try {
-    return realpathSync(path);
+    return realpathSync.native(path);
   } catch {
     return resolve(path);
   }

@@ -251,6 +251,41 @@ test("a relative link in a PATH directory reached through a symlink resolves fro
   });
 });
 
+test("a PATH entry climbing out of a symlinked directory is searched where the system finds it", () => {
+  const { home, localBin, target } = sandbox();
+  // alias -> tools/sub, so alias/../bin is tools/bin, not the sibling of alias.
+  const tools = fresh("tools");
+  mkdirSync(join(tools, "sub"));
+  mkdirSync(join(tools, "bin"));
+  writeFileSync(join(tools, "bin", "squiz"), "#!/bin/sh\n", { mode: 0o755 });
+  const work = fresh("work");
+  symlinkSync(join(tools, "sub"), join(work, "alias"));
+
+  const printed = linkOntoPath(target, { PATH: `${localBin}:${work}/alias/../bin`, HOME: home });
+
+  assert.equal(printed.exit, 1);
+  assert.equal(existsSync(join(localBin, "squiz")), false);
+});
+
+test("a link whose target climbs out of a symlinked directory is followed where the system follows it", () => {
+  const { home, localBin } = sandbox();
+  // alias -> place/sub, so alias/../copy/bin/squiz is place/copy/bin/squiz.
+  const place = fresh("place");
+  mkdirSync(join(place, "sub"));
+  const target = squizCopy(join(place, "copy"));
+  const work = fresh("work");
+  symlinkSync(join(place, "sub"), join(work, "alias"));
+  symlinkSync(`${work}/alias/../copy/bin/squiz`, join(localBin, "squiz"));
+
+  const printed = linkOntoPath(target, { PATH: localBin, HOME: home });
+
+  assert.deepEqual(printed, {
+    stdout: `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n`,
+    stderr: "",
+    exit: 0,
+  });
+});
+
 test("another squiz copy's bin/ on PATH, as Claude Code puts an enabled plugin's, stops the link", () => {
   const { home, localBin, target } = sandbox();
   const copy = squizCopy(fresh("plugin-cache-copy"));
