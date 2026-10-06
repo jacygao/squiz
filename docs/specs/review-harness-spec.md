@@ -512,8 +512,8 @@ trigger, and every round host as it starts, recovers each killed round it finds:
 1. It reads the reviewer's session from the reviewing record: its backend, its
    pane or window, its pid and start time.
 2. Where that reviewer is still running, it stops it as a round host stops a
-   reviewer at its bound: the reviewer's process group, then the groups its shells
-   recorded, then the pane. It does so whether or not the reviewer's time bound
+   reviewer at its bound: the reviewer's process group, then the groups recorded
+   for its test command, then the pane. It does so whether or not the reviewer's time bound
    has passed, so an orphan past its bound is always stopped by the first
    recovery to find it.
 3. It confirms that the reviewer and every recorded group are gone, by pid and
@@ -729,8 +729,8 @@ Five things are handed to it:
 **A configured test command reaches the reviewer in the prompt, and only at depth
 `deep`.** The prompt is the only channel a project's own text arrives through:
 the charter ships with the harness, and the command line is flags and tool names.
-It is named there as the only test command the reviewer may run. At `read` it is
-absent, because there is no shell to run it with.
+It is named there as the command `run_tests` runs. At `read` it is absent,
+because no tool runs it.
 
 **There is no file-selection or budgeting stage.** The reviewer decides what to
 open, one read at a time.
@@ -820,7 +820,7 @@ takes no input.
 
 **The round host stops a reviewer in a pane the way it stops one it started
 itself.** At the time bound it signals the reviewer's process group, then the
-groups the reviewer's shells recorded, as Confinement sets out, and then it closes
+groups recorded for the test command, as Confinement sets out, and then it closes
 the pane. It reads the reviewer's group from the backend while `pi` runs:
 
 | Backend | Where the reviewer's group comes from |
@@ -834,12 +834,12 @@ runs on with the window gone. Herdr's `pane close` sends `SIGHUP`, then `SIGTERM
 then `SIGKILL`, to every process in the pane's shell session. Neither reaches a
 process in a session of its own.
 
-**`pi` stops its own shells when it is closed or exits**, by sending `SIGKILL` to
-the group of each shell it started. A process one of those shells moved into a
-session of its own is reached by nothing: not the pane close, not `pi`, and not
-the recorded groups, which name the shells' groups and not that session. It runs
-on after the round. Nothing in this version detects it. No depth grants a
-shell, so only a process the `deep` test command starts can leave one.
+**A process the test command moves into a group or a session of its own is
+reached by nothing**: not the pane close, not the signal to the reviewer's
+group, and not a recorded group, which names the group the test command was
+started in. It runs on after the round, and nothing in this version detects it.
+Only `run_tests` starts a process the reviewer CLI does not, so only a round at
+`deep` can leave one.
 
 ### The snapshot
 
@@ -873,10 +873,10 @@ snapshot a killed round left behind is removed by the recovery that finds it, on
 its reviewer is confirmed gone.
 
 **Confinement applies to the snapshot.** The tracked-file comparison is taken in
-it before the reviewer starts and again when the reviewer exits. The refused
-calls and the shell-group record work as before, and scratch space stays at
-`.squiz/<number>/scratch/`. Nothing but the reviewer writes the snapshot, so a
-change the comparison finds is the reviewer's.
+it before the reviewer starts and again when the reviewer exits. Scratch space
+stays at `.squiz/<number>/scratch/`, outside it. Once the snapshot is made, only
+the test command `run_tests` starts can write it, so a change the comparison
+finds was made by a test command the reviewer ran.
 
 **What it costs:**
 
@@ -927,42 +927,65 @@ The reviewer must not change anything the coding agent would commit. Writes to
 gitignored paths and to locations outside the repository are permitted, which is
 what running a build and a test suite requires.
 
-What holds this depends on the depth.
+**No depth grants a tool that writes, or a shell.** `edit` and `write` are
+withheld at both depths, and so is every shell tool. Nothing the reviewer can
+call touches the tree, the reporting calls included: what a report reaches is
+the round that is reading the reviewer's output, and nothing on disk. At `read`
+the grant is the whole of the confinement.
 
-**At `read` the tool grant holds it.** The reviewer is given no tool that
-writes: `edit` and `write` are withheld, and so is the shell. Nothing it can
-reach for touches the tree, the reporting calls included: what a report reaches
-is the round that is reading the reviewer's output, and nothing on disk.
+**At `deep`, three things hold:**
 
-**At `deep` the grant includes `bash`, which is itself a write primitive.** A
-reviewer at `deep` can write to a tracked file, and five mechanisms bound what
-follows. None is configurable, and each applies where the third column says.
+- the grant, which carries no tool that writes and no shell;
+- the typed tools, whose arguments reach no shell, as Depth sets out. The three
+  history tools each run one `git` subcommand that reads, and `run_tests` takes
+  no argument;
+- the comparison taken in the snapshot, which names a write the test command
+  made there.
+
+**The test command is not confined.** It runs the project's code at the commit
+under review, with the user's access, as the coding agent's own test runs do,
+and nothing confines it. Its environment carries no GitHub token or `gh`
+credential, and nothing else is withheld from it. An operating-system sandbox
+around the reviewer and every process it starts is held as #529.
+
+**The comparison sees the snapshot and nothing else.** A write the test command
+makes anywhere else is neither prevented nor detected. That includes:
+
+- the git directory the snapshot shares with the coding agent's worktree: its
+  config, such as the `core.hooksPath` that a `husky` install sets (#540), and
+  its branches, tags and other refs;
+- the coding agent's worktree, the user's home directory, and other
+  repositories;
+- a remote, reached by `git push` or any other network call, with any credential
+  the user's machine supplies outside the environment.
+
+Five mechanisms bound what happens inside the round. None is configurable, and
+each applies where the third column says.
 
 | Mechanism | Guards against | Applies |
 |---|---|---|
-| **Scratch space.** `TMPDIR` points at `.squiz/<number>/scratch/`, which is gitignored and goes with the worktree. | A probe script or temporary file landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
+| **Scratch space.** `TMPDIR` points at `.squiz/<number>/scratch/`, which is gitignored and goes with the worktree. | A temporary file the test command writes landing in the tree, where it appears in `git status` and may be committed as the coding agent's own work. | Always |
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
-| **Refused calls.** The reviewer's own calls are refused before they run: the `edit` and `write` tools, and the shell commands that change which commit the work sits on. | A reviewer that moves `HEAD` — `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`, `git update-ref` — or pushes with `git push`. The comparison names a moved `HEAD` once the reviewer has exited, and a refused call never moves it. | At `deep`, where a shell is granted |
-| **A comparison of `git status`, the hashes of tracked files, and `HEAD`**, taken in the snapshot before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, including one made through the shell, and a `HEAD` that names another branch or another commit. | Always, in the snapshot |
-| **The process group each shell records for itself**, signalled when the round ends. | A tool the reviewer started outliving the round, where the signal to the reviewer's own group does not reach it. | Where the reviewer CLI starts a shell in a group of its own |
+| **Refused calls.** `pi`'s extension refuses the `edit` and `write` tools by name before they run. | A grant that stops being passed. The grant already withholds both, so while it is passed no refusal fires. | The `pi` adapter, at both depths |
+| **A comparison of `git status`, the hashes of tracked files, and `HEAD`**, taken in the snapshot before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, and a `HEAD` that names another branch or another commit. At `deep` the test command can make either. | Always, in the snapshot |
+| **The process group the test command leads**, recorded when it starts and signalled when the round ends. | A test process outliving the round, where the signal to the reviewer's own group does not reach it. | Where `run_tests` starts the test command in a group of its own |
 
 The first three prevent, the fourth detects, and the fifth reaches what the
 round's own signal does not.
 
-**A refused call never reaches a shell**, and the reviewer reads the refusal as
-that call's own error while it is still there to choose something else.
+**No shell command is refused.** A refused call is one of the reviewer's own,
+and no depth grants the reviewer a call that runs a command line. What the test
+command runs passes through nothing that reads it. `pi`'s extension still
+carries code that matches shell commands, and the `pi` adapter still writes a
+settings line that has each shell record its group. Nothing in this
+specification needs either, and their removal is #557.
 
-A name counts where a command runs: `grep 'git commit' file` searches and is not
-refused. A word the shell builds out of quoting is left alone: `git "com"mit`
-runs. So the refusals hold a reviewer acting in good faith, not one working
-around them.
-
-**A command that moves `HEAD` and is not refused is detected, and not
-prevented.** `git "com"mit` is such a command. The comparison reads `HEAD` as the
-branch it names and the commit that branch is at, or as the commit a detached
-`HEAD` is at. A commit, an amend, a reset and a switch to another branch are each
-named, though every tracked file is left exactly as it was. The round reports the
-move and does not undo it.
+**A move of `HEAD` is detected, and not prevented.** A test that commits,
+amends, resets or switches branch in the snapshot moves the snapshot's `HEAD`.
+The comparison reads `HEAD` as the branch it names and the commit that branch is
+at, or as the commit a detached `HEAD` is at. A commit, an amend, a reset and a
+switch to another branch are each named, though every tracked file is left
+exactly as it was. The round reports the move and does not undo it.
 
 | `HEAD` | Read as |
 |---|---|
@@ -973,22 +996,28 @@ move and does not undo it.
 A `HEAD` that cannot be read makes the comparison one that could not be taken,
 as a tracked file that cannot be read does.
 
-`git push` changes the remote and leaves `HEAD` where it was, so the comparison
-does not see it.
+**Whether `run_tests` starts the test command in a group of its own is not
+settled** (#547). Started in the reviewer's group, the test command is reached
+by the round's signal to that group, and nothing is recorded. Started in a group
+of its own, it can be stopped at the end of its own run without stopping the
+reviewer, and the round reaches it at the end only through the record below.
+Either way, a process the test command moves into a group or a session of its
+own is reached by nothing, as The reviewer session sets out.
 
-Every shell the reviewer starts writes the group it leads into a file the round
-names, before it runs the command it was given, so a tool started in the last
-instant before the reviewer exits is recorded like any other. The file lives in
-`.squiz/<number>/`, under a name that round alone uses, and it goes when the
-round ends. Nothing is recorded at `read`, where no shell is granted.
+Where the test command leads a group of its own, that group is written into a
+file the round names before the command runs, so a test command started in the
+last instant before the reviewer exits is recorded like any other. The file
+lives in `.squiz/<number>/`, under a name that round alone uses, and it goes
+when the round ends. Nothing is recorded at `read`, where nothing runs the test
+command.
 
 **A recorded group is signalled only where the system says it is still the
-round's own.** The identifier is the shell's own and is free the moment that
-shell is reaped, and the space of identifiers turns over in well under one round,
-so a number left unheld comes to name something else. Each shell therefore leaves
-a process of the round's own in its group, under a name no other round uses, and
-the round signals a group where it holds one of those and where nothing in it
-predates the round.
+round's own.** The identifier is the group leader's own and is free the moment
+that leader is reaped, and the space of identifiers turns over in well under one
+round, so a number left unheld comes to name something else. A recorded group
+therefore holds a process of the round's own, under a name no other round uses,
+and the round signals a group where it holds one of those and where nothing in
+it predates the round.
 
 **The round reads each group again before it kills anything outright**, because a
 `SIGKILL` cannot be taken back. That reading asks something different. The group
@@ -998,13 +1027,14 @@ place. A number cannot be handed out while anything still holds it, so a group
 that still holds one of them never emptied and is the group that was signalled.
 
 A group whose every process began after the round signalled it is left alone, so
-a tool that answers `SIGTERM` by leaving a fresh process behind and exiting is not
-killed outright.
+a test process that answers `SIGTERM` by leaving a fresh process behind and
+exiting is not killed outright.
 
 A group nothing could be established about is left alone: a stranger's process
-killed over a reused identifier is worse than a tool left running. Both readings
-are bounded, and one cut short establishes nothing, so a system that will not
-answer about a process leaves a tool running rather than holding the round open.
+killed over a reused identifier is worse than a test process left running. Both
+readings are bounded, and one cut short establishes nothing, so a system that
+will not answer about a process leaves a test process running rather than
+holding the round open.
 
 ### Adapters
 
@@ -1058,12 +1088,11 @@ stopped, as Copilot does. A run declared its review finished where the report
 file holds the finish, and the round knows when it stopped a run itself, because
 the stop is its own. Nothing else is read for it.
 
-**A CLI that starts a shell tool in a group of its own puts that tool outside
-that signal.** The round signals the reviewer's group, and a shell the CLI
-detached leads a group that is not it. `confine` is where such an adapter
-delivers the line its CLI runs inside every shell, which is what has each shell
-record the group it leads. What the round then does with those groups is under
-Confinement. Copilot starts every shell this way, which matters at `deep` alone.
+**The `deep` tools run inside the reviewer's own group**: in the extension `pi`
+loads, and in the server the Copilot adapter ships. No CLI is granted a shell
+tool, so no adapter has a shell record its group. The test command `run_tests`
+starts is the one process that may lead a group of its own, as Confinement sets
+out.
 
 ### The `pi` adapter
 
@@ -1109,32 +1138,14 @@ line is the only one loaded. An extension installed on the machine or sitting in
 the tree under review could otherwise register a tool under a reporting call's
 name and take the round's reports.
 
-**The line every shell runs before its command is a setting rather than a flag**,
-so the adapter writes `pi`'s settings itself. It makes a directory of its own
-under `.squiz/<number>/` and points `PI_CODING_AGENT_DIR` at it. Every entry of
-the user's own configuration directory is linked into that one, and
-`settings.json` alone is written afresh: the user's, with the recording line
-added.
-
-The whole of `pi`'s configuration resolves against that variable, not the
-settings alone: its credential, its model catalogue, and the binaries it puts on
-the shell's path. A directory holding the settings alone would be a reviewer with
-no credential, reviewing on a model nobody chose. The links are followed rather
-than replaced, so a token `pi` refreshes through one lands in the user's own file.
-Nothing is written at `read`, where no shell is granted and there is nothing to
-record.
+**The adapter writes none of `pi`'s settings.** `pi` is granted no shell at
+either depth, so it has no shell to hand a recording line to, and
+`PI_CODING_AGENT_DIR` is left as the user has it.
 
 `--no-approve` untrusts the tree under review, so none of its own `.pi/`
 configuration reaches `pi`. Without it `pi` merges a trusted project's
 `.pi/settings.json` over the user's global settings, and a trust decision saved
-against any directory above the worktree trusts the worktree. A shell command
-prefix of its own replaces the recording line outright, and then no shell records
-anything.
-
-A shell command prefix the project configured still runs. The adapter resolves it
-the way `pi` resolves it — the project's where the tree sets one, the user's own
-otherwise — and writes the recording line in front of it. Nothing else of the
-project's applies.
+against any directory above the worktree trusts the worktree.
 
 **The reviewer's reports reach the round through a file, not through `pi`'s
 output.** In a pane, `pi`'s output is the screen. The extension appends one line
@@ -1396,13 +1407,9 @@ the grant carries `squiz-report_finding`, `squiz-report_verdict` and
 At `read` the grant is the whole of the confinement, as Confinement sets out.
 Nothing is refused by pattern, so the run's refusals are always zero.
 
-`deep` is not granted until the adapter can do two things it cannot yet. Copilot
-runs each shell call in a session of its own, so each shell would have to record
-the group it leads. Copilot's nearest to `pi`'s settings line is `--bash-env`,
-which enables `BASH_ENV`, and whether bash reads that file under `--norc
---noprofile` is not measured. A call `--deny-tool` refuses is recorded in
-Copilot's own event stream and never in the report file, so the round would
-count none of the refusals.
+`deep` is not granted until the adapter's server serves the four `deep` tools.
+Copilot is granted no shell tool at `deep` either, so nothing it starts has to
+record a group, and nothing has to be refused by pattern.
 
 #### The reporting server
 
@@ -2258,7 +2265,7 @@ nothing retries one.
 | The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. |
 | The reviewer exceeds the review budget | Exit 1, unless the round holds the reviewer's declaration, as the end of this row says. The reviewer process is killed, what it reported before the kill is posted, and the failure comment and stderr say how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. That round posts no failure comment, and exits 0, 2 or 3 as its outcome says. |
 | The command is stopped from outside | The coding agent's tool or a person ends `squiz review` while it waits. The round runs in the round host, outside the command's process tree and group, and goes on. The next run returns its result. |
-| The round host dies | The reviewing record names a host that has gone, so the round reads as killed. The next trigger or round host to find it stops the orphaned reviewer and its recorded shell groups, confirms they are gone, removes the snapshot, and records the round failed, as The round host under § 3 sets out. What the reviewer reported is not posted, and no failure comment is posted. The state is retried by a new commit or reply, or by `squiz review`. |
+| The round host dies | The reviewing record names a host that has gone, so the round reads as killed. The next trigger or round host to find it stops the orphaned reviewer and its recorded groups, confirms they are gone, removes the snapshot, and records the round failed, as The round host under § 3 sets out. What the reviewer reported is not posted, and no failure comment is posted. The state is retried by a new commit or reply, or by `squiz review`. |
 | No pane can be opened | Where tmux or Herdr refuses to open a pane, the round host starts the reviewer detached, and the round goes on. |
 | No wake reaches the owner of the work | The note stays in `.squiz/<number>/notes/`. The owner learns the result from `squiz review` or `squiz status`, and the pull request holds it. |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. stderr is the channel. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
@@ -2365,7 +2372,7 @@ three parts, each bounded on its own:
 
 Stopping the reviewer runs after the moment the review had to be over by, and a
 reviewer that ignores the signal spends the grace and the kill there. The
-readings it takes of the groups its shells recorded are bounded as well, so
+readings it takes of the groups recorded for the test command are bounded as well, so
 nothing about stopping a round is unbounded. That overrun comes out of the
 posting reserve: a round whose reserve is spent by the time it has findings
 posts nothing and says so.
@@ -2519,7 +2526,7 @@ until something asks.
 | **P0** | The failure comment | What failed and what else the round established, posted by a round that fails, with the same reason the command prints |
 | **P0** | The command's stderr | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub says nothing about why |
 | **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the pull request's number and living in the worktree |
-| **P1** | Depth `deep` | Running the configured tests and reading history (`git log -S`, `git blame`, `git show`) through tools that take fixed arguments, with no shell granted and no GitHub credential in the reviewer's environment. It ships with the tracked-file comparison, or not at all |
+| **P1** | Depth `deep` | Running the configured tests and reading history (`git log -S`, `git blame`, `git show`) through tools that take fixed arguments, with no shell granted and no GitHub credential in the reviewer's environment. It ships with the tracked-file comparison, or not at all. The test command still runs with the user's access, and nothing confines a write it makes outside the snapshot until the operating-system sandbox below |
 | **P1** | The tracked-file comparison | `git status`, the hashes of tracked files, and `HEAD`, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
@@ -2648,7 +2655,7 @@ its own branch. Squiz does not create them, and does not remove them.
 | `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `depth` | `read` | `deep` adds running the configured tests and reading history, with no shell, and requires the tracked-file comparison |
-| `test` | none | The non-mutating command that runs the tests |
+| `test` | none | The non-mutating command that runs the tests, which `run_tests` runs in the snapshot at `deep`. It runs with the user's access, unconfined (§ 4 Confinement) |
 | `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
