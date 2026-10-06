@@ -19,7 +19,7 @@
 
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
-import { unspent, type RoundCost } from "../reviewers/adapter.ts";
+import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
 import type { ConfinementEvidence } from "./confinement.ts";
 import type { Episode } from "./episode.ts";
 import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
@@ -29,10 +29,16 @@ import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
  * the time bound that ended the reviewer where one did, and how long its posting
  * took.
  *
+ * A round with no cost carries no figure of any kind, rather than zeros that
+ * would read back as a round that spent nothing.
+ *
  * A file written before the timings were recorded carries none of them, so a
  * reader takes none as given.
  */
-export type RoundRecord = RoundCost & {
+export type RoundRecord = (RoundCost | NoCost) & Timings;
+
+/** How long a round's reviewer ran and its posting took, and the bound that cut it short. */
+export type Timings = {
   /** Wall-clock seconds from starting the reviewer to having it stopped, to a tenth. */
   readonly elapsedSeconds?: number;
   /**
@@ -48,6 +54,27 @@ export type RoundRecord = RoundCost & {
    */
   readonly postingSeconds?: number;
 };
+
+/** The figures of a round with no cost, every one of them absent. */
+type NoCost = { readonly [figure in keyof RoundCost]?: never };
+
+/** A round's entry, from its cost and its timings. */
+export function roundRecord(cost: Spend, timings: Timings): RoundRecord {
+  return cost === undefined ? { ...timings } : { ...cost, ...timings };
+}
+
+/** The cost a round's entry records, or `undefined` where it records none. */
+export function costOf(round: RoundRecord): Spend {
+  if (round.tokens === undefined) return undefined;
+  const { dollars, tokens, messages, credits, floor } = round;
+  return {
+    dollars,
+    tokens,
+    messages,
+    ...(credits === undefined ? {} : { credits }),
+    ...(floor === undefined ? {} : { floor }),
+  };
+}
 
 /** What the rounds of one episode have established so far. */
 export type EpisodeState = {
@@ -222,6 +249,9 @@ export function recordSpendOutsideRounds(
     dollars: spent.dollars + cost.dollars,
     tokens: spent.tokens + cost.tokens,
     messages: spent.messages + cost.messages,
+    ...(spent.credits === undefined && cost.credits === undefined
+      ? {}
+      : { credits: (spent.credits ?? 0) + (cost.credits ?? 0) }),
   };
   return {
     ...state,
@@ -397,9 +427,9 @@ type ReadRound = { readonly round: RoundRecord } | { readonly problem: string };
  * finished.
  */
 function roundFrom(entry: unknown): ReadRound {
-  const read = costFrom(entry);
-  if ("problem" in read) return read;
   if (!isRecord(entry)) return { problem: `is ${render(entry)} rather than a JSON object` };
+  const read = costless(entry) ? { cost: undefined } : costFrom(entry);
+  if ("problem" in read) return read;
 
   const elapsed = entry["elapsedSeconds"];
   if (elapsed !== undefined && !isAmount(elapsed)) {
@@ -415,13 +445,18 @@ function roundFrom(entry: unknown): ReadRound {
   }
 
   return {
-    round: {
-      ...read.cost,
+    round: roundRecord(read.cost, {
       ...(elapsed === undefined ? {} : { elapsedSeconds: elapsed }),
       ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
       ...(posting === undefined ? {} : { postingSeconds: posting }),
-    },
+    }),
   };
+}
+
+/** Whether a round's entry carries no figure at all, which is a round with no cost. */
+function costless(entry: Record<string, unknown>): boolean {
+  const figures: readonly (keyof RoundCost)[] = ["dollars", "tokens", "messages", "credits", "floor"];
+  return figures.every((figure) => entry[figure] === undefined);
 }
 
 function costFrom(entry: unknown): ReadCost {
@@ -439,10 +474,20 @@ function costFrom(entry: unknown): ReadCost {
   const messages = entry["messages"];
   if (!isTally(messages)) return { problem: `has "messages" as ${render(messages)}` };
 
+  const credits = entry["credits"];
+  if (credits !== undefined && !isAmount(credits)) return { problem: `has "credits" as ${render(credits)}` };
+
   const floor = entry["floor"];
-  if (floor === undefined) return { cost: { dollars, tokens, messages } };
-  if (floor !== true) return { problem: `has "floor" as ${render(floor)}` };
-  return { cost: { dollars, tokens, messages, floor } };
+  if (floor !== undefined && floor !== true) return { problem: `has "floor" as ${render(floor)}` };
+  return {
+    cost: {
+      dollars,
+      tokens,
+      messages,
+      ...(credits === undefined ? {} : { credits }),
+      ...(floor === undefined ? {} : { floor }),
+    },
+  };
 }
 
 function unreadable(reason: string): StateRead {

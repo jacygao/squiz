@@ -117,6 +117,15 @@ export type RoundCost = {
  */
 export const unspent: RoundCost = Object.freeze({ dollars: 0, tokens: 0, messages: 0 });
 
+/**
+ * What a run spent, or `undefined` where it has no cost: the CLI reported no
+ * figure for it.
+ *
+ * No cost is not a zero. A zero is a round that spent nothing, and it is summed
+ * into the summary's totals and counted against the token bound as one.
+ */
+export type Spend = RoundCost | undefined;
+
 /** The reviewer's ruling on one thread it was handed. */
 export type ThreadVerdict = {
   /** The identifier the thread was handed over under, copied back. */
@@ -163,7 +172,7 @@ export type Reported = RoundOutput & {
 };
 
 /** What a round has so far: what it has spent, and what the reviewer has reported. */
-export type RoundProgress = { readonly cost: RoundCost } & Reported;
+export type RoundProgress = { readonly cost: Spend } & Reported;
 
 /**
  * Told what the round has so far, each time the run adds to it.
@@ -196,7 +205,7 @@ export type RunResult =
  * spent whatever its messages reported before it stopped.
  */
 export type ParsedRun = {
-  readonly cost: RoundCost;
+  readonly cost: Spend;
   readonly result: RunResult;
 };
 
@@ -262,4 +271,11 @@ export type Adapter = {
    * whose CLI keeps no session has no resume.
    */
   readonly resume?: (sessionDirectory: string, spelled: string) => readonly string[] | undefined;
+  /**
+   * The CLI reports a run's cost once, as it exits by itself, so a run the round
+   * stopped has no cost. Absent where it reports each message's cost as the
+   * message completes, so a stopped run has a floor: what completed, short of
+   * the message in flight.
+   */
+  readonly costAtExit?: true;
 };

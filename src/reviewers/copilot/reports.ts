@@ -27,8 +27,8 @@ import {
   type Reported,
   type RoundCost,
   type RunResult,
+  type Spend,
   type ThreadVerdict,
-  unspent,
 } from "../adapter.ts";
 import { REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 
@@ -216,12 +216,9 @@ function resultOf(tally: Tally): RunResult {
   return { kind: "unparsed", reason: unfinished(tally.findings, tally.verdicts) };
 }
 
-/**
- * The run's cost, or `unspent` where there is none: no usage line, or one that
- * carried no token counts.
- */
-function costOf(tally: Tally): RoundCost {
-  return tally.usage?.cost ?? unspent;
+/** The run's cost, or none: no usage line, or one that carried no token counts. */
+function costOf(tally: Tally): Spend {
+  return tally.usage?.cost;
 }
 
 function reportedIn(tally: Tally): Reported {

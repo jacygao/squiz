@@ -59,6 +59,7 @@ import {
   readState,
   recordPostingSeconds,
   recordRound,
+  roundRecord,
   recordSpendOutsideRounds,
   type EpisodeState,
   type StateWrite,
@@ -656,7 +657,8 @@ async function reviewOn(
     // The recorded entries are the rounds that have run, this one included,
     // which is the count the cap does its arithmetic on.
     roundsRun: recorded.rounds.length,
-    tokens: review.cost.tokens,
+    // A round with no cost counts nothing against the token bound.
+    tokens: review.cost?.tokens ?? 0,
   };
   const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve);
   if ("reason" in ended) {
@@ -1005,13 +1007,16 @@ function withSpend(
 ): EpisodeState | null {
   const kept = withConfinement(state, confinement);
   if (isRound(review)) {
-    return recordRound(kept, {
-      ...review.cost,
-      elapsedSeconds,
-      ...(review.outcome === "timed-out" ? { cutShortAtSeconds: review.seconds } : {}),
-    });
+    return recordRound(
+      kept,
+      roundRecord(review.cost, {
+        elapsedSeconds,
+        ...(review.outcome === "timed-out" ? { cutShortAtSeconds: review.seconds } : {}),
+      }),
+    );
   }
-  if (nothingSpent(review.cost)) return null;
+  // An attempt with no cost has no figure to add to the episode's spend.
+  if (review.cost === undefined || nothingSpent(review.cost)) return null;
   return recordSpendOutsideRounds(kept, review.cost);
 }
 
@@ -1406,7 +1411,7 @@ function anchorOf(outcome: Threaded): ThreadAnchor {
  * of them would.
  */
 function widestAttempt(state: EpisodeState): number {
-  const rounds = state.rounds.map((cost) => cost.tokens);
+  const rounds = state.rounds.map((round) => round.tokens ?? 0);
   return Math.max(0, ...rounds, state.spentOutsideRounds.tokens);
 }
 

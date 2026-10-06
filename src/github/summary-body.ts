@@ -18,7 +18,7 @@ import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
 import type { ConfinementEvidence } from "../loop/confinement.ts";
-import type { RoundRecord } from "../loop/episode-state.ts";
+import { costOf, type RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import { namedStates, type LeftNotReviewed, type StoppingBound } from "../loop/round-end.ts";
@@ -102,7 +102,8 @@ function tally(episode: ClosedEpisode): string {
   const statuses = Object.entries(countedAs)
     .map(([status, word]) => `${word} ${howMany(episode.threads, status)}`)
     .join(" · ");
-  return `${marker}${rounds}, ${findings}**\n\n${statuses}\n${renderSpendLine(episode.rounds)}`;
+  const spend = renderSpendLine(episode.rounds.map(costOf));
+  return `${marker}${rounds}, ${findings}**\n\n${statuses}${spend === null ? "" : `\n${spend}`}`;
 }
 
 /**

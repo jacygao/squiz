@@ -36,7 +36,7 @@ import {
 import { composeReview } from "../review/output.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { headMovedIn } from "./confinement.ts";
-import { writeState, type EpisodeState } from "./episode-state.ts";
+import { writeState, type EpisodeState, type RoundRecord } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
@@ -105,7 +105,7 @@ type Setup = {
   readonly reviewer: Reviewer;
   readonly config?: Partial<Config>;
   /** Rounds already recorded, which is what makes the round a later one. */
-  readonly rounds?: readonly RoundCost[];
+  readonly rounds?: readonly RoundRecord[];
   /** What the episode already spent on attempts that were no round. */
   readonly outsideRounds?: RoundCost;
   /** Whether a firing of the episode has already reported its close. */
@@ -223,13 +223,14 @@ const ANSWER_COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
 function reviews(output: {
   readonly findings?: readonly Finding[];
   readonly verdicts?: readonly ThreadVerdict[];
-  readonly cost?: RoundCost;
+  /** `undefined` given explicitly is a review with no cost, as Copilot's can be. */
+  readonly cost?: RoundCost | undefined;
 }): Reviewer {
   return {
     parse: async (stdout): Promise<ParsedRun> => {
       await drain(stdout);
       return {
-        cost: output.cost ?? ANSWER_COST,
+        cost: "cost" in output ? output.cost : ANSWER_COST,
         result: {
           kind: "reviewed",
           findings: output.findings ?? [],
@@ -717,7 +718,10 @@ function untimed(state: EpisodeState | null): EpisodeState | null {
   if (state === null) return null;
   return {
     ...state,
-    rounds: state.rounds.map(({ dollars, tokens, messages }) => ({ dollars, tokens, messages })),
+    // A round with no cost has none of the three, and is left with none.
+    rounds: state.rounds.map(({ dollars, tokens, messages }) =>
+      tokens === undefined ? {} : { dollars, tokens, messages },
+    ),
   };
 }
 
@@ -1534,6 +1538,51 @@ test("a round that reached the token bound closes the episode", async () => {
     untimed(ran.state)?.rounds.at(-1),
     wide,
     "the dollars are still recorded beside the tokens the bound was read from",
+  );
+});
+
+/**
+ * A round with no cost is recorded with no figures, and the token bound counts
+ * nothing for it. Recorded as zeros, the summary would total it as a round that
+ * spent nothing.
+ */
+test("a round with no cost is recorded with no figures, and counts nothing against the token bound", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 8, tokens: 100_000 },
+    answers: POSTING,
+    reviewer: reviews({ cost: undefined, findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block", `the round concluded ${ran.conclusion.outcome}`);
+  assert.deepEqual(
+    Object.keys(ran.state?.rounds[0] ?? { missing: true }).sort(),
+    ["elapsedSeconds", "postingSeconds"],
+    "a round with no cost was written with figures",
+  );
+});
+
+// Copilot's tokens are input and output, as pi's are, so one bound means the
+// same thing whichever CLI reviews.
+test("a Copilot round with a cost is held to the token bound, its credits recorded beside the tokens", async () => {
+  const wide: RoundCost = { dollars: 0, tokens: 400_000, messages: 12, credits: 3.5 };
+  const ran = await runInFixture({
+    config: { rounds: 8, tokens: 400_000 },
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      unresolve: REOPENED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "token-bound");
+  assert.equal(ran.state?.rounds.at(-1)?.credits, 3.5);
+  assert.ok(
+    summaryBody(ran).includes("400,000 tokens over 1 round: 400,000 · 3.50 AI credits"),
+    `the summary did not carry the round's credits: ${summaryBody(ran)}`,
   );
 });
 

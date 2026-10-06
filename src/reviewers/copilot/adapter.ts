@@ -19,4 +19,5 @@ export const copilot: Adapter = {
   parse: readReports,
   grants,
   resume: resumeLine,
+  costAtExit: true,
 };
