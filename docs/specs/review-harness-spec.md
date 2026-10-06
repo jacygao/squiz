@@ -1092,7 +1092,7 @@ each applies where the third column says.
 | **A non-mutating test invocation**, named in configuration. | A snapshot runner rewriting its snapshots, which turns a failing test green by editing the code under review. | Where a test command is configured |
 | **Refused calls.** `pi`'s extension refuses the `edit` and `write` tools by name before they run. | A grant that stops being passed. The grant already withholds both, so while it is passed no refusal fires. | The `pi` adapter, at both depths |
 | **A comparison of `git status`, the hashes of tracked files, and `HEAD`**, taken in the snapshot before the reviewer starts and again when it exits. | A write that shows in `git status` or changes what a tracked file holds, and a `HEAD` that names another branch or another commit. At `deep` the test command can make either. | Always, in the snapshot |
-| **The process group the test command leads**, recorded when it starts and signalled when the round ends. | A test process outliving the round, where the signal to the reviewer's own group does not reach it. | Where `run_tests` starts the test command in a group of its own |
+| **The process group the test command leads**, recorded when it starts and signalled when the round ends. | A test process outliving the round, where the signal to the reviewer's own group does not reach it. | At `deep` |
 
 The first three prevent, the fourth detects, and the fifth reaches what the
 round's own signal does not.
@@ -1120,16 +1120,14 @@ exactly as it was. The round reports the move and does not undo it.
 A `HEAD` that cannot be read makes the comparison one that could not be taken,
 as a tracked file that cannot be read does.
 
-**Whether `run_tests` starts the test command in a group of its own is not
-settled** (#547). Started in the reviewer's group, the test command is reached
-by the round's signal to that group, and nothing is recorded. Started in a group
-of its own, it can be stopped at the end of its own run without stopping the
-reviewer, and the round reaches it at the end only through the record below.
-Either way, a process the test command moves into a group of its own is
-reached by no signal to a group, and one moved into a session of its own by
-nothing at all, as The reviewer session sets out.
+**`run_tests` starts the test command in a group of its own.** So it can be
+stopped at the end of its own run without stopping the reviewer, and the round
+reaches it at the end only through the record below. A process the test command
+moves into a further group of its own is reached by no signal to a group, and
+one moved into a session of its own by nothing at all, as The reviewer session
+sets out.
 
-Where the test command leads a group of its own, that group is written into a
+The group the test command leads is written into a
 file the round names before the command runs, so a test command started in the
 last instant before the reviewer exits is recorded like any other. The file
 lives in `.squiz/<number>/`, under a name that round alone uses, and it goes
