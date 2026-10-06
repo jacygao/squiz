@@ -18,7 +18,8 @@ const sessionId = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/u;
 
 /**
  * `COPILOT_HOME=<spelled> copilot --resume=<id>` for the latest session kept in
- * `home`, or `undefined` where there is none that could be read.
+ * `home`. `undefined` where there is none, and where any session's record is
+ * there and could not be read.
  */
 export function resumeLine(home: string, spelled: string): readonly string[] | undefined {
   const states = join(home, "session-state");
@@ -32,6 +33,8 @@ export function resumeLine(home: string, spelled: string): readonly string[] | u
   for (const name of names) {
     if (!sessionId.test(name)) continue;
     const started = startOf(join(states, name, "events.jsonl"), name);
+    // It may be the latest, and any line given instead could resume another conversation.
+    if (started === "unreadable") return undefined;
     if (started !== undefined && (latest === undefined || started > latest.started)) {
       latest = { id: name, started };
     }
@@ -40,13 +43,18 @@ export function resumeLine(home: string, spelled: string): readonly string[] | u
   return [`COPILOT_HOME=${spelled}`, "copilot", `--resume=${latest.id}`];
 }
 
-/** When the session `id` started, where its record opens with its own `session.start`. */
-function startOf(file: string, id: string): number | undefined {
+/**
+ * When the session `id` started, where its record opens with its own
+ * `session.start`. `undefined` where there is no record or it is not a session's,
+ * and `"unreadable"` where a record is there and could not be read.
+ */
+function startOf(file: string, id: string): number | undefined | "unreadable" {
   let line: string;
   try {
     line = firstLine(file);
-  } catch {
-    return undefined;
+  } catch (cause) {
+    const code = typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
+    return code === "ENOENT" ? undefined : "unreadable";
   }
   let parsed: unknown;
   try {

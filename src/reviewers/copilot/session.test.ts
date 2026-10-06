@@ -56,6 +56,15 @@ test("a later session whose record names another id, or none, is passed over", (
   assert.equal(resumeLine(directory, "s")?.at(-1), `--resume=${OLDER}`);
 });
 
+// Any line given instead could resume a different conversation from the round's.
+test("a session whose record is there and cannot be read leaves nothing to resume", (t) => {
+  const directory = home(t);
+  session(directory, OLDER, "2026-10-05T23:50:00.000Z");
+  // A directory where the record would be, which cannot be read as a file.
+  mkdirSync(join(directory, "session-state", "ffffffff-0000-4000-8000-000000000006", "events.jsonl"), { recursive: true });
+  assert.equal(resumeLine(directory, "s"), undefined);
+});
+
 test("a later session whose id is not one word to a shell is passed over", (t) => {
   const directory = home(t);
   session(directory, OLDER, "2026-10-05T23:50:00.000Z");
