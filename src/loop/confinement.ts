@@ -24,9 +24,9 @@
  * composed from the closing round's readings alone would say a tree nobody
  * touched for an episode whose first round named a mutated file.
  *
- * **At `deep` the git files the snapshot shares are read as well.** The test
- * command can write the repository's config and hooks, which the coding agent's
- * worktree reads too and the snapshot's files do not show. Unlike the snapshot,
+ * **At `deep` the coding agent's git config and hooks are read as well.** The test
+ * command can write them by the repository's path, and the snapshot's files do
+ * not show it. Unlike the snapshot,
  * those files are not the reviewer's alone: the coding agent and every other
  * worktree of the repository write them, so a change found there is named as one
  * the reviewer's tests may have made. At `read` the reviewer runs nothing, and
@@ -80,7 +80,7 @@ export type RoundConfinement = {
   /** What the reviewer did to the paths a commit could carry, and to `HEAD`. */
   readonly trackedFiles: TrackedFilesAnswer;
   /**
-   * What changed in the git files the snapshot shares. Absent at `read`, where
+   * What changed in the coding agent's git config and hooks. Absent at `read`, where
    * the reviewer runs nothing that could write them.
    */
   readonly sharedConfig?: SharedConfigAnswer;

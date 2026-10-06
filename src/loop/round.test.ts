@@ -507,7 +507,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         ? {}
         : { [setup.lockStateAfter]: episode.directory }),
     });
-    if (setup.snapshotAddFails === true) failWorktreeAdd(binaries);
+    if (setup.snapshotAddFails === true) failCheckout(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     if (setup.rounds !== undefined) {
@@ -656,15 +656,15 @@ function withHead<T extends Partial<Record<Kind, string | readonly string[]>>>(
   ) as T;
 }
 
-/** A `git` ahead of the real one, whose `worktree add` adds and then fails. */
-function failWorktreeAdd(binaries: string): void {
+/** A `git` ahead of the real one, whose `checkout` checks out and then fails. */
+function failCheckout(binaries: string): void {
   const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   standIn(
     binaries,
     "git",
     [
       "#!/bin/sh",
-      `case " $* " in *" worktree add "*) '${real}' "$@"; exit 1 ;; esac`,
+      `case " $* " in *" checkout "*) '${real}' "$@"; exit 1 ;; esac`,
       `exec '${real}' "$@"`,
       "",
     ].join("\n"),
@@ -2739,7 +2739,7 @@ test("a snapshot that cannot be made runs no review, and what the add left is re
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
-  assert.match(ran.conclusion.reason, /^no review ran: the snapshot could not be added at /u);
+  assert.match(ran.conclusion.reason, /^no review ran: the snapshot could not be made at /u);
   assert.deepEqual(ran.invocations, [], "no reviewer starts without its snapshot");
   assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "failure"]);
   assert.deepEqual(ran.snapshotsLeft, [], "what the failed add made is removed with the round");

@@ -1,11 +1,16 @@
 /**
- * A round's snapshot: a detached worktree at the head commit under review,
- * which only the reviewer reads and writes.
+ * A round's snapshot: a clone of the coding agent's repository, checked out
+ * detached at the head commit under review, which only the reviewer reads and
+ * writes.
  *
  * The coding agent may be editing its own worktree while the round runs, so the
- * reviewer never reads that. The snapshot shares the agent's object store and
- * sits outside its worktree, so it shows in neither the agent's `git status`
- * nor its commits.
+ * reviewer never reads that. The clone borrows the repository's objects and
+ * shares nothing else: a test command that sets config, installs a hook, or
+ * makes a branch in the snapshot does it to the clone's own git directory, which
+ * goes when the snapshot does.
+ *
+ * Borrowing means the clone reads the repository's objects in place. One
+ * pruned from the repository while the snapshot stands is gone from it too.
  *
  * It sits in the temporary directory, under no component that begins with a
  * dot, wherever the worktree is. A suite that matches its own absolute paths
@@ -17,12 +22,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, rmdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, rmdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
-import { runGit } from "./git.ts";
+import { type GitOutput, runGit } from "./git.ts";
 
 /** The snapshot made, and whether its commit had to be fetched first, or why not. */
 export type SnapshotAddition =
@@ -68,9 +73,9 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * - anything already stands at the path, which is a killed round's snapshot
  *   for recovery to remove;
  * - the fetch fails, or finishes without bringing the commit;
- * - git refuses the add, or the deadline passes.
+ * - git refuses the clone or the checkout, or the deadline passes.
  *
- * Git makes the snapshot before the add can fail, so a failed add that left
+ * A checkout can fail after the clone is made, so a failed addition that left
  * anything at the path says so in `leftBehind`. Nothing here removes it, because
  * removal grows with the snapshot and does not belong before the review.
  */
@@ -81,7 +86,7 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
   const unowned = ownSnapshotsDirectory();
   if (unowned !== null) return failed(unowned);
   const path = snapshotPath(worktree, of);
-  // Git adds into an empty directory that is already there, so its own refusal
+  // Git clones into an empty directory that is already there, so its own refusal
   // is not enough to keep a leftover from being reused.
   if (existsSync(path)) return failed(`something already stands at ${path}`);
 
@@ -101,39 +106,62 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
     if (!arrived.has) return failed(`the fetch finished without bringing ${of.commit}`);
   }
 
-  const added = runGit(
-    worktree,
-    // The project's checkout hooks are for the coding agent's worktree. In a
-    // snapshot they would spend the deadline, and could write outside it.
-    ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "--detach", path, of.commit],
-    { until },
+  const common = runGit(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"], { until });
+  if (!common.ran) return failed(`the repository of ${worktree} could not be found: ${common.reason}`);
+
+  // A commit fetched by its name is on no ref, and a clone copies refs. The
+  // clone reads the repository's objects in place, so it has the commit and its
+  // history all the same.
+  const cloned = madeAt(
+    path,
+    runGit(
+      worktree,
+      [
+        "clone",
+        "--quiet",
+        "--shared",
+        "--no-checkout",
+        // The clone's origin is the coding agent's repository, whose refs a
+        // push would write.
+        "--config",
+        "remote.origin.pushurl=/dev/null",
+        common.stdout.trim(),
+        path,
+      ],
+      { until },
+    ),
   );
-  if (!added.ran) {
-    const reason = `the snapshot could not be added at ${path}: ${added.reason}`;
-    // The path was clear before the add, so whatever stands there now is its.
-    return existsSync(path) ? { outcome: "failed", reason, leftBehind: path } : failed(reason);
-  }
+  if (cloned !== null) return cloned;
+  // A checkout hook from the user's own config or template would spend the
+  // deadline, and could write outside the snapshot.
+  const checkedOut = madeAt(
+    path,
+    runGit(path, ["-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", of.commit], { until }),
+  );
+  if (checkedOut !== null) return checkedOut;
   return { outcome: "added", path, fetched: !present.has };
 }
 
 /**
- * Remove the snapshot at `path`, with whatever the reviewer left in it, and
- * prune its registration from the repository. The episode's directories above
- * it go too, where nothing else is in them.
+ * Remove the snapshot at `path`, with whatever the reviewer left in it. The
+ * episode's directories above it go too, where nothing else is in them.
+ *
+ * Refuses any path but a round's snapshot in this user's snapshots directory,
+ * because it deletes whatever it is given.
  *
  * Unbounded: it runs after the round has recorded its result, and takes as long
  * as the files in the snapshot take to delete.
  */
-export function removeSnapshot(worktree: string, path: string): SnapshotRemoval {
-  // The coding agent's worktree may have been removed while the round ran. Git
-  // removes a worktree from inside it, so the snapshot is its own way back to
-  // the repository.
-  const agentGone = !existsSync(worktree);
-  const removed = runGit(agentGone ? path : worktree, ["worktree", "remove", "--force", path]);
-  if (!removed.ran) return failed(`the snapshot at ${path} could not be removed: ${removed.reason}`);
-  if (!agentGone) {
-    const pruned = runGit(worktree, ["worktree", "prune"]);
-    if (!pruned.ran) return failed(`the snapshot at ${path} was removed but not pruned: ${pruned.reason}`);
+export function removeSnapshot(path: string): SnapshotRemoval {
+  const parts = relative(snapshotsDirectory(), path).split(sep);
+  const isSnapshot =
+    isAbsolute(path) && parts.length === 4 && parts[0] !== ".." && parts[1] === "rounds" && parts[3] === "tree";
+  if (!isSnapshot) return failed(`${path} is not the path of a round's snapshot`);
+  try {
+    rmSync(path, { recursive: true });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return failed(`the snapshot at ${path} could not be removed: ${reason}`);
   }
   // `rounds/<round>`, `rounds` and the episode's own directory. One round of an
   // episode runs at a time, so no add races these.
@@ -211,6 +239,14 @@ function hasCommit(worktree: string, commit: string, until: Deadline): Presence 
   });
   if (!checked.ran) return { known: false, reason: checked.reason };
   return { known: true, has: checked.status === 0 };
+}
+
+/** The failure one step of making the snapshot came to, or null where it ran. */
+function madeAt(path: string, step: GitOutput): SnapshotAddition | null {
+  if (step.ran) return null;
+  const reason = `the snapshot could not be made at ${path}: ${step.reason}`;
+  // The path was clear before the snapshot was begun, so whatever stands there now is its.
+  return existsSync(path) ? { outcome: "failed", reason, leftBehind: path } : failed(reason);
 }
 
 function failed(reason: string): { readonly outcome: "failed"; readonly reason: string } {

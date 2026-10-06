@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.98 (draft)
+**Version:** 0.99 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -757,7 +757,7 @@ Five things are handed to it:
 
 | | |
 |---|---|
-| **A working directory** | A snapshot of the pull request's head commit, in a worktree of its own (The snapshot, below). The reviewer runs with this as its current directory. |
+| **A working directory** | A snapshot of the pull request's head commit, in a clone of its own (The snapshot, below). The reviewer runs with this as its current directory. |
 | **The pull request** | Its number, its base and head refs, its description, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness fetches all of this and passes it in. |
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
@@ -919,20 +919,47 @@ one.
 
 **Every reviewer reads its own snapshot of the head commit, at either depth.**
 The coding agent may be editing its worktree while a round runs, so the reviewer
-never reads that worktree. Before the reviewer starts, the round host adds a
-detached worktree at the head commit of the state under review, in the system's
-temporary directory:
+never reads that worktree. Before the reviewer starts, the round host clones the
+repository into the system's temporary directory and checks out the head commit
+of the state under review, detached:
 
 ```
-git worktree add --detach /var/folders/x7/T/squiz-501/5e1f0c2a9b3d7e64-41/rounds/2/tree 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+git clone --quiet --shared --no-checkout --config remote.origin.pushurl=/dev/null /work/squiz/.git /var/folders/x7/T/squiz-501/5e1f0c2a9b3d7e64-41/rounds/2/tree
+git -c core.hooksPath=/dev/null checkout --quiet --detach 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
 ```
 
-The commit is the one GitHub reports as the pull request's head. Where the
+The source is the repository's shared git directory, which
+`git rev-parse --git-common-dir` names from the coding agent's worktree. The
+commit is the one GitHub reports as the pull request's head. Where the
 repository does not have it yet, because it was pushed from elsewhere, the round
-host fetches it first. The fetch and the add run in the part of the round before
-the review, under its 30 seconds (§ 7 The review budget). The snapshot shares the
-repository's object store and sits outside the coding agent's worktree, so it
-shows in neither the agent's `git status` nor its commits.
+host fetches it into the repository first, writing no ref and no `FETCH_HEAD`.
+The fetch, the clone and the checkout run in the part of the round before the
+review, under its 30 seconds (§ 7 The review budget).
+
+**The snapshot borrows the repository's objects and shares nothing else.**
+`--shared` writes the repository's object directory into the clone's
+`objects/info/alternates`, so the clone reads every object the repository has,
+without copying one. That includes a head commit the fetch brought, which no ref
+points to. The clone's history is the repository's, so `git log`, `git blame`
+and `git show` in the snapshot answer as they would in a worktree at the same
+commit. Everything else is the clone's own:
+
+| The clone's own | What a test command's write to it reaches |
+|---|---|
+| Config, `.git/config` | The clone. A `core.hooksPath` that a `husky` install sets is the clone's. |
+| Hooks, `.git/hooks/` | The clone. The repository's hooks never run in the snapshot. |
+| Refs: branches, tags, `HEAD` | The clone. A branch or tag a test makes is not the repository's. |
+| `origin`, which names the repository | Nothing: its push URL is `/dev/null`, so a push to `origin` fails. |
+
+The clone's refs start as a copy of the repository's branches, under
+`refs/remotes/origin/`, and its tags. A branch name given to `git_show` resolves
+against those, so it can name a different commit than it would in the coding
+agent's worktree. A full commit name or a revision from `HEAD` resolves alike in
+both.
+
+The repository's local config does not reach the snapshot either. A filter or
+`core.autocrlf` set there, and not in the user's own config, is not applied when
+the snapshot is checked out, as it would not be in a fresh clone.
 
 **The path is `<temporary directory>/squiz-<uid>/<digest>-<number>/rounds/<k>/tree`:**
 
@@ -953,7 +980,7 @@ against a glob skips every file under such a component, so it would fail in the
 snapshot where it passes in a fresh checkout. A `TMPDIR` whose own path has such
 a component is the user's, and the harness does not change it.
 
-**The round host refuses to add a snapshot where `squiz-<uid>` is not the
+**The round host refuses to make a snapshot where `squiz-<uid>` is not the
 user's alone**: a link, a directory another user owns, or one that a group or
 other users can write. The temporary directory may be shared, as `/tmp` is, and
 another user could make that path first. The round fails before the review, as
@@ -961,20 +988,20 @@ any snapshot that cannot be made does.
 
 **The snapshot holds the commit and nothing else.** It carries none of the coding
 agent's uncommitted changes, which no state names, and none of its untracked
-files, build output or installed dependencies.
+files, build output or installed dependencies. It is not a worktree of the
+repository, so it shows in neither the coding agent's `git status` nor
+`git worktree list`.
 
 **The round host removes the snapshot once the round has recorded its result**,
-with `git worktree remove --force` and then `git worktree prune`, whatever the
-round became. It then removes `rounds/<k>/`, `rounds/` and `<digest>-<number>/`
-where each is empty. Removal grows with every file in the snapshot, the ones the
-reviewer left behind included, so it runs after the result rather than before it,
-and delays nothing a waiting `squiz review` returns. It takes no part of the
-round's deadline. The round host takes the next queued state once it is done.
-
-**The snapshot is removed even where the coding agent's worktree has gone.**
-Where that worktree was removed while the round ran, the round host runs the
-removal from inside the snapshot instead, and skips the prune, which needs a
-worktree that still exists.
+by deleting its directory, whatever the round became. It deletes only a path of
+the form above, inside `squiz-<uid>`. It then removes `rounds/<k>/`, `rounds/`
+and `<digest>-<number>/` where each is empty. Removal grows with every file in
+the snapshot, the ones the reviewer left behind included, so it runs after the
+result rather than before it, and delays nothing a waiting `squiz review`
+returns. It takes no part of the round's deadline. The round host takes the next
+queued state once it is done. Nothing in the repository refers to the snapshot,
+so removing it needs nothing from the repository, and works the same where the
+coding agent's worktree has gone.
 
 **A snapshot a killed round left behind is removed by the recovery that finds
 it**, once its reviewer is confirmed gone. The reviewing record names it once the
@@ -984,24 +1011,31 @@ reviewer has started. Before then, the record's round number gives the same path
 it before the reviewer starts and again when the reviewer exits. Scratch space
 stays at `.squiz/<number>/scratch/`, outside it. Once the snapshot is made, only
 the test command `run_tests` starts can write it, so a change the comparison
-finds was made by a test command the reviewer ran. The snapshot shares the
-repository's git config and hooks with every other worktree, and at `deep` those
-are compared as well, as Confinement sets out.
+finds was made by a test command the reviewer ran. At `deep` the coding agent's
+git config and hooks are compared as well, as Confinement sets out.
 
 **What it costs:**
 
 - **Time and disk on every round.** Checking out every tracked file grows with
-  the size of the repository, not the size of the change. The disk held at once
-  is the checkout's size times the reviews running at once, and it is held on
-  the temporary directory's filesystem. Where that filesystem is in memory, as
+  the size of the repository, not the size of the change. The clone itself, with
+  no objects of its own, takes a few hundredths of a second. The disk held at
+  once is the checkout's size times the reviews running at once, and it is held
+  on the temporary directory's filesystem. Where that filesystem is in memory, as
   `/tmp` is on some Linux systems, so is the snapshot, with whatever a `deep`
   round's build installs into it.
 - **A snapshot nothing recovers stays until the system clears its temporary
   directory.** That is a snapshot whose round host was killed and which no later
-  trigger or round host for the same episode finds. Its registration in the
-  repository stays as long, and `git worktree list` shows it.
-- **A limit on very large repositories.** The add runs inside the 30 seconds
-  before the review, so a repository large enough that the add spends them
+  trigger or round host for the same episode finds.
+- **A snapshot that loses its objects if the repository's are pruned.** The
+  clone reads the repository's objects in place. A `git gc`, automatic or not,
+  keeps an object no ref reaches for two weeks by default, so a head commit the
+  fetch brought survives one that runs while the round does. A
+  `git gc --prune=now`, a `git prune`, or a `gc.pruneExpire` of `now` deletes it
+  at once, and the snapshot then cannot read its own `HEAD`: the history tools,
+  the test command's git calls and the comparison's reading of `HEAD` fail. The
+  round does not guard against that.
+- **A limit on very large repositories.** The checkout runs inside the 30
+  seconds before the review, so a repository large enough that it spends them
   cannot be reviewed. A snapshot per round does not scale to such repositories,
   and the first version accepts that.
 - **A build before tests at `deep`.** The snapshot has no installed
@@ -1110,12 +1144,18 @@ credential store stays readable, and on macOS `gh auth token` still finds the
 login `gh` keeps there. An operating-system sandbox around the reviewer and
 every process it starts is held as #529.
 
-**The comparison sees the snapshot and nothing else.** Apart from the shared git
-config and hooks compared below, a write the test command makes anywhere else is
-neither prevented nor detected. That includes:
+**A write to git's config, hooks or refs from inside the snapshot stays in the
+snapshot.** The snapshot is a clone with a git directory of its own, so
+`git config`, an installed hook, and a new branch or tag change the clone, and
+the coding agent's repository is as it was (The snapshot). A `husky` install
+that sets `core.hooksPath` is the case this prevents (#540).
 
-- the branches, tags and other refs of the git directory the snapshot shares
-  with the coding agent's worktree;
+**The comparison sees the snapshot and nothing else.** Apart from the coding
+agent's git config and hooks compared below, a write the test command makes
+anywhere else is neither prevented nor detected. That includes:
+
+- the branches, tags and other refs of the coding agent's repository, written
+  by its path rather than from the snapshot;
 - the coding agent's worktree, the user's home directory, and other
   repositories;
 - a remote, reached by `git push` or any other network call, with any credential
@@ -1142,13 +1182,12 @@ carries code that matches shell commands, and the `pi` adapter still writes a
 settings line that has each shell record its group. Nothing in this
 specification needs either, and their removal is #557.
 
-**At `deep` the round also compares the git files the snapshot shares with the
-coding agent's worktree.** A test command can write them from the snapshot, and
-the coding agent's next commit reads what it wrote: `husky`, run as a `prepare`
-script, sets `core.hooksPath` in the repository's config, and the coding agent's
-own hooks are then skipped. The files are found from the coding agent's
-worktree, never from the snapshot, so a snapshot with a git directory of its own
-does not change which are read. They are:
+**At `deep` the round also compares the git files the coding agent's commits
+read.** A test command cannot write them through the snapshot, but it can by
+the repository's path, and the coding agent's next commit reads what it wrote:
+`husky`, run as a `prepare` script, sets `core.hooksPath` in the repository's
+config, and the coding agent's own hooks are then skipped. The files are found
+from the coding agent's worktree, never from the snapshot. They are:
 
 - the repository's local `config`;
 - the main worktree's `config.worktree`;
@@ -1169,9 +1208,6 @@ These files are not the reviewer's alone. The coding agent writes them too, with
 `git push -u` for one, and so does every other worktree of the repository. The
 summary therefore names the reviewer's tests as one possible writer, and never as
 the writer. At `read` the reviewer runs nothing, and they are not read.
-
-**The write is prevented once the snapshot has a git directory of its own
-(#570), and until then it is detected as above.**
 
 **A move of `HEAD` is detected, and not prevented.** A test that commits,
 amends, resets or switches branch in the snapshot moves the snapshot's `HEAD`.
@@ -2589,7 +2625,7 @@ nothing retries one.
 | No wake reaches the owner of the work | The note stays in `.squiz/<number>/notes/`. The owner learns the result from `squiz review` or `squiz status`, and the pull request holds it. |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. stderr is the channel. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. |
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. |
-| The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch and the add could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
+| The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
 | No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode, so a new commit, a new reply or a run of `squiz review` retries it. |
@@ -2685,7 +2721,7 @@ three parts, each bounded on its own:
 
 | Part | How long | What runs in it |
 |---|---|---|
-| Before the review | At most 30 seconds | The pull request lookup, the threads listing, the diff, and the fetch and add that make the snapshot |
+| Before the review | At most 30 seconds | The pull request lookup, the threads listing, the diff, and the fetch, clone and checkout that make the snapshot |
 | The review | The time bound | The reviewer |
 | Posting | A reserve of 60 seconds | The findings, the verdicts, the summary comment and the failure comment |
 

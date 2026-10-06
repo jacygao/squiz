@@ -312,7 +312,7 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
     // Removal grows with what the reviewer left in the snapshot, so it waits for
     // the round's result. It runs under the lock, before the next round can add
     // a snapshot of its own.
-    if (opened.snapshot !== undefined) removeSnapshot(setup.worktree, opened.snapshot);
+    if (opened.snapshot !== undefined) removeSnapshot(opened.snapshot);
     // A lock this round could not remove names a process that is about to exit,
     // and the next round takes over a lock whose holder has gone.
     if (opened.held?.owned === true) opened.held.lock.release();
@@ -554,7 +554,7 @@ async function reviewOn(
   const tree = snapshot.path;
 
   // Only at `deep` does the reviewer run anything that could write the git files
-  // the snapshot shares with `directory`.
+  // `directory` reads from its repository.
   const around = readBeforeReviewer(
     tree,
     preReview.until,
