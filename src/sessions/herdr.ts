@@ -146,12 +146,14 @@ const CONTROL = /[\u0000-\u001f\u007f]/u;
 
 function startBehind(gate: string, command: PaneCommand, options: HerdrOptions): PaneStart {
   const polls = Math.ceil((GATE_HOLDS_BOUNDS * options.boundMs) / GATE_POLL_MS);
-  const line = ["/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments]
+  const gated = ["/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments]
     .map(quoted)
     .join(" ");
-  if (CONTROL.test(line)) {
+  if (CONTROL.test(gated)) {
     return { outcome: "refused", reason: `the gate ${JSON.stringify(gate)} holds a control character` };
   }
+  const line = typeable(gated, gate);
+  if (line.outcome === "unwritten") return { outcome: "refused", reason: line.reason };
   const variables = Object.entries(command.variables ?? {}).flatMap(([name, value]) => ["--env", `${name}=${value}`]);
   const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus", ...variables];
   let created: Answer;
@@ -184,7 +186,7 @@ function startBehind(gate: string, command: PaneCommand, options: HerdrOptions):
 
   // `pane run` types the line and returns at once. Whatever it answered, the
   // line may have been typed, which is safe only because the gate is still shut.
-  const sent = herdr(["pane", "run", pane, line], options.environment, options.boundMs);
+  const sent = herdr(["pane", "run", pane, line.typed], options.environment, options.boundMs);
   if (sent.outcome !== "answered") return abandon(pane, `herdr pane run: ${describe(sent)}`, options);
 
   const pid = gatedPid(gate, command);
@@ -213,6 +215,37 @@ function startBehind(gate: string, command: PaneCommand, options: HerdrOptions):
     return abandon(pane, `the gate could not be opened: ${String(cause)}`, options);
   }
   return { outcome: "started", pane, leader: leader.identity };
+}
+
+/**
+ * The most a line typed into a pane may hold.
+ *
+ * A new pane's shell may not have started its line editor when the line
+ * arrives. The terminal then keeps 1024 bytes of an unfinished line on macOS,
+ * and a line cut inside a quoted word runs nothing.
+ */
+const TYPED_AT_MOST = 512;
+
+type Typeable =
+  | { readonly outcome: "typeable"; readonly typed: string }
+  | { readonly outcome: "unwritten"; readonly reason: string };
+
+/**
+ * `gated` as it is typed: whole where it fits, and otherwise a short line that
+ * runs it from a file in the gate.
+ *
+ * The file is written whole before anything is typed. It removes itself and
+ * then becomes the gated line, so the gate's pid is still the typed command's.
+ */
+function typeable(gated: string, gate: string): Typeable {
+  if (Buffer.byteLength(gated) <= TYPED_AT_MOST) return { outcome: "typeable", typed: gated };
+  const file = join(gate, "line");
+  try {
+    writeFileSync(file, `rm -f "$0"; exec ${gated}\n`, { mode: 0o600 });
+  } catch (cause) {
+    return { outcome: "unwritten", reason: `the command's line could not be written to the gate: ${String(cause)}` };
+  }
+  return { outcome: "typeable", typed: ["/bin/sh", file].map(quoted).join(" ") };
 }
 
 /** Close a pane a start opened and could not finish, and say why the start failed. */
