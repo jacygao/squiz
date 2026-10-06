@@ -74,7 +74,7 @@ export function deepTools(environment: Readonly<Record<string, string | undefine
     name: runTestsTool.name,
     description: runTestsTool.description,
     parameters: runTestsTool.parameters,
-    call: async () => {
+    call: async (_params, signal) => {
       if (typeof round === "string") return unhanded(runTestsTool.name);
       const run = await runTestsTool.run({
         snapshot: round.snapshot,
@@ -82,6 +82,7 @@ export function deepTools(environment: Readonly<Record<string, string | undefine
         scratch: round.scratch,
         deadline: deadlineAt(round.endsAt),
         environment: definedIn(environment),
+        ...(signal === undefined ? {} : { signal }),
       });
       const { text, isError } = describeTestsRun(run);
       return { text, failed: isError };

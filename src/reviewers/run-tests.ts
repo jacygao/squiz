@@ -51,6 +51,8 @@ export type RunTestsInput = {
   readonly deadline: Deadline;
   /** The reviewer's environment, which the command runs with in place of this process's own. */
   readonly environment: Readonly<Record<string, string>>;
+  /** The CLI cancelling the call. The run is stopped as it is at the deadline. */
+  readonly signal?: AbortSignal;
 };
 
 /** The end of what the command wrote to either stream, in the order it arrived. */
@@ -69,6 +71,8 @@ export type TestsRun =
   | { readonly outcome: "signalled"; readonly signal: string; readonly output: Output }
   /** The round's time ran out first, and the runner stopped the command. */
   | { readonly outcome: "stopped"; readonly seconds: number; readonly output: Output }
+  /** The CLI cancelled the call first, and the runner stopped the command. */
+  | { readonly outcome: "cancelled"; readonly output: Output }
   /** Nothing ran. */
   | { readonly outcome: "not run"; readonly reason: string };
 
@@ -124,6 +128,9 @@ export async function runTests(input: RunTestsInput): Promise<TestsRun> {
   if (input.command === null) {
     return { outcome: "not run", reason: "No test command is configured, so nothing was run." };
   }
+  if (input.signal?.aborted === true) {
+    return { outcome: "not run", reason: "The call was cancelled before the test command started, so nothing was run." };
+  }
   const left = input.deadline.remaining();
   if (left <= STOP_MARGIN_MS) {
     return {
@@ -148,7 +155,7 @@ export async function runTests(input: RunTestsInput): Promise<TestsRun> {
     return { outcome: "not run", reason: `The test command could not be started: ${reason}` };
   }
   const output = tailOf(child);
-  const ended = await endOf(child, bound);
+  const ended = await endOf(child, bound, input.signal);
 
   if (ended.how === "unstartable" || child.pid === undefined) {
     output.close();
@@ -163,6 +170,7 @@ export async function runTests(input: RunTestsInput): Promise<TestsRun> {
   if (ended.how === "time") {
     return { outcome: "stopped", seconds: seconds(Date.now() - started), output: read };
   }
+  if (ended.how === "cancelled") return { outcome: "cancelled", output: read };
   return { outcome: "signalled", signal: await signalOf(child), output: read };
 }
 
@@ -184,7 +192,9 @@ export function describeTestsRun(run: TestsRun): { readonly text: string; readon
       ? `The test command exited ${run.status}.${signalIn(run.status)}`
       : run.outcome === "stopped"
         ? `The test command was stopped after ${run.seconds} seconds, because the round's time ran out. It did not finish, so this says nothing about whether the tests pass.`
-        : `The test command was ended by ${run.signal} from outside run_tests before it finished, so this says nothing about whether the tests pass.`;
+        : run.outcome === "cancelled"
+          ? "The test command was stopped because the call was cancelled. It did not finish, so this says nothing about whether the tests pass."
+          : `The test command was ended by ${run.signal} from outside run_tests before it finished, so this says nothing about whether the tests pass.`;
   return { text: `${head}\n\n${outputLine(run.output)}\n${run.output.text}`, isError: false };
 }
 
@@ -214,11 +224,12 @@ function outputLine(output: Output): string {
 type Ended =
   | { readonly how: "status"; readonly status: number }
   | { readonly how: "time" }
+  | { readonly how: "cancelled" }
   | { readonly how: "lost" }
   | { readonly how: "unstartable"; readonly reason: string };
 
-/** Wait for the command's status, for the bound, or for the leader to go without one. */
-function endOf(child: ChildProcess, bound: Deadline): Promise<Ended> {
+/** Wait for the command's status, for the bound, for the cancel, or for the leader to go without one. */
+function endOf(child: ChildProcess, bound: Deadline, signal: AbortSignal | undefined): Promise<Ended> {
   return new Promise((settle) => {
     let said = "";
     let cancel = (): void => {};
@@ -244,9 +255,18 @@ function endOf(child: ChildProcess, bound: Deadline): Promise<Ended> {
     status.once("error", () => {
       done({ how: "lost" });
     });
-    cancel = bound.whenPassed(() => {
+    const unbind = bound.whenPassed(() => {
       done({ how: "time" });
     });
+    const aborted = (): void => {
+      done({ how: "cancelled" });
+    };
+    signal?.addEventListener("abort", aborted, { once: true });
+    cancel = (): void => {
+      unbind();
+      signal?.removeEventListener("abort", aborted);
+    };
+    if (signal?.aborted === true) aborted();
   });
 }
 
