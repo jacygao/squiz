@@ -212,9 +212,7 @@ function depthOf(path: string, value: unknown): Depth {
     // `deep` grants the shell, the shell writes, and the comparison of tracked
     // files that detects such a write is not built. Refusing says so; loading
     // `read` in its place would leave a project believing its tests were being
-    // run when only files were being read. It also refuses `deep` for Copilot,
-    // whose adapter grants nothing there, so accepting `deep` for `pi` must keep
-    // refusing it for `copilot`.
+    // run when only files were being read.
     if (depth === "deep") {
       throw new ConfigError(
         `${path}: "depth" is "deep", which is not supported yet: it grants the shell, and the comparison of tracked files that detects a write made through the shell is not built. Use "read".`,

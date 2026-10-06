@@ -995,8 +995,8 @@ finds was made by a test command the reviewer ran.
 Depth is a configuration setting controlling how much the reviewer is allowed to
 do. It has two values, and `edit` and `write` are granted at neither. The tool
 names below are `pi`'s; another adapter maps the same two values onto its own
-CLI's names. The Copilot adapter grants `read` alone, under the names The
-Copilot adapter gives.
+CLI's names. The Copilot adapter grants both, under the names The Copilot
+adapter gives.
 
 | Depth | Tools granted | What it can answer |
 |---|---|---|
@@ -1405,7 +1405,7 @@ which leaves the round thinking at the level those settings hold.
 ### The Copilot adapter
 
 The adapter for the GitHub Copilot CLI, which a project chooses with
-`"reviewer": "copilot"`. It grants depth `read` alone, as The grant sets out.
+`"reviewer": "copilot"`. It grants both depths, as The grant sets out.
 
 #### The command line
 
@@ -1432,6 +1432,11 @@ no newline in it, every path is absolute and single-quoted inside the script,
 and the MCP configuration travels as the script's `$0`, so its quotes need no
 escaping inside the script. `<node>` is the Node the harness runs on, and
 `<server>` is the reporting server the adapter ships, by absolute path.
+
+At `deep` the line differs only in `--available-tools`, which carries the `deep`
+grant. The MCP configuration is the same at both depths: the server finds
+`SQUIZ_ROUND` on the environment Copilot hands it, as The reporting server sets
+out.
 
 The environment adds three variables:
 
@@ -1546,35 +1551,67 @@ servers and hooks are code that would run with the round's environment.
 | Depth | Tools granted |
 |---|---|
 | `read` | `view`, `grep`, `glob`, and the three reporting calls |
-| `deep` | Not granted. The configuration refuses `deep` |
+| `deep` | The above, and `squiz-run_tests`, `squiz-git_log_search`, `squiz-git_blame` and `squiz-git_show` |
 
-The reporting calls are named `<server>-<call>` under `--available-tools`, so
-the grant carries `squiz-report_finding`, `squiz-report_verdict` and
-`squiz-finish_review`.
+The calls the reporting server serves are named `<server>-<call>` under
+`--available-tools`. So the grant carries `squiz-report_finding`,
+`squiz-report_verdict` and `squiz-finish_review` at both depths, and the four
+`deep` tools under the same prefix at `deep`.
 
-At `read` the grant is the whole of the confinement, as Confinement sets out.
+**No shell tool is granted at either depth.** Copilot disables every tool that
+`--available-tools` leaves out and does not show it to the model, so a grant of
+these names alone leaves Copilot no shell. The model is shown `grep` as `rg`.
 Nothing is refused by pattern, so the run's refusals are always zero.
 
-`deep` is not granted until the adapter's server serves the four `deep` tools.
-Copilot is granted no shell tool at `deep` either, so nothing it starts has to
-record a group, and nothing has to be refused by pattern.
+At `read` the grant is the whole of the confinement. At `deep` it is one of the
+three things Confinement sets out.
 
 #### The reporting server
 
-**The three reporting calls are served by an MCP server the adapter ships.**
-Copilot starts it from `--additional-mcp-config` and talks to it over standard
-input and output, in newline-delimited JSON-RPC. Its answer to `initialize`
-carries the file `SQUIZ_CHARTER` names as its `instructions`, where that is
-set, and the adapter never sets it. The server lists the three calls
-with the schemas the report checks declare, and it answers each call as `pi`'s
-extension does. It writes the same lines to the report file that
-`SQUIZ_REPORTS` names, so the round reads the file as it reads `pi`'s.
+**The reporting calls, and at `deep` the four `deep` tools, are served by an MCP
+server the adapter ships.** Copilot starts it from `--additional-mcp-config` and
+talks to it over standard input and output, in newline-delimited JSON-RPC. Its
+answer to `initialize` carries the file `SQUIZ_CHARTER` names as its
+`instructions`, where that is set, and the adapter never sets it.
 
-**The server applies the report checks to every call, because Copilot validates
-none**, as Adapters sets out. It answers a call the checks refuse with
-`isError: true` and the refusal as its text. Copilot hands that to the model as
-the call's own error, and the model can make the call again. Nothing converts an
-argument first, so the value a report records is always what the model sent.
+The server lists the three reporting calls with the schemas the report checks
+declare, and answers each as `pi`'s extension does. It writes the same lines to
+the report file that `SQUIZ_REPORTS` names, so the round reads the file as it
+reads `pi`'s.
+
+**Copilot hands the server its own environment**, with the configuration's
+`env` laid over it. So what the round puts on the reviewer's environment reaches
+the server as it reaches Copilot: `SQUIZ_ROUND`, the record and keeper
+Confinement names, and the emptied GitHub credentials.
+
+**Where `SQUIZ_ROUND` is set, the server lists the four `deep` tools after the
+reporting calls**, and runs them as Adapters sets out. The test command runs in
+the server's environment less `SQUIZ_CHARTER` and `SQUIZ_REPORTS`. Where
+`SQUIZ_ROUND` is not set, as at `read`, a call to a `deep` tool is a protocol
+error, as a call to any tool the server does not serve is.
+
+**The server checks every call itself, because Copilot validates none**, as
+Adapters sets out:
+
+- a reporting call meets the report checks;
+- a `deep` tool's arguments are checked against that tool's schema before it
+  runs, and a call they do not match runs nothing.
+
+Either refusal is answered with `isError: true` and the reason as its text.
+Copilot hands that to the model as the call's own error, and the model can make
+the call again:
+
+```
+MCP server 'squiz': git_blame was not run: line must be an integer.
+```
+
+Nothing converts an argument first, so the value a report records is always what
+the model sent. A `deep` tool that failed, such as `git_show` given a commit the
+repository does not have, is answered the same way.
+
+**The server goes on answering while a `deep` tool runs**, and answers each call
+when it ends. A `notifications/cancelled` naming a running `run_tests` stops the
+test command, and that call is not answered.
 
 The server exits when its standard input closes, and on `SIGTERM` and `SIGHUP`.
 Copilot sends it `SIGTERM` as it exits, and `SIGHUP` where a signal reached
@@ -1646,8 +1683,14 @@ group, then `SIGKILL` after the grace for whatever is left.
 - **After `SIGKILL` nothing is written**, by Copilot or by `sh`.
 
 So a round the round stopped, either way, leaves no usage line, and records no
-cost. At `read` Copilot starts no shell, so nothing it started leaves the
-group.
+cost.
+
+**The test command `run_tests` starts is the one process that leaves the
+group.** It leads a group of its own, which it records as Confinement sets out.
+`run_tests` stops it before `endsAt`. Where the round ends first, the round
+reaches it through the record, after the reporting server has gone with the
+reviewer's group. Copilot starts no shell at either depth, so nothing else it
+starts leaves the group.
 
 #### Resuming
 

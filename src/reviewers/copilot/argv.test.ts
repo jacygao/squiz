@@ -53,9 +53,30 @@ test("the grant at read is the three reading tools and the three reporting calls
   ]);
 });
 
-test("nothing is granted at deep, which the configuration refuses", () => {
-  assert.deepEqual(grants.deep, []);
-  assert.throws(() => argv({ ...invocation, depth: "deep" }), /deep/u);
+test("the grant at deep is the read grant and the four deep tools under the server's name", () => {
+  assert.deepEqual(grants.deep, [
+    ...grants.read,
+    "squiz-run_tests",
+    "squiz-git_log_search",
+    "squiz-git_blame",
+    "squiz-git_show",
+  ]);
+});
+
+// Copilot hides every tool `--available-tools` leaves out, so a grant naming only
+// these grants no shell, whatever Copilot calls its shell tools.
+test("no grant names a tool other than the three reading tools and the server's own", () => {
+  for (const [depth, granted] of Object.entries(grants)) {
+    for (const tool of granted) {
+      assert.ok(["view", "grep", "glob"].includes(tool) || tool.startsWith("squiz-"), `${depth} grants ${tool}`);
+    }
+  }
+});
+
+test("the line at deep carries the deep grant, and the same MCP configuration as at read", () => {
+  const deep = argv({ ...invocation, depth: "deep" });
+  assert.ok(scriptOf(deep).includes(` --available-tools=${grants.deep.join(",")} `), scriptOf(deep));
+  assert.deepEqual(configOf(deep), configOf(argv(invocation)));
 });
 
 test("the script carries the grant, the agent, and every flag that keeps the tree and the user out", () => {
