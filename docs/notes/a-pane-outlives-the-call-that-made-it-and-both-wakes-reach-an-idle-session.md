@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether a round host or a reviewer's pane outlives the trigger that started it, and which wake reaches an idle Claude Code session; § 4 — how a reviewer's pane is found again; § 8 — the prerequisites on a pane outliving its call and on the two wakes"
+settles: "§ 3 — whether a round host or a reviewer's pane outlives the trigger that started it, and which wake reaches an idle Claude Code session; § 4 — how a reviewer's pane is found again"
 issue: 277
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288, herdr: 0.9.3, tmux: 3.7b, pi: 0.85.1, macos: 26.6.2 }

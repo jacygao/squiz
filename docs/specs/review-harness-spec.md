@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.78 (draft)
+**Version:** 0.79 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2487,8 +2487,7 @@ into the rest of `src/`.
 
 A test sits beside the code it tests, named for it: `src/config/config.ts` is
 tested by `src/config/config.test.ts`. One `include` then covers the code and
-its tests together, and a directory lists what it holds beside how it is
-checked.
+its tests together.
 
 ### What ships
 
@@ -2530,90 +2529,14 @@ until something asks.
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
 | **P2** | A check that says a review is in progress | A status on the pull request that is not green while an episode is running, so the change does not read as ready to merge mid-review |
 
-Nothing at P2 gets an interface built for it in advance.
-
 ### Prerequisites
 
 Facts the design rests on that have not been established. Each is settled before
 the part that rests on it is built, and each result is written as a finding in
 `docs/notes/`.
 
-These are settled, each measured in nested `claude` sessions:
-
-- A subagent waiting on a shell command is not failed by the stall threshold.
-- A subagent told to pass the longest timeout passes it.
-- A subagent given only the § 9 text runs the command again on exit 2, works the
-  threads in between, and stops on 0, 1 and 3.
-- A subagent loads the plugin's skill once it opens a pull request, with nothing
-  in its brief naming it.
-- A command stopped from outside, and every process under it, gets `SIGTERM`, and
-  `SIGKILL` one to two seconds later.
-- A process started by a double fork with `setsid`, and a tmux or Herdr pane,
-  outlive the call that started them.
-- An `asyncRewake` exit 2 and a post to the messaging socket each wake an idle
-  interactive session.
-- An interactive `pi` in a pane, with squiz's grant and extension, reviews as the
-  headless one does, and exits when the extension shuts it down.
-- A subagent shown a shortened `squiz review` output reads the file its first
-  line names, and works every thread.
-- A `SubagentStop` hook's environment carries the parent's
-  `CLAUDE_CODE_MESSAGING_SOCKET`, and a post to it from a process outside the
-  hook's tree wakes the idle parent, with or without
-  `CLAUDE_CODE_MESSAGING_TOKEN`.
-
-This is settled by measurement on one machine:
-
-- A snapshot of 63,424 tracked files adds in 4.6 to 6.1 seconds and removes in
-  2.9.
-- What a tmux window close and a Herdr pane close reach, and where each backend
-  reports the reviewer's group, as § 4 The reviewer session sets out. Measured
-  with stand-ins and `pi` 0.85.1, with no model call.
-
-These are settled for the Copilot reviewer, measured against Copilot CLI 1.0.91
-on macOS, in short runs of at most seven model calls:
-
-- Copilot reports tokens and AI credits once a run, in `--usage-output-file`,
-  and nothing per call. A run stopped by `SIGTERM` still writes the file, and
-  one stopped by `SIGKILL` writes none.
-- `copilot -i` waits at its prompt once it is done. `copilot -p` in a tmux pane
-  prints its work as text and exits 0 by itself.
-- A folder below a trusted folder is trusted, and runs the tree's hooks and MCP
-  servers. A `COPILOT_HOME` holding no trusted folders, with
-  `COPILOT_ALLOW_ALL` unset, keeps them out, and the run still signs in.
-  `--no-custom-instructions` keeps out the tree's instructions, and leaving
-  `skill` out of `--available-tools` keeps out its skills.
-- Copilot validates no MCP call against its schema, and hands the model a
-  server's `isError` answer as the call's error.
-- Copilot exits 0 on `SIGTERM`, and stops its MCP server and its shells as it
-  exits. Each shell leads a session of its own, so one that ignores the signal,
-  and every one after `SIGKILL`, outlives Copilot.
-- `--deny-tool='shell(git commit)'` refuses a git subcommand wherever it is the
-  command, and not after `env`, inside `sh -c`, or built from quoting.
-
-These remain open:
-
-- **What installing dependencies before tests at `deep` adds to a round.**
-- **What a snapshot costs on a repository of several hundred thousand files.**
 - **Linux.** The detach and pane probes ran on macOS alone, and so did every
   Copilot run, whose credential was in macOS's own credential store.
-- **Copilot in a Herdr pane.** The Copilot pane runs were in tmux.
-- **Whether a shell under Copilot can record its group.** `--bash-env` enables
-  `BASH_ENV`, and whether bash reads it under `--norc --noprofile` was not run.
-  Copilot at `deep` waits for it.
-- **Whether Copilot reports usage during a long run.** Its stream's
-  `session.usage_checkpoint` was seen only once a run, just before the end, and
-  every run was short.
-- **`--max-ai-credits`.** Copilot's own cap on a session's credits was not
-  tried.
-- **The rest of the Copilot adapter's open questions**, listed at the end of
-  § 4 The Copilot adapter: the model, the empty `COPILOT_ALLOW_ALL`, the
-  charter's route to the system prompt, Copilot's group under `sh`, effort
-  levels per model, the size of one argument, a run that reaches
-  no model, `reasoningTokens`, resuming, and a detached run.
-- **GitHub Copilot CLI, as a coding agent.** Its documentation lists `agentStop`
-  and `subagentStop` hooks. Whether they fire, whether `subagentStop` names the
-  parent session, and whether anything can wake an idle session from outside are
-  not established.
 
 ## 9. Adoption
 
@@ -2639,12 +2562,7 @@ Three things in the host project, the last one optional.
 2. Allow `squiz` in the project's Claude Code permissions, so the coding agent
    is not prompted every time it starts a round or works a thread.
 3. **Optional.** `.squiz.json`, to change any of the settings below. Every one
-   has a working default, so a project that writes none still runs. The `test`
-   setting is read only at depth `deep`, where it names the non-mutating command
-   the reviewer runs instead of one it infers for itself.
-
-Running the coding agent inside tmux or Herdr puts each reviewer in a pane
-beside it.
+   has a working default, so a project that writes none still runs.
 
 Then run `/squiz doctor`.
 
@@ -2730,20 +2648,10 @@ its own branch. Squiz does not create them, and does not remove them.
 
 `timeout` is the time bound on the review part of a round, which runs in the
 round host. No caller's timeout limits it, so it is a guard against a reviewer
-that runs away rather than a fit to a window. A review that reaches it is cut
-short and says so. The review budget names the parts of a round.
-
-`tokens` is the review budget's other bound. The review budget says what it
-counts, when it is read, and what an episode's ceiling comes to under a given
-round cap.
+that runs away rather than a fit to a window.
 
 `reviewer` chooses the adapter, and nothing else changes with it. `copilot`
-needs the GitHub Copilot CLI installed and signed in. Under it, the reviewer
-runs on the user's default Copilot model, and nothing else of the user's own
-Copilot configuration reaches it, as § 4 The Copilot adapter sets out. A
-`model` setting, letting a project choose the reviewer's model and defaulting to
-the user's default, is a later addition. `thinking` reaches Copilot as its reasoning
-effort, with `off` given as `none`.
+needs the GitHub Copilot CLI installed and signed in.
 
 A setting outside its range, or of a type the table does not give it, is
 rejected with an error naming the setting, the value given and what was

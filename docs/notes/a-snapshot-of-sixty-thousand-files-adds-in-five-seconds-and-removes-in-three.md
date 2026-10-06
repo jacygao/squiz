@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 and § 8 — what a snapshot costs in time and disk; § 7 — whether it fits the 30 seconds before the review"
+settles: "§ 4 — what a snapshot costs in time and disk; § 7 — whether it fits the 30 seconds before the review"
 issue: 302
 recorded: 2026-10-04
 versions: { git: 2.54.0 (Apple Git-157), macos: 26.6.2 }
@@ -60,9 +60,10 @@ recheck-when: git changes how worktree add checks out or how worktree remove del
   as not measured.** The time and disk part is settled here. What installing
   dependencies at `deep` adds is still open. Recommend narrowing both to that.
 
-  2026-10-05: settled. The times are in Reference below, and § 8
-  Prerequisites lists them as measured and leaves `deep`'s install and very
-  large repositories open.
+  2026-10-05: settled. The times are in Reference below.
+
+  2026-10-06: what `deep`'s install adds is open as #496, and very large
+  repositories as #358.
 
 ## Reference
 

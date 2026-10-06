@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — that `squiz host` can be started with `startDetached` and outlive the call that started it; § 8 — the prerequisite on a double-forked process outliving that call, for Node's `spawn` with `detached` rather than Python's `os.setsid()`"
+settles: "§ 3 — that `squiz host` can be started with `startDetached` and outlive the call that started it; § 2 — that a double-forked process outlives that call, for Node's `spawn` with `detached` rather than Python's `os.setsid()`"
 issue: 368
 recorded: 2026-10-05
 versions: { claude-code: 2.1.289, node: 24.15.0, macos: 26.6.2 }

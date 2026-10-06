@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what a tmux window close and a Herdr pane close reach, and which pid the round host signals for a reviewer in a pane; § 8 — the prerequisite on what closing a pane reaches"
+settles: "§ 4 — what a tmux window close and a Herdr pane close reach, and which pid the round host signals for a reviewer in a pane"
 issue: 300
 recorded: 2026-10-04
 versions: { tmux: 3.7b, herdr: 0.9.3, pi: 0.85.1, macos: 26.6.2, zsh: 5.9 }

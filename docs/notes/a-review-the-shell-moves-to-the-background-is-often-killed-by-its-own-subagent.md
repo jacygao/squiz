@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — the deadline `squiz review` waits within; § 2 — the Bash timeout and the stall watchdog; § 3 — what starts a round; § 8 — five of the settled prerequisites"
+settles: "§ 7 — the deadline `squiz review` waits within; § 2 — the Bash timeout and the stall watchdog; § 3 — what starts a round; § 9 — the skill's text"
 issue: 278
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288, coding-agent: claude-opus-5-5 }
