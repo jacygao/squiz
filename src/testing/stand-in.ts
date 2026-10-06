@@ -34,9 +34,13 @@ export function standIn(directory: string, name: string, script: string, runner:
 
 let shim: string | undefined;
 
+// Read once, so a test that points `TMPDIR` somewhere it later deletes does not
+// take every later fake's shim with it.
+const temporary = tmpdir();
+
 function shared(): string {
   if (shim !== undefined) return shim;
-  const directory = mkdtempSync(join(tmpdir(), "squiz-stand-in-"));
+  const directory = mkdtempSync(join(temporary, "squiz-stand-in-"));
   process.on("exit", () => rmSync(directory, { recursive: true, force: true }));
   const file = join(directory, "stand-in");
   writeFileSync(

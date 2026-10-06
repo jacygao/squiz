@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.90 (draft)
+**Version:** 0.91 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -174,9 +174,9 @@ what its rounds' comparisons established. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
   handed, the report file the reviewer reports into, the reviewer's session,
-  `resume.txt`, the command that resumes that session, `gh/`, the empty `gh`
-  configuration the reviewer runs with (§ 4 Depth), and `tree/`, the
-  snapshot the reviewer reads while the round runs.
+  `resume.txt`, the command that resumes that session, and `gh/`, the empty `gh`
+  configuration the reviewer runs with (§ 4 Depth). The snapshot the reviewer
+  reads is in the temporary directory instead (§ 4 The snapshot).
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
@@ -901,18 +901,44 @@ one.
 **Every reviewer reads its own snapshot of the head commit, at either depth.**
 The coding agent may be editing its worktree while a round runs, so the reviewer
 never reads that worktree. Before the reviewer starts, the round host adds a
-detached worktree at the head commit of the state under review:
+detached worktree at the head commit of the state under review, in the system's
+temporary directory:
 
 ```
-git worktree add --detach .squiz/41/rounds/2/tree 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
+git worktree add --detach /var/folders/x7/T/squiz-501/5e1f0c2a9b3d7e64-41/rounds/2/tree 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
 ```
 
 The commit is the one GitHub reports as the pull request's head. Where the
 repository does not have it yet, because it was pushed from elsewhere, the round
 host fetches it first. The fetch and the add run in the part of the round before
 the review, under its 30 seconds (§ 7 The review budget). The snapshot shares the
-repository's object store, and `.squiz/` is gitignored, so it shows in neither the
-coding agent's `git status` nor its commits.
+repository's object store and sits outside the coding agent's worktree, so it
+shows in neither the agent's `git status` nor its commits.
+
+**The path is `<temporary directory>/squiz-<uid>/<digest>-<number>/rounds/<k>/tree`:**
+
+| Component | What it is |
+|---|---|
+| `<temporary directory>` | `TMPDIR`, or the system's default where it is unset |
+| `squiz-<uid>` | One directory per user, which the round host makes readable and writable by that user alone |
+| `<digest>-<number>` | The first 16 hex digits of the SHA-256 of the coding agent's worktree path, and the pull request's number |
+| `rounds/<k>/tree` | The round's number within the episode |
+
+Two worktrees reviewing pull requests with the same number never share a path,
+and neither do two rounds of one episode. The same worktree, number and round
+always give the same path.
+
+**No component the harness adds to the path begins with a dot**, wherever the
+coding agent's worktree is. A test suite that matches its own absolute paths
+against a glob skips every file under such a component, so it would fail in the
+snapshot where it passes in a fresh checkout. A `TMPDIR` whose own path has such
+a component is the user's, and the harness does not change it.
+
+**The round host refuses to add a snapshot where `squiz-<uid>` is not the
+user's alone**: a link, a directory another user owns, or one that a group or
+other users can write. The temporary directory may be shared, as `/tmp` is, and
+another user could make that path first. The round fails before the review, as
+any snapshot that cannot be made does.
 
 **The snapshot holds the commit and nothing else.** It carries none of the coding
 agent's uncommitted changes, which no state names, and none of its untracked
@@ -920,12 +946,20 @@ files, build output or installed dependencies.
 
 **The round host removes the snapshot once the round has recorded its result**,
 with `git worktree remove --force` and then `git worktree prune`, whatever the
-round became. Removal grows with every file in the snapshot, the ones the
+round became. It then removes `rounds/<k>/`, `rounds/` and `<digest>-<number>/`
+where each is empty. Removal grows with every file in the snapshot, the ones the
 reviewer left behind included, so it runs after the result rather than before it,
 and delays nothing a waiting `squiz review` returns. It takes no part of the
-round's deadline. The round host takes the next queued state once it is done. A
-snapshot a killed round left behind is removed by the recovery that finds it, once
-its reviewer is confirmed gone.
+round's deadline. The round host takes the next queued state once it is done.
+
+**The snapshot is removed even where the coding agent's worktree has gone.**
+Where that worktree was removed while the round ran, the round host runs the
+removal from inside the snapshot instead, and skips the prune, which needs a
+worktree that still exists.
+
+**A snapshot a killed round left behind is removed by the recovery that finds
+it**, once its reviewer is confirmed gone. The reviewing record names it once the
+reviewer has started. Before then, the record's round number gives the same path.
 
 **Confinement applies to the snapshot.** The tracked-file comparison is taken in
 it before the reviewer starts and again when the reviewer exits. Scratch space
@@ -937,7 +971,14 @@ finds was made by a test command the reviewer ran.
 
 - **Time and disk on every round.** Checking out every tracked file grows with
   the size of the repository, not the size of the change. The disk held at once
-  is the checkout's size times the reviews running at once.
+  is the checkout's size times the reviews running at once, and it is held on
+  the temporary directory's filesystem. Where that filesystem is in memory, as
+  `/tmp` is on some Linux systems, so is the snapshot, with whatever a `deep`
+  round's build installs into it.
+- **A snapshot nothing recovers stays until the system clears its temporary
+  directory.** That is a snapshot whose round host was killed and which no later
+  trigger or round host for the same episode finds. Its registration in the
+  repository stays as long, and `git worktree list` shows it.
 - **A limit on very large repositories.** The add runs inside the 30 seconds
   before the review, so a repository large enough that the add spends them
   cannot be reviewed. A snapshot per round does not scale to such repositories,
@@ -1449,9 +1490,9 @@ agent's, as § 2 requires. The later `model` setting maps to the same variable.
 
 **`COPILOT_HOME` is the adapter's own, and holds no trusted folders.** Copilot
 runs a project's hooks and starts its MCP servers only in a folder it trusts,
-and it trusts a folder below any folder it was told to trust. The snapshot sits
-inside the coding agent's worktree, so a user who trusted the project would have
-trusted every snapshot. Under the adapter's `COPILOT_HOME`, Copilot trusts
+and it trusts a folder below any folder it was told to trust, so a user who
+trusted any folder above the snapshots would have trusted every one of them.
+Under the adapter's `COPILOT_HOME`, Copilot trusts
 nothing, and none of the tree's hooks or MCP servers runs. The credential is in
 the system's credential store rather than in `COPILOT_HOME`, so the reviewer
 still signs in.

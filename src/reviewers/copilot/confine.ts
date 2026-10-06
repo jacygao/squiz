@@ -5,8 +5,8 @@
  *
  * **`COPILOT_HOME` is the round's session directory, and holds no trusted
  * folders.** Copilot runs a project's hooks and MCP servers only in a folder it
- * trusts, and a user who trusted the project would have trusted every snapshot
- * inside it. Under a home of the round's own Copilot trusts nothing. The
+ * trusts, and a user who trusted any folder above the snapshots would have
+ * trusted every one of them. Under a home of the round's own Copilot trusts nothing. The
  * credential is in the system's credential store, so the reviewer still signs
  * in. Nothing else of the user's configuration reaches the reviewer except its
  * model.

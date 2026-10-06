@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { defaultConfig, type Config } from "../config/config.ts";
@@ -35,6 +35,7 @@ import {
 } from "../reviewers/adapter.ts";
 import { composeReview } from "../review/output.ts";
 import { standIn } from "../testing/stand-in.ts";
+import { snapshotPath } from "../worktree/snapshot.ts";
 import { headMovedIn } from "./confinement.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
@@ -202,6 +203,8 @@ type Ran = {
    * started, `null` where git could not say.
    */
   readonly headsWhenStarted: readonly (string | null)[];
+  /** The coding agent's worktree the rounds reviewed. */
+  readonly worktree: string;
   /** The commit the fixture's worktree holds, which the pull request names as its head. */
   readonly head: string;
   /** The rounds' snapshot directories still standing once the rounds have ended. */
@@ -491,6 +494,8 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const head = headIn(worktree) ?? assert.fail("the fixture's own commit must read back");
 
     const episode = episodeAt(worktree, PULL_REQUEST);
+    // Where the episode's snapshots go, for the fake `gh` to look as each call is made.
+    await writeFile(join(binaries, "snapshot-rounds"), snapshotRoundsOf(worktree), "utf8");
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
     // The pull request names the commit the fixture made, which is one a snapshot
@@ -613,7 +618,8 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       lockLeft: existsSync(join(episode.directory, "host.lock")),
       headsWhenStarted,
       head,
-      snapshotsLeft: snapshotsIn(episode.directory),
+      worktree,
+      snapshotsLeft: snapshotsOf(worktree),
       worktreesLeft: worktreesOf(worktree),
       snapshotAtCall: kinds.map((_, at) => existsSync(join(binaries, `snapshot-${at + 1}`))),
     };
@@ -665,9 +671,14 @@ function failWorktreeAdd(binaries: string): void {
   );
 }
 
-/** The round snapshots standing under the episode's directory. */
-function snapshotsIn(episodeDirectory: string): readonly string[] {
-  const rounds = join(episodeDirectory, "rounds");
+/** The directory holding one directory per round of the episode's snapshots of `worktree`. */
+function snapshotRoundsOf(worktree: string): string {
+  return dirname(dirname(snapshotPath(worktree, { pullRequest: PULL_REQUEST, round: 1 })));
+}
+
+/** The round snapshots of `worktree` still standing. */
+function snapshotsOf(worktree: string): readonly string[] {
+  const rounds = snapshotRoundsOf(worktree);
   if (!existsSync(rounds)) return [];
   return readdirSync(rounds)
     .map((round) => join(rounds, round, "tree"))
@@ -789,9 +800,8 @@ const GH_SCRIPT = [
   "  *'v3.diff'*) kind=diff ;;",
   "esac",
   'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
-  // Whether a round's snapshot stood as this call was made. `gh` runs in the
-  // worktree, which the snapshots sit inside.
-  'for tree in .squiz/*/rounds/*/tree; do [ -d "$tree" ] && : > "$dir/snapshot-$n"; done',
+  // Whether a round's snapshot stood as this call was made.
+  'for tree in "$(cat "$dir/snapshot-rounds")"/*/tree; do [ -d "$tree" ] && : > "$dir/snapshot-$n"; done',
   // The arguments of this one call, so a test can read the method and the path
   // a comment was sent to and not only that a call was made.
   'printf \'%s\\n\' "$*" > "$dir/argv-$n"',
@@ -2631,7 +2641,7 @@ test("the reviewer runs in a snapshot of the head commit, at either depth, with 
     const ran = await runInFixture({ config: { depth }, answers: POSTING, reviewer: reviews({}) });
 
     const directory = ran.invocations[0]?.directory ?? "";
-    assert.match(directory, new RegExp(`/\\.squiz/${PULL_REQUEST}/rounds/1/tree$`, "u"), depth);
+    assert.equal(directory, snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }), depth);
     assert.deepEqual(ran.headsWhenStarted, [ran.head], `the snapshot holds the head commit at ${depth}`);
     const scratch = ran.invocations[0]?.scratchDirectory ?? "";
     assert.match(scratch, new RegExp(`/\\.squiz/${PULL_REQUEST}/scratch$`, "u"));
