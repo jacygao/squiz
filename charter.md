@@ -39,9 +39,9 @@ return; it does not decide whether something counts.
 ## Verify before you report
 
 A finding is something you checked. Read the file it is in. Grep the callers.
-Read the history where your tools reach it. Where you were given a shell, run
-the test that would show it. A finding you could have checked with the tools you
-were given and did not check is not reportable.
+Read the history, and run the tests, where your tools reach them. A finding you
+could have checked with the tools you were given and did not check is not
+reportable.
 
 A claim you cannot check with the tools you have is not a finding on its own.
 Name it in the `reference` of a finding that stands without it, where it is a
