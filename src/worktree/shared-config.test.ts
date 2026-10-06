@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { deadlineIn } from "../reviewers/deadline.ts";
+import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import {
   compareSharedConfig,
   readSharedConfig,
@@ -233,6 +233,57 @@ test("a directory that is no repository is a reading that failed", async () => {
 test("a reading with no time left is one that failed", async () => {
   await withSnapshot((repository) => {
     const reading = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(0));
+    assert.deepEqual(reading, { outcome: "failed", reason: "the reading ran out of the time it was given" });
+  });
+});
+
+// A subsection can be a URL, and a URL can carry a credential, so no key that
+// reaches a comment carries its subsection.
+test("a key whose subsection carries a credential is named without it", async () => {
+  await withSnapshot(async (repository) => {
+    const comparison = await around(repository, () => {
+      git(repository.snapshot, "config", "url.https://someone:s3cret@example.com/.insteadOf", "https://example.com/");
+      git(repository.snapshot, "config", "branch.review-me.merge", "refs/heads/review-me");
+    });
+
+    assert.doesNotMatch(JSON.stringify(comparison), /s3cret/u);
+    assert.deepEqual(comparison, {
+      outcome: "changed",
+      changes: [
+        { file: "config", key: "branch.*.merge" },
+        { file: "config", key: "url.*.insteadof" },
+      ],
+    });
+  });
+});
+
+/** A deadline that reports passed from look `after + 1` onward, and counts the looks. */
+function passingAfter(after: number): Deadline & { readonly looks: () => number } {
+  let looks = 0;
+  return {
+    passed: () => {
+      looks += 1;
+      return looks > after;
+    },
+    remaining: () => (looks >= after ? 0 : 60_000),
+    whenPassed: () => () => {},
+    looks: () => looks,
+  };
+}
+
+/**
+ * A large hook is hashed with the clock read inside it, so a deadline that passes
+ * while it is read fails the reading rather than going unseen. The hook sorts
+ * last, so no other file's read comes after it to look at the clock.
+ */
+test("a deadline that passes inside a large shared file fails the reading", async () => {
+  await withSnapshot(async (repository) => {
+    const counting = passingAfter(Number.MAX_SAFE_INTEGER);
+    assert.equal(readSharedConfig(repository.snapshot, repository.worktree, counting).outcome, "read");
+    const without = counting.looks();
+
+    await writeFile(join(repository.common, "hooks", "zzz-bundle"), Buffer.alloc(4 * 1024 * 1024, 1));
+    const reading = readSharedConfig(repository.snapshot, repository.worktree, passingAfter(without + 2));
     assert.deepEqual(reading, { outcome: "failed", reason: "the reading ran out of the time it was given" });
   });
 });

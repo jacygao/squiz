@@ -14,11 +14,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
 import { runGit } from "./git.ts";
+import { hashOfFile } from "./tracked-files.ts";
 
 /** One shared file's content, and its keys where git reads it as a config. */
 type Stands = {
@@ -100,6 +101,8 @@ export function readSharedConfig(
 
   const hooks = readTree(common.path, "hooks", files, until);
   if (hooks !== null) return { outcome: "failed", reason: hooks };
+  // A reading that finished after its deadline was not taken inside it.
+  if (until?.passed() === true) return { outcome: "failed", reason: RAN_OUT };
 
   return { outcome: "read", common: common.path, files };
 }
@@ -169,7 +172,8 @@ type Read =
  * One config file, with its keys.
  *
  * The keys are git's own reading of the file, so they are named as git names
- * them, with the section and the key lowercased.
+ * them, with the section and the key lowercased. A subsection is written as `*`,
+ * because it can be a URL and a URL can carry a credential.
  */
 function readConfig(common: string, name: string, until?: Deadline): Read {
   const plain = readPlain(common, name, until);
@@ -198,7 +202,7 @@ function keysOf(stdout: string): ReadonlyMap<string, string> {
     if (record === "") continue;
     // A key given no value, which git reads as true, has no newline after it.
     const newline = record.indexOf("\n");
-    const key = newline === -1 ? record : record.slice(0, newline);
+    const key = withoutSubsection(newline === -1 ? record : record.slice(0, newline));
     const value = newline === -1 ? "\0no value" : record.slice(newline + 1);
     values.set(key, [...(values.get(key) ?? []), value]);
   }
@@ -209,11 +213,23 @@ function keysOf(stdout: string): ReadonlyMap<string, string> {
   return keys;
 }
 
+/**
+ * `section.subsection.key` as `section.*.key`. The section and the key hold no
+ * dot, so whatever lies between the first dot and the last is the subsection.
+ */
+function withoutSubsection(key: string): string {
+  const first = key.indexOf(".");
+  const last = key.lastIndexOf(".");
+  return first === last ? key : `${key.slice(0, first)}.*${key.slice(last)}`;
+}
+
 /** A file's content as a value two readings can be compared by. */
 function readPlain(common: string, name: string, until?: Deadline): Read {
   if (until?.passed() === true) return { read: false, reason: RAN_OUT };
   try {
-    return { read: true, stands: { stands: standsAt(join(common, name)) } };
+    const stands = standsAt(join(common, name), until);
+    if (stands === null) return { read: false, reason: RAN_OUT };
+    return { read: true, stands: { stands } };
   } catch (cause) {
     if (isMissing(cause)) return { read: true, stands: { stands: "absent" } };
     return { read: false, reason: `${name} could not be read: ${reasonFor(cause)}` };
@@ -261,13 +277,17 @@ function readTree(
 }
 
 /**
- * What stands at one path. A link is read rather than followed, and only a regular
- * file is opened, because opening a pipe waits for a writer that may never come.
+ * What stands at one path, or `null` where the deadline passed inside it. A link
+ * is read rather than followed, and only a regular file is opened, because
+ * opening a pipe waits for a writer that may never come.
  */
-function standsAt(path: string): string {
+function standsAt(path: string, until?: Deadline): string | null {
   const entry = lstatSync(path);
   if (entry.isSymbolicLink()) return `link:${digestOf(readlinkSync(path, "buffer"))}`;
-  if (entry.isFile()) return `file:${digestOf(readFileSync(path))}`;
+  if (entry.isFile()) {
+    const hashed = hashOfFile(path, until);
+    return hashed === null ? null : `file:${hashed}`;
+  }
   if (entry.isDirectory()) return "kind:directory";
   return "kind:other";
 }
