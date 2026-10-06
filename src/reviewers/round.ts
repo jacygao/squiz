@@ -36,6 +36,7 @@ import {
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
+import { roundVariable } from "./deep-tools.ts";
 import { follow } from "./follow.ts";
 import {
   KEEPER_VARIABLE,
@@ -212,7 +213,7 @@ export async function runRound(
     };
   }
 
-  const variables = variablesOf(invocation, scratch, github, confinement.environment);
+  const variables = variablesOf(invocation, scratch, github, confinement.environment, bound);
 
   let spent: Spend = undefined;
   // Added up rather than replaced, unlike the reports below: each refusal is a
@@ -293,17 +294,32 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * here overrides one the server has. `gh` reads an empty token as none.
  * `GH_CONFIG_DIR` names `github`, which the round has emptied. They come after
  * the confinement's, so no adapter puts a token back.
+ *
+ * At `deep` the tools the CLI serves are handed the snapshot, the test command,
+ * the scratch space and the moment the round ends. The moment is on the wall
+ * clock, because that is the one clock the tools can read as well.
  */
 function variablesOf(
   invocation: Invocation,
   scratch: string,
   github: string,
   confinement: Readonly<Record<string, string>>,
+  bound: Deadline,
 ): Readonly<Record<string, string>> {
   const space = invocation.roundSpace;
+  const deep =
+    invocation.depth === "deep"
+      ? roundVariable({
+          snapshot: resolve(invocation.directory),
+          scratch,
+          test: invocation.test,
+          endsAt: Date.now() + bound.remaining(),
+        })
+      : {};
   return {
     TMPDIR: scratch,
     ...confinement,
+    ...deep,
     ...(space === undefined
       ? {}
       : { [RECORD_VARIABLE]: space.shellRecord, [KEEPER_VARIABLE]: space.keeperName }),

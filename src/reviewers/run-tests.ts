@@ -73,11 +73,13 @@ export type TestsRun =
   | { readonly outcome: "not run"; readonly reason: string };
 
 /**
- * The tool as an adapter grants it: its name, a schema that admits no argument,
- * and the run.
+ * The tool as an adapter grants it: its name, what the model is told it does, a
+ * schema that admits no argument, and the run.
  */
 export const runTestsTool = {
   name: "run_tests",
+  description:
+    "Run the project's configured test command in the commit under review, and return its exit status and the end of its output. Takes no arguments. The command is stopped before the review's time runs out.",
   parameters: { type: "object", properties: {}, additionalProperties: false },
   run: runTests,
 } as const;

@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import type { Depth, Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
+import { deepToolNames } from "../deep-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
 import { argv, extensionFile, grants } from "./argv.ts";
@@ -23,6 +24,7 @@ const invocation: Invocation = {
   scratchDirectory: ".squiz/agent-7/scratch",
   githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
   depth: "read",
+  test: null,
   thinking: "medium",
   roundSpace: undefined,
   terminal: "none",
@@ -168,7 +170,31 @@ test("the session is kept, in the directory handed over, wherever the reviewer r
 test("depth arrives as a parameter, and each value produces its own grant", () => {
   const reporting = [...reportingTools];
   assert.deepEqual(toolsAt("read"), ["read", "grep", "find", "ls", ...reporting]);
-  assert.deepEqual(toolsAt("deep"), ["read", "grep", "find", "ls", ...reporting, "bash"]);
+  assert.deepEqual(toolsAt("deep"), [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    ...reporting,
+    "run_tests",
+    "git_log_search",
+    "git_blame",
+    "git_show",
+  ]);
+});
+
+// `grants` is what a round says it allowed, and `--tools` is what pi allowed.
+test("the grant and --tools name the same tools, at each depth", () => {
+  for (const depth of depths) {
+    assert.deepEqual(toolsAt(depth), grants[depth], `depth ${depth} grants one thing and says another`);
+  }
+});
+
+test("no depth grants a shell", () => {
+  for (const depth of depths) {
+    assert.ok(!toolsAt(depth).includes("bash"), `depth ${depth} passes bash on --tools`);
+    assert.ok(!grants[depth].includes("bash"), `depth ${depth} lists bash in its grant`);
+  }
 });
 
 /**
@@ -285,10 +311,10 @@ test("adding the reporting calls did not add the writers pi grants by default", 
   }
 });
 
-test("the deep grant is the read grant and the shell, so no name is spelled twice", () => {
+test("the deep grant is the read grant and the deep tools, so no name is spelled twice", () => {
   assert.deepEqual(
     grants.deep,
-    [...grants.read, "bash"],
+    [...grants.read, ...deepToolNames],
     "a name spelled a second time is a name that can be misspelled, and pi drops an unrecognised name in silence",
   );
 });

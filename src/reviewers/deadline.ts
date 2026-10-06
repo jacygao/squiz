@@ -46,7 +46,16 @@ export type Deadline = {
  * when time moves in a way a timer cannot see.
  */
 export function deadlineIn(milliseconds: number, now: () => number = Date.now): Deadline {
-  const at = now() + milliseconds;
+  return deadlineAt(now() + milliseconds, now);
+}
+
+/**
+ * A deadline at `at`, a moment on `now`'s clock in milliseconds.
+ *
+ * It is how a deadline crosses into another process: the moment travels as a
+ * number, and both sides read the same wall clock.
+ */
+export function deadlineAt(at: number, now: () => number = Date.now): Deadline {
   const passed = (): boolean => now() >= at;
   const remaining = (): number => Math.max(0, at - now());
 

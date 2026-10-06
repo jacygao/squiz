@@ -36,22 +36,23 @@ import { fileURLToPath } from "node:url";
 
 import type { Depth } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
+import { deepToolNames } from "../deep-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
 
 const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
 
 /**
- * The tools `pi` is given at each depth. `edit` and `write` are in neither.
+ * The tools `pi` is given at each depth. `edit`, `write` and `bash` are in
+ * neither.
  *
- * Every name is spelled once, and `deep` is the `read` grant plus the shell. An
- * unrecognised name is dropped with exit status 0 and empty stderr, so a
- * misspelling costs the reviewer a tool and says nothing.
+ * Every name is spelled once, and `deep` is the `read` grant plus the tools the
+ * extension serves for it. An unrecognised name is dropped with exit status 0
+ * and empty stderr, so a misspelling costs the reviewer a tool and says nothing.
  */
 export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze({
   read: Object.freeze([...readGrant, ...reportingTools]),
-  // The shell is all `deep` adds, and it is the one granted tool that writes.
-  deep: Object.freeze([...readGrant, ...reportingTools, "bash"]),
+  deep: Object.freeze([...readGrant, ...reportingTools, ...deepToolNames]),
 });
 
 /**

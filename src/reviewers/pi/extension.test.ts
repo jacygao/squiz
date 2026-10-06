@@ -16,13 +16,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { deepToolNames, deepTools, roundVariable } from "../deep-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
+import { grants } from "./argv.ts";
 import reportAsYouGo, {
   type Context,
   type MessageEnd,
   type Registrar,
   reportInto,
+  serveDeepTools,
 } from "./extension.ts";
 import type { Refusal, ToolCall } from "./refusals.ts";
 
@@ -623,4 +626,63 @@ test("with no file named, every call answers as it did", async (t) => {
     () => message({ type: "message_end", message: assistantMessage }),
     "with no file named, an assistant message threw",
   );
+});
+
+/** The deep tools served with `environment` as the reviewer's own. */
+function deepLoaded(environment: Readonly<Record<string, string | undefined>>): Loaded {
+  const { pi, loaded: extension } = registrar();
+  serveDeepTools(pi, environment);
+  return extension;
+}
+
+/** A round whose snapshot is this repository, which has a history to read. */
+const thisRound = roundVariable({
+  snapshot: process.cwd(),
+  scratch: tmpdir(),
+  test: null,
+  endsAt: Date.now() + 600_000,
+});
+
+/** The tools `pi` brings itself, which the extension does not register. */
+const builtIn = new Set(["read", "grep", "find", "ls"]);
+
+// pi registers what the extension offers and grants what --tools names, so a
+// name in one list and not the other is a tool offered and never granted.
+test("the extension pi loads registers exactly what the deep grant names", (t) => {
+  keepVariable(t);
+  const { pi, loaded: extension } = registrar();
+  reportAsYouGo(pi);
+  assert.deepEqual(
+    [...extension.tools.keys()].sort(),
+    grants.deep.filter((name) => !builtIn.has(name)).sort(),
+  );
+});
+
+test("each deep tool is registered under its shared runner's name, schema and description", () => {
+  const extension = deepLoaded({});
+  for (const shared of deepTools({})) {
+    const tool = toolOf(extension, shared.name);
+    assert.deepEqual(tool.parameters, shared.parameters);
+    assert.equal(tool.description, shared.description);
+    assert.notEqual(tool.label, "", `${shared.name} carries no label`);
+  }
+});
+
+// pi marks a call's answer as an error only where execute throws.
+test("a deep tool that failed is the call's error", async () => {
+  for (const name of deepToolNames) {
+    const refused = await refusalOf(toolOf(deepLoaded({}), name), {});
+    assert.match(refused, /could not run: /u, `${name} answered ${refused}`);
+  }
+});
+
+test("a deep tool's result is the call's answer", async () => {
+  const answer = await toolOf(deepLoaded(thisRound), "git_show").execute("call_1", { commit: "HEAD" });
+  const [content] = answer.content;
+  assert.ok(content !== undefined && content.text.startsWith("commit "), JSON.stringify(answer));
+});
+
+test("the signal pi hands a call reaches the runner", async () => {
+  const tool = toolOf(deepLoaded(thisRound), "git_show");
+  await assert.rejects(tool.execute("call_1", { commit: "HEAD" }, AbortSignal.abort()));
 });

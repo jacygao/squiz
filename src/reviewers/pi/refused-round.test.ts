@@ -114,7 +114,7 @@ test("a round whose reviewer reaches for none of them refuses nothing", async ()
 /** The prompt that tells the stand-in to review without reaching for anything. */
 const TRIES_NOTHING = "# Review pull request #1\n\nReach for nothing.";
 
-/** The invocation for one round over the fixture, at the depth that grants a shell. */
+/** The invocation for one round over the fixture, at `deep`. */
 function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
@@ -126,6 +126,7 @@ function invocationIn(tree: string): Invocation {
     scratchDirectory: ".squiz/agent-1/scratch",
     githubConfigDirectory: ".squiz/agent-1/rounds/1/gh",
     depth: "deep",
+    test: null,
     thinking: "medium",
     // No space, so nothing records a group. What a refused call does is the whole
     // of what this reads, and it never reaches a shell.
@@ -236,9 +237,8 @@ const blocked = (reason) => ({
 async function review() {
   const extension = after("--extension");
   if (extension === undefined) give("the command line carries no extension");
-  if (!(after("--tools") || "").split(",").includes("bash")) {
-    give("the grant carries no shell, so there is nothing here to refuse");
-  }
+  // No depth grants a shell or a writer, so every call below stands for a
+  // grant that stopped being passed, which is what the refusal is there for.
 
   const tools = new Map();
   const handlers = [];

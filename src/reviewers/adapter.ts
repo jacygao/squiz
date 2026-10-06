@@ -58,6 +58,11 @@ export type Invocation = {
    */
   readonly depth: Depth;
   /**
+   * The configured test command, which `run_tests` runs at `deep`. `null` where
+   * none is configured.
+   */
+  readonly test: string | null;
+  /**
    * How hard the reviewer thinks. The harness decides it, and the adapter puts
    * it on every command line rather than leaving the CLI to its own setting.
    */

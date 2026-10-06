@@ -21,6 +21,7 @@ const invocation: Invocation = {
   scratchDirectory: ".squiz/7/scratch",
   githubConfigDirectory: ".squiz/7/rounds/1/gh",
   depth: "read",
+  test: null,
   thinking: "medium",
   roundSpace: undefined,
   terminal: "none",

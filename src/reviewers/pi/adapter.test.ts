@@ -18,6 +18,7 @@ const invocation: Invocation = {
   scratchDirectory: ".squiz/agent-7/scratch",
   githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
   depth: "read",
+  test: null,
   thinking: "medium",
   roundSpace: undefined,
   terminal: "none",
