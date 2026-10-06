@@ -40,9 +40,12 @@ started a turn in it.
   next turn within 1.5 seconds of the command's exit. The longest idle
   stretch tried was 7 minutes. The wake belongs to the session that ran the
   command, so no other process can send it.
-- **Expect the woken turn to carry the review's result, with nothing for the
-  agent to fetch.** Copilot adds a `read_bash` result to the turn itself, before
-  the model runs. For `squiz review 14`, which exited 0, the new turn held:
+- **Expect the woken turn to carry the command's output and exit code, with
+  nothing for the agent to fetch.** Copilot adds a `read_bash` result to the turn
+  itself, before the model runs. That is the review's result only when the
+  command ended on one. A run whose deadline comes first exits 4 while the round
+  goes on, and the wake then carries only that. The agent runs `squiz review` in
+  `async` mode again, and that run's exit is the next wake. For `squiz review 14`, which exited 0, the new turn held:
 
   ```
   <system_notification>
