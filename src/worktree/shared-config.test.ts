@@ -88,6 +88,30 @@ test("a key the test command set from the snapshot is named, with the file it is
   });
 });
 
+// A round makes its snapshot in the temporary directory, outside the repository,
+// and the snapshot still shares the repository's git directory from there.
+test("a key set from a snapshot outside the repository is named in the repository's config", async () => {
+  await withSnapshot(async (repository) => {
+    const outside = realpathSync(await mkdtemp(join(tmpdir(), "squiz-outside-")));
+    try {
+      const snapshot = join(outside, "rounds", "1", "tree");
+      git(repository.worktree, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "--detach", snapshot, "HEAD");
+      assert.equal(git(snapshot, "rev-parse", "--path-format=absolute", "--git-common-dir"), repository.common);
+
+      const before = readSharedConfig(snapshot, repository.worktree, deadlineIn(60_000));
+      git(snapshot, "config", "core.hooksPath", ".husky/_");
+      const after = readSharedConfig(snapshot, repository.worktree, deadlineIn(60_000));
+
+      assert.deepEqual(compareSharedConfig(before, after), {
+        outcome: "changed",
+        changes: [{ file: "config", key: "core.hookspath" }],
+      });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
 test("a test command that wrote nothing leaves the shared files unchanged", async () => {
   await withSnapshot(async (repository) => {
     assert.deepEqual(await around(repository, () => {}), { outcome: "unchanged" });
