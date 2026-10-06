@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.86 (draft)
+**Version:** 0.87 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -917,11 +917,6 @@ whatever it was allowed to look at. The three calls are named under Findings.
 `git_log_search` takes a term, `git_blame` a file and a line, and `git_show` a
 commit, and each runs that one `git` subcommand with its arguments as separate
 words. The reviewer's environment carries no GitHub token or `gh` credential.
-
-The test command runs the project's code at the commit under review, with the
-user's access, as the coding agent's own test runs do. Nothing confines it, and
-the tracked-file comparison described under Confinement is what catches a write
-it makes to the snapshot.
 
 ### Confinement
 
