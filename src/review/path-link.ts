@@ -20,7 +20,7 @@ import {
   statSync,
   symlinkSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { failureLine } from "../hook/report.ts";
@@ -144,8 +144,13 @@ export function linkOntoPath(
     return madeNone("HOME is not set, so there is no directory to link squiz into");
   }
   const choices = [join(home, ".local", "bin"), join(home, "bin")];
-  const onPath = new Set(absoluteDirectories(environment).map(realOrResolved));
-  const chosen = choices.find((choice) => onPath.has(realOrResolved(choice)) && isWritableDirectory(choice));
+  // Only an entry that resolves counts: a shell cannot search through a missing
+  // directory, whatever its text folds to.
+  const onPath = new Set(absoluteDirectories(environment).map(realOrUndefined));
+  const chosen = choices.find((choice) => {
+    const real = realOrUndefined(choice);
+    return real !== undefined && onPath.has(real) && isWritableDirectory(choice);
+  });
   if (chosen === undefined) {
     return madeNone(
       `neither ${choices[0]} nor ${choices[1]} is a directory on PATH that you can write to. Add ${choices[0]} to PATH, creating it if it does not exist, then run squiz init again`,
@@ -174,8 +179,10 @@ function searchedDirectories(environment: LinkEnvironment, directory: string): s
   const directories: string[] = [];
   for (const entry of (environment.PATH ?? "").split(":")) {
     const searched = entry === "" ? directory : isAbsolute(entry) ? entry : `${directory}/${entry}`;
-    const key = realOrResolved(searched);
-    if (seen.has(key)) continue;
+    // An entry that does not resolve holds nothing to find, and is not allowed
+    // to stand for a directory that does.
+    const key = realOrUndefined(searched);
+    if (key === undefined || seen.has(key)) continue;
     seen.add(key);
     directories.push(searched);
   }
@@ -210,22 +217,30 @@ function followLinks(path: string): { final: string; exists: boolean } {
     try {
       stat = lstatSync(current);
     } catch {
-      return { final: realParent(current), exists: false };
+      return { final: physicalOf(current), exists: false };
     }
     if (!stat.isSymbolicLink()) return { final: realpathSync.native(current), exists: true };
     const link = readlinkSync(current);
-    current = isAbsolute(link) ? link : `${realOrResolved(dirname(current))}/${link}`;
+    current = isAbsolute(link) ? link : `${realOrUndefined(dirname(current)) ?? dirname(current)}/${link}`;
   }
   return { final: current, exists: false };
 }
 
-/** `path` with its directory's links resolved, for a file that is not there. */
-function realParent(path: string): string {
-  try {
-    return join(realpathSync.native(dirname(path)), basename(path));
-  } catch {
-    return path;
+/**
+ * `path`, for a file that is not there, with the longest part of it that exists
+ * resolved by the system and the rest appended. A removed cache version is then
+ * named under the same install as the version that replaced it.
+ */
+function physicalOf(path: string): string {
+  const missing: string[] = [];
+  let existing = path;
+  while (dirname(existing) !== existing) {
+    const real = realOrUndefined(existing);
+    if (real !== undefined) return join(real, ...missing);
+    missing.unshift(basename(existing));
+    existing = dirname(existing);
   }
+  return path;
 }
 
 /** Whether `binary` is `bin/squiz` in a plugin whose manifest names it squiz. */
@@ -270,11 +285,11 @@ function isWritableDirectory(path: string): boolean {
   }
 }
 
-function realOrResolved(path: string): string {
+function realOrUndefined(path: string): string | undefined {
   try {
     return realpathSync.native(path);
   } catch {
-    return resolve(path);
+    return undefined;
   }
 }
 

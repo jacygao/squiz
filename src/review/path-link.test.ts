@@ -286,6 +286,61 @@ test("a link whose target climbs out of a symlinked directory is followed where 
   });
 });
 
+test("a PATH entry through a missing directory does not hide the directory its text folds to", () => {
+  const { home, localBin, target } = sandbox();
+  const tools = fresh("tools");
+  mkdirSync(join(tools, "bin"));
+  writeFileSync(join(tools, "bin", "squiz"), "#!/bin/sh\n", { mode: 0o755 });
+
+  const printed = linkOntoPath(target, {
+    PATH: `${localBin}:${tools}/missing/../bin:${tools}/bin`,
+    HOME: home,
+  });
+
+  assert.equal(printed.exit, 1);
+  assert.equal(existsSync(join(localBin, "squiz")), false);
+});
+
+test("a PATH entry through a missing directory does not count as ~/.local/bin being on PATH", () => {
+  const { home, localBin, target } = sandbox();
+
+  const printed = linkOntoPath(target, { PATH: `${home}/.local/missing/../bin`, HOME: home });
+
+  assert.equal(printed.exit, 1);
+  assert.equal(existsSync(join(localBin, "squiz")), false);
+});
+
+test("a relative link to a removed earlier version of the same install is moved", () => {
+  const home = fresh("home");
+  const localBin = join(home, ".local", "bin");
+  mkdirSync(localBin, { recursive: true });
+  const install = join(home, ".claude", "plugins", "cache", "squiz-marketplace", "squiz");
+  const target = squizCopy(join(install, "0.2.0"));
+  const link = join(localBin, "squiz");
+  symlinkSync("../../.claude/plugins/cache/squiz-marketplace/squiz/0.1.0/bin/squiz", link);
+
+  const printed = linkOntoPath(target, { PATH: localBin, HOME: home });
+
+  assert.equal(printed.exit, 0, printed.stderr);
+  assert.equal(readlinkSync(link), target);
+});
+
+test("a link to a removed earlier version through a symlinked cache is moved", () => {
+  const home = fresh("home");
+  const localBin = join(home, ".local", "bin");
+  mkdirSync(localBin, { recursive: true });
+  const claude = fresh("real-claude");
+  const target = squizCopy(join(claude, "plugins", "cache", "squiz-marketplace", "squiz", "0.2.0"));
+  symlinkSync(claude, join(home, ".claude"));
+  const link = join(localBin, "squiz");
+  symlinkSync(join(home, ".claude", "plugins", "cache", "squiz-marketplace", "squiz", "0.1.0", "bin", "squiz"), link);
+
+  const printed = linkOntoPath(target, { PATH: localBin, HOME: home });
+
+  assert.equal(printed.exit, 0, printed.stderr);
+  assert.equal(readlinkSync(link), target);
+});
+
 test("another squiz copy's bin/ on PATH, as Claude Code puts an enabled plugin's, stops the link", () => {
   const { home, localBin, target } = sandbox();
   const copy = squizCopy(fresh("plugin-cache-copy"));
