@@ -285,11 +285,13 @@ test("git_show fetches no missing object, so no transport the config names runs"
   git(partial, "config", "remote.origin.url", "ssh://example.invalid/repo");
   git(partial, "config", "remote.origin.promisor", "true");
   git(partial, "config", "core.sshCommand", `${join(outside, "mark")} lazyfetch`);
-  const tree = spawnSync("git", ["mktree", "--missing"], {
+  const made = spawnSync("git", ["mktree", "--missing"], {
     cwd: partial,
     input: "100644 blob 0123456789abcdef0123456789abcdef01234567\tmissing.txt\n",
     encoding: "utf8",
-  }).stdout.trim();
+  });
+  assert.equal(made.status, 0, made.stderr);
+  const tree = made.stdout.trim();
   const orphan = git(
     partial,
     "-c",
@@ -304,13 +306,22 @@ test("git_show fetches no missing object, so no transport the config names runs"
   const result = await gitShow.run(partial, { commit: orphan });
   assert.equal(existsSync(join(marks, "lazyfetch")), false, `a lazy fetch ran: ${result.text}`);
   ranNothing();
+  // The commit resolved and show reached the blob, so the fetch was refused rather than never asked for.
+  assert.equal(result.failed, true);
+  assert.match(result.text, /^git exited \d+: .*0123456789abcdef0123456789abcdef01234567/su);
 });
 
 test("a tool whose signal is aborted stops git and says so", async () => {
-  const stop = new AbortController();
-  stop.abort();
-  const result = await gitLogSearch.run(repo, { term: "two" }, stop.signal);
-  assert.deepEqual(result, { text: "git was stopped", failed: true });
+  for (const [tool, params] of [
+    [gitLogSearch, { term: "two" }],
+    [gitBlame, { file: "code.txt", line: 1 }],
+    [gitShow, { commit: "HEAD" }],
+  ] as const) {
+    const stop = new AbortController();
+    stop.abort();
+    const result = await tool.run(repo, params, stop.signal);
+    assert.deepEqual(result, { text: "git was stopped", failed: true }, tool.name);
+  }
 });
 
 test("the three tools are named as the grant names them, each with an object schema", () => {

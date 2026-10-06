@@ -88,7 +88,12 @@ function gitEnvironment(): NodeJS.ProcessEnv {
 
 type Ran =
   | { readonly ran: true; readonly stdout: string; readonly cut: boolean }
-  | { readonly ran: false; readonly reason: string };
+  | {
+      readonly ran: false;
+      readonly reason: string;
+      /** Whether git ran to an exit status, rather than being stopped or never starting. */
+      readonly exited: boolean;
+    };
 
 function runGit(snapshot: string, args: readonly string[], signal: AbortSignal | undefined): Promise<Ran> {
   return new Promise((done) => {
@@ -111,7 +116,8 @@ function runGit(snapshot: string, args: readonly string[], signal: AbortSignal |
         if ("code" in error && error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && stdout.length > 0) {
           return done({ ran: true, stdout: out, cut: true });
         }
-        done({ ran: false, reason: describeFailure(error, decode(stderr)) });
+        const exited = "code" in error && typeof error.code === "number" && error.name !== "AbortError";
+        done({ ran: false, reason: describeFailure(error, decode(stderr)), exited });
       },
     );
   });
@@ -281,6 +287,8 @@ export const gitShow: HistoryTool = {
       ["rev-parse", "--verify", "--quiet", "--end-of-options", `${commit}^{commit}`],
       signal,
     );
+    // Only a git that ran and found no commit says the argument is wrong.
+    if (!resolved.ran && !resolved.exited) return refused(resolved.reason);
     const name = resolved.ran ? resolved.stdout.trim() : "";
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(name)) {
       return refused(`${commit} is not a commit in the snapshot's repository`);
