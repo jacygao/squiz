@@ -1,12 +1,12 @@
 # Milestones
 
-**Version:** 0.28 (draft)
+**Version:** 0.29 (draft)
 **Status:** For review
 **Owner:** TBD
 
 ---
 
-Thirteen milestones for building squiz, in the order they are done. Each ends in
+Fourteen milestones for building squiz, in the order they are done. Each ends in
 something that can be run or seen, never in a module written.
 
 | Order | Milestone | State |
@@ -21,12 +21,13 @@ something that can be run or seen, never in a module written.
 | 8 | M7 — The reviewer as a detached session | Done |
 | 9 | M10 — The subagent-era workarounds removed | Done |
 | 10 | M12 — Copilot as the reviewer | Done |
-| 11 | M11 — Depth `deep` | |
-| 12 | M8 — Episode boundaries | |
-| 13 | M9 — Install and dogfood | |
+| 11 | M13 — Copilot as a coding agent | |
+| 12 | M11 — Depth `deep` | |
+| 13 | M8 — Episode boundaries | |
+| 14 | M9 — Install and dogfood | |
 
-**A milestone's number names it, and the table places it.** M10, M12 and M11
-come before M8 and M9 in the order.
+**A milestone's number names it, and the table places it.** M10, M12, M13 and
+M11 come before M8 and M9 in the order.
 
 **From M7, squiz runs its reviewer as a session of its own, instead of inside a
 subagent's hook or shell call.** The review itself stays as it is: findings as
@@ -40,8 +41,8 @@ a second tool needs it.
 
 **The first version leaves three things out:** delivering a note when a session
 starts, rules for acknowledging a note and retrying one, and messages in both
-directions. Hooks for agents other than Claude Code, GitHub Copilot's among them,
-come after M9.
+directions. GitHub Copilot is the one coding agent besides Claude Code that the
+first version supports, in M13.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
@@ -181,6 +182,39 @@ It left these for M9: choosing the reviewer's model in `.squiz.json` (#483),
 and the setup check following `reviewer` (#512). Its open questions about
 Copilot are held with `milestone:M9`, and granting `deep` to Copilot is #526,
 with M11.
+
+## M13 — Copilot as a coding agent
+
+A GitHub Copilot CLI session works its pull request's review the way a Claude
+Code session does: it runs `squiz review`, works the threads, and stops on 0 or 3.
+The owner works with Copilot as well as Claude Code, so this comes before M11.
+
+### Spike
+
+Run before anything here is built. Its findings go in `docs/notes/`, and decide
+how much of the rest M13 builds:
+
+- **The plugin.** Whether `copilot --plugin-dir` loads squiz's plugin directory
+  as it is: its skill, and `bin/` on the shell's `PATH`.
+- **The instruction.** Whether Copilot follows the skill, or the `AGENTS.md`
+  section `squiz init` writes, to run `squiz review` once it opens a pull request,
+  with nothing in its prompt naming squiz.
+- **The hooks.** Whether Copilot's `agentStop` and `subagentStop` hooks fire,
+  what their payload names, and whether anything can wake an idle Copilot session
+  from outside (#499).
+
+### Acceptance criteria
+
+- [ ] The spike's findings, in `docs/notes/`.
+- [ ] A Copilot session reaches `squiz` and the instruction to run it, by the
+      plugin or by `AGENTS.md`, as the spike settles. The harness specification
+      says how, and § 9 says how a project sets it up.
+- [ ] A live run: a Copilot session, given a task and no mention of squiz, opens
+      a pull request, runs `squiz review`, and works a finding to exit 0 or 3.
+- [ ] Where the spike shows Copilot's stop hooks fire, they queue a state as
+      Claude Code's do. Where they do not, or nothing can wake an idle session,
+      the specification states it as a gap, and the coding agent runs the command
+      itself.
 
 ## M11 — Depth `deep`
 
