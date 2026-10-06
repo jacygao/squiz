@@ -92,5 +92,5 @@ exit 1, stderr: gh: Not Found (HTTP 404)
   GitHub, so only `git`'s rendering of those is known.
 - **One repository, one account.** Everything here ran against a public
   repository under the account `gh` was authenticated as.
-- **One `git`.** The comparison used git 2.54.0, where § 2 Verified against
-  records 2.50.1. The quoting on 2.50.1 was not re-run.
+- **One `git`.** The comparison used git 2.54.0, where
+  `no-dependency-version-is-a-minimum.md` records 2.50.1. The quoting on 2.50.1 was not re-run.

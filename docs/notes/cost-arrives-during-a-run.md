@@ -49,7 +49,7 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
 
 ## Needs your input
 
-**§ 2's Verified against table records `pi` 0.84.2.** Everything measured since
+**`no-dependency-version-is-a-minimum.md` records `pi` 0.84.2.** Everything measured since
 is 0.85.1, and the two agree wherever both were run.
 
 ## Reference
