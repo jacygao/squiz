@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.89 (draft)
+**Version:** 0.90 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -31,7 +31,7 @@ one of them is required.
 | Role | Today | Needed for |
 |---|---|---|
 | Git repository | `git` | The review runs against a working tree and a merge base. The repository needs a remote for a pull request to exist against. |
-| Runtime | Claude Code | Runs the coding agent, whose shell tool runs `squiz review`. Fires the `Stop` and `SubagentStop` hooks, which start a review. Wakes the session that owns the work when the review is done. Distributes the harness as a plugin. |
+| Runtime | Claude Code, or the GitHub Copilot CLI | Runs the coding agent, whose shell tool runs `squiz review`. Loads the harness as a plugin, and fires its `Stop` and `SubagentStop` hooks, which start a review. Wakes the session that owns the work when the review is done: Claude Code for any round its hooks queued, Copilot only for a `squiz review` the session itself ran. |
 | Reviewer | `pi`, or the GitHub Copilot CLI where `reviewer` names it | The agent that reads the change and reports what is wrong with it. It must run a different model from the coding agent. Only the reviewer the configuration names has to be installed. |
 | Forge | GitHub, through an authenticated `gh` | The pull request is where the review is conducted and recorded. |
 
@@ -79,6 +79,11 @@ the reviewer runs detached, and a log holds its progress.
   session**, ten minutes after its turn ended as well as one. The runtime enforces
   an `asyncRewake` hook's `timeout`, and a hook stopped at it wakes nothing. Every
   socket post reaches the agent as "Another Claude session sent a message".
+- **Copilot starts a turn in an idle session when a background shell command
+  that session started ends.** The command is in the background where the agent
+  ran it in the bash tool's `async` mode, or where it was still running when its
+  `sync` call's `initial_wait` ran out. The new turn carries the command's whole
+  output and its exit code. It wakes only the session that started the command.
 
 ### GitHub access
 
@@ -466,23 +471,32 @@ There are two kinds of trigger:
   pull request and again after each push that works the threads. A coordinator or
   a CI job may run it as well, from a checkout of the pull request's branch. It
   waits for the review, and prints the result.
-- **The Claude Code hooks**, on `Stop` and `SubagentStop`, which queue the state
-  and return at once.
+- **The plugin's hooks**, on `Stop` and `SubagentStop`, which queue the state
+  and return at once. Claude Code and the GitHub Copilot CLI both fire them, as
+  The Claude Code hooks sets out.
 
 **The instruction to run `squiz review` reaches the coding agent two ways.**
 
-- **In Claude Code, a skill the plugin ships.** Its description has the coding
-  agent load it when it opens or updates a pull request. A Claude Code project
+- **In Claude Code and in Copilot, a skill the plugin ships.** Its description
+  has the coding agent load it when it opens or updates a pull request. Copilot
+  loads the plugin's skills as Claude Code does, so a project that runs either
   needs nothing in its own files for this.
 - **For any other agent, a section of the host project's `AGENTS.md`**, which
   `squiz init` adds.
 
-§ 9 gives the text of both. Nothing forces an agent to follow either. Claude Code
+§ 9 gives the text of both. Nothing forces an agent to follow either. A runtime
 loads a skill when its description matches what the agent is doing, and does not
-promise to. In Claude Code the hooks start a review whether the agent follows it
-or not. An agent in a runtime with no hook that never runs the command leaves a
-pull request no round has read, which carries no comment with any of § 2
-Identity's markers.
+promise to. Under Claude Code and Copilot the hooks start a review whether the
+agent follows it or not. An agent in a runtime with no hook that never runs the
+command leaves a pull request no round has read, which carries no comment with
+any of § 2 Identity's markers.
+
+**A Copilot coding agent starts its own rounds, by running `squiz review`.** The
+hooks queue a state only where the agent did not run the command. Copilot fires `Stop` when a
+turn ends, and a turn that ran the command ends after the command queued the
+state, so that firing finds the state queued or reviewed and queues nothing.
+Under Copilot that command is also the only thing that can wake the session, as
+The report sets out.
 
 ### The round host
 
@@ -573,9 +587,11 @@ Copilot puts no socket in a hook's environment, so a
 `CLAUDE_CODE_MESSAGING_SOCKET` found there belongs to a Claude Code session that
 started Copilot, and the hook records no socket from it.
 
-The `Stop` registration runs in the background, so the session does not wait on
-it. After it has queued, it stays to deliver a note, as The report sets out. The
-`SubagentStop` hook returns as soon as it has queued.
+Under Claude Code the `Stop` registration runs in the background, so the session
+does not wait on it. After it has queued, it stays to deliver a note, as The
+report sets out. The `SubagentStop` hook returns as soon as it has queued, and
+so does the `Stop` hook under Copilot, which waits for every hook to end before
+the session goes idle.
 
 **Nothing the runtime does to a hook bounds a review.** The hook only queues, so
 neither the hook's timeout, nor the stall threshold, nor the hand-back that ends a
@@ -630,8 +646,8 @@ retries it. A failed state gets one note, however many times it fails, and a
 state not reviewed gets one saying why. A state no hook recorded an owner for gets
 no note.
 
-**Then it wakes the owner, one of two ways.** Whichever delivers a note moves it
-into `delivered/` beside it, so the other does not deliver it again.
+**Then it wakes a Claude Code owner, one of two ways.** Whichever delivers a note
+moves it into `delivered/` beside it, so the other does not deliver it again.
 
 - **The messaging socket.** Where the hook recorded the owner's
   `CLAUDE_CODE_MESSAGING_SOCKET`, the round host posts the text to it, and an idle
@@ -643,6 +659,15 @@ into `delivered/` beside it, so the other does not deliver it again.
   not deduplicate background hooks, so a session that ends three turns has three
   waiters, and a waiter whose session has ended a later turn exits 0 without
   delivering anything. Only the newest delivers.
+
+**Copilot wakes a Copilot owner itself, and only from the session's own
+`squiz review`.** The hook records no socket under Copilot and leaves no waiter,
+so the round host writes the note and wakes nothing. A `squiz review` that the
+session ran in the background, or that Copilot moved there, wakes the idle
+session when it exits, with its output and its exit code (§ 2). That is the
+round's result where the round ended before the command's deadline. Where the
+deadline came first the command exits 4, the agent runs `squiz review` again, and
+that run's exit is the next wake.
 
 **A subagent's parent decides what follows.** It reads the threads with
 `squiz review`, and sends the same subagent back to work them, dispatches
@@ -656,6 +681,9 @@ in any case.
 
 - **Delivering notes when a session starts.** A note waiting for a session that
   was closed is delivered only by its next `Stop` waiter, or read by pull.
+- **A wake for a Copilot session from a round only a hook queued.** No
+  `squiz review` is running in the session, so no command's end wakes it, and
+  Copilot gives the hook no socket. Its note is read by pull.
 - **Acknowledgement and retry rules.** A note is delivered at most once, and
   nothing retries one a wake did not reach.
 - **A two-way inbox.** The coding agent answers on the pull request, and never
@@ -2519,9 +2547,9 @@ plugin is the package, so there is no separate packaging step.
 
 ```
 .claude-plugin/plugin.json   manifest: name, version, description
-hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code triggers
+hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code and Copilot triggers
 commands/                    slash commands; the setup check is the first
-skills/squiz-review/SKILL.md the instruction to run squiz review, for a Claude Code coding agent
+skills/squiz-review/SKILL.md the instruction to run squiz review, for a Claude Code or Copilot coding agent
 bin/                         the CLI, on the Bash tool's PATH while enabled
 charter.md                   the standing review instructions, shipped as one file
 src/
@@ -2565,7 +2593,7 @@ until something asks.
 | | | |
 |---|---|---|
 | **P0** | The command and the loop | `squiz review <number>`, the pull request gate, the record per head commit and latest reply, the round cap, the exit statuses and what is printed with each, and the time bound on the reviewer |
-| **P0** | The review skill | The skill that tells a Claude Code coding agent to run `squiz review` and work what it prints |
+| **P0** | The review skill | The skill that tells a Claude Code or Copilot coding agent to run `squiz review` and work what it prints |
 | **P0** | The Claude Code hooks | The `Stop` and `SubagentStop` registrations, which resolve the pull request for their worktree, queue the review and return |
 | **P0** | The round host | `squiz host`, started by a double fork, which runs an episode's rounds one at a time and is found again by pid and start time |
 | **P0** | The reviewer session | A fresh reviewer per round in a tmux or Herdr pane, or detached, whose pane closes at the end and whose session stays resumable |
@@ -2605,6 +2633,9 @@ the part that rests on it is built, and each result is written as a finding in
 
 - **Linux.** The detach and pane probes ran on macOS alone, and so did every
   Copilot run, whose credential was in macOS's own credential store.
+- **Copilot's own install.** Copilot has loaded the plugin from
+  `--plugin-dir` only. Whether it loads the skill and the hooks the same way
+  from `copilot plugin install` has not been run.
 
 ## 9. Adoption
 
@@ -2634,8 +2665,8 @@ Three things in the host project, the last one optional.
 
 Then run `/squiz doctor`.
 
-**A Claude Code coding agent is told to run `squiz review` by the plugin's skill,**
-`skills/squiz-review/SKILL.md`, which the install brings with it:
+**A Claude Code or Copilot coding agent is told to run `squiz review` by the
+plugin's skill,** `skills/squiz-review/SKILL.md`, which comes with the plugin:
 
 ```markdown
 ---
@@ -2664,6 +2695,11 @@ anything else.
 - **Exit 1, or anything else:** the review could not run, or it failed. Put the
   lines it printed in your report, and do not run it again.
 ```
+
+**A Copilot session gets the skill by loading the plugin,** with
+`copilot --plugin-dir <plugin directory>`. Copilot does not put the plugin's
+`bin/` on its shell's `PATH`, so `squiz init` links `squiz` into a directory
+already on it, once on each machine.
 
 **Any other coding agent is told by a section of `AGENTS.md`**, which
 `squiz init` adds:
