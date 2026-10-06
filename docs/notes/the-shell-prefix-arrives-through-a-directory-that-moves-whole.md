@@ -23,6 +23,10 @@ recheck-when: pi upgrades, pi's settings resolution changes, or the harness runs
 
 - **Point `PI_CODING_AGENT_DIR` at a directory the round owns, holding a
   `settings.json`.** No flag and no other variable carries the prefix.
+  2026-10-06: removed, with the four decisions after this one. No depth grants
+  `pi` a shell, so the adapter writes no settings and leaves
+  `PI_CODING_AGENT_DIR` as the user has it. The recording line now runs only in
+  the shell `run_tests` starts to lead the test command's group.
 
 - **Mirror the user's whole configuration directory into it: link every entry,
   write `settings.json` alone.** Every path `pi` resolves hangs off that one

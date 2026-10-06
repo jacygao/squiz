@@ -10,9 +10,8 @@
  * group of its own, led by a shell that does not exit until the runner has
  * stopped everything else in it. So the group's number is held while it is
  * signalled, and a test runner's workers are stopped whether the command
- * finished, failed, or ran out of time. The shell also records its group the way
- * every reviewer shell does, so a run the round ends from outside is reached by
- * the round's own stop.
+ * finished, failed, or ran out of time. The shell also records its group, so a
+ * run the round ends from outside is reached by the round's own stop.
  *
  * Nothing here throws. Every outcome is a value, because the reviewer reads it as
  * the tool's result.

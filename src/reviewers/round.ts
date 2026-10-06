@@ -672,10 +672,10 @@ type Owned = {
  * Stop the reviewer and everything it started, and do not return while any of
  * it might still be running.
  *
- * Two groups of processes, because a reviewer CLI that starts a shell tool
- * detached puts that shell in a group of its own, which the reviewer's group is
- * not. The reviewer's group goes first, so that nothing new starts while the
- * record is being read, and the groups the shells recorded go after it.
+ * Two groups of processes, because `run_tests` starts the test command in a
+ * group of its own, which the reviewer's group is not. The reviewer's group goes
+ * first, so that nothing new starts while the record is being read, and the
+ * groups the test command's runs recorded go after it.
  *
  * **The reviewer's own exit does not end this.** A tool it started can outlive
  * it, whether because the reviewer finished first or because the reviewer took

@@ -29,7 +29,9 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes its shell permission 
 
   `shell(git checkout -B)` matched nothing, so `git checkout` is refused whole.
   Whether to refuse `git switch -C` too is for the adapter: it moved `HEAD` and
-  matched none of these.
+  matched none of these. 2026-10-06: no adapter refuses a shell command any
+  more. No depth grants Copilot a shell, so it is passed no `--deny-tool` for
+  one.
 - **Count a refusal from `tool.execution_complete`, where `success` is false and
   `error.code` is `"denied"`.** That is the call's own result, and the model read
   it as one and went on to its next call. The text names the rule:

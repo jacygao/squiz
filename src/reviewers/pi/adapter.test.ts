@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import type { Depth } from "../../config/config.ts";
 import type { Invocation } from "../adapter.ts";
+import { makeRoundSpace } from "../groups.ts";
 import { pi } from "./adapter.ts";
 
 const invocation: Invocation = {
@@ -33,6 +34,24 @@ test("the adapter carries a command line, what it confines with, a reader and th
   assert.deepEqual(Object.keys(pi.grants).toSorted(), ["deep", "read"]);
   assert.equal(typeof pi.parse, "function");
   assert.deepEqual(pi.confine(invocation), { outcome: "prepared", environment: {} });
+});
+
+/** No depth grants `pi` a shell, so there is no setting to hand it and its own configuration stands. */
+test("at deep, with a round space, nothing is written and nothing is added", () => {
+  const directory = mkdtempSync(join(tmpdir(), "squiz-pi-confine-"));
+  try {
+    const made = makeRoundSpace(directory);
+    assert.equal(made.outcome, "made");
+    const roundSpace = made.outcome === "made" ? made.space : undefined;
+    const before = readdirSync(directory, { recursive: true }).toSorted();
+    assert.deepEqual(pi.confine({ ...invocation, depth: "deep", roundSpace }), {
+      outcome: "prepared",
+      environment: {},
+    });
+    assert.deepEqual(readdirSync(directory, { recursive: true }).toSorted(), before);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("the grant on the command line is the one the adapter names", () => {
