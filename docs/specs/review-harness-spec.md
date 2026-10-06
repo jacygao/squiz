@@ -1069,12 +1069,31 @@ what running a build and a test suite requires.
 **No depth grants a tool that writes, or a shell.** `edit` and `write` are
 withheld at both depths, and so is every shell tool. Nothing the reviewer can
 call touches the tree, the reporting calls included: what a report reaches is
-the round that is reading the reviewer's output, and nothing on disk. At `read`
-the grant is the whole of the confinement.
+the round that is reading the reviewer's output, and nothing on disk.
 
-**At `deep`, three things hold:**
+**The reading tools read the snapshot and nothing outside it, at both depths.**
+A path is inside where its real path, every link resolved, is inside the
+snapshot's real path. So an absolute path elsewhere, a `..` path, and a link in
+the tree under review that points out are each refused before anything is read.
+A finding is posted publicly on the pull request, so a file the reviewer reads
+can end up there. Each adapter confines its tools differently:
+
+| Adapter | What refuses a read outside the snapshot |
+|---|---|
+| `pi` | The extension's `tool_call` handler, for `read`, `grep`, `find` and `ls`. It resolves the path as `pi` does: a leading `@` dropped, `~` taken as the home directory, a `file://` URL taken as its path, and the rest resolved against the snapshot. Every other spelling `read` would try for a path that does not exist is checked as well. A path that is not a string is refused. The reviewer reads ``squiz refused this call: `<path>` is outside the code under review.`` as the call's error, and the refusal is recorded like any other. |
+| Copilot | Copilot's own path check, which refuses any path outside its working directory and the system's temporary directory. `--disallow-temp-dir` removes the temporary directory, which for the reviewer is the round's scratch space. `--allow-all-paths` and `--add-dir` are never passed. |
+
+No tool reads outside the snapshot on purpose. The charter, the prompt and
+Copilot's agent file are read by the CLI itself, from its command line and its
+`COPILOT_HOME`, and no granted tool reads them.
+
+At `read`, the grant and the confinement of the reading tools are the whole of
+the confinement.
+
+**At `deep`, four things hold:**
 
 - the grant, which carries no tool that writes and no shell;
+- the confinement of the reading tools to the snapshot;
 - the typed tools, whose arguments reach no shell, as Depth sets out. The three
   history tools each run one `git` subcommand that reads, and `run_tests` takes
   no argument;
@@ -1296,6 +1315,10 @@ harness could not compose a comment or a mutation from, and a `deep` tool that
 failed throws its error text. Either way the reviewer reads it as that call's
 error.
 
+The extension also subscribes the `tool_call` handler that refuses `edit` and
+`write`, and a read outside the snapshot, before either runs (Confinement). The
+snapshot is the directory `pi` was started in.
+
 `--no-extensions` turns off discovery, so the extension named on the command
 line is the only one loaded. An extension installed on the machine or sitting in
 the tree under review could otherwise register a tool under a reporting call's
@@ -1432,6 +1455,7 @@ sh -c 'prompt=$(cat .squiz/<number>/rounds/<k>/prompt.md && printf .) \
          --agent squiz-reviewer \
          --no-ask-user --allow-all-tools \
          --available-tools=view,grep,glob,squiz-report_finding,squiz-report_verdict,squiz-finish_review \
+         --disallow-temp-dir \
          --no-custom-instructions \
          --disable-builtin-mcps \
          --additional-mcp-config "$0" \
@@ -1507,6 +1531,7 @@ inherits it.
 | `--agent` | Chooses the agent whose instructions are the charter. |
 | `--no-ask-user`, `--allow-all-tools` | Copilot runs to the end with nobody to answer it. `--allow-all-tools` lets the granted tools run without asking, and `-p` requires it. |
 | `--available-tools` | The grant. A tool outside it is disabled, and the model is not shown it. |
+| `--disallow-temp-dir` | The reading tools reach the snapshot and nothing else, as Confinement sets out. |
 | `--no-custom-instructions` | Keeps the tree's `AGENTS.md`, `.github/copilot-instructions.md` and `.github/instructions/` out of the system prompt. These load whether or not the folder is trusted. |
 | `--disable-builtin-mcps` | The GitHub MCP server is not started for a reviewer that has no GitHub access of its own. |
 | `--additional-mcp-config` | Starts the reporting server. |
@@ -1578,8 +1603,9 @@ The calls the reporting server serves are named `<server>-<call>` under
 these names alone leaves Copilot no shell. The model is shown `grep` as `rg`.
 Nothing is refused by pattern, so the run's refusals are always zero.
 
-At `read` the grant is the whole of the confinement. At `deep` it is one of the
-three things Confinement sets out.
+The grant is one of the things Confinement sets out, at both depths. Copilot's
+own path check, with `--disallow-temp-dir`, confines the three reading tools to
+the snapshot.
 
 #### The reporting server
 

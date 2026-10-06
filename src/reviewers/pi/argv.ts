@@ -1,10 +1,11 @@
 /**
  * `pi`'s command line, and the tools it is granted at each depth.
  *
- * The grant is the confinement. `pi`'s own default set, used when no `--tools`
- * reaches it, is `read`, `bash`, `edit` and `write`, so a grant that goes
- * missing does not fall back to something safe: it hands the reviewer two
- * writers and a shell over the code it is reviewing. `--tools` is enforced by
+ * The grant confines what the reviewer may call, and the extension where it may
+ * read. `pi`'s own default set, used when no `--tools` reaches it, is `read`,
+ * `bash`, `edit` and `write`, so a grant that goes missing does not fall back
+ * to something safe: it hands the reviewer two writers and a shell over the
+ * code it is reviewing. `--tools` is enforced by
  * filtering the registered tools, so a name outside the grant has no definition
  * and no implementation.
  *

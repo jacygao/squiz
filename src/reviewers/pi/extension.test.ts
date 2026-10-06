@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -62,7 +62,7 @@ function registrar(): { pi: Registrar; loaded: Loaded } {
 /** The extension loaded with its reports going to `reports`, or nowhere. */
 function loaded(reports?: string): Loaded {
   const { pi, loaded } = registrar();
-  reportInto(pi, reports);
+  reportInto(pi, reports, process.cwd());
   return loaded;
 }
 
@@ -329,6 +329,24 @@ test("a call stopped before it ran is recorded with its refusal", (t) => {
 
   assert.deepEqual(linesIn(reports), [
     { type: "refused", call: "bash", reason: refused?.reason, stopped: true },
+  ]);
+});
+
+test("a read outside the working directory pi was started in is refused and recorded", (t) => {
+  const reports = reportsFile(t);
+  const outside = join(reports, "..", "id_rsa");
+  writeFileSync(outside, "decoy\n");
+  const { pi, loaded: extension } = registrar();
+  keepVariable(t);
+  process.env[REPORTS_VARIABLE] = reports;
+  reportAsYouGo(pi);
+  const handler = onlyHandler(extension, "tool_call") as Handler;
+
+  const refused = handler({ toolName: "read", input: { path: outside } });
+  assert.equal(refused?.block, true, "the subscribed handler let a read outside the snapshot through");
+  assert.equal(handler({ toolName: "read", input: { path: "package.json" } }), undefined);
+  assert.deepEqual(linesIn(reports), [
+    { type: "refused", call: "read", reason: refused?.reason, stopped: true },
   ]);
 });
 

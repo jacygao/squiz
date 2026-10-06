@@ -7,9 +7,10 @@
  * exited 0, because Copilot reports its usage only into a file of its own. The
  * MCP configuration is the script's `$0`, so its quotes are never the script's.
  *
- * The grant is the confinement. Copilot hides from the model every tool
- * `--available-tools` leaves out, so `--available-tools` is on every line, and
- * no shell tool is on it at either depth. The `deep` tools are the reporting
+ * The grant and Copilot's own path check are the confinement. Copilot hides
+ * from the model every tool `--available-tools` leaves out, so
+ * `--available-tools` is on every line, and no shell tool is on it at either
+ * depth. The path check keeps the reading tools inside the snapshot. The `deep` tools are the reporting
  * server's, which finds the round's values on the environment it inherits.
  *
  * Nothing here runs a process.
@@ -80,6 +81,9 @@ export function argv(invocation: Invocation): CommandLine {
     `--agent ${AGENT_NAME}`,
     "--no-ask-user --allow-all-tools",
     `--available-tools=${grants[invocation.depth].join(",")}`,
+    // Copilot refuses a path outside the snapshot, symlinks resolved, except
+    // in the temporary directory, which is the round's scratch space.
+    "--disallow-temp-dir",
     "--no-custom-instructions",
     "--disable-builtin-mcps",
     '--additional-mcp-config "$0"',
