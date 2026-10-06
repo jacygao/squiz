@@ -257,6 +257,27 @@ test("a key whose subsection carries a credential is named without it", async ()
   });
 });
 
+// Two keys that differ only in their subsection are two keys, though they are
+// named alike.
+test("a subsection replaced under the same value is named beside another key that changed", async () => {
+  await withSnapshot(async (repository) => {
+    git(repository.worktree, "config", "url.https://old.example/.insteadOf", "https://example.com/");
+    const comparison = await around(repository, () => {
+      git(repository.snapshot, "config", "--remove-section", "url.https://old.example/");
+      git(repository.snapshot, "config", "url.https://new.example/.insteadOf", "https://example.com/");
+      git(repository.snapshot, "config", "core.hooksPath", ".husky/_");
+    });
+
+    assert.deepEqual(comparison, {
+      outcome: "changed",
+      changes: [
+        { file: "config", key: "core.hookspath" },
+        { file: "config", key: "url.*.insteadof" },
+      ],
+    });
+  });
+});
+
 /** A deadline that reports passed from look `after + 1` onward, and counts the looks. */
 function passingAfter(after: number): Deadline & { readonly looks: () => number } {
   let looks = 0;

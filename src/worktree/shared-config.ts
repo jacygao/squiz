@@ -26,10 +26,18 @@ type Stands = {
   /** The content hashed, the kind of a path that is no file, or `absent`. */
   readonly stands: string;
   /**
-   * Each key against the hash of its values, in the order the file gives them.
-   * Absent where the file is no config, or one git could not read as one.
+   * Each key, by the hash of its full name, against what it is named as and the
+   * hash of its values. Absent where the file is no config, or one git could not
+   * read as one.
    */
-  readonly keys?: ReadonlyMap<string, string>;
+  readonly keys?: ReadonlyMap<string, Key>;
+};
+
+type Key = {
+  /** The key with its subsection written as `*`. */
+  readonly name: string;
+  /** The hash of every value the key is given, in the order the file gives them. */
+  readonly values: string;
 };
 
 /** The shared files at one moment, or why they could not be read. */
@@ -146,7 +154,14 @@ export function compareSharedConfig(
 function keysChanged(was: Stands | undefined, is: Stands | undefined): readonly string[] {
   if (was?.keys === undefined || is?.keys === undefined) return [];
   const keys = new Set([...was.keys.keys(), ...is.keys.keys()]);
-  return [...keys].filter((key) => was.keys?.get(key) !== is.keys?.get(key)).sort();
+  const changed = [...keys].flatMap((key) => {
+    const before = was.keys?.get(key);
+    const after = is.keys?.get(key);
+    if (before?.values === after?.values) return [];
+    return [(before ?? after)?.name ?? ""];
+  });
+  // Two keys that differ only in their subsection are named alike, and once.
+  return [...new Set(changed)].sort();
 }
 
 type Found =
@@ -195,21 +210,29 @@ function readConfig(common: string, name: string, until?: Deadline): Read {
   return { read: true, stands: { ...plain.stands, keys: keysOf(listed.stdout) } };
 }
 
-/** Each key against the hash of every value it is given, in order. */
-function keysOf(stdout: string): ReadonlyMap<string, string> {
+/**
+ * Each key, by the hash of its full name, against its name and its values.
+ *
+ * Full names and values are kept as hashes, so that two keys differing only in a
+ * subsection stay two keys while neither the subsection nor the value is held.
+ */
+function keysOf(stdout: string): ReadonlyMap<string, Key> {
   const values = new Map<string, string[]>();
   for (const record of stdout.split("\0")) {
     if (record === "") continue;
     // A key given no value, which git reads as true, has no newline after it.
     const newline = record.indexOf("\n");
-    const key = withoutSubsection(newline === -1 ? record : record.slice(0, newline));
+    const key = newline === -1 ? record : record.slice(0, newline);
     const value = newline === -1 ? "\0no value" : record.slice(newline + 1);
     values.set(key, [...(values.get(key) ?? []), value]);
   }
-  const keys = new Map<string, string>();
-  // Values are kept as hashes. A remote's URL can carry a credential, and nothing
-  // here needs the value itself.
-  for (const [key, given] of values) keys.set(key, digestOf(Buffer.from(given.join("\0"))));
+  const keys = new Map<string, Key>();
+  for (const [key, given] of values) {
+    keys.set(digestOf(Buffer.from(key)), {
+      name: withoutSubsection(key),
+      values: digestOf(Buffer.from(given.join("\0"))),
+    });
+  }
   return keys;
 }
 
