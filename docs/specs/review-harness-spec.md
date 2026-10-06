@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.81 (draft)
+**Version:** 0.82 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -737,6 +737,21 @@ at once. The line is the reviewer's behind a gate, each word single-quoted:
 ```
 '/bin/sh' '-c' '<gate>' '/tmp/squiz-gate-Xa81Qe' '400' 'pi' '--session-dir' …
 ```
+
+**No line over 512 bytes is typed.** A new pane's shell may not have started its
+line editor when the line arrives, and macOS then keeps only 1024 bytes of it. A
+line cut inside a quoted word runs nothing. A gated line over 512 bytes is
+written to a file named `line` in the gate directory before the tab is created,
+and the line typed runs that file:
+
+```
+'/bin/sh' '/tmp/squiz-gate-Xa81Qe/line'
+```
+
+The file removes itself and then execs the gated line, so the gate's pid is
+still the typed command's. Copilot's line is about 1.7 KB, and `pi`'s is about
+900 bytes from a worktree, so both run from the file. tmux types nothing: the
+command line is `new-window`'s own argument.
 
 The gate writes its pid into the gate directory, waits for a `go` file there,
 and then becomes the reviewer with the same pid, group and start time. The

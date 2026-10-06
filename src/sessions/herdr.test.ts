@@ -95,13 +95,15 @@ function withFakeHerdr<T>(answers: Record<string, readonly Answer[]>, body: (fak
         '[ -f "$answer.out" ] || answer="$dir/answer-$key-last"',
         '[ -f "$answer.out" ] || { echo \'{"error":{"code":"unexpected_call","message":"no answer"}}\'; exit 1; }',
         '[ -f "$answer.sleep" ] && sleep "$(cat "$answer.sleep")"',
-        // The typed line is `/bin/sh -c <gate script> <gate> …`, so its fourth word is the gate.
         'line=$4',
         'if [ -f "$answer.runs" ]; then /bin/sh -c "$line" </dev/null >/dev/null 2>&1 & fi',
         'if [ -f "$answer.gatepid" ]; then',
         '  eval "set -- $line"',
-        '  echo "$4" >> "$dir/gates"',
-        '  cat "$answer.gatepid" > "$4/pid"',
+        // The typed line is `/bin/sh -c <gate script> <gate> …`, whose fourth
+        // word is the gate, or `/bin/sh <gate>/<file>`, which runs one written there.
+        '  gate=$4; [ $# -eq 2 ] && gate=$(dirname "$2")',
+        '  echo "$gate" >> "$dir/gates"',
+        '  cat "$answer.gatepid" > "$gate/pid"',
         'fi',
         'if [ -f "$answer.stderr" ]; then cat "$answer.out" >&2; else cat "$answer.out"; fi',
         'exit "$(cat "$answer.status")"',
@@ -206,6 +208,71 @@ test("the line typed hands the shell every argument as one word", () => {
       assert.deepEqual(words.slice(-4), ["pi", argument, "", ""]);
     },
   );
+});
+
+// A fresh pane's shell keeps 1024 bytes of a line typed before its line editor
+// starts, and a line cut short starts nothing (#516).
+const TYPED_AT_MOST = 512;
+
+/** `line` split into words as a POSIX shell reads it. */
+function wordsOf(line: string): string[] {
+  const listed = spawnSync("/bin/sh", ["-c", `for word in ${line}; do printf '%s\\0' "$word"; done`], { encoding: "utf8" });
+  return listed.stdout.split("\0").slice(0, -1);
+}
+
+/** Start `program` with `args` against a fake that answers every call, and hand `body` the line it typed. */
+function typedFor<T>(program: string, args: readonly string[], body: (line: string) => T): T {
+  return withFakeHerdr(
+    {
+      "tab-create": [tabCreated("w1:p7")],
+      "pane-run": [typed(process.pid)],
+      "pane-process-info": atPromptThenRunning("w1:p7", process.pid),
+    },
+    ({ options, calls }) => {
+      const started = startInHerdrPane({ ...command, program, arguments: args }, options);
+      assert.equal(started.outcome, "started", JSON.stringify(started));
+      return body((calls()[2] ?? "").slice("pane run w1:p7 ".length));
+    },
+  );
+}
+
+test("a line at the bound is typed whole, and one a byte over it is run from a file in the gate (#516)", () => {
+  const shortest = typedFor("pi", ["x"], (line) => Buffer.byteLength(line));
+  const atBound = "x".repeat(1 + TYPED_AT_MOST - shortest);
+
+  typedFor("pi", [atBound], (line) => {
+    assert.equal(Buffer.byteLength(line), TYPED_AT_MOST);
+    assert.deepEqual(wordsOf(line).slice(-2), ["pi", atBound]);
+  });
+  typedFor("pi", [`${atBound}x`], (line) => {
+    assert.ok(Buffer.byteLength(line) <= TYPED_AT_MOST, `${Buffer.byteLength(line)} bytes were typed`);
+    const words = wordsOf(line);
+    assert.equal(words.length, 2, line);
+    assert.equal(words[0], "/bin/sh");
+    assert.match(readFileSync(words[1] ?? "", "utf8"), new RegExp(`'pi' '${atBound}x'`, "u"));
+  });
+});
+
+test("a line run from a file hands the command every argument byte for byte (#516)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-file-"));
+  try {
+    const out = join(directory, "it's a $dir");
+    // As the Copilot adapter's line is: an `sh -c` script, and a JSON `$0` long enough to be cut.
+    const script = `printf '%s\\0' "$0" "$@" > '${out.replaceAll("'", "'\\''")}'`;
+    const json = JSON.stringify({ servers: { squiz: { env: { A: "it's $HOME `id` a\\b" }, args: ["x ".repeat(700)] } } });
+    const args = ["-c", script, json, "two words", "$HOME", "", "it's"];
+
+    typedFor("/bin/sh", args, (line) => {
+      assert.ok(Buffer.byteLength(line) <= TYPED_AT_MOST, `${Buffer.byteLength(line)} bytes were typed`);
+      // The start opened the gate, so the line runs the command at once, as the pane's shell would.
+      const ran = spawnSync("/bin/sh", ["-c", line], { encoding: "utf8", timeout: BOUND_MS });
+      assert.equal(ran.status, 0, ran.stderr);
+      assert.deepEqual(readFileSync(out, "utf8").split("\0").slice(0, -1), args.slice(2));
+      assert.equal(existsSync(wordsOf(line)[1] ?? ""), false, "the file outlived the line it held");
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("a pane Herdr refuses to open is refused, and nothing more is asked of it", () => {
@@ -768,6 +835,27 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     assert.equal(started.outcome, "refused", JSON.stringify(started));
     assert.equal(tabs(), before, "a tab opened");
     assert.equal(existsSync(pidFile), false, "the command ran");
+  });
+
+  test("a line longer than a fresh pane's shell reads whole still starts, with every argument as given (#516)", async () => {
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    const out = join(home, "long line's $args");
+    const quotedOut = `'${out.replaceAll("'", "'\\''")}'`;
+    const script = `printf '%s\\0' "$0" "$@" > ${quotedOut}.part && mv ${quotedOut}.part ${quotedOut}; exec sleep 60`;
+    const json = JSON.stringify({ servers: { squiz: { env: { A: "it's $HOME `id` a\\b" }, args: ["x ".repeat(800)] } } });
+    const args = ["-c", script, json, "two words", "$HOME", "", "it's"];
+    const started = startInHerdrPane({ ...fakeCommand("squiz-long", "", 0), program: "/bin/sh", arguments: args }, options);
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    if (started.outcome !== "started") return;
+    try {
+      for (let tries = 0; tries < 200 && !existsSync(out); tries += 1) {
+        await new Promise((settle) => setTimeout(settle, 50));
+      }
+      assert.deepEqual(readFileSync(out, "utf8").split("\0").slice(0, -1), args.slice(2));
+    } finally {
+      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
+    }
   });
 
   test("a pane whose shell is slow to reach its prompt still starts the command, once", async () => {
