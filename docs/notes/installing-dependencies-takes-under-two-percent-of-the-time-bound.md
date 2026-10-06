@@ -20,9 +20,10 @@ recheck-when: squiz reviews a project whose test command compiles (Rust, Go, C++
 - **Keep the 900-second default at `deep`, and add no shared dependency
   cache.** On four projects of 46 to 1,589 packages, installing into a fresh
   snapshot took 3 to 13 seconds from an empty cache and 0.2 to 6.4 seconds from
-  a warm one. The slowest is 1.5% of the bound. Installing and running the whole
-  suite together took at most 53 seconds, 6% of it, on an otherwise quiet
-  machine.
+  a warm one. The slowest is 1.5% of the bound. Installing and then running the
+  test command took at most 53 seconds, 6% of it, on an otherwise quiet
+  machine; mocha's command, the longest, stopped at its first failing script
+  rather than running its whole suite.
 - **Expect the tests, not the install, to be what spends a round at `deep`.**
   The same mocha suite that took 48 seconds on a quiet machine took 260 and 397
   seconds at load averages of 18 and 8, with 11 and 9 tests failing, timeouts
@@ -45,68 +46,33 @@ recheck-when: squiz reviews a project whose test command compiles (Rust, Go, C++
 
 ## Reference
 
-### What was measured
+### The figures the decisions rest on
 
-Each run makes a snapshot as `src/worktree/snapshot.ts` does, then runs the
-install and the test command in it, timed apart. The snapshot was proven empty
-before each install: `git status --porcelain --ignored` printed nothing, and
-neither `node_modules` nor `.venv` existed.
+Medians in seconds, from an empty cache directory (cold) and from one a
+previous run filled (warm), each install in a fresh snapshot. The test column
+is the command after the install, and mocha's stops at its first failing
+script, so it is not the whole suite.
 
-```
-git -C <clone> -c core.hooksPath=/dev/null worktree add --quiet --detach <clone>/.squiz/496/rounds/<k>/tree <commit>
-cd <clone>/.squiz/496/rounds/<k>/tree
-npm_config_cache=<cache> UV_CACHE_DIR=<cache> <install>
-<test>
-git -C <clone> worktree remove --force <clone>/.squiz/496/rounds/<k>/tree
-git -C <clone> worktree prune
-```
-
-A cold run used a new, empty cache directory. A warm run used one that a
-previous run had filled. Neither touched `~/.npm`. Flask ran on a uv-managed
-Python 3.12 that was installed beforehand, with `UV_PYTHON_DOWNLOADS=never`.
-
-| Project | Commit | Tracked files | Packages | Install | Test | Tests run |
-|---|---|---|---|---|---|---|
-| `markedjs/marked` | `e80938648225` | 538 | 489 | `npm ci` | `npm test`, which builds with esbuild and `tsc` first | 2,060, all pass |
-| `mochajs/mocha` | `a9fc52968316` | 692 | 651 | `npm ci` | `npm run test-node`, which builds with rollup first | 389, 1 fails (below) |
-| `nestjs/nest` | `35142c3eca8e` | 2,468 | 1,589 | `npm ci --legacy-peer-deps` | `npm test` (vitest) | 3,814, all pass |
-| `pallets/flask` | `d73fa1cdcbd8` | 236 | 46 | `uv sync --frozen` | `uv run --frozen pytest` | 494, all pass |
-
-nest's `npm ci` fails on a peer-dependency conflict without
-`--legacy-peer-deps`, which its own CI passes. mocha's run stops at its first
-failing script, so it ran the integration suite and not the rest.
-
-### Times, in seconds
-
-Median, with the range. Each install column is three runs, and the other
-columns are all six.
-
-| Project | Snapshot add | Install, cold | Install, warm | Test | Remove, after |
+| Project | Packages | Install | Cold | Warm | Test command |
 |---|---|---|---|---|---|
-| marked | 0.05 | 4.40 (4.30–4.94) | 2.05 (2.02–2.05) | 9.63 (9.57–9.75) | 0.90 (0.82–1.10) |
-| mocha | 0.08 | 4.44 (3.97–4.91) | 2.17 (2.10–2.18) | 48.5 (47.7–48.7) | 1.18 (1.03–1.35) |
-| nest | 0.21 | 8.63 (8.45–13.09) | 6.39 (6.37–6.44) | 9.43 (9.32–9.85) | 3.79 (3.26–4.22) |
-| flask | 0.05 | 3.59 (3.03–4.00) | 0.21 (0.20–0.21) | 1.70 (1.65–1.86) | 0.47 (0.46–0.49) |
+| `markedjs/marked` | 489 | `npm ci` | 4.4 | 2.1 | `npm test`: 9.6 |
+| `mochajs/mocha` | 651 | `npm ci` | 4.4 | 2.2 | `npm run test-node`: 48.5 |
+| `nestjs/nest` | 1,589 | `npm ci --legacy-peer-deps` | 8.6 (13.1 at most) | 6.4 | `npm test`: 9.4 |
+| `pallets/flask` | 46 | `uv sync --frozen` | 3.6 | 0.2 | `uv run --frozen pytest`: 1.7 |
 
-mocha's test column is its five quiet runs. It leaves out two warm runs made
-under load: 259.7 seconds at
-a load average of 18, and 396.6 seconds at 8. A fourth warm install under that
-load took 1.95 seconds. What loaded the machine was not established.
+Rounds at `read` recorded so far ran 15 to 370 seconds.
 
-The empty caches filled to 73 MB (marked), 54 MB (mocha), 113 MB (nest) and
-198 MB (flask, which uv keeps unpacked). On a link a tenth as fast as this one,
-nest's cold install would take about 90 seconds, 10% of the bound (a
-prediction, extrapolated from 113 MB in 8.6 to 13 seconds).
+On a link a tenth as fast as this one, nest's cold install would take about 90
+seconds, 10% of the bound (a prediction, from its 113 MB of packages).
 
-`npm ci` deletes `node_modules` first, so a test command that begins with it
-pays the install on every `run_tests` call, at the warm figure after the first.
+### Traps
 
-### Rounds at `read`, for scale
-
-Rounds at `read` recorded so far ran 15 to 370 seconds: 70 to 370 seconds for
-`pi` on `deepseek-v4-pro`, 324 for an interactive `pi`, 248.3 in the state file
-of pull request #477's round, and 15 seconds for small changes. Two rounds on
-2026-10-03 reached the 480-second bound in force then.
+- **`npm ci` deletes `node_modules` first**, so a test command that begins with
+  it pays the install on every `run_tests` call, at the warm figure after the
+  first.
+- **nest's `npm ci` fails on a peer-dependency conflict** without
+  `--legacy-peer-deps`, which its own CI passes. A test command that works in a
+  fresh checkout has to carry whatever flags the project's CI does.
 
 ## Limits
 
