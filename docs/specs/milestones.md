@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.28 (draft)
+**Version:** 0.29 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -192,6 +192,10 @@ is measured before M11 is planned.
 
 ### Acceptance criteria
 
+- [ ] The reviewer at `deep`, and every process it starts, runs inside a sandbox the
+      operating system enforces: writes only to the round's own files, network only
+      to the model and the package registries, no credentials. Where the sandbox
+      cannot start, `deep` refuses to run. `deep` does not ship without it (#529).
 - [ ] Depth `deep` produces a command line with `bash`, and the configured test
       command reaches the reviewer.
 - [ ] A write the reviewer makes through the shell is detected on its snapshot

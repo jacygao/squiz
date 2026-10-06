@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.84 (draft)
+**Version:** 0.85 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2492,7 +2492,7 @@ until something asks.
 | **P0** | The failure comment | What failed and what else the round established, posted by a round that fails, with the same reason the command prints |
 | **P0** | The command's stderr | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub says nothing about why |
 | **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the pull request's number and living in the worktree |
-| **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison, and with the record each shell writes of the group it leads, or not at all |
+| **P1** | Depth `deep` | The `bash` grant. It ships inside a sandbox the operating system enforces, which confines the reviewer's writes to its own round, its network to the model and the package registries, and keeps credentials out; with the tracked-file comparison; and with the record each shell writes of the group it leads. Or not at all |
 | **P1** | The tracked-file comparison | `git status`, the hashes of tracked files, and `HEAD`, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
