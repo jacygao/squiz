@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.27 (draft)
+**Version:** 0.28 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -19,8 +19,8 @@ something that can be run or seen, never in a module written.
 | 6 | M5 — The round | Done |
 | 7 | M6 — The summary comment | Done |
 | 8 | M7 — The reviewer as a detached session | Done |
-| 9 | M10 — The subagent-era workarounds removed | |
-| 10 | M12 — Copilot as the reviewer | Its spike runs alongside M10 |
+| 9 | M10 — The subagent-era workarounds removed | Done |
+| 10 | M12 — Copilot as the reviewer | Done |
 | 11 | M11 — Depth `deep` | |
 | 12 | M8 — Episode boundaries | |
 | 13 | M9 — Install and dogfood | |
@@ -45,9 +45,9 @@ come after M9.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
-planned once M9 closes. M12 is the exception: it brings forward the P2 entry
-"a second reviewer adapter", for GitHub Copilot, because the owner reviews with
-Copilot already.
+planned once M9 closes. M12 was the exception: it brought forward "a second
+reviewer adapter", for GitHub Copilot, because the owner reviews with Copilot
+already.
 
 ## M0 — Prerequisites spike
 
@@ -150,102 +150,37 @@ The other gaps M7 left are held for after the MVP, labelled `held` and
 
 ## M10 — The subagent-era workarounds removed
 
-The cleanup that follows M7: what reviewer sessions make redundant goes, from
-the harness specification and from the code, and nothing of it stays as dead
-code. Every issue held while squiz was paused gets a disposition.
+**Done.** Its criteria are in #466.
 
-The 540-second deadline of `squiz review`, the 30-second and 60-second bounds,
-`postingSeconds`, and the 900-second time bound with its 60 to 3,600 range all
-stay.
+Removed what reviewer sessions made redundant, from the code and the
+specification: the hook-path window constants, the blocking reason and the
+hook's round reporting, shared-tree detection, and the round's own end decision
+beside the round host's. It added a test that a killed reviewer which moved
+`HEAD` names the move in the failure comment and on stderr. It cleaned the
+specification section by section, and reduced the done milestones here to what
+they delivered. Every issue held for it has its disposition recorded on the
+issue.
 
-### Acceptance criteria
-
-- [ ] **`src/` and the tests are audited against M7's design.** Every
-      implementation the reviewer sessions make redundant is removed, and the
-      pull request lists each removed piece. Nothing redundant is left behind.
-      The pieces to remove are these:
-  - **The hook-path timing and windows.** The 600-second window a hook's round
-    ran in, its 540-second reviewer cap and the per-path `timeout` cap, in
-    `src/loop/window.ts`, and the hook's registration test.
-  - **The hand-back assumptions.** The hook's exit-2 block and its blocking
-    reason in `src/loop/reason.ts`, the table mapping a review's exit to the
-    hook's, and the reading that auto mode drops a block after the hand-back.
-  - **Duplicate-episode handling.** Shared-tree detection in
-    `src/worktree/shared-tree.ts`, the other-episodes and could-not-tell lists
-    the state file keeps for it, the Notes items built from them, and the
-    comparison switched off in a shared tree.
-  - **The reviewer as a child of the hook.** The round started from
-    `squiz hook` in `src/hook/hook.ts`, and the reliance on the runtime
-    signalling the hook's process tree to stop a reviewer.
-  - **The watchdog-driven bounds.** Sizing any bound against the subagent stall
-    threshold, and the test holding the hook's window to its declared timeout.
-  - **Every test that exists only for one of the above.**
-- [ ] The harness specification describes none of what was removed.
-- [ ] **Every issue below has its disposition recorded on the issue:**
-      implemented, closed with the reason, reassigned to a later milestone, or
-      explicitly held with the reason.
-- [ ] **The harness specification and this file carry nothing an agent does
-      not need.** Each is cleaned section by section, in #485 to #493, and the
-      harness specification's section on the Copilot adapter after M12.
-
-### Issues to re-judge
-
-| Issue | What it is | Expected disposition |
-|---|---|---|
-| #278 | A block reaches no coding agent | Closed: M7's note and wake reach a main session and a subagent's parent, and `squiz review` reaches a subagent |
-| #273 | A round that fails leaves no trace on the pull request | Closed by M7's failure comment |
-| #265 | A subagent the session never dispatched starts a round of its own | Closed: one review runs per state, and the episode keys on the pull request |
-| #297 | A reviewer cut short kept running for nine minutes, and the watchdog cancelled the hook | The watchdog half is moot. Whether a stopped reviewer is gone within the grace is judged against stopping its session and its recorded shell groups |
-| #280 | Reviews run to within seconds of the time bound | Judged against the 900-second default. Measuring #281's effect on time may remain |
-| #281 | Rewrite the review charter around a defined method | Not caused by the subagent model. Implemented here, or reassigned, by the owner's call |
-| #260 | Report a marker a blocked round could not write | Closed: no round blocks |
-| #113 | Accept depth `deep` | Reassigned to M11 |
-| #244 | Name the reviewer's refused calls in the summary's Notes | Held until M9's dogfooding shows a refused call |
-| #293 | Check the DeepSeek balance the reviewer runs on | Needs a person, and depends on nothing here |
+It left these held, with `milestone:M9`: the charter rewrite (#281), naming
+refused calls in the summary (#244), and whether a stopped reviewer is gone
+within the grace (#297).
 
 ## M12 — Copilot as the reviewer
 
-A second reviewer adapter, for the GitHub Copilot CLI, beside `pi`. A project
-chooses its reviewer in `.squiz.json`, and `pi` stays the default. Nothing above
-the adapter changes: the round, the threads, the verdicts and the summary are
-the same whichever CLI reviews.
+**Done.** Its criteria are in #457.
 
-### Spike
+Added a second reviewer adapter, for the GitHub Copilot CLI, chosen with
+`"reviewer": "copilot"` in `.squiz.json`; `pi` stays the default. Copilot runs
+from one shell line with its own `COPILOT_HOME`, on the user's default model,
+with the charter as a custom agent and the three reporting calls served by an
+MCP server that applies the shared report checks. A round records a cost only
+where it is exact, in tokens and AI credits. A long pane line runs from a file,
+so Copilot starts in a Herdr pane. A live run worked a planted defect to exit 0.
 
-Run alongside M10, before anything here is built. Its findings go in
-`docs/notes/`, and decide what the rest of M12 builds:
-
-- **Cost.** What the CLI's JSON output reports for each model call: tokens,
-  premium requests, or neither. The token bound and the summary's spend line are
-  built on tokens.
-- **Ending in a pane.** Whether `copilot -i` exits once the review is finished,
-  or waits for input as an interactive `pi` does until its extension shuts it
-  down.
-- **The project's own settings.** Whether a project's Copilot settings,
-  instructions, skills, hooks or MCP servers reach the reviewer, and the flags
-  that keep them out, as `--no-approve` does for `pi`.
-- **Refusals.** What `--deny-tool` patterns match for shell commands, and whether
-  a refused call reaches the model as that call's error.
-- **Reporting calls.** Whether a tool an MCP server registers is validated against
-  its schema before it runs, as `pi` validates an extension's.
-- **Stopping.** Whether the CLI and every process it starts exit on `SIGTERM`.
-
-### Acceptance criteria
-
-- [ ] The spike's findings, in `docs/notes/`.
-- [ ] The three reporting calls are served to Copilot by an MCP server, which
-      shares the report checks and the report file with `pi`'s extension.
-- [ ] A Copilot adapter builds the command line, grants the reading tools and the
-      reporting calls, refuses the calls that would change what the coding agent
-      commits, and reads the round back from the report file.
-- [ ] `.squiz.json` takes `reviewer`, `pi` or `copilot`, defaulting to `pi`.
-- [ ] A round reviewed by Copilot records a cost and is held to the token bound,
-      or the harness specification says how it is bounded instead, as the spike
-      settles.
-- [ ] The harness specification describes the Copilot adapter under § 4
-      Adapters, and What ships lists the second reviewer adapter as P1.
-- [ ] A live run: a pull request reviewed by Copilot, with a finding worked to
-      exit 0 or 3.
+It left these for M9: choosing the reviewer's model in `.squiz.json` (#483),
+and the setup check following `reviewer` (#512). Its open questions about
+Copilot are held with `milestone:M9`, and granting `deep` to Copilot is #526,
+with M11.
 
 ## M11 — Depth `deep`
 

@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.83 (draft)
+**Version:** 0.84 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2500,9 +2500,9 @@ until something asks.
 | **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review` |
 | **P1** | `squiz init` | Adds the review section to `AGENTS.md`, for coding agents other than Claude Code |
 | **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server, the custom agent that carries the charter, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
+| **P1** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default. The setup check refuses a model the reviewer's CLI does not offer |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
-| **P2** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
