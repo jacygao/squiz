@@ -188,6 +188,69 @@ test("a link whose target is gone is left alone, and named", () => {
   assert.equal(readlinkSync(link), gone);
 });
 
+test("a squiz in a relative PATH entry is read from the working directory, and stops the link", () => {
+  const { home, localBin, target } = sandbox();
+  const working = fresh("working");
+  mkdirSync(join(working, "tools"));
+  writeFileSync(join(working, "tools", "squiz"), "#!/bin/sh\n", { mode: 0o755 });
+
+  const printed = linkOntoPath(target, { PATH: `${localBin}:./tools`, HOME: home }, working);
+
+  assert.equal(printed.exit, 1);
+  assert.match(printed.stderr, /tools\/squiz is not squiz/u);
+  assert.equal(existsSync(join(localBin, "squiz")), false);
+});
+
+test("a squiz in the working directory is read where PATH has an empty entry, and stops the link", () => {
+  const { home, localBin, target } = sandbox();
+  const working = fresh("working");
+  writeFileSync(join(working, "squiz"), "#!/bin/sh\n", { mode: 0o755 });
+
+  const printed = linkOntoPath(target, { PATH: `${localBin}::/usr/bin`, HOME: home }, working);
+
+  assert.equal(printed.exit, 1);
+  assert.equal(existsSync(join(localBin, "squiz")), false);
+});
+
+test("a link to an earlier version ahead of a link to this one on PATH is moved too", () => {
+  const home = fresh("home");
+  const localBin = join(home, ".local", "bin");
+  const homeBin = join(home, "bin");
+  mkdirSync(localBin, { recursive: true });
+  mkdirSync(homeBin);
+  const install = join(fresh("claude"), "plugins", "cache", "squiz-marketplace", "squiz");
+  const earlier = squizCopy(join(install, "0.1.0"));
+  const target = squizCopy(join(install, "0.2.0"));
+  symlinkSync(earlier, join(homeBin, "squiz"));
+  symlinkSync(target, join(localBin, "squiz"));
+
+  const printed = linkOntoPath(target, { PATH: `${homeBin}:${localBin}`, HOME: home });
+
+  assert.equal(printed.exit, 0);
+  assert.equal(readlinkSync(join(homeBin, "squiz")), target);
+});
+
+test("a relative link in a PATH directory reached through a symlink resolves from the directory's real place", () => {
+  const { home, target } = sandbox();
+  // tools/bin/squiz -> ../squiz/bin/squiz, which from tools/bin is tools/squiz/bin/squiz.
+  const tools = fresh("tools");
+  mkdirSync(join(tools, "bin"));
+  const copy = squizCopy(join(tools, "squiz"));
+  symlinkSync("../squiz/bin/squiz", join(tools, "bin", "squiz"));
+  const alias = join(home, "bin");
+  symlinkSync(join(tools, "bin"), alias);
+  rmSync(target);
+  symlinkSync(copy, target);
+
+  const printed = linkOntoPath(realpathSync(target), { PATH: alias, HOME: home });
+
+  assert.deepEqual(printed, {
+    stdout: `squiz: ${join(alias, "squiz")} already links to this squiz; nothing changed\n`,
+    stderr: "",
+    exit: 0,
+  });
+});
+
 test("another squiz copy's bin/ on PATH, as Claude Code puts an enabled plugin's, stops the link", () => {
   const { home, localBin, target } = sandbox();
   const copy = squizCopy(fresh("plugin-cache-copy"));

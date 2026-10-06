@@ -47,10 +47,10 @@ export type Found =
  * its own shell alone, so it says nothing about what another agent's shell
  * runs.
  */
-export function squizzesOnPath(target: string, environment: LinkEnvironment): Found[] {
+export function squizzesOnPath(target: string, environment: LinkEnvironment, directory: string): Found[] {
   const found: Found[] = [];
-  for (const directory of pathDirectories(environment)) {
-    const entry = join(directory, "squiz");
+  for (const searched of searchedDirectories(environment, directory)) {
+    const entry = join(searched, "squiz");
     let stat;
     try {
       stat = lstatSync(entry);
@@ -65,7 +65,7 @@ export function squizzesOnPath(target: string, environment: LinkEnvironment): Fo
         isSquiz(final)
           ? conflict(
               entry,
-              `${directory} is another squiz's bin/ on PATH, the way Claude Code puts an enabled plugin's there. Run squiz init by name in that session, so the link points at the squiz it uses`,
+              `${searched} is another squiz's bin/ on PATH, the way Claude Code puts an enabled plugin's there. Run squiz init by name in that session, so the link points at the squiz it uses`,
             )
           : conflict(entry, `${entry} is not squiz, and squiz leaves it alone. Move it off PATH, then run squiz init again`),
       );
@@ -102,19 +102,25 @@ export function squizzesOnPath(target: string, environment: LinkEnvironment): Fo
 /**
  * Link `target` into a directory on `PATH`, or say why no link was made.
  *
- * Exits 1 where no link to `target` is on `PATH` afterwards. Never throws.
+ * `directory` is the working directory, which a relative or empty `PATH` entry
+ * names. Exits 1 where no link to `target` is on `PATH` afterwards. Never
+ * throws.
  */
-export function linkOntoPath(target: string, environment: LinkEnvironment): LinkPrinted {
-  const found = squizzesOnPath(target, environment);
+export function linkOntoPath(
+  target: string,
+  environment: LinkEnvironment,
+  directory: string = process.cwd(),
+): LinkPrinted {
+  const found = squizzesOnPath(target, environment, directory);
 
   const blocking = found.find((each) => each.kind === "conflict");
   if (blocking !== undefined) return madeNone(blocking.reason);
 
-  const linked = found.find((each) => each.kind === "this");
-  if (linked !== undefined) return made(`${linked.entry} already links to this squiz; nothing changed`);
-
-  const earlier = found.find((each) => each.kind === "earlier");
-  if (earlier !== undefined) {
+  // Every one is moved, since one left ahead of a link to this version is the
+  // squiz that runs.
+  const lines: string[] = [];
+  for (const earlier of found) {
+    if (earlier.kind !== "earlier") continue;
     // A link made beside the old one and renamed over it, so there is no moment
     // with no squiz on PATH.
     const beside = `${earlier.entry}.squiz-${process.pid}`;
@@ -124,15 +130,19 @@ export function linkOntoPath(target: string, environment: LinkEnvironment): Link
     } catch (error) {
       return madeNone(`${earlier.entry} could not be moved to ${target}: ${describe(error)}`);
     }
-    return made(`linked ${earlier.entry} to ${target}, in place of ${earlier.final}, an earlier version of this install`);
+    lines.push(`linked ${earlier.entry} to ${target}, in place of ${earlier.final}, an earlier version of this install`);
   }
+  if (lines.length > 0) return made(lines.join("\nsquiz: "));
+
+  const linked = found.find((each) => each.kind === "this");
+  if (linked !== undefined) return made(`${linked.entry} already links to this squiz; nothing changed`);
 
   const home = environment.HOME;
   if (home === undefined || !isAbsolute(home)) {
     return madeNone("HOME is not set, so there is no directory to link squiz into");
   }
   const choices = [join(home, ".local", "bin"), join(home, "bin")];
-  const onPath = new Set(pathDirectories(environment).map(realOrResolved));
+  const onPath = new Set(absoluteDirectories(environment).map(realOrResolved));
   const chosen = choices.find((choice) => onPath.has(realOrResolved(choice)) && isWritableDirectory(choice));
   if (chosen === undefined) {
     return madeNone(
@@ -152,20 +162,28 @@ export function linkOntoPath(target: string, environment: LinkEnvironment): Link
 }
 
 /**
- * The absolute directories on `PATH`, each once. An empty or relative entry
- * names the working directory, which is no place to link into.
+ * Every directory a shell searches for `squiz`, in order and each once. An empty
+ * entry is the working directory, and a relative one is resolved from it.
  */
-function pathDirectories(environment: LinkEnvironment): string[] {
+function searchedDirectories(environment: LinkEnvironment, directory: string): string[] {
   const seen = new Set<string>();
   const directories: string[] = [];
   for (const entry of (environment.PATH ?? "").split(":")) {
-    if (!isAbsolute(entry)) continue;
-    const key = realOrResolved(entry);
+    const searched = resolve(directory, entry);
+    const key = realOrResolved(searched);
     if (seen.has(key)) continue;
     seen.add(key);
-    directories.push(entry);
+    directories.push(searched);
   }
   return directories;
+}
+
+/**
+ * The absolute directories on `PATH`. A relative entry names a different
+ * directory from each place a shell starts in, so no link goes there.
+ */
+function absoluteDirectories(environment: LinkEnvironment): string[] {
+  return (environment.PATH ?? "").split(":").filter((entry) => isAbsolute(entry));
 }
 
 /**
@@ -184,7 +202,9 @@ function followLinks(path: string): { final: string; exists: boolean } {
       return { final: realParent(current), exists: false };
     }
     if (!stat.isSymbolicLink()) return { final: realpathSync(current), exists: true };
-    current = resolve(dirname(current), readlinkSync(current));
+    // From the directory's real place, as the system resolves it: `..` in a
+    // link inside a symlinked directory climbs out of the directory's target.
+    current = resolve(realOrResolved(dirname(current)), readlinkSync(current));
   }
   return { final: current, exists: false };
 }

@@ -2383,14 +2383,15 @@ own Bash tool.
   on `PATH` is used, even a writable one. `squiz init` creates no directory and
   edits no shell startup file.
 - **Every `squiz` already on `PATH` is read first,** in each of its
-  directories. One person may run several coding agents on one machine, and
+  directories, with an empty or relative entry read from the working directory
+  as a shell would. One person may run several coding agents on one machine, and
   none of them may change which `squiz` another runs. So nothing named `squiz`
   that is not this squiz is replaced, or shadowed by a link put ahead of it:
 
 | Already on `PATH` | `squiz init` |
 |---|---|
 | A link to this squiz | Changes nothing, and says so |
-| A link to another version of the same plugin-cache install, `plugins/cache/<marketplace>/squiz/<version>/bin/squiz`, whether or not that version is still there | Moves the link to this version |
+| A link to another version of the same plugin-cache install, `plugins/cache/<marketplace>/squiz/<version>/bin/squiz`, whether or not that version is still there | Moves the link to this version, wherever it is on `PATH` |
 | This squiz's own `bin/` | Ignores it, as only Claude Code's shell has it |
 | A link to another squiz checkout or install | Makes no link, names it, and says to remove it and run `squiz init` again to use this one |
 | Another squiz's own `bin/`, as Claude Code puts an enabled plugin's | Makes no link, and says to run `squiz init` by name in that session, so the link points at the squiz Claude Code uses |

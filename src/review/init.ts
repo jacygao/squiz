@@ -51,7 +51,7 @@ export type InitPrinted = { readonly stdout: string; readonly stderr: string; re
  */
 export function squizInit(directory: string, environment: LinkEnvironment, target: string): InitPrinted {
   const section = addReviewSection(directory);
-  const link = linkOntoPath(target, environment);
+  const link = linkOntoPath(target, environment, directory);
   return {
     stdout: section.stdout + link.stdout,
     stderr: section.stderr + link.stderr,
