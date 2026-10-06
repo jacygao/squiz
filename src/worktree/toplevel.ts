@@ -1,10 +1,10 @@
 /**
  * The root of the worktree a hook fired in, resolved by asking git.
  *
- * It is resolved rather than read. The payload's `cwd` and the hook process's
- * own working directory are both the subagent's directory, which is only the
- * worktree root when the subagent happened to be dispatched there, and two
- * subagents in two subdirectories of one shared tree carry two of them. The
+ * It is resolved rather than read. The payload's `cwd` is the session's
+ * directory, which is only the worktree root when the session happened to start
+ * there, and two subagents in two subdirectories of one shared tree carry two
+ * of them. The
  * toplevel is the one answer that is normalised, stable across firings, and the
  * same for every subagent inside one worktree.
  */

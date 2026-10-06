@@ -55,6 +55,7 @@ test("the hook's environment names the owner's socket", async () => {
 
   assert.deepEqual(firing, {
     event: "SubagentStop",
+    directory: "/work/session-directory",
     owner: { sessionId: SESSION_ID, socket: "/tmp/cc.sock" },
     subagent: AGENT_ID,
   });

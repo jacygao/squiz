@@ -1,10 +1,9 @@
 /**
- * The branch the hook fired on, resolved by asking git from the working
- * directory the hook was given.
+ * The branch the hook fired on, resolved by asking git from the directory the
+ * hook was given.
  *
- * The branch is resolved rather than read. The hook's working directory is the
- * subagent's, fixed when it was dispatched, and may be any subdirectory of the
- * worktree. A branch answers the same from any of them, so this is all the gate
+ * The branch is resolved rather than read. That directory is the payload's
+ * `cwd`, the session's own, and may be any subdirectory of the worktree. A branch answers the same from any of them, so this is all the gate
  * needs.
  */
 

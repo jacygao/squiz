@@ -45,7 +45,7 @@ const START_FLOOR_MS = 2_000;
 export type HostCommand = { readonly command: string; readonly args: readonly string[] };
 
 export type TriggerRequest = {
-  /** Where the trigger ran. The worktree and its branch are resolved from it. */
+  /** Where the work is: the payload's `cwd` for a hook. The worktree and its branch are resolved from it. */
   readonly directory: string;
   readonly trigger: TriggerKind;
   /** The number `squiz review` was given. A hook gives none, and reviews the branch's pull request. */

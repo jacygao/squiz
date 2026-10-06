@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.87 (draft)
+**Version:** 0.88 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -534,10 +534,17 @@ and not before.
 **Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`.**
 `Stop` fires when a regular session's turn ends, and `SubagentStop` when a
 subagent's does. Each firing resolves the pull request whose head is the branch
-checked out in its working directory, records the session that owns the work,
+checked out in the payload's `cwd`, records the session that owns the work,
 queues the state as The state file sets out, and returns. It never runs a round
 and never blocks the agent: it exits 0 whatever it found. Where it finds no pull
 request it writes the line under step 1 naming the branch and the directory.
+
+**The worktree comes from the payload's `cwd`, never from the directory the hook
+process runs in.** Under Claude Code the two are the same directory. Copilot runs
+a plugin's hook in the plugin root, so the hook's own directory is the plugin
+checkout. A payload with no `cwd`, or with one that is not an absolute path,
+queues nothing, and the hook says so on stderr. So does a `cwd` that is in no git
+worktree.
 
 ```json
 "Stop": [
@@ -662,8 +669,9 @@ go together.
 **The command reviews the worktree it is run in.** It resolves the toplevel with
 `git rev-parse --show-toplevel` from its own working directory, which is the
 caller's. A coding agent working in a worktree by path runs the command from that
-path, and that worktree is the one reviewed. The hook runs in the subagent's
-working directory, which is fixed when the subagent is dispatched.
+path, and that worktree is the one reviewed. The hook resolves the toplevel from
+the payload's `cwd` instead, which is the session's directory. For a subagent it
+is fixed when the subagent is dispatched.
 
 ```mermaid
 flowchart TD
@@ -1932,7 +1940,7 @@ reaches the `PATH` of any other coding agent is not specified.
 | `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. |
 | `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
 | `squiz init` | A person | Adds the review section under § 9 to the host project's `AGENTS.md`, for coding agents other than Claude Code. |
-| `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for its working directory and returns, as § 3 sets out. |
+| `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for the payload's `cwd` and returns, as § 3 sets out. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |

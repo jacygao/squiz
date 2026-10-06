@@ -14,7 +14,7 @@ const hookModule = new URL("./hook/hook.ts", import.meta.url).href;
 const reviewModule = new URL("./review/review.ts", import.meta.url).href;
 const initModule = new URL("./review/init.ts", import.meta.url).href;
 
-// Anywhere that is not the plugin. The hook runs in the subagent's directory,
+// Anywhere that is not the plugin. A hook may run in the session's directory,
 // which is not even the worktree root, so every run here starts somewhere the
 // entry point cannot be reached from by a relative path.
 //
@@ -29,13 +29,16 @@ let onABranch = "";
 
 const identity = ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz"];
 
-/** One firing, as the runtime writes it to the hook's stdin. */
-const PAYLOAD = JSON.stringify({
-  hook_event_name: "SubagentStop",
-  session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
-  agent_id: "a1e3196c5ad0f2410",
-  stop_hook_active: false,
-});
+/** One firing in `elsewhere`, as the runtime writes it to the hook's stdin. */
+function payload(): string {
+  return JSON.stringify({
+    hook_event_name: "SubagentStop",
+    session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
+    cwd: realpathSync(elsewhere),
+    agent_id: "a1e3196c5ad0f2410",
+    stop_hook_active: false,
+  });
+}
 
 before(async () => {
   elsewhere = await mkdtemp(join(tmpdir(), "squiz-elsewhere-"));
@@ -136,7 +139,7 @@ test("a child that reads no stdin is run rather than failed (#180)", async () =>
 });
 
 test("the shim resolves the entry point from a working directory that is not the plugin", async () => {
-  const result = await run(shim, ["hook"], { cwd: elsewhere, input: PAYLOAD });
+  const result = await run(shim, ["hook"], { cwd: elsewhere, input: payload() });
 
   assert.equal(result.code, 0, `the shim did not run: ${result.stderr}`);
   assert.equal(result.stdout, "");
@@ -152,7 +155,7 @@ test("the binary runs by name off PATH, through a symlink to the shim", async ()
     await symlink(shim, join(directory, "squiz"));
     const result = await run("squiz", ["hook"], {
       cwd: elsewhere,
-      input: PAYLOAD,
+      input: payload(),
       // node has to stay reachable: the shim execs it.
       path: `${directory}:${process.env["PATH"] ?? ""}`,
     });

@@ -38,7 +38,7 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return review(argv.slice(1));
   }
   if (command === "hook") {
-    return runHook({ stdin: process.stdin, directory: process.cwd() });
+    return runHook({ stdin: process.stdin });
   }
   if (command === "threads") {
     return listThreads();

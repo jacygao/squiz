@@ -25,7 +25,9 @@ directory is where its dispatcher stood, which
   answers that is stable, normalised and different per subagent, and it is what
   every other per-episode thing hangs off. § 3's shared-tree detection compared
   this value too, until M10 removed it: each reviewer now reads a snapshot that
-  only it writes.
+  only it writes. 2026-10-06: the toplevel is now resolved from the payload's
+  `cwd`, because Copilot runs a plugin's hook in the plugin root. It is still
+  resolved through git, never used as it stands.
 - **The harness must not use `cwd` from the payload, nor the hook process's own
   working directory, as the episode's directory or as a key.** Both are the
   subagent's directory. They equal the worktree root only when the subagent was
