@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.01 (draft)
+**Version:** 1.02 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -31,7 +31,7 @@ one of them is required.
 | Role | Today | Needed for |
 |---|---|---|
 | Git repository | `git` | The review runs against a working tree and a merge base. The repository needs a remote for a pull request to exist against. |
-| Runtime | Claude Code, or the GitHub Copilot CLI | Runs the coding agent, whose shell tool runs `squiz review`. Loads the harness as a plugin, and fires its `Stop` and `SubagentStop` hooks, which start a review. Wakes the session that owns the work when the review is done: Claude Code for any round its hooks queued, Copilot only for a `squiz review` the session itself ran. |
+| Runtime | Claude Code, or the GitHub Copilot CLI | Runs the coding agent, whose shell tool runs `squiz review`. Loads the harness as a plugin, and fires its `Stop` and `SubagentStop` hooks, which start a review. Wakes the session that owns the work when the review is done. Copilot does so through the plugin's extension, which it loads only with its experimental features on, so squiz's Copilot support is experimental (§ 9). |
 | Reviewer | `pi`, or the GitHub Copilot CLI where `reviewer` names it | The agent that reads the change and reports what is wrong with it. It must run a different model from the coding agent. Only the reviewer the configuration names has to be installed. |
 | Forge | GitHub, through an authenticated `gh` | The pull request is where the review is conducted and recorded. |
 
@@ -495,8 +495,8 @@ any of § 2 Identity's markers.
 hooks queue a state only where the agent did not run the command. Copilot fires `Stop` when a
 turn ends, and a turn that ran the command ends after the command queued the
 state, so that firing finds the state queued or reviewed and queues nothing.
-Under Copilot that command is also the only thing that can wake the session, as
-The report sets out.
+A round a hook queued wakes the session through the plugin's extension, as The
+report sets out.
 
 ### The round host
 
@@ -676,9 +676,10 @@ moves it into `delivered/` beside it, so the other does not deliver it again.
   waiters, and a waiter whose session has ended a later turn exits 0 without
   delivering anything. Only the newest delivers.
 
-**A Copilot owner started with experimental features on is woken through the
-plugin's extension.** This is experimental, as Copilot's extensions are. Copilot
-starts `extensions/squiz-wake/extension.mjs` in each session. It listens on
+**A Copilot owner is woken through the plugin's extension.** Copilot loads
+extensions only with its experimental features on, so squiz's Copilot support
+is experimental as a whole, and § 9 has the user turn them on. Copilot starts
+`extensions/squiz-wake/extension.mjs` in each session. It listens on
 `squiz.sock` in the session's state directory, reads the posts the round host
 makes to a Claude Code socket, and turns each one into a turn with
 `session.send()`, as a system message carrying the note's text. The hook
@@ -691,13 +692,16 @@ to it exactly as it posts to Claude Code's.
 - **A post that finds nothing listening fails.** The note goes back to wait for
   a pull, and nothing posts it again.
 
-**A Copilot owner with no socket is woken only by its own `squiz review`.**
-Copilot leaves no waiter, so the round host writes the note and wakes nothing. A
-`squiz review` that the session ran in the background, or that Copilot moved
-there, wakes the idle session when it exits, with its output and its exit code
-(§ 2). That is the round's result where the round ended before the command's
-deadline. Where the deadline came first the command exits 4, the agent runs
-`squiz review` again, and that run's exit is the next wake.
+**A Copilot owner with no socket learns the result only from its own
+`squiz review`.** That is a session started without experimental features, which
+squiz does not support, or one whose socket path is too long for the extension
+to listen on (§ 9). Its reviews still run. Copilot leaves no waiter, so the round
+host writes the note and wakes nothing. A `squiz review` that the session ran in
+the background, or that Copilot moved there, wakes the idle session when it
+exits, with its output and its exit code (§ 2). That is the round's result where
+the round ended before the command's deadline. Where the deadline came first the
+command exits 4, the agent runs `squiz review` again, and that run's exit is the
+next wake. This is a fallback, and § 9 sets up no session to rely on it.
 
 **A subagent's parent decides what follows.** It reads the threads with
 `squiz review`, and sends the same subagent back to work them, dispatches
@@ -711,10 +715,9 @@ in any case.
 
 - **Delivering notes when a session starts.** A note waiting for a session that
   was closed is delivered only by its next `Stop` waiter, or read by pull.
-- **A wake for a Copilot session without experimental features, from a round
-  only a hook queued.** No `squiz review` is running in the session, so no
-  command's end wakes it, and without experimental features Copilot loads no
-  extension, so the hook finds no socket. Its note is read by pull.
+- **Copilot sessions without experimental features.** Squiz does not support
+  them. A note for a round only a hook queued wakes nothing in one, and is read
+  by pull.
 - **Acknowledgement and retry rules.** A note is delivered at most once, and
   nothing retries one a wake did not reach.
 - **A two-way inbox.** The coding agent answers on the pull request, and never
@@ -2908,7 +2911,7 @@ until something asks.
 | **P0** | The round host | `squiz host`, started by a double fork, which runs an episode's rounds one at a time and is found again by pid and start time |
 | **P0** | The reviewer session | A fresh reviewer per round in a tmux or Herdr pane, or detached, whose pane closes at the end and whose session stays resumable |
 | **P0** | The report | The note for the session that owns the work, and its wake by the messaging socket or the `asyncRewake` waiter |
-| **P1** | The Copilot wake | The extension that wakes a Copilot session started with experimental features on, through the same post as Claude Code's socket. Experimental while Copilot's extensions are |
+| **P1** | The Copilot wake | The extension that wakes an idle Copilot session, through the same post as Claude Code's socket. It runs only with Copilot's experimental features on, so squiz's Copilot support is experimental |
 | **P0** | The `pi` adapter | The command line, the extension the reviewer reports through and the report file it writes, the read of that file, and the `read` grant |
 | **P0** | Scratch space | `TMPDIR` points at `.squiz/<number>/scratch/` |
 | **P0** | The charter | The standing rules handed to the reviewer every round |
@@ -3012,8 +3015,11 @@ anything else.
 `bin/` on its shell's `PATH`, so `squiz init` links `squiz` into a directory
 already on it, once on each machine.
 
-**Optional, and experimental: let squiz wake an idle Copilot session.** Turn on
-Copilot's experimental features once, for the user, by either of:
+**Squiz's Copilot support is experimental, because it relies on Copilot's
+experimental features.** Squiz wakes an idle Copilot session through an
+extension the plugin ships, and Copilot loads extensions only with experimental
+features on. Setting up Copilot includes turning them on once, for the user, by
+either of:
 
 ```
 copilot --experimental --plugin-dir <plugin directory>
@@ -3029,8 +3035,8 @@ the flag. `copilot --no-experimental` writes `false`, which turns them off for
 every later session. The same key in a repository's
 `.github/copilot/settings.json` turns nothing on. Experimental features turn on
 more than extensions, for every session of that user; `/experimental show`
-lists them. Without them, a Copilot session works as before, and a note for it
-waits to be read by pull.
+lists them. A Copilot session without them is unsupported. Its reviews still
+run, and it learns the result only from a `squiz review` it runs itself.
 
 The socket's path, `<COPILOT_HOME>/session-state/<session id>/squiz.sock`, must
 fit in the 104 bytes macOS allows a socket path, and the 108 Linux allows. The
