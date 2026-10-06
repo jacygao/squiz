@@ -2,14 +2,14 @@
  * A reading of the git files the coding agent's worktree reads from the
  * repository's shared git directory, and what two readings disagree about.
  *
- * A snapshot added by `git worktree add` shares the repository's config, hooks and
- * exclude file with the coding agent's worktree. A test command run in the
- * snapshot can write those, and a `prepare` script that sets `core.hooksPath`
- * does. Nothing in the snapshot changes, so the tracked-file comparison cannot see
- * it, and the coding agent's next commit reads the result.
+ * The snapshot has a git directory of its own, so a test command cannot write
+ * these files through it. It can still write them by the repository's path, as a
+ * `prepare` script that sets `core.hooksPath` would. Nothing in the snapshot
+ * changes then, so the tracked-file comparison cannot see it, and the coding
+ * agent's next commit reads the result.
  *
  * The files are found from the coding agent's worktree and never from the
- * snapshot, so a snapshot with a git directory of its own still has them read.
+ * snapshot, whose own are the clone's.
  *
  * Contents are compared, never modification times. Nothing here writes to what
  * it reads.

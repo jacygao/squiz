@@ -507,7 +507,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         ? {}
         : { [setup.lockStateAfter]: episode.directory }),
     });
-    if (setup.snapshotAddFails === true) failWorktreeAdd(binaries);
+    if (setup.snapshotAddFails === true) failCheckout(binaries);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     if (setup.rounds !== undefined) {
@@ -656,15 +656,15 @@ function withHead<T extends Partial<Record<Kind, string | readonly string[]>>>(
   ) as T;
 }
 
-/** A `git` ahead of the real one, whose `worktree add` adds and then fails. */
-function failWorktreeAdd(binaries: string): void {
+/** A `git` ahead of the real one, whose `checkout` checks out and then fails. */
+function failCheckout(binaries: string): void {
   const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   standIn(
     binaries,
     "git",
     [
       "#!/bin/sh",
-      `case " $* " in *" worktree add "*) '${real}' "$@"; exit 1 ;; esac`,
+      `case " $* " in *" checkout "*) '${real}' "$@"; exit 1 ;; esac`,
       `exec '${real}' "$@"`,
       "",
     ].join("\n"),
@@ -2739,7 +2739,7 @@ test("a snapshot that cannot be made runs no review, and what the add left is re
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
-  assert.match(ran.conclusion.reason, /^no review ran: the snapshot could not be added at /u);
+  assert.match(ran.conclusion.reason, /^no review ran: the snapshot could not be made at /u);
   assert.deepEqual(ran.invocations, [], "no reviewer starts without its snapshot");
   assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "failure"]);
   assert.deepEqual(ran.snapshotsLeft, [], "what the failed add made is removed with the round");
@@ -2947,6 +2947,11 @@ function movedIn(conclusion: RoundConclusion & { readonly outcome: "block" }): s
   return conclusion.confinement === undefined ? "" : (headMovedIn(conclusion.confinement) ?? "");
 }
 
+// The snapshot is a clone, which has none of the fixture repository's config,
+// so a commit in it names its author or fails wherever no global identity is set.
+const COMMITS_IN_THE_SNAPSHOT =
+  "git -c user.email=squiz@example.invalid -c user.name=Squiz -c commit.gpgsign=false commit --quiet --allow-empty --message moved";
+
 /** A reviewer that moved `HEAD` through its shell with `move`, and reviewed. */
 function movesHeadThenReviews(move: string, findings: readonly Finding[]): Reviewer {
   return { command: "/bin/sh", args: ["-c", move], parse: reviews({ findings }).parse };
@@ -2961,7 +2966,7 @@ test("a reviewer that committed in its snapshot is read as a move of HEAD", asyn
   const ran = await runInFixture({
     answers: TWO_ROUNDS,
     sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: movesHeadThenReviews("git commit --quiet --allow-empty --message moved", [
+    reviewer: movesHeadThenReviews(COMMITS_IN_THE_SNAPSHOT, [
       finding("The flag is never read"),
     ]),
     andThen: [{ reviewer: FIXES_IT }],
@@ -3297,7 +3302,7 @@ test("a failure comment lists the file the killed reviewer changed", async () =>
 function commitsThenHangs(cost: RoundCost): Reviewer {
   return {
     command: "/bin/sh",
-    args: ["-c", "git commit --quiet --allow-empty --message moved; sleep 30"],
+    args: ["-c", `${COMMITS_IN_THE_SNAPSHOT}; sleep 30`],
     parse: hangs(cost).parse,
   };
 }
@@ -3387,11 +3392,36 @@ function setsTheHooksPathThenReviews(): Reviewer {
   };
 }
 
-test("at deep, a key set in the config the snapshot shares is named in the summary", async () => {
+/**
+ * A reviewer whose test command set `core.hooksPath` in the coding agent's
+ * repository by its path, which the snapshot's `origin` names.
+ */
+function setsTheRepositorysHooksPathThenReviews(): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", 'git config --file "$(git remote get-url origin)/config" core.hooksPath .husky/_'],
+    parse: reviews({}).parse,
+  };
+}
+
+test("at deep, a key the test command set from the snapshot stays in it and is not named", async () => {
   const ran = await runInFixture({
     config: { depth: "deep" },
     answers: POSTING,
     reviewer: setsTheHooksPathThenReviews(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
+  assert.deepEqual(ran.conclusion.confinement?.sharedConfig, { outcome: "unchanged" });
+  assert.doesNotMatch(summaryBody(ran), /git config or hooks/u);
+});
+
+test("at deep, a key set in the coding agent's repository by its path is named in the summary", async () => {
+  const ran = await runInFixture({
+    config: { depth: "deep" },
+    answers: POSTING,
+    reviewer: setsTheRepositorysHooksPathThenReviews(),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
@@ -3402,11 +3432,11 @@ test("at deep, a key set in the config the snapshot shares is named in the summa
   );
 });
 
-test("at read, the config the snapshot shares is not compared and the summary has no notes", async () => {
+test("at read, the coding agent's config is not compared and the summary has no notes", async () => {
   const ran = await runInFixture({
     config: { depth: "read" },
     answers: POSTING,
-    reviewer: setsTheHooksPathThenReviews(),
+    reviewer: setsTheRepositorysHooksPathThenReviews(),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
