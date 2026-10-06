@@ -59,8 +59,13 @@ export function openWindow(request: WindowRequest, environment: Environment, bou
   if (!insideTmux(environment)) return { outcome: "refused", reason: "TMUX is not set" };
   if (request.argv.length === 0) return { outcome: "refused", reason: "there is no command to run" };
 
-  const commandLine = ["exec", ...request.argv.map(quoted)].join(" ");
-  const variables = Object.entries(request.variables ?? {}).flatMap(([name, value]) => ["-e", `${name}=${value}`]);
+  const assigned = Object.entries(request.variables ?? {}).map(([name, value]) => `${name}=${value}`);
+  // Set again on the line, because the window's shell can set any of them as
+  // it starts: zsh reads `.zshenv` even for `-c`. `env` becomes the command
+  // with the same pid.
+  const settings = assigned.length === 0 ? [] : ["/usr/bin/env", ...assigned];
+  const commandLine = ["exec", ...[...settings, ...request.argv].map(quoted)].join(" ");
+  const variables = assigned.flatMap((assignment) => ["-e", assignment]);
   const ran = tmux(
     [
       "new-window",

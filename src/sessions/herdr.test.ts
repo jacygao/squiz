@@ -704,7 +704,17 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     chmodSync(join(fakes, "pi"), 0o755);
     // Holds a pane's shell back from its prompt, as a person's slow dotfiles
     // would, wherever the tab sets SHELL_STARTS_IN.
-    writeFileSync(join(home, ".zshenv"), '[ -n "$SHELL_STARTS_IN" ] && sleep "$SHELL_STARTS_IN"\n', "utf8");
+    // Sets SESSION_MARK as a person's dotfiles would export a token, wherever
+    // the tab sets RC_SETS_MARK.
+    writeFileSync(
+      join(home, ".zshenv"),
+      [
+        '[ -n "$SHELL_STARTS_IN" ] && sleep "$SHELL_STARTS_IN"',
+        '[ -n "$RC_SETS_MARK" ] && export SESSION_MARK="$RC_SETS_MARK"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
 
     const socket = join(home, ".config", "herdr", "sessions", session, "herdr.sock");
     // The pane's shell reads this home's dotfiles, which leave the path alone,
@@ -817,6 +827,25 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     if (started.outcome !== "started") return;
     try {
       assert.equal(await written(markFile), variables.SESSION_MARK);
+    } finally {
+      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
+    }
+  });
+
+  // The empty value is how the round keeps a GitHub token from the reviewer.
+  test("the variables given win over the ones the pane's shell sets as it starts, empty ones too", async () => {
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    const markFile = join(home, "rc-mark.txt");
+    const command = fakeCommand("squiz-rc", join(home, "rc.pid"), 60);
+    const started = startInHerdrPane(
+      { ...command, arguments: [...command.arguments, markFile], variables: { SESSION_MARK: "", RC_SETS_MARK: "gho_fromrc" } },
+      options,
+    );
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    if (started.outcome !== "started") return;
+    try {
+      assert.equal(await written(markFile), "");
     } finally {
       assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
     }

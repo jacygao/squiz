@@ -148,6 +148,45 @@ function noticingAllowAll(tree: string): string {
   ].join("\n");
 }
 
+/** A GitHub credential in each place a pane server's environment can carry one. */
+function githubCredentials(tree: string): Record<string, string> {
+  const theirs = join(tree, "their-gh");
+  mkdirSync(theirs, { recursive: true });
+  writeFileSync(join(theirs, "hosts.yml"), "github.com:\n    oauth_token: gho_fromtheirconfig\n");
+  return {
+    GH_TOKEN: "gho_server",
+    GITHUB_TOKEN: "gho_server",
+    GH_ENTERPRISE_TOKEN: "gho_server",
+    GITHUB_ENTERPRISE_TOKEN: "gho_server",
+    GH_CONFIG_DIR: theirs,
+  };
+}
+
+/** A stand-in in a pane that writes down the GitHub credentials it can see, then reviews and finishes. */
+function noticingGitHub(tree: string): string {
+  const file = JSON.stringify(join(tree, "github.json"));
+  const seen =
+    "[process.env.GH_TOKEN, process.env.GITHUB_TOKEN, process.env.GH_ENTERPRISE_TOKEN, " +
+    'process.env.GITHUB_ENTERPRISE_TOKEN, process.env.GH_CONFIG_DIR, require("node:fs").readdirSync(process.env.GH_CONFIG_DIR)]';
+  // `finishingInAPane` declares `fs` itself.
+  return [
+    `require("node:fs").writeFileSync(${file}, JSON.stringify(${seen}));`,
+    finishingInAPane(join(tree, "note.json")),
+  ].join("\n");
+}
+
+/** What `noticingGitHub` saw, against what a round's reviewer must see. */
+function assertNoGitHub(tree: string, invocation: Invocation): void {
+  assert.deepEqual(JSON.parse(readFileSync(join(tree, "github.json"), "utf8")), [
+    "",
+    "",
+    "",
+    "",
+    invocation.githubConfigDirectory,
+    [],
+  ]);
+}
+
 /** `script` written beside the reports, for a stand-in that takes a file rather than `-e`. */
 function scriptFile(invocation: Invocation, script: string): string {
   const file = join(invocation.directory, "stand-in.cjs");
@@ -164,6 +203,7 @@ function invocationIn(tree: string): Invocation {
     promptFile: join(tree, ".squiz/142/rounds/1/prompt.md"),
     reportsFile: join(tree, ".squiz/142/rounds/1/reports.jsonl"),
     scratchDirectory: join(tree, ".squiz/142/scratch"),
+    githubConfigDirectory: join(tree, ".squiz/142/rounds/1/gh"),
     depth: "read",
     thinking: "medium",
     roundSpace: undefined,
@@ -284,6 +324,23 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     );
     assert.equal(round.outcome, "reviewed", accountOf(round));
     assert.equal(readFileSync(join(tree, "allow-all.json"), "utf8"), '""');
+  });
+
+  test("a reviewer in a window sees no GitHub credential the server carries", async (t) => {
+    const server = privateTmux(t);
+    const tree = treeFor(t);
+    for (const [name, value] of Object.entries(githubCredentials(tree))) {
+      server.tmux("set-environment", "-g", name, value);
+    }
+    const invocation = invocationIn(tree);
+    const round = await runRound(
+      adapterOf({ inPane: noticingGitHub(tree), detached: "process.exit(3)" }),
+      invocation,
+      30,
+      { environment: server.environment, name: "squiz-142-r1" },
+    );
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assertNoGitHub(tree, invocation);
   });
 
   test("at the bound the round stops the reviewer's own group, not just its window, and the window is gone", async (t) => {
@@ -465,8 +522,9 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
       Object.entries(noPanes()).filter(([name]) => name !== "ZDOTDIR"),
     );
     const socket = join(home, ".config", "herdr", "sessions", session, "herdr.sock");
+    // The server carries GitHub credentials, as a person's would, for the pane's shell to inherit.
     server = spawn(herdrPath, ["--session", session, "server"], {
-      env: { ...base, HOME: home, PATH: `${fakes}:/usr/bin:/bin` } as NodeJS.ProcessEnv,
+      env: { ...base, ...githubCredentials(home), HOME: home, PATH: `${fakes}:/usr/bin:/bin` } as NodeJS.ProcessEnv,
       stdio: "ignore",
     });
     for (let tries = 0; tries < 100 && !existsSync(socket); tries += 1) {
@@ -516,6 +574,19 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     );
     assert.equal(round.outcome, "reviewed", accountOf(round));
     assert.equal(readFileSync(join(tree, "allow-all.json"), "utf8"), '""');
+  });
+
+  test("a reviewer in a pane sees no GitHub credential the server carries", async (t) => {
+    const tree = treeFor(t);
+    const invocation = invocationIn(tree);
+    const round = await runRound(
+      adapterOf({ inPane: noticingGitHub(tree), detached: "process.exit(3)" }, "pi"),
+      invocation,
+      40,
+      { environment, name: "squiz-142-r1" },
+    );
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assertNoGitHub(tree, invocation);
   });
 
   test("a reviewer in a pane that finishes at once is a review, not a start that failed", async (t) => {

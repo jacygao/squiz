@@ -582,6 +582,7 @@ async function reviewOn(
         promptFile: join(ownDirectory, "prompt.md"),
         reportsFile: join(ownDirectory, "reports.jsonl"),
         scratchDirectory: episode.scratchDirectory,
+        githubConfigDirectory: join(ownDirectory, "gh"),
         thinking: config.thinking,
         depth: config.depth,
         roundSpace,

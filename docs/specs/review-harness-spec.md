@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.88 (draft)
+**Version:** 0.89 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -169,7 +169,8 @@ what its rounds' comparisons established. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
   handed, the report file the reviewer reports into, the reviewer's session,
-  `resume.txt`, the command that resumes that session, and `tree/`, the
+  `resume.txt`, the command that resumes that session, `gh/`, the empty `gh`
+  configuration the reviewer runs with (§ 4 Depth), and `tree/`, the
   snapshot the reviewer reads while the round runs.
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
@@ -797,7 +798,23 @@ The round host checks the arguments before it creates the tab, and treats such a
 command as a pane Herdr refused: nothing opens, and it goes on to tmux or a
 child. Neither adapter's line carries one unless a path in it does.
 
-The environment the adapter sets reaches the reviewer through `--env` and `-e`.
+**The variables the round sets reach the reviewer on every backend, over any
+value the pane's shell gives them.** They are the adapter's, the round's own
+`TMPDIR` and group record, and the GitHub variables under Depth, which come last
+so that no adapter can undo them. A child is started with them in its
+environment. A pane starts its shell with the server's environment rather than
+the round host's, so they are passed with Herdr's `--env` and tmux's `-e`. The
+shell then runs the person's startup files, which can set any of them again: zsh
+reads `.zshenv` even for `-c`. So the line typed into a Herdr pane, and the
+command of a tmux window, set each variable once more, as `env` arguments in
+front of the gate or the reviewer:
+
+```
+'/usr/bin/env' 'TMPDIR=…' 'GH_TOKEN=' 'GH_CONFIG_DIR=…' … '/bin/sh' '-c' '<gate>' …
+```
+
+`env` sets them and then becomes the gate or the reviewer, so the pid, group and
+start time the round reads are still the reviewer's.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits. Herdr returns the pane to its shell when
@@ -924,7 +941,36 @@ whatever it was allowed to look at. The three calls are named under Findings.
 `run_tests` takes no argument and runs the test command the configuration names.
 `git_log_search` takes a term, `git_blame` a file and a line, and `git_show` a
 commit, and each runs that one `git` subcommand with its arguments as separate
-words. The reviewer's environment carries no GitHub token or `gh` credential.
+words.
+
+**The reviewer's environment carries no GitHub token and no `gh` login, at
+either depth and for either adapter.** The round sets four variables empty and
+points `gh` at a configuration of its own:
+
+| Variable | Value |
+|---|---|
+| `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN` | The empty string, which `gh` reads as no token |
+| `GH_CONFIG_DIR` | `.squiz/<number>/rounds/<k>/gh/`, which the round empties before the reviewer starts |
+
+They are set empty rather than left out because a pane's shell starts with its
+server's environment, and only a value the round sets replaces one the server
+has (The reviewer session). Everything the reviewer starts inherits them, the
+test command included, so a `gh` it runs finds no login: `gh auth status` says
+none, and `gh api` refuses to run.
+
+The credential each CLI needs for its model is left alone: `pi`'s provider key,
+such as `DEEPSEEK_API_KEY`, and Copilot's own login in the system's credential
+store. A Copilot reviewer signs in under these variables.
+
+**The system's credential store stays readable.** On macOS, `gh auth token`
+still prints the login `gh` keeps in the keychain, whatever `GH_CONFIG_DIR`
+names, and any process running as the user can read that keychain. Copilot's own
+login is in the same store, so it cannot be closed to the reviewer without being
+closed to Copilot. `COPILOT_GITHUB_TOKEN` is left set where the round host has it,
+since a user who signs Copilot in that way has no other model credential. A user
+who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no model
+credential in the round, and nothing here handles that. The operating-system
+sandbox under § 8 What ships is what would close both.
 
 ### Confinement
 
@@ -949,9 +995,11 @@ the grant is the whole of the confinement.
 
 **The test command is not confined.** It runs the project's code at the commit
 under review, with the user's access, as the coding agent's own test runs do,
-and nothing confines it. Its environment carries no GitHub token or `gh`
-credential, and nothing else is withheld from it. An operating-system sandbox
-around the reviewer and every process it starts is held as #529.
+and nothing confines it. Its environment carries no GitHub token and no `gh`
+login, as Depth sets out, and nothing else is withheld from it. The system's
+credential store stays readable, and on macOS `gh auth token` still finds the
+login `gh` keeps there. An operating-system sandbox around the reviewer and
+every process it starts is held as #529.
 
 **The comparison sees the snapshot and nothing else.** A write the test command
 makes anywhere else is neither prevented nor detected. That includes:
