@@ -6,6 +6,7 @@ import { readFiring, type Firing, type FiringRead, type HookEnvironment } from "
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const AGENT_ID = "a1e3196c5ad0f2410";
 const SOCKET = "/tmp/cc-socks/57053.sock";
+const DIRECTORY = "/work/session-directory";
 
 /** The hook's environment as the runtime gives it, with a messaging socket. */
 const WITH_SOCKET: HookEnvironment = {
@@ -22,7 +23,7 @@ function stopText(over: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
     session_id: SESSION_ID,
     transcript_path: `/transcripts/${SESSION_ID}.jsonl`,
-    cwd: "/work/session-directory",
+    cwd: DIRECTORY,
     prompt_id: "26307758-09d6-454d-9375-a29943e65963",
     permission_mode: "default",
     hook_event_name: "Stop",
@@ -39,7 +40,7 @@ function subagentStopText(over: Readonly<Record<string, unknown>> = {}): string 
   return JSON.stringify({
     session_id: SESSION_ID,
     transcript_path: `/transcripts/${SESSION_ID}.jsonl`,
-    cwd: "/work/session-directory",
+    cwd: DIRECTORY,
     prompt_id: "59893e32-bf05-4243-8b68-062d0f8767ef",
     permission_mode: "acceptEdits",
     agent_id: AGENT_ID,
@@ -72,7 +73,7 @@ function phantomText(): string {
   return JSON.stringify({
     session_id: SESSION_ID,
     transcript_path: `/transcripts/${SESSION_ID}.jsonl`,
-    cwd: "/work/session-directory",
+    cwd: DIRECTORY,
     prompt_id: "59893e32-bf05-4243-8b68-062d0f8767ef",
     permission_mode: "default",
     agent_id: "a52d5fd4b5ef193bc",
@@ -101,6 +102,7 @@ function reasonFrom(read: FiringRead): string {
 test("on Stop, the owner is the session itself, with its socket", () => {
   assert.deepEqual(firingIn(readFiring(stopText(), WITH_SOCKET)), {
     event: "Stop",
+    directory: DIRECTORY,
     owner: { sessionId: SESSION_ID, socket: SOCKET },
   });
 });
@@ -110,6 +112,7 @@ test("on SubagentStop, the owner is the dispatching session, with its socket, an
   // environment is the parent's.
   assert.deepEqual(firingIn(readFiring(subagentStopText(), WITH_SOCKET)), {
     event: "SubagentStop",
+    directory: DIRECTORY,
     owner: { sessionId: SESSION_ID, socket: SOCKET },
     subagent: AGENT_ID,
   });
@@ -165,6 +168,7 @@ test("a Stop names no subagent, whatever agent fields it carries", () => {
   for (const over of [{ agent_id: AGENT_ID }, { agent_id: AGENT_ID, agent_type: "" }]) {
     assert.deepEqual(firingIn(readFiring(stopText(over), WITH_SOCKET)), {
       event: "Stop",
+      directory: DIRECTORY,
       owner: { sessionId: SESSION_ID, socket: SOCKET },
     });
   }
@@ -180,6 +184,14 @@ test("a payload carrying no usable session_id is unreadable", () => {
   for (const id of [undefined, "", 42, null, { id: SESSION_ID }]) {
     for (const text of [stopText({ session_id: id }), subagentStopText({ session_id: id })]) {
       assert.match(reasonFrom(readFiring(text, WITH_SOCKET)), /session_id/u);
+    }
+  }
+});
+
+test("a payload carrying no usable cwd is unreadable, since the worktree is resolved from it", () => {
+  for (const cwd of [undefined, "", 42, null, ["/work"], "work/session-directory"]) {
+    for (const text of [stopText({ cwd }), subagentStopText({ cwd })]) {
+      assert.match(reasonFrom(readFiring(text, WITH_SOCKET)), /cwd/u, `for ${JSON.stringify(cwd)}`);
     }
   }
 });
@@ -252,6 +264,7 @@ function copilotSubagentStopText(): string {
 test("under Copilot, a Stop for the session's own turn is owned by the session, with no socket", () => {
   assert.deepEqual(firingIn(readFiring(copilotStopText(COPILOT_PARENT), UNDER_COPILOT)), {
     event: "Stop",
+    directory: "/work/repo",
     owner: { sessionId: COPILOT_PARENT },
   });
 });
@@ -259,6 +272,7 @@ test("under Copilot, a Stop for the session's own turn is owned by the session, 
 test("under Copilot, a SubagentStop is owned by the parent session, with no socket, and names the subagent", () => {
   assert.deepEqual(firingIn(readFiring(copilotSubagentStopText(), UNDER_COPILOT)), {
     event: "SubagentStop",
+    directory: "/work/repo",
     owner: { sessionId: COPILOT_PARENT },
     subagent: COPILOT_SUBAGENT,
   });
@@ -277,6 +291,7 @@ test("a Claude Code Stop is read whatever session its transcript's file name giv
   for (const path of [`/Users/someone/.claude/projects/-work-repo/${other}.jsonl`, `/transcripts/${other}/events.jsonl`]) {
     assert.deepEqual(firingIn(readFiring(stopText({ transcript_path: path }), WITH_SOCKET)), {
       event: "Stop",
+      directory: DIRECTORY,
       owner: { sessionId: SESSION_ID, socket: SOCKET },
     });
   }

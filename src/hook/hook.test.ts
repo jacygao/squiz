@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,11 +35,11 @@ const AGENT_ID = "a1e3196c5ad0f2410";
 const SOCKET = "/tmp/claude-code-messaging.sock";
 const BOUND_MS = 10_000;
 
-/** A firing as the runtime writes it to the hook's stdin. */
-function stopPayload(over: Readonly<Record<string, unknown>> = {}): string {
+/** A firing as the runtime writes it to the hook's stdin, for a session in `cwd`. */
+function stopPayload(cwd: string, over: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
     session_id: SESSION_ID,
-    cwd: "/work/session-directory",
+    cwd,
     hook_event_name: "Stop",
     stop_hook_active: false,
     last_assistant_message: "The change is on the branch.",
@@ -47,8 +47,8 @@ function stopPayload(over: Readonly<Record<string, unknown>> = {}): string {
   });
 }
 
-function subagentStopPayload(over: Readonly<Record<string, unknown>> = {}): string {
-  return stopPayload({ hook_event_name: "SubagentStop", agent_id: AGENT_ID, agent_type: "general-purpose", ...over });
+function subagentStopPayload(cwd: string, over: Readonly<Record<string, unknown>> = {}): string {
+  return stopPayload(cwd, { hook_event_name: "SubagentStop", agent_id: AGENT_ID, agent_type: "general-purpose", ...over });
 }
 
 /** A worktree on `BRANCH`, a `gh` answering for it, and a file for whatever reports back. */
@@ -134,6 +134,11 @@ type TriggerAs =
 
 type HookFiring = {
   readonly payload: string;
+  /**
+   * The directory the hook process runs in. Not a git worktree where not given,
+   * as under Copilot, which runs a plugin's hook in the plugin root.
+   */
+  readonly from?: string;
   readonly environment?: Readonly<Record<string, string>>;
   readonly trigger?: TriggerAs;
 };
@@ -176,7 +181,6 @@ async function fire(place: Place, firing: HookFiring): Promise<Fired> {
       ``,
       `process.exitCode = await runHook({`,
       `  stdin: Readable.from([${JSON.stringify(firing.payload)}]),`,
-      `  directory: ${JSON.stringify(place.worktree)},`,
       `  environment: ${JSON.stringify(firing.environment ?? {})},`,
       `  trigger: ${triggerSource(place, firing.trigger ?? { as: "real" })},`,
       `});`,
@@ -189,6 +193,7 @@ async function fire(place: Place, firing: HookFiring): Promise<Fired> {
     // Pipes, which is how Claude Code runs the hook. A host that kept either
     // open would hold this until it exited.
     const child = spawn(process.execPath, [source], {
+      cwd: firing.from ?? place.bin,
       env: { ...process.env, PATH: `${place.bin}:${process.env["PATH"] ?? ""}` },
     });
     let stderr = "";
@@ -230,7 +235,7 @@ function alive(pid: number): boolean {
 test("a Stop firing queues the state, owned by the session and its socket, and says nothing", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
-      payload: stopPayload(),
+      payload: stopPayload(place.worktree),
       environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, HERDR_WORKSPACE_ID: "w2" },
     });
 
@@ -250,7 +255,7 @@ test("a Stop firing queues the state, owned by the session and its socket, and s
 test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
-      payload: subagentStopPayload(),
+      payload: subagentStopPayload(place.worktree),
       environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET },
     });
 
@@ -269,7 +274,7 @@ test("a SubagentStop firing queues the state, owned by the parent session, its s
 test("the hook returns while the host it started is still running", async () => {
   await withPlace(async (place) => {
     // The stand-in host holds the lock for a minute, as a host running a round would.
-    const fired = await fire(place, { payload: stopPayload() });
+    const fired = await fire(place, { payload: stopPayload(place.worktree) });
 
     assert.equal(fired.code, 0);
     assert.ok(fired.elapsedMs < 30_000, `the hook took ${fired.elapsedMs}ms`);
@@ -279,10 +284,10 @@ test("the hook returns while the host it started is still running", async () => 
   });
 });
 
-test("the trigger is asked as a hook, from the directory the hook fired in, with its environment", async () => {
+test("the trigger is asked as a hook, from the payload's cwd, with its environment", async () => {
   await withPlace(async (place) => {
     const environment = { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, HERDR_WORKSPACE_ID: "w2" };
-    await fire(place, { payload: subagentStopPayload(), environment, trigger: { as: "recording" } });
+    await fire(place, { payload: subagentStopPayload(place.worktree), environment, trigger: { as: "recording" } });
 
     const request = JSON.parse(reported(place)) as Record<string, unknown>;
     assert.equal(request["trigger"], "hook");
@@ -293,9 +298,91 @@ test("the trigger is asked as a hook, from the directory the hook fired in, with
   });
 });
 
+test("a hook run in another repository queues for the payload's worktree, and writes nothing where it ran", async () => {
+  await withPlace(async (place) => {
+    // A plugin checkout on a branch of its own, as Copilot runs the plugin's hook in.
+    const plugin = realpathSync(await mkdtemp(join(tmpdir(), "squiz-hook-plugin-")));
+    try {
+      git(plugin, "init", "--quiet", "--initial-branch", "plugin-main");
+      git(plugin, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false",
+        "commit", "--quiet", "--allow-empty", "--message", "the plugin");
+
+      const fired = await fire(place, { payload: stopPayload(place.worktree), from: plugin });
+
+      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.equal(recordsIn(place).length, 1, "nothing was queued for the payload's worktree");
+      assert.equal(existsSync(join(plugin, ".squiz")), false, "state was written in the directory the hook ran in");
+    } finally {
+      await rm(plugin, { recursive: true, force: true });
+    }
+  });
+});
+
+test("Copilot's recorded SubagentStop, fired from outside any worktree, queues for the payload's worktree", async () => {
+  await withPlace(async (place) => {
+    const payload = JSON.stringify({
+      hook_event_name: "SubagentStop",
+      session_id: SESSION_ID,
+      timestamp: "2026-10-06T05:34:55.034Z",
+      cwd: place.worktree,
+      transcript_path: `/copilot-home/session-state/${SESSION_ID}/events.jsonl`,
+      agent_id: AGENT_ID,
+      agent_type: "explore",
+      agent_name: "explore",
+      last_assistant_message: "PONG",
+      stop_reason: "end_turn",
+    });
+
+    const fired = await fire(place, { payload, environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(recordsIn(place), [
+      { head: HEAD, activity: null, owner: { sessionId: SESSION_ID, subagent: AGENT_ID }, status: "queued" },
+    ]);
+  });
+});
+
+test("a payload's cwd in a subdirectory of the worktree queues at the worktree's root", async () => {
+  await withPlace(async (place) => {
+    const inside = join(place.worktree, "src", "deep");
+    mkdirSync(inside, { recursive: true });
+
+    const fired = await fire(place, { payload: stopPayload(inside) });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(recordsIn(place).length, 1);
+  });
+});
+
+test("a payload with no cwd asks the trigger nothing, exits 0, and says why in one line", async () => {
+  await withPlace(async (place) => {
+    // Fired from inside the worktree, where reading the hook's own directory would queue.
+    const fired = await fire(place, {
+      payload: stopPayload(place.worktree, { cwd: undefined }),
+      from: place.worktree,
+      trigger: { as: "recording" },
+    });
+
+    assert.equal(fired.code, 0);
+    assert.match(fired.stderr, /^squiz: nothing was queued: [^\n]*"cwd"[^\n]*\n$/u);
+    assert.equal(reported(place), "", "the trigger was asked");
+  });
+});
+
+test("a payload whose cwd is no git worktree queues nothing, exits 0, and says why in one line", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: stopPayload(place.bin), from: place.worktree });
+
+    assert.equal(fired.code, 0);
+    assert.match(fired.stderr, /^squiz: nothing was queued: the worktree could not be resolved: [^\n]*\n$/u);
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false, "state was written in the directory the hook ran in");
+    assert.equal(existsSync(join(place.bin, ".squiz")), false, "state was written in the payload's cwd");
+  });
+});
+
 test("a trigger that throws exits 0 with one line naming what it threw", async () => {
   await withPlace(async (place) => {
-    const fired = await fire(place, { payload: stopPayload(), trigger: { as: "throwing", message: "the trigger exploded" } });
+    const fired = await fire(place, { payload: stopPayload(place.worktree), trigger: { as: "throwing", message: "the trigger exploded" } });
 
     assert.equal(fired.code, 0);
     assert.match(fired.stderr, /^squiz: [^\n]*the trigger exploded\n$/u);
@@ -304,7 +391,7 @@ test("a trigger that throws exits 0 with one line naming what it threw", async (
 
 test("a SubagentStop with an empty agent_type asks the trigger nothing and says nothing", async () => {
   await withPlace(async (place) => {
-    const fired = await fire(place, { payload: subagentStopPayload({ agent_type: "" }), trigger: { as: "recording" } });
+    const fired = await fire(place, { payload: subagentStopPayload(place.worktree, { agent_type: "" }), trigger: { as: "recording" } });
 
     assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
     assert.equal(reported(place), "", "the trigger was asked");
@@ -315,12 +402,12 @@ test("a SubagentStop with an empty agent_type asks the trigger nothing and says 
 const COPILOT_PARENT = "57444f75-0c1e-4d6b-9a2f-3b8e1d7c5a60";
 const COPILOT_SUBAGENT = "829422d1-6f3a-4b9e-8c2d-7e1f0a5b4c39";
 
-function copilotStopPayload(sessionId: string): string {
+function copilotStopPayload(cwd: string, sessionId: string): string {
   return JSON.stringify({
     hook_event_name: "Stop",
     session_id: sessionId,
     timestamp: "2026-10-06T05:34:54.854Z",
-    cwd: "/work/repo",
+    cwd,
     transcript_path: `/Users/someone/.copilot/session-state/${COPILOT_PARENT}/events.jsonl`,
     stop_reason: "end_turn",
     stop_hook_active: false,
@@ -330,7 +417,7 @@ function copilotStopPayload(sessionId: string): string {
 test("a Copilot Stop queues the state owned by the session, and records no socket its environment carries", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
-      payload: copilotStopPayload(COPILOT_PARENT),
+      payload: copilotStopPayload(place.worktree, COPILOT_PARENT),
       environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET },
     });
 
@@ -342,7 +429,7 @@ test("a Copilot Stop queues the state owned by the session, and records no socke
 test("a Copilot Stop for a subagent's turn asks the trigger nothing and says nothing", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
-      payload: copilotStopPayload(COPILOT_SUBAGENT),
+      payload: copilotStopPayload(place.worktree, COPILOT_SUBAGENT),
       environment: { COPILOT_CLI: "1" },
       trigger: { as: "recording" },
     });
@@ -354,7 +441,7 @@ test("a Copilot Stop for a subagent's turn asks the trigger nothing and says not
 
 test("a payload that cannot be read asks the trigger nothing, exits 0, and says why in one line", async () => {
   await withPlace(async (place) => {
-    for (const payload of ["", "{not json", subagentStopPayload({ agent_id: "" })]) {
+    for (const payload of ["", "{not json", subagentStopPayload(place.worktree, { agent_id: "" })]) {
       const fired = await fire(place, { payload, trigger: { as: "recording" } });
 
       assert.equal(fired.code, 0);
@@ -368,7 +455,7 @@ test("a branch with no pull request writes the line naming the branch and the di
   await withPlace(async (place) => {
     writeFileSync(join(place.bin, "list.out"), "[]", "utf8");
 
-    const fired = await fire(place, { payload: stopPayload() });
+    const fired = await fire(place, { payload: stopPayload(place.worktree) });
 
     assert.equal(fired.code, 0);
     assert.equal(
@@ -383,7 +470,7 @@ test("a trigger that could not read what it decides from says so in one line", a
   await withPlace(async (place) => {
     writeFileSync(join(place.bin, "list.status"), "1", "utf8");
 
-    const fired = await fire(place, { payload: stopPayload() });
+    const fired = await fire(place, { payload: stopPayload(place.worktree) });
 
     assert.equal(fired.code, 0);
     assert.match(fired.stderr, /^squiz: nothing was queued: the pull request for "feature-a" could not be looked up: [^\n]*\n$/u);
@@ -393,7 +480,7 @@ test("a trigger that could not read what it decides from says so in one line", a
 test("a host that could not be started says so in one line, the state queued", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
-      payload: stopPayload(),
+      payload: stopPayload(place.worktree),
       trigger: { as: "real", hostCommand: join(place.bin, "no-such-host") },
     });
 

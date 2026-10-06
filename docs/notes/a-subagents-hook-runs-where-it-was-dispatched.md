@@ -29,7 +29,9 @@ recheck-when: Claude Code changes how it sets a hook's working directory, or how
   subagent `cd`ing there, change nothing.
 - **Resolve the worktree from the hook's own working directory, as the code
   already does.** The payload's `cwd` equals it in every firing, so reading
-  `cwd` adds nothing.
+  `cwd` adds nothing. 2026-10-06: the hook now resolves the worktree from the
+  payload's `cwd`, because Copilot runs a plugin's hook in the plugin root.
+  Under Claude Code the two are still the same directory.
 - **Do not depend on `agent-<id>.meta.json`.** It is undocumented, and nothing
   else says whether a subagent was isolated.
 - **Write the gate's pass to stderr, and do not count on a person seeing it.**

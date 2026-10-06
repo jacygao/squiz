@@ -23,8 +23,6 @@ const QUEUE_BUDGET_MS = 30_000;
 export type HookCall = {
   /** The hook's stdin, which the runtime wrote the payload to. */
   readonly stdin: PayloadStream;
-  /** The directory the hook fired in, which the worktree is resolved from. */
-  readonly directory: string;
   /** `process.env` where not given. */
   readonly environment?: HookEnvironment;
   /** `trigger` where not given. */
@@ -47,7 +45,7 @@ export async function runHook(call: HookCall): Promise<HookExit> {
     }
 
     const triggered = (call.trigger ?? trigger)({
-      directory: call.directory,
+      directory: read.firing.directory,
       trigger: "hook",
       owner: ownerOf(read.firing),
       environment,

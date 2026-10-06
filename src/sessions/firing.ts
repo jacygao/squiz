@@ -20,6 +20,10 @@
  * `SubagentStop` names the work, and read as it stands this firing would make
  * the subagent the owner.
  *
+ * The directory is the payload's `cwd`, the session's directory. The hook's own
+ * working directory is not it under Copilot, which runs a plugin's hook in the
+ * plugin root.
+ *
  * A `SubagentStop` whose `agent_type` is the empty string is none of the
  * session's subagents: an interactive session fires a few after a turn ends,
  * with no transcript behind them. One with no `agent_type` at all is read as a
@@ -29,6 +33,8 @@
  * last message is in there.
  */
 
+import { isAbsolute } from "node:path";
+
 export type Owner = {
   readonly sessionId: string;
   /** Absent where the hook's environment named no socket, or an empty one. */
@@ -36,8 +42,8 @@ export type Owner = {
 };
 
 export type Firing =
-  | { readonly event: "Stop"; readonly owner: Owner }
-  | { readonly event: "SubagentStop"; readonly owner: Owner; readonly subagent: string };
+  | { readonly event: "Stop"; readonly directory: string; readonly owner: Owner }
+  | { readonly event: "SubagentStop"; readonly directory: string; readonly owner: Owner; readonly subagent: string };
 
 export type FiringRead =
   | { readonly outcome: "read"; readonly firing: Firing }
@@ -86,14 +92,20 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   if (event === "Stop") {
     const named = transcriptSession(payload["transcript_path"]);
     if (named !== undefined && named !== sessionId) return { outcome: "a subagent's turn" };
-    return { outcome: "read", firing: { event, owner } };
   }
+
+  const directory = payload["cwd"];
+  // A relative path would be resolved against the hook's own directory.
+  if (typeof directory !== "string" || !isAbsolute(directory)) {
+    return unreadable('the payload carries no absolute "cwd", which the worktree is resolved from');
+  }
+  if (event === "Stop") return { outcome: "read", firing: { event, directory, owner } };
 
   const agentId = payload["agent_id"];
   if (typeof agentId !== "string" || agentId === "") {
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
-  return { outcome: "read", firing: { event, owner, subagent: agentId } };
+  return { outcome: "read", firing: { event, directory, owner, subagent: agentId } };
 }
 
 function underCopilot(environment: HookEnvironment): boolean {
