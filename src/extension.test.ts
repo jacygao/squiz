@@ -123,6 +123,18 @@ test("a line that is not a user message is dropped, and the lines around it are 
   });
 });
 
+test("a message the session refuses gets a warning in the session naming why", async () => {
+  await withExtension(async ({ socket, calls }) => {
+    await postMessage(socket, "REFUSED-BY-SESSION", BOUND_MS);
+
+    await until(() => calls().some((call) => "log" in call), "the session was told nothing");
+    assert.deepEqual(
+      calls().filter((call) => "log" in call),
+      [{ log: "squiz could not start a turn with its note: the session refused it", options: { level: "warning" } }],
+    );
+  });
+});
+
 test("a socket file a killed extension left is replaced by a listening one", async () => {
   await withExtension(
     async ({ socket }) => {

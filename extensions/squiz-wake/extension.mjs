@@ -30,14 +30,19 @@ const server = createServer((connection) => {
   connection.on("data", (chunk) => (text += chunk));
   // The hook checks the socket with a connection that writes nothing, which sends nothing.
   connection.on("end", () => {
-    for (const prompt of messages(text)) session.send({ prompt, source: "system" }).catch(() => undefined);
+    for (const prompt of messages(text)) {
+      // The poster has already counted the note delivered, so the session is the only place left to say it was not.
+      session.send({ prompt, source: "system" }).catch((error) => warn(`squiz could not start a turn with its note: ${error.message}`));
+    }
   });
   connection.on("error", () => undefined);
 });
 
-server.on("error", (error) => {
-  session.log(`squiz cannot wake this session: ${error.message}`, { level: "warning" }).catch(() => undefined);
-});
+server.on("error", (error) => warn(`squiz cannot wake this session: ${error.message}`));
+
+function warn(message) {
+  session.log(message, { level: "warning" }).catch(() => undefined);
+}
 
 // A file at the path is a socket a killed run of this session left, which nothing listens on.
 rmSync(path, { force: true });

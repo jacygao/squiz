@@ -4,7 +4,8 @@
  *
  * Each call the extension makes on the session is printed to stdout as one JSON
  * line. The session's directory is `SQUIZ_STAND_IN_WORKSPACE`. A line
- * `shutdown` on stdin fires `session.shutdown`.
+ * `shutdown` on stdin fires `session.shutdown`. `send` rejects a prompt that
+ * contains `REFUSED-BY-SESSION`.
  */
 
 import { createInterface } from "node:readline";
@@ -26,6 +27,7 @@ export async function joinSession(): Promise<unknown> {
     workspacePath: process.env["SQUIZ_STAND_IN_WORKSPACE"],
     send(options: unknown): Promise<string> {
       print({ send: options });
+      if (JSON.stringify(options).includes("REFUSED-BY-SESSION")) return Promise.reject(new Error("the session refused it"));
       return Promise.resolve("message-id");
     },
     log(message: string, options?: unknown): Promise<void> {
