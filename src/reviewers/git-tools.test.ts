@@ -150,7 +150,9 @@ test("git_show refuses a revision that names a file or a range rather than a com
   for (const commit of ["HEAD:code.txt", `HEAD:../outside/secret.txt`, `${first}..${second}`, "HEAD^{tree}"]) {
     const result = await gitShow.run(repo, { commit });
     assert.equal(result.failed, true, `${commit} was shown: ${result.text}`);
-    assert.match(result.text, /not a commit/u, commit);
+    // Where git explains the refusal itself, its explanation is what the reviewer reads.
+    assert.match(result.text, /not a commit|is outside repository|expected commit type/u, commit);
+    assert.doesNotMatch(result.text, /SECRET-CONTENT/u);
   }
 });
 
@@ -158,6 +160,12 @@ test("git_show answers an unknown commit with git's own error, not a throw", asy
   const result = await gitShow.run(repo, { commit: "0123456789abcdef0123456789abcdef01234567" });
   assert.equal(result.failed, true);
   assert.match(result.text, /0123456789abcdef/u);
+});
+
+test("git_show answers a snapshot that is no repository with git's error, not as a bad commit", async () => {
+  const result = await gitShow.run(outside, { commit: "HEAD" });
+  assert.equal(result.failed, true);
+  assert.match(result.text, /not a git repository/u);
 });
 
 test("git_show cuts its output at the cap and says so", async () => {

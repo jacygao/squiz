@@ -91,8 +91,11 @@ type Ran =
   | {
       readonly ran: false;
       readonly reason: string;
-      /** Whether git ran to an exit status, rather than being stopped or never starting. */
-      readonly exited: boolean;
+      /**
+       * Whether git exited 1 having said nothing, which is how `rev-parse
+       * --quiet` answers a revision it cannot resolve.
+       */
+      readonly silent: boolean;
     };
 
 function runGit(snapshot: string, args: readonly string[], signal: AbortSignal | undefined): Promise<Ran> {
@@ -116,8 +119,9 @@ function runGit(snapshot: string, args: readonly string[], signal: AbortSignal |
         if ("code" in error && error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && stdout.length > 0) {
           return done({ ran: true, stdout: out, cut: true });
         }
-        const exited = "code" in error && typeof error.code === "number" && error.name !== "AbortError";
-        done({ ran: false, reason: describeFailure(error, decode(stderr)), exited });
+        const said = decode(stderr);
+        const silent = error.name !== "AbortError" && "code" in error && error.code === 1 && said.trim() === "";
+        done({ ran: false, reason: describeFailure(error, said), silent });
       },
     );
   });
@@ -287,8 +291,8 @@ export const gitShow: HistoryTool = {
       ["rev-parse", "--verify", "--quiet", "--end-of-options", `${commit}^{commit}`],
       signal,
     );
-    // Only a git that ran and found no commit says the argument is wrong.
-    if (!resolved.ran && !resolved.exited) return refused(resolved.reason);
+    // Where git says why, the reviewer reads that; silence means no such commit.
+    if (!resolved.ran && !resolved.silent) return refused(resolved.reason);
     const name = resolved.ran ? resolved.stdout.trim() : "";
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(name)) {
       return refused(`${commit} is not a commit in the snapshot's repository`);
