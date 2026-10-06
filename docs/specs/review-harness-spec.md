@@ -1497,8 +1497,8 @@ The standing rules:
   that assert nothing.
 - Do not report formatting, naming, import order, anything the compiler catches,
   or speculation. "Consider whether" means there is no finding.
-- Verify before reporting. Read the file, grep the callers, and run the test
-  where the depth grants a shell. A finding that could have been checked with
+- Verify before reporting. Read the file, grep the callers, and run the tests
+  where the depth grants `run_tests`. A finding that could have been checked with
   the tools you were given and was not is not reportable.
 - Read what the project treats as authoritative. `AGENTS.md` names it, and it is
   the authority on intended behaviour. It extends what counts as a finding; it
