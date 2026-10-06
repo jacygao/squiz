@@ -1371,9 +1371,11 @@ Nothing is refused by pattern, so the run's refusals are always zero.
 
 `deep` is not granted until the adapter can do two things it cannot yet. Copilot
 runs each shell call in a session of its own, so each shell would have to record
-the group it leads, and Copilot has no line it runs before every command, as
-`pi` has. A call `--deny-tool` refuses is recorded in Copilot's own event stream
-and never in the report file, so the round would count none of the refusals.
+the group it leads. Copilot's nearest to `pi`'s settings line is `--bash-env`,
+which enables `BASH_ENV`, and whether bash reads that file under `--norc
+--noprofile` is not measured. A call `--deny-tool` refuses is recorded in
+Copilot's own event stream and never in the report file, so the round would
+count none of the refusals.
 
 #### The reporting server
 
