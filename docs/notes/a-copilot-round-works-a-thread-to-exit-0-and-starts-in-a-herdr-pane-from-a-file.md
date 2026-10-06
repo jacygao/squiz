@@ -162,7 +162,7 @@ A line typed with `herdr pane run` into a tab made the moment before:
 
 The run measured two of the items under § 4 The Copilot adapter, Not
 established. The charter governed a model other than `gpt-5-mini`, and Copilot
-ran detached with `/dev/null` as standard input. The spec still lists both.
+ran detached with `/dev/null` as standard input.
 
 ### What Copilot wrote into `COPILOT_HOME`
 
