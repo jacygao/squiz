@@ -819,8 +819,8 @@ process in a session of its own.
 the group of each shell it started. A process one of those shells moved into a
 session of its own is reached by nothing: not the pane close, not `pi`, and not
 the recorded groups, which name the shells' groups and not that session. It runs
-on after the round. Nothing in this version detects it. Only `deep` grants a
-shell, so only a round at `deep` can leave one.
+on after the round. Nothing in this version detects it. No depth grants a
+shell, so only a process the `deep` test command starts can leave one.
 
 ### The snapshot
 
@@ -1213,7 +1213,7 @@ whether the run stopped or hung. The reports that were read stand either way.
 project's conventions reach the reviewer without the charter carrying them.
 
 `--tools` sets the grant, and it filters the extension's calls the same way it
-filters the built-in tools. The list above is `read`; `deep` adds `bash`. A name
+filters the built-in tools. The list above is `read`; `deep` adds the tools § 4 Depth names. A name
 the grant does not carry is dropped with exit status 0 and an empty stderr, so a
 grant short of a reporting call leaves the reviewer no way to report and says
 nothing about it.
@@ -2628,7 +2628,7 @@ its own branch. Squiz does not create them, and does not remove them.
 |---|---|---|
 | `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
 | `rounds` | 3 | The round cap, settable 1 to 8 |
-| `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
+| `depth` | `read` | `deep` adds running the configured tests and reading history, with no shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
