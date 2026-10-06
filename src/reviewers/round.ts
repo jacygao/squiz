@@ -14,7 +14,7 @@
  */
 
 import { spawnSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -192,6 +192,11 @@ export async function runRound(
   if (unmade !== null) {
     return { outcome: "setup", cost: unspent, reason: unmade, refusals: 0, ...nothingReported };
   }
+  const github = resolve(invocation.directory, invocation.githubConfigDirectory);
+  const unemptied = emptyDirectory(github);
+  if (unemptied !== null) {
+    return { outcome: "setup", cost: unspent, reason: unemptied, refusals: 0, ...nothingReported };
+  }
 
   // What the CLI reads from a file rather than from its command line is put in
   // place before anything starts. A confinement that is not in place is not a
@@ -207,7 +212,7 @@ export async function runRound(
     };
   }
 
-  const variables = variablesOf(invocation, scratch, confinement.environment);
+  const variables = variablesOf(invocation, scratch, github, confinement.environment);
 
   let spent: Spend = undefined;
   // Added up rather than replaced, unlike the reports below: each refusal is a
@@ -281,10 +286,18 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * review. The record's own variable is named here rather than by the adapter: it
  * is the harness's, and every shell the reviewer starts inherits it, so the line
  * the adapter delivers carries no path of its own.
+ *
+ * **No GitHub credential reaches the reviewer through a variable or `gh`'s
+ * configuration.** The token variables are set empty rather than left out,
+ * because a pane starts with its server's environment and only a variable set
+ * here overrides one the server has. `gh` reads an empty token as none.
+ * `GH_CONFIG_DIR` names `github`, which the round has emptied. They come after
+ * the confinement's, so no adapter puts a token back.
  */
 function variablesOf(
   invocation: Invocation,
   scratch: string,
+  github: string,
   confinement: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
   const space = invocation.roundSpace;
@@ -294,8 +307,13 @@ function variablesOf(
     ...(space === undefined
       ? {}
       : { [RECORD_VARIABLE]: space.shellRecord, [KEEPER_VARIABLE]: space.keeperName }),
+    ...Object.fromEntries(GITHUB_TOKENS.map((name) => [name, ""])),
+    GH_CONFIG_DIR: github,
   };
 }
+
+/** Every variable `gh` reads a token from. */
+const GITHUB_TOKENS = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"] as const;
 
 /** How one attempt ended, what it spent getting there, and what it got through. */
 type Attempt = {
@@ -374,7 +392,8 @@ async function attempt(
       withoutTerminal: { program: detached.command, arguments: detached.args },
       startsWithinMs: STARTS_MS,
       ...(sessions.workspace === undefined ? {} : { workspace: sessions.workspace }),
-      variables: { ...variables, ...detached.environment, ...inPane.environment },
+      // The round's own last, so the command line cannot hand the reviewer a token.
+      variables: { ...detached.environment, ...inPane.environment, ...variables },
     },
     { environment: sessions.environment, boundMs: SESSION_BOUND_MS },
     sessions.backends,
@@ -780,6 +799,17 @@ function makeScratch(directory: string): string | null {
     return null;
   } catch (cause) {
     return `the reviewer's scratch space ${directory} could not be made: ${reasonFor(cause)}`;
+  }
+}
+
+/** Make `directory` and leave nothing in it, whatever an earlier run left there. */
+function emptyDirectory(directory: string): string | null {
+  try {
+    rmSync(directory, { recursive: true, force: true });
+    mkdirSync(directory, { recursive: true });
+    return null;
+  } catch (cause) {
+    return `the reviewer's gh configuration ${directory} could not be emptied: ${reasonFor(cause)}`;
   }
 }
 

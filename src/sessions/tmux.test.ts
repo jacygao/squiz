@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -162,6 +162,32 @@ test("the variables given reach the command, though the server never had them", 
 
   assert.equal((await recordOf(file)).mark, variables.SESSION_MARK);
 });
+
+const zshPath = spawnSync("/bin/sh", ["-c", "command -v zsh"], { encoding: "utf8" }).stdout.trim();
+
+// zsh reads `.zshenv` even for `-c`. The empty value is how the round keeps a
+// GitHub token from the reviewer.
+test(
+  "the variables given win over the ones the window's shell sets as it starts, empty ones too",
+  { skip: skip || (zshPath === "" ? "zsh is not installed" : false) },
+  async (t) => {
+    const server = privateServer(t, zshPath);
+    const directory = scratch(t);
+    writeFileSync(join(directory, ".zshenv"), 'export SESSION_MARK="gho_fromrc"\n');
+    server.tmux("set-environment", "-g", "ZDOTDIR", directory);
+    const file = join(directory, "record.json");
+
+    opened(
+      openWindow(
+        { name: "squiz-rc", directory, argv: recorder(file), variables: { SESSION_MARK: "" } },
+        server.environment,
+        BOUND_MS,
+      ),
+    );
+
+    assert.equal((await recordOf(file)).mark, "");
+  },
+);
 
 const AWKWARD = [
   "two words",

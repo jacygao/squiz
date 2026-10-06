@@ -47,6 +47,12 @@ export type Invocation = {
    */
   readonly scratchDirectory: string;
   /**
+   * The round's own `gh` configuration directory, which `GH_CONFIG_DIR` names.
+   * The round empties it before the reviewer starts, so a `gh` the reviewer or
+   * its test command runs finds no login there.
+   */
+  readonly githubConfigDirectory: string;
+  /**
    * How much the reviewer is allowed to do. The harness decides it; the adapter
    * turns it into the grant and never chooses a value of its own.
    */

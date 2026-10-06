@@ -57,7 +57,7 @@ export type PaneCommand = {
   /** The workspace the tab opens in. Absent, it opens in the focused one. */
   readonly workspace?: string;
   /**
-   * Set in the pane's shell, which the command inherits. Herdr starts the shell
+   * Set in the pane's shell, and again on the command's line. Herdr starts the shell
    * with the server's environment, so the client's own reaches it only through these.
    */
   readonly variables?: Readonly<Record<string, string>>;
@@ -146,7 +146,12 @@ const CONTROL = /[\u0000-\u001f\u007f]/u;
 
 function startBehind(gate: string, command: PaneCommand, options: HerdrOptions): PaneStart {
   const polls = Math.ceil((GATE_HOLDS_BOUNDS * options.boundMs) / GATE_POLL_MS);
-  const gated = ["/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments]
+  // Set again on the line, because the pane's shell runs a person's startup
+  // files after `--env`, and those can set any of them. `env` becomes the gate
+  // with the same pid.
+  const assigned = Object.entries(command.variables ?? {}).map(([name, value]) => `${name}=${value}`);
+  const settings = assigned.length === 0 ? [] : ["/usr/bin/env", ...assigned];
+  const gated = [...settings, "/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments]
     .map(quoted)
     .join(" ");
   if (CONTROL.test(gated)) {

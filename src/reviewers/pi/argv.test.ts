@@ -21,6 +21,7 @@ const invocation: Invocation = {
   promptFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/prompt.md",
   reportsFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/agent-7/scratch",
+  githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
   depth: "read",
   thinking: "medium",
   roundSpace: undefined,

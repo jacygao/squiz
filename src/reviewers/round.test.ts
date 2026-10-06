@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { type Adapter, type Confinement, type Invocation, type ParsedRun, unspent } from "./adapter.ts";
 import { copilot } from "./copilot/adapter.ts";
 import { makeRoundSpace, shellPrefix } from "./groups.ts";
+import { pi } from "./pi/adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { readReports as parse } from "./pi/reports.ts";
 import { REPORTS_VARIABLE } from "./report-file.ts";
@@ -16,6 +17,9 @@ import { type Round, runRound } from "./round.ts";
 
 /** The scratch space, named relative to the work tree as the harness names it. */
 const scratchDirectory = ".squiz/agent-1/scratch";
+
+/** The round's own `gh` configuration, named relative to the work tree as the harness names it. */
+const githubConfigDirectory = ".squiz/1/rounds/1/gh";
 
 /** The report file, named relative to the work tree as the harness names it. */
 const reportsFile = ".squiz/1/rounds/1/reports.jsonl";
@@ -734,6 +738,96 @@ test("a variable the adapter sets empty reaches a reviewer with no terminal as s
   });
 });
 
+/** The four variables `gh` and most GitHub clients read a token from. */
+const githubTokens = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"] as const;
+
+/**
+ * A round host carrying every GitHub credential a variable or `gh`'s
+ * configuration can, and no pane server.
+ */
+function hostWithGitHub(tree: string): Record<string, string | undefined> {
+  const theirs = join(tree, "their-gh");
+  mkdirSync(theirs, { recursive: true });
+  writeFileSync(join(theirs, "hosts.yml"), "github.com:\n    oauth_token: gho_fromtheirconfig\n    user: someone\n");
+  const { TMUX: _tmux, HERDR_SOCKET_PATH: _herdr, ...host } = process.env;
+  return {
+    ...host,
+    ...Object.fromEntries(githubTokens.map((name) => [name, `gho_${name.toLowerCase()}`])),
+    GH_CONFIG_DIR: theirs,
+  };
+}
+
+/** What a reviewer reports of the GitHub credentials in its environment. */
+const githubSeen = (): string =>
+  reporting(
+  `JSON.stringify([${githubTokens.map((name) => `process.env.${name}`).join(", ")}, ` +
+    "process.env.GH_CONFIG_DIR, fs.readdirSync(process.env.GH_CONFIG_DIR)])",
+);
+
+for (const [name, shipped] of [
+  ["pi", pi],
+  ["Copilot", copilot],
+] as const) {
+  test(`the ${name} reviewer's environment carries no GitHub token and an empty gh configuration`, async () => {
+    await inATree(async (tree) => {
+      writeFileSync(join(tree, "charter.md"), "Review the change.\n");
+      const running = reviewer(githubSeen());
+      // The adapter's own confinement runs, so whatever it adds is in the environment read.
+      const adapter: Adapter = { ...shipped, argv: running.adapter.argv, parse };
+      const round = await runRound(adapter, at(tree), 10, { name: "squiz-reviewer", environment: hostWithGitHub(tree) });
+      assert.equal(round.outcome, "reviewed", accountOf(round));
+      assert.deepEqual(JSON.parse(headlineOf(round)), ["", "", "", "", join(tree, githubConfigDirectory), []]);
+    });
+  });
+}
+
+// A token an adapter or its command line put back would reach the reviewer, so
+// the round's own variables are applied last.
+test("neither the adapter nor its command line can hand the reviewer a GitHub token", async () => {
+  await inATree(async (tree) => {
+    const running = reviewer(githubSeen());
+    const adapter: Adapter = {
+      ...running.adapter,
+      confine: () => ({ outcome: "prepared", environment: { GH_TOKEN: "gho_fromconfine" } }),
+      argv: (invocation) => {
+        const line = running.adapter.argv(invocation);
+        return { ...line, environment: { ...line.environment, GITHUB_TOKEN: "gho_fromtheline" } };
+      },
+    };
+    const round = await runRound(adapter, at(tree), 10, { name: "squiz-reviewer", environment: hostWithGitHub(tree) });
+    assert.deepEqual(JSON.parse(headlineOf(round)).slice(0, 2), ["", ""]);
+  });
+});
+
+test("a gh configuration an earlier attempt left is emptied before the round", async () => {
+  await inATree(async (tree) => {
+    const left = join(tree, githubConfigDirectory);
+    mkdirSync(left, { recursive: true });
+    writeFileSync(join(left, "hosts.yml"), "github.com:\n    oauth_token: gho_leftbehind\n");
+    const round = await runRound(reviewer(githubSeen()).adapter, at(tree), 10);
+    assert.deepEqual(JSON.parse(headlineOf(round)).at(-1), []);
+  });
+});
+
+const ghInstalled = spawnSync("gh", ["--version"], { stdio: "ignore" }).status === 0;
+
+// `gh auth status` reads the variables and the configuration directory. On
+// macOS `gh auth token` can still read the system keychain, which no variable
+// closes, so it is not what this asks.
+test("a gh the reviewer starts finds no login", { skip: ghInstalled ? false : "gh is not installed" }, async () => {
+  await inATree(async (tree) => {
+    const asking = [
+      'const asked = require("node:child_process").spawnSync("gh", ["auth", "status"], { encoding: "utf8" });',
+      "const answer = (asked.stdout + asked.stderr).trim();",
+    ].join("\n");
+    const round = await runRound(reviewer(asking + "\n" + reporting("answer")).adapter, at(tree), 10, {
+      name: "squiz-reviewer",
+      environment: hostWithGitHub(tree),
+    });
+    assert.match(headlineOf(round), /not logged into any GitHub hosts/u);
+  });
+});
+
 /**
  * A confinement that is not in place is not a round to run: at `deep` it is what
  * the round reaches a detached tool by, and a round that ran anyway would leave
@@ -1270,6 +1364,7 @@ function at(tree: string): Invocation {
     promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile,
     scratchDirectory,
+    githubConfigDirectory,
     depth: "read",
     thinking: "medium",
     roundSpace: undefined,
