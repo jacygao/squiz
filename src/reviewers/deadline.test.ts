@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { deadlineIn } from "./deadline.ts";
+import { deadlineAt, deadlineIn } from "./deadline.ts";
 
 /**
  * How long a test waits for a bound of 150 ms before calling it unfired.
@@ -41,6 +41,19 @@ test("cancelling after it has fired changes nothing", async () => {
   cancel();
   await forMilliseconds(50);
   assert.equal(fired, 1);
+});
+
+// The moment is carried across a process boundary as a number, so the reading
+// on the far side must come to the moment the round set, not one counted afresh.
+test("a deadline at a moment on the clock is that moment, whenever it is read", () => {
+  let clock = 1_000;
+  const bound = deadlineAt(5_000, () => clock);
+  assert.equal(bound.remaining(), 4_000);
+  clock = 4_999;
+  assert.ok(!bound.passed());
+  clock = 5_000;
+  assert.ok(bound.passed());
+  assert.equal(bound.remaining(), 0);
 });
 
 test("the time left never runs below zero", async () => {

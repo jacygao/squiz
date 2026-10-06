@@ -235,6 +235,7 @@ function at(roundSpace: RoundSpace | undefined, directory = "/tmp/squiz/worktree
     scratchDirectory: ".squiz/agent-7/scratch",
     githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
     depth: roundSpace === undefined ? "read" : "deep",
+    test: null,
     thinking: "medium",
     roundSpace,
     terminal: "none",

@@ -301,6 +301,7 @@ function invocationIn(tree: string): Invocation {
     scratchDirectory,
     githubConfigDirectory: ".squiz/104/rounds/1/gh",
     depth: "read",
+    test: null,
     thinking: "medium",
     roundSpace: undefined,
     terminal: "none",

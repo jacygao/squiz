@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.91 (draft)
+**Version:** 0.92 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -764,9 +764,11 @@ Five things are handed to it:
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
 
 **A configured test command reaches the reviewer in the prompt, and only at depth
-`deep`.** The prompt is the only channel a project's own text arrives through:
-the charter ships with the harness, and the command line is flags and tool names.
-It is named there as the command `run_tests` runs. At `read` it is absent,
+`deep`.** The prompt is the only channel a project's own text reaches the model
+through: the charter ships with the harness, and the command line is flags and
+tool names. It is named there as the command `run_tests` runs. `run_tests` itself
+reads the command from `SQUIZ_ROUND`, as Adapters sets out, and no tool the
+reviewer is granted reads a variable. At `read` the command is in neither,
 because no tool runs it.
 
 **There is no file-selection or budgeting stage.** The reviewer decides what to
@@ -1217,6 +1219,26 @@ tool, so no adapter has a shell record its group. The test command `run_tests`
 starts is the one process that may lead a group of its own, as Confinement sets
 out.
 
+**The round hands the `deep` tools its own values in one variable**, because
+they run in a process the CLI started and the round cannot pass arguments to. At
+`deep` the round sets `SQUIZ_ROUND` on the reviewer's environment, on every
+backend, to a JSON object:
+
+```json
+{"snapshot":"/…/squiz-501/3f9c2e07b1d4a8c6-41/rounds/2/tree","scratch":"/…/.squiz/41/scratch","test":"npm test","endsAt":1791273600000}
+```
+
+| Field | Value |
+|---|---|
+| `snapshot` | The absolute path of the round's snapshot, where every `deep` tool runs |
+| `scratch` | The scratch space, which `TMPDIR` names for the test command |
+| `test` | The configured test command, or `null` where none is configured |
+| `endsAt` | The moment the round's time bound runs out, in milliseconds since the epoch |
+
+`run_tests` stops the test command before `endsAt`, and runs it with the
+reviewer's environment. A tool that finds the variable missing or unreadable
+answers with its error and runs nothing. At `read` the variable is not set.
+
 ### The `pi` adapter
 
 The adapter `reviewer` chooses by default. It builds this command line:
@@ -1251,10 +1273,13 @@ output. Detached, the round host adds `--print` and gives it `< /dev/null`. With
 stdin inherited, `pi` in print mode blocks forever and emits nothing: no output,
 no error, no exit. This holds whether or not any tool is enabled.
 
-`--extension` names the file that registers the three reporting calls. It ships
-with the adapter, and `pi` compiles it and the modules it imports when it loads
-it. The call refuses a report the harness could not compose a comment or a
-mutation from, and the refusal reaches the reviewer as that call's error.
+`--extension` names the file that registers the three reporting calls and the
+four `deep` tools. It ships with the adapter, and `pi` compiles it and the
+modules it imports when it loads it. It registers all seven at both depths, and
+`--tools` drops the `deep` tools at `read`. A reporting call refuses a report the
+harness could not compose a comment or a mutation from, and a `deep` tool that
+failed throws its error text. Either way the reviewer reads it as that call's
+error.
 
 `--no-extensions` turns off discovery, so the extension named on the command
 line is the only one loaded. An extension installed on the machine or sitting in

@@ -153,6 +153,31 @@ test("a child the command leaves behind, ignoring SIGTERM, is killed before the 
   });
 });
 
+test("a call cancelled before it starts runs nothing", async () => {
+  await inPlace(async (place) => {
+    const started = join(place.scratch, "started");
+    const run = await runTests({ ...place, command: `touch ${started}`, signal: AbortSignal.abort() });
+    assert.equal(run.outcome, "not run");
+    assert.ok(!existsSync(started), "a cancelled call started the command");
+  });
+});
+
+test("a call cancelled while the command runs stops everything it started, at once", async () => {
+  await inPlace(async (place) => {
+    const leftPid = join(place.scratch, "left");
+    const command = `sh -c 'trap "" TERM; printf "%s" "$$" > ${leftPid}; exec sleep 60' & wait`;
+    const cancel = new AbortController();
+    const started = Date.now();
+    const pending = runTests({ ...place, command, signal: cancel.signal });
+    await untilThere(leftPid);
+    cancel.abort();
+    const run = await pending;
+    assert.equal(run.outcome, "cancelled");
+    assert.ok(Date.now() - started < 15_000, "the run went on after it was cancelled");
+    assert.ok(!running(Number(readFileSync(leftPid, "utf8"))), "the command's child outlived the cancel");
+  });
+});
+
 test("a run the round ends from outside is reached through the round's record", async () => {
   await inPlace(async (place) => {
     const made = makeRoundSpace(place.scratch);
@@ -161,7 +186,7 @@ test("a run the round ends from outside is reached through the round's record", 
     const space = made.space;
     try {
       const leftPid = join(place.scratch, "left");
-      const running_ = runTests({
+      const pending = runTests({
         ...place,
         environment: {
           ...place.environment,
@@ -173,7 +198,7 @@ test("a run the round ends from outside is reached through the round's record", 
       await untilThere(leftPid);
       const stopped = await stopRecordedGroups(space, 1_500, deadlineIn(20_000));
       assert.equal(stopped.signalled.length, 1, `the round reached no group: ${JSON.stringify(stopped)}`);
-      const run = await running_;
+      const run = await pending;
       assert.equal(run.outcome, "signalled");
       assert.match(describeTestsRun(run).text, /says nothing about whether the tests pass/u);
       assert.ok(!running(Number(readFileSync(leftPid, "utf8"))), "the child outlived the round");

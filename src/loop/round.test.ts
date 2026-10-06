@@ -2649,6 +2649,26 @@ test("the reviewer runs in a snapshot of the head commit, at either depth, with 
   }
 });
 
+// The deep tools read the snapshot and scratch space out of SQUIZ_ROUND, so it
+// has to name where the round really put them.
+test("at deep the round hands the deep tools the snapshot and scratch space the reviewer was given", async () => {
+  const kept = await mkdtemp(join(tmpdir(), "squiz-round-variable-"));
+  try {
+    const seen = join(kept, "round.json");
+    const ran = await runInFixture({
+      config: { depth: "deep", test: "npm test" },
+      answers: POSTING,
+      reviewer: { command: "/bin/sh", args: ["-c", `printf '%s' "$SQUIZ_ROUND" > '${seen}'`], parse: reviews({}).parse },
+    });
+    const handed = JSON.parse(readFileSync(seen, "utf8")) as Record<string, unknown>;
+    assert.equal(handed["snapshot"], snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }));
+    assert.equal(handed["scratch"], ran.invocations[0]?.scratchDirectory);
+    assert.equal(handed["test"], "npm test");
+  } finally {
+    await rm(kept, { recursive: true, force: true });
+  }
+});
+
 /**
  * The coding agent goes on working while the reviewer reads, and nothing it does
  * in its own worktree is the reviewer's.

@@ -585,6 +585,7 @@ async function reviewOn(
         githubConfigDirectory: join(ownDirectory, "gh"),
         thinking: config.thinking,
         depth: config.depth,
+        test: config.test,
         roundSpace,
         // Whatever this says, each attempt asks the adapter for a line for every
         // place the reviewer may run.

@@ -1,12 +1,13 @@
 /**
  * The extension `pi` loads: the calls the reviewer reports each finding
- * through, registered through `pi`'s API, the handler that refuses the calls
- * which would change what the coding agent commits, and the end of the review.
+ * through and the `deep` tools, registered through `pi`'s API, the handler that
+ * refuses the calls which would change what the coding agent commits, and the
+ * end of the review.
  *
  * Nothing in the harness imports this. `pi` loads it from the path on the
  * command line, compiles it and the modules it imports, and runs the default
  * export once with its own API. So the types here describe as much of that API
- * as the three calls and the handlers use, structurally: the package is
+ * as the tools and the handlers use, structurally: the package is
  * not a dependency of this one and nothing here may make it one.
  *
  * Every accepted report, every refusal, every assistant message's usage and the
@@ -25,6 +26,7 @@
  * with one.
  */
 
+import { deepTools } from "../deep-tools.ts";
 import { reportCalls } from "../report-calls.ts";
 import { reportFileAt, REPORTS_VARIABLE, type UsageLine } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
@@ -118,9 +120,49 @@ const shownInPi: Readonly<
   },
 };
 
-/** The extension as `pi` loads it, reporting to the file the adapter named. */
+/** How `pi` lists each `deep` tool. */
+const deepLabels: Readonly<Record<string, string>> = {
+  run_tests: "Run tests",
+  git_log_search: "Search history",
+  git_blame: "Blame line",
+  git_show: "Show commit",
+};
+
+/**
+ * The extension as `pi` loads it, reporting to the file the adapter named and
+ * serving the `deep` tools in the round the round named.
+ *
+ * Both are registered at every depth. `--tools` drops whatever the depth does
+ * not grant.
+ */
 export default function reportAsYouGo(pi: Registrar): void {
   reportInto(pi, process.env[REPORTS_VARIABLE]);
+  serveDeepTools(pi, process.env);
+}
+
+/**
+ * Register the `deep` tools, run with `environment` as the reviewer's own.
+ *
+ * `pi`'s process environment is the reviewer's: the round's variables over its
+ * host's, with no GitHub credential. `pi` adds only markers of its own to it.
+ */
+export function serveDeepTools(pi: Registrar, environment: Readonly<Record<string, string | undefined>>): void {
+  for (const tool of deepTools(environment)) {
+    const label = deepLabels[tool.name];
+    if (label === undefined) throw new Error(`${tool.name} has no label to show in pi`);
+    pi.registerTool({
+      name: tool.name,
+      label,
+      description: tool.description,
+      parameters: tool.parameters,
+      execute: async (_toolCallId, params, signal) => {
+        const { text, failed } = await tool.call(params, signal);
+        // `pi` reads a call's answer as an error only where `execute` throws.
+        if (failed) throw new Error(text);
+        return { content: [{ type: "text", text }] };
+      },
+    });
+  }
 }
 
 /**
