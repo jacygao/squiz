@@ -23,6 +23,7 @@ import { defaultConfig, type Config } from "../config/config.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import { endsOnFor, failureLinesOf } from "../host/host.ts";
+import { takeHostLock, type HostLock } from "../host/lock.ts";
 import {
   unspent,
   type Adapter,
@@ -115,6 +116,11 @@ type Setup = {
    * writes that fail, and the ones before that call have already landed.
    */
   readonly lockStateAfter?: Kind;
+  /**
+   * Whether the host lock is taken before the round starts and handed to it, as
+   * the round host does, so the round takes no lock of its own.
+   */
+  readonly heldByHost?: boolean;
   /** A state file written as it stands, for a file the round cannot read. */
   readonly stateSource?: string;
   /** What the episode's lock holds before the round starts, where it is there. */
@@ -549,6 +555,12 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       grants: { read: ["read"], deep: ["read", "bash"] },
     };
 
+    let held: HostLock | undefined;
+    if (setup.heldByHost === true) {
+      mkdirSync(episode.directory, { recursive: true });
+      const taking = takeHostLock(episode.directory, { boundMs: 5_000 });
+      held = taking.outcome === "taken" ? taking.lock : assert.fail("the fixture's host lock must be taken");
+    }
     const conclusions: RoundConclusion[] = [];
     const started = Date.now();
     const config = { ...defaultConfig, timeout: 5, ...setup.config };
@@ -564,6 +576,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       ...(setup.preReviewMs === undefined ? {} : { preReviewMs: setup.preReviewMs }),
       ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
       ...(setup.clock === undefined ? {} : { now: setup.clock.now }),
+      ...(held === undefined ? {} : { held: { pullRequest: PULL_REQUEST, lock: held } }),
     };
     if (setup.overlapping !== undefined) {
       const together = Array.from({ length: setup.overlapping }, () => runRound(roundSetup));
@@ -2364,6 +2377,42 @@ test("a close that could not record itself posts no summary, and the next firing
 
   assert.ok(again.conclusion.outcome === "close");
   assert.equal(again.conclusion.because, "round-cap");
+  assert.deepEqual(again.invocations, [], "a round the cap has spent runs no reviewer");
+  assert.equal(again.state?.closeReported, true);
+});
+
+/**
+ * A close taken before a reviewer starts, whose record could not be written,
+ * posts nothing after it, and the next firing closes the episode again (#495).
+ *
+ * The episode's directory stops taking writes once the pull request is looked
+ * up, which is before the close is recorded. The host lock is already held, as
+ * the round host holds it, so the round has no lock of its own to take there.
+ */
+test("a cap already spent whose close could not be recorded posts nothing, and the next firing closes it (#495)", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 1 },
+    rounds: [ANSWER_COST],
+    answers: POSTING,
+    lockStateAfter: "prlist",
+    heldByHost: true,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.recorded.outcome, "failed", "a close nothing recorded is reported as such");
+  assert.deepEqual(ran.kinds, ["prlist"], "nothing is posted after a close that was not recorded");
+  assert.notEqual(ran.state?.closeReported, true);
+
+  const again = await runInFixture({
+    config: { rounds: 1 },
+    rounds: ran.state?.rounds ?? [],
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(again.conclusion.outcome === "close");
+  assert.equal(again.conclusion.recorded.outcome, "written");
   assert.deepEqual(again.invocations, [], "a round the cap has spent runs no reviewer");
   assert.equal(again.state?.closeReported, true);
 });

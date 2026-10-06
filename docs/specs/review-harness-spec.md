@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.80 (draft)
+**Version:** 0.81 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -320,7 +320,9 @@ as § 6 shows.
 under `state.lock`, decides from it as the table above sets out, and writes the
 close in that same update, before it posts the summary. A trigger that comes
 after the close finds it and queues nothing, so no state queued while the
-summary is posted is stopped by a close it arrived before.
+summary is posted is stopped by a close it arrived before. A round that finds
+the round cap or the token bound already spent, and closes the episode without
+starting a reviewer (§ 5), also writes the close before it posts the summary.
 
 **A state left not reviewed is named by its short head commit, and by its
 replies where an earlier state has the same commit.** The earlier states are the
@@ -387,9 +389,9 @@ flowchart TD
     Q --> H[Round host starts a<br/>reviewer session]
     H --> F[Findings posted as threads<br/>on the pull request]
     F --> G{Threads open?}
-    G -->|no| I[Post summary comment,<br/>record the close]
+    G -->|no| I[Record the close,<br/>post summary comment]
     G -->|yes, rounds remain| M[Record the open threads]
-    G -->|yes, cap reached| J[Post summary comment,<br/>record the close]
+    G -->|yes, cap reached| J[Record the close,<br/>post summary comment]
     I --> N[Note and wake for the<br/>session that owns the work]
     M --> N
     J --> N
@@ -1716,9 +1718,10 @@ The comment is never edited or replaced. A second episode on the same pull
 request posts a second comment, and the comments accumulate as a history of the
 review passes.
 
-**An episode reports its close once.** The round that closes it posts the
-comment, and then writes the close to the episode's state. Every path that ends an
-episode writes it, the paths that end one with no comment included.
+**An episode reports its close once.** The round that closes it writes the
+close to the episode's state, and then posts the comment, as The state file under
+§ 3 sets out. Every path that ends an episode writes the close, the paths that end
+one with no comment included.
 
 A round that leaves threads open for the coding agent posts no summary and records
 no close, because the comment is the close of the episode rather than the end of a
