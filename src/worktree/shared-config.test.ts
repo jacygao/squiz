@@ -67,9 +67,9 @@ async function around(
   repository: Repository,
   between: () => Promise<void> | void,
 ): Promise<SharedConfigComparison> {
-  const before = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(60_000));
+  const before = readSharedConfig(repository.worktree, deadlineIn(60_000));
   await between();
-  const after = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(60_000));
+  const after = readSharedConfig(repository.worktree, deadlineIn(60_000));
   return compareSharedConfig(before, after);
 }
 
@@ -89,18 +89,44 @@ test("a key the test command set from the snapshot is named, with the file it is
 });
 
 // A round makes its snapshot in the temporary directory, outside the repository,
-// and the snapshot still shares the repository's git directory from there.
+// and a write made from there lands in the git directory the coding agent reads.
 test("a key set from a snapshot outside the repository is named in the repository's config", async () => {
   await withSnapshot(async (repository) => {
     const outside = realpathSync(await mkdtemp(join(tmpdir(), "squiz-outside-")));
     try {
       const snapshot = join(outside, "rounds", "1", "tree");
       git(repository.worktree, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "--detach", snapshot, "HEAD");
-      assert.equal(git(snapshot, "rev-parse", "--path-format=absolute", "--git-common-dir"), repository.common);
+      assert.equal(
+        git(repository.worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+        repository.common,
+      );
 
-      const before = readSharedConfig(snapshot, repository.worktree, deadlineIn(60_000));
+      const before = readSharedConfig(repository.worktree, deadlineIn(60_000));
       git(snapshot, "config", "core.hooksPath", ".husky/_");
-      const after = readSharedConfig(snapshot, repository.worktree, deadlineIn(60_000));
+      const after = readSharedConfig(repository.worktree, deadlineIn(60_000));
+
+      assert.deepEqual(compareSharedConfig(before, after), {
+        outcome: "changed",
+        changes: [{ file: "config", key: "core.hookspath" }],
+      });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+// A snapshot that is a clone has a git directory of its own, and the files that
+// matter are still the ones the coding agent's worktree reads.
+test("the shared files read are the coding agent's, even where the snapshot is a clone", async () => {
+  await withSnapshot(async (repository) => {
+    const outside = realpathSync(await mkdtemp(join(tmpdir(), "squiz-clone-")));
+    try {
+      const snapshot = join(outside, "tree");
+      git(outside, "clone", "--quiet", "--shared", repository.worktree, snapshot);
+
+      const before = readSharedConfig(repository.worktree, deadlineIn(60_000));
+      git(repository.worktree, "config", "core.hooksPath", ".husky/_");
+      const after = readSharedConfig(repository.worktree, deadlineIn(60_000));
 
       assert.deepEqual(compareSharedConfig(before, after), {
         outcome: "changed",
@@ -189,9 +215,9 @@ test("a key set in the coding agent's linked worktree config is named", async ()
     git(agent, "worktree", "add", "--quiet", "--detach", snapshot, "HEAD");
     git(agent, "config", "extensions.worktreeConfig", "true");
 
-    const before = readSharedConfig(snapshot, agent, deadlineIn(60_000));
+    const before = readSharedConfig(agent, deadlineIn(60_000));
     git(agent, "config", "--worktree", "core.hooksPath", ".husky/_");
-    const after = readSharedConfig(snapshot, agent, deadlineIn(60_000));
+    const after = readSharedConfig(agent, deadlineIn(60_000));
 
     assert.deepEqual(compareSharedConfig(before, after), {
       outcome: "changed",
@@ -204,9 +230,9 @@ test("a key set in the coding agent's linked worktree config is named", async ()
 // was there and is not is named, rather than the reading failing.
 test("a config that appeared or went away is named rather than a reading that failed", async () => {
   await withSnapshot(async (repository) => {
-    const before = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(60_000));
+    const before = readSharedConfig(repository.worktree, deadlineIn(60_000));
     await writeFile(join(repository.common, "config.worktree"), "[squiz]\n\tadded = yes\n", "utf8");
-    const after = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(60_000));
+    const after = readSharedConfig(repository.worktree, deadlineIn(60_000));
 
     assert.deepEqual(compareSharedConfig(before, after), {
       outcome: "changed",
@@ -222,10 +248,10 @@ test("a config that appeared or went away is named rather than a reading that fa
 test("a shared file that cannot be read is a reading that failed, not a config nobody changed", async () => {
   await withSnapshot(async (repository) => {
     const exclude = join(repository.common, "info", "exclude");
-    const before = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(60_000));
+    const before = readSharedConfig(repository.worktree, deadlineIn(60_000));
     chmodSync(exclude, 0o000);
     try {
-      const after = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(60_000));
+      const after = readSharedConfig(repository.worktree, deadlineIn(60_000));
       const comparison = compareSharedConfig(before, after);
       assert.equal(comparison.outcome, "unknown");
       assert.match(
@@ -242,7 +268,7 @@ test("a directory that is no repository is a reading that failed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "squiz-shared-none-"));
   try {
     await mkdir(join(directory, "tree"));
-    const reading = readSharedConfig(join(directory, "tree"), directory, deadlineIn(60_000));
+    const reading = readSharedConfig(directory, deadlineIn(60_000));
     assert.equal(reading.outcome, "failed");
     assert.equal(
       compareSharedConfig(reading, reading).outcome,
@@ -256,7 +282,7 @@ test("a directory that is no repository is a reading that failed", async () => {
 
 test("a reading with no time left is one that failed", async () => {
   await withSnapshot((repository) => {
-    const reading = readSharedConfig(repository.snapshot, repository.worktree, deadlineIn(0));
+    const reading = readSharedConfig(repository.worktree, deadlineIn(0));
     assert.deepEqual(reading, { outcome: "failed", reason: "the reading ran out of the time it was given" });
   });
 });
@@ -340,11 +366,11 @@ function passingAfter(after: number): Deadline & { readonly looks: () => number 
 test("a deadline that passes inside a large shared file fails the reading", async () => {
   await withSnapshot(async (repository) => {
     const counting = passingAfter(Number.MAX_SAFE_INTEGER);
-    assert.equal(readSharedConfig(repository.snapshot, repository.worktree, counting).outcome, "read");
+    assert.equal(readSharedConfig(repository.worktree, counting).outcome, "read");
     const without = counting.looks();
 
     await writeFile(join(repository.common, "hooks", "zzz-bundle"), Buffer.alloc(4 * 1024 * 1024, 1));
-    const reading = readSharedConfig(repository.snapshot, repository.worktree, passingAfter(without + 2));
+    const reading = readSharedConfig(repository.worktree, passingAfter(without + 2));
     assert.deepEqual(reading, { outcome: "failed", reason: "the reading ran out of the time it was given" });
   });
 });

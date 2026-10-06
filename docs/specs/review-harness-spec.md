@@ -1146,7 +1146,9 @@ specification needs either, and their removal is #557.
 coding agent's worktree.** A test command can write them from the snapshot, and
 the coding agent's next commit reads what it wrote: `husky`, run as a `prepare`
 script, sets `core.hooksPath` in the repository's config, and the coding agent's
-own hooks are then skipped. The files are:
+own hooks are then skipped. The files are found from the coding agent's
+worktree, never from the snapshot, so a snapshot with a git directory of its own
+does not change which are read. They are:
 
 - the repository's local `config`;
 - the main worktree's `config.worktree`;

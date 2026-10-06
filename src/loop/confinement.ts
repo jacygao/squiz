@@ -262,8 +262,8 @@ type SharedBefore = {
  *
  * `until` is the moment the reading has to be inside, which is the end of the
  * part of the round before the review. `worktree` is the coding agent's worktree,
- * given at `deep` alone, and the git files the snapshot shares with it are read
- * too where it is.
+ * given at `deep` alone, and the shared git files it reads are read too where it
+ * is.
  *
  * Never throws. A reading that failed is carried rather than raised, and does
  * not stop the round.
@@ -282,7 +282,7 @@ export function readBeforeReviewer(
   }
   const reading = readTrackedFiles(tree, phase);
   if (worktree === undefined) return { tree, reading };
-  return { tree, reading, shared: { worktree, reading: readSharedConfig(tree, worktree, phase) } };
+  return { tree, reading, shared: { worktree, reading: readSharedConfig(worktree, phase) } };
 }
 
 /**
@@ -299,10 +299,10 @@ export function readAfterReviewer(before: BeforeTheReviewer, until: Deadline): R
   const phase = phaseInside(until);
   const trackedFiles = compared(before, phase);
   if (before.shared === undefined) return { trackedFiles };
-  return { trackedFiles, sharedConfig: sharedCompared(before.tree, before.shared, phase) };
+  return { trackedFiles, sharedConfig: sharedCompared(before.shared, phase) };
 }
 
-function sharedCompared(tree: string, shared: SharedBefore, phase: Deadline | null): SharedConfigAnswer {
+function sharedCompared(shared: SharedBefore, phase: Deadline | null): SharedConfigAnswer {
   const { worktree, reading } = shared;
   if (reading.outcome === "not-taken") return reading;
   if (phase === null) {
@@ -311,7 +311,7 @@ function sharedCompared(tree: string, shared: SharedBefore, phase: Deadline | nu
       reason: "the round had too little of its window left to read the shared git files a second time",
     };
   }
-  const after = reading.outcome === "failed" ? reading : readSharedConfig(tree, worktree, phase);
+  const after = reading.outcome === "failed" ? reading : readSharedConfig(worktree, phase);
   return compareSharedConfig(reading, after);
 }
 

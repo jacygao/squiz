@@ -1,13 +1,15 @@
 /**
- * A reading of the git files the snapshot shares with every other worktree of the
- * repository, and what two readings disagree about.
+ * A reading of the git files the coding agent's worktree reads from the
+ * repository's shared git directory, and what two readings disagree about.
  *
- * A snapshot added by `git worktree add` has a git directory of its own and shares
- * the repository's config, hooks and exclude file with the coding agent's
- * worktree. A test command run in the snapshot can write those, and a `prepare`
- * script that sets `core.hooksPath` does. Nothing in the snapshot changes, so the
- * tracked-file comparison cannot see it, and the coding agent's next commit reads
- * the result.
+ * A snapshot added by `git worktree add` shares the repository's config, hooks and
+ * exclude file with the coding agent's worktree. A test command run in the
+ * snapshot can write those, and a `prepare` script that sets `core.hooksPath`
+ * does. Nothing in the snapshot changes, so the tracked-file comparison cannot see
+ * it, and the coding agent's next commit reads the result.
+ *
+ * The files are found from the coding agent's worktree and never from the
+ * snapshot, so a snapshot with a git directory of its own still has them read.
  *
  * Contents are compared, never modification times. Nothing here writes to what
  * it reads.
@@ -65,8 +67,7 @@ export type SharedConfigComparison =
   | { readonly outcome: "unknown"; readonly reason: string };
 
 /**
- * Read the files the snapshot at `snapshot` shares with `worktree`, the coding
- * agent's worktree:
+ * Read the shared git files that `worktree`, the coding agent's worktree, reads:
  *
  * - `config`, the repository's local config;
  * - `config.worktree`, the main worktree's own config;
@@ -82,12 +83,8 @@ export type SharedConfigComparison =
  * that nothing stands there, and a deadline that passes all come back as
  * `failed`.
  */
-export function readSharedConfig(
-  snapshot: string,
-  worktree: string,
-  until?: Deadline,
-): SharedConfigReading {
-  const common = gitPath(snapshot, "--git-common-dir", until);
+export function readSharedConfig(worktree: string, until?: Deadline): SharedConfigReading {
+  const common = gitPath(worktree, "--git-common-dir", until);
   if (!common.found) return { outcome: "failed", reason: common.reason };
   const agent = gitPath(worktree, "--git-dir", until);
   if (!agent.found) return { outcome: "failed", reason: agent.reason };
