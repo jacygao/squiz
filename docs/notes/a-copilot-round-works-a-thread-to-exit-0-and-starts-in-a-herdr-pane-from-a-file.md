@@ -6,7 +6,7 @@ versions: { claude-code: 2.1.290, coding-agent: claude-opus-5-5, copilot: 1.0.92
 recheck-when: Copilot changes `--agent`, `--usage-output-file` or its usage file, the Herdr start changes how it hands a pane its line, or the charter or the Copilot adapter's command line changes
 ---
 
-# A Copilot round works a thread to exit 0 detached, and never starts in a Herdr pane
+# A Copilot round works a thread to exit 0, and starts in a Herdr pane once its line runs from a file
 
 Copilot reviewed a real pull request as § 4 sets out, once it ran detached. Test
 pull request #515 carried a planted off-by-one, a `pageCount` using
@@ -15,9 +15,9 @@ thread on it, and the command exited 2. The fix was pushed with tests, a reply
 was posted with `squiz reply`, and round 2 ruled the thread `fixed`. The command
 exited 0. The first attempt at round 1 ran in the owner's Herdr workspace and
 never started: the round typed a 1.7 KB line into a fresh pane, and macOS cut it
-at 1024 bytes. That is #516. Nothing ran and no quota was spent. With #516
-fixed, a later round on #518 started in a Herdr pane, and the pane closed when
-the review ended.
+at 1024 bytes. That is #516. Nothing ran and no quota was spent. Once a long
+line ran from a file instead, a round on #518 started in a Herdr pane, and the
+pane closed when the review ended.
 
 ## Intent
 
