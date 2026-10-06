@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.84 (draft)
+**Version:** 0.85 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -819,8 +819,8 @@ process in a session of its own.
 the group of each shell it started. A process one of those shells moved into a
 session of its own is reached by nothing: not the pane close, not `pi`, and not
 the recorded groups, which name the shells' groups and not that session. It runs
-on after the round. Nothing in this version detects it. Only `deep` grants a
-shell, so only a round at `deep` can leave one.
+on after the round. Nothing in this version detects it. No depth grants a
+shell, so only a process the `deep` test command starts can leave one.
 
 ### The snapshot
 
@@ -884,15 +884,23 @@ Copilot adapter gives.
 | Depth | Tools granted | What it can answer |
 |---|---|---|
 | `read` *(default)* | `read`, `grep`, `find`, `ls` | Anything the code can be read for. |
-| `deep` | the above, plus `bash` | Also whether the tests actually pass, whether a line was deliberate (`git log -S`, `git blame`), and whether a hypothesis holds when run. |
+| `deep` | the above, plus `run_tests`, `git_log_search`, `git_blame` and `git_show`. No shell | Also whether the tests actually pass, and whether a line was deliberate (`git log -S`, `git blame`, `git show`). |
 
 **The calls the reviewer reports through are granted at both depths**, alongside
 the tools in the table. Depth decides how much the reviewer may read and run.
 Reporting is not a depth: a reviewer with no way to report returns nothing
 whatever it was allowed to look at. The three calls are named under Findings.
 
-`deep` depends on the tracked-file comparison described under Confinement, which
-is the only mechanism that catches a write made through the shell.
+**Each `deep` tool runs one command, and no argument reaches a shell.**
+`run_tests` takes no argument and runs the test command the configuration names.
+`git_log_search` takes a term, `git_blame` a file and a line, and `git_show` a
+commit, and each runs that one `git` subcommand with its arguments as separate
+words. The reviewer's environment carries no GitHub token or `gh` credential.
+
+The test command runs the project's code at the commit under review, with the
+user's access, as the coding agent's own test runs do. Nothing confines it, and
+the tracked-file comparison described under Confinement is what catches a write
+it makes to the snapshot.
 
 ### Confinement
 
@@ -1205,7 +1213,7 @@ whether the run stopped or hung. The reports that were read stand either way.
 project's conventions reach the reviewer without the charter carrying them.
 
 `--tools` sets the grant, and it filters the extension's calls the same way it
-filters the built-in tools. The list above is `read`; `deep` adds `bash`. A name
+filters the built-in tools. The list above is `read`; `deep` adds the tools § 4 Depth names. A name
 the grant does not carry is dropped with exit status 0 and an empty stderr, so a
 grant short of a reporting call leaves the reviewer no way to report and says
 nothing about it.
@@ -1489,8 +1497,8 @@ The standing rules:
   that assert nothing.
 - Do not report formatting, naming, import order, anything the compiler catches,
   or speculation. "Consider whether" means there is no finding.
-- Verify before reporting. Read the file, grep the callers, and run the test
-  where the depth grants a shell. A finding that could have been checked with
+- Verify before reporting. Read the file, grep the callers, and run the tests
+  where the depth grants `run_tests`. A finding that could have been checked with
   the tools you were given and was not is not reportable.
 - Read what the project treats as authoritative. `AGENTS.md` names it, and it is
   the authority on intended behaviour. It extends what counts as a finding; it
@@ -2492,7 +2500,7 @@ until something asks.
 | **P0** | The failure comment | What failed and what else the round established, posted by a round that fails, with the same reason the command prints |
 | **P0** | The command's stderr | The one line that carries a failure GitHub could not be told about. Without it a round that cannot reach GitHub says nothing about why |
 | **P0** | The episode state file | Round count, per-round cost, what the episode spent on attempts that were no round, whether its close has been reported, keyed by the pull request's number and living in the worktree |
-| **P1** | Depth `deep` | The `bash` grant. It ships with the tracked-file comparison, and with the record each shell writes of the group it leads, or not at all |
+| **P1** | Depth `deep` | Running the configured tests and reading history (`git log -S`, `git blame`, `git show`) through tools that take fixed arguments, with no shell granted and no GitHub credential in the reviewer's environment. It ships with the tracked-file comparison, or not at all |
 | **P1** | The tracked-file comparison | `git status`, the hashes of tracked files, and `HEAD`, taken before the reviewer starts and again when it exits. What `deep` depends on |
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
@@ -2503,6 +2511,7 @@ until something asks.
 | **P1** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
 | **P2** | A GitHub App identity | The harness posts as its own bot rather than as the account that authenticated `gh`. Configured by the host project, which installs the App and holds its key |
+| **P2** | An operating-system sandbox | The reviewer, and every process it starts, inside a boundary the operating system enforces: writes only to its round, network only to the model and the package registries, none of the user's credentials (#529) |
 | **P2** | Tracking findings scoped to the change as a whole | Today they are reported in the summary comment and carried no further |
 | **P2** | A record other than a pull request | The pull request is one implementation behind an interface, and the identity a comment is posted under is the one whatever holds the record supplies |
 | **P2** | A person in the review cycle | What the loop does with a thread a person opened, beyond leaving it alone |
@@ -2619,7 +2628,7 @@ its own branch. Squiz does not create them, and does not remove them.
 |---|---|---|
 | `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
 | `rounds` | 3 | The round cap, settable 1 to 8 |
-| `depth` | `read` | `deep` adds the shell, and requires the tracked-file comparison |
+| `depth` | `read` | `deep` adds running the configured tests and reading history, with no shell, and requires the tracked-file comparison |
 | `test` | none | The non-mutating command that runs the tests |
 | `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
