@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.90 (draft)
+**Version:** 0.91 (draft)
 **Status:** For review
 **Owner:** TBD
 
