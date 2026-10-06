@@ -117,6 +117,17 @@ test("a path that is not a string is refused rather than guessed at", (t) => {
   }
 });
 
+test("a file URL that names no path is refused rather than thrown", (t) => {
+  const { snapshot } = fixture(t);
+  for (const path of ["file:///tmp/%", "file:///tmp/a%2Fb"]) {
+    let refused;
+    assert.doesNotThrow(() => {
+      refused = refuseRead(call("read", { path }), snapshot);
+    }, `${path} threw`);
+    assert.equal((refused as { block?: boolean } | undefined)?.block, true, `${path} was let through`);
+  }
+});
+
 test("every read is refused where the snapshot itself cannot be resolved", (t) => {
   const { snapshot } = fixture(t);
   const gone = join(snapshot, "nowhere");

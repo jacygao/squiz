@@ -50,7 +50,13 @@ export function refuseRead(call: ToolCall, snapshot: string): Refusal | undefine
     return refusal(`the snapshot ${snapshot} could not be resolved, so no path could be checked against it.`);
   }
 
-  const resolved = resolvedAs(path, snapshot);
+  let resolved: string;
+  try {
+    resolved = resolvedAs(path, snapshot);
+  } catch {
+    // A `file://` URL that names no path, which `pi` cannot open either.
+    return refusal(`\`${path}\` could not be read as a path, so nothing here could check it.`);
+  }
   const opened = call.toolName === "read" ? spellingReadOpens(resolved) : resolved;
   const real = realOf(opened);
   if (real === undefined || !(real === root || real.startsWith(root + sep))) {
