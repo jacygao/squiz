@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.30 (draft)
+**Version:** 0.31 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -21,7 +21,7 @@ something that can be run or seen, never in a module written.
 | 8 | M7 — The reviewer as a detached session | Done |
 | 9 | M10 — The subagent-era workarounds removed | Done |
 | 10 | M12 — Copilot as the reviewer | Done |
-| 11 | M13 — Copilot as a coding agent | |
+| 11 | M13 — Copilot as a coding agent | Done |
 | 12 | M11 — Depth `deep` | |
 | 13 | M8 — Episode boundaries | |
 | 14 | M9 — Install and dogfood | |
@@ -42,7 +42,7 @@ a second tool needs it.
 **The first version leaves three things out:** delivering a note when a session
 starts, rules for acknowledging a note and retrying one, and messages in both
 directions. GitHub Copilot is the one coding agent besides Claude Code that the
-first version supports, in M13.
+first version supports, experimentally, in M13.
 
 M9 is the last of them. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
@@ -185,36 +185,25 @@ with M11.
 
 ## M13 — Copilot as a coding agent
 
-A GitHub Copilot CLI session works its pull request's review the way a Claude
-Code session does: it runs `squiz review`, works the threads, and stops on 0 or 3.
-The owner works with Copilot as well as Claude Code, so this comes before M11.
+**Done.** Its criteria are in #533.
 
-### Spike
+Let a GitHub Copilot CLI session work its pull request's review the way a Claude
+Code session does. Copilot loads the plugin with `--plugin-dir`, and with it the
+review skill and the `Stop` and `SubagentStop` hooks. Copilot leaves the
+plugin's `bin/` off the shell's `PATH`, so `squiz init` links `squiz` onto it.
+The hooks take the pull request from the payload's `cwd`, and the owner from the
+payload, never from an inherited Claude Code socket. An extension the plugin
+ships, `extensions/squiz-wake/`, listens on a socket in each session's state
+directory and turns the round host's post into a turn, so an idle session is
+woken as Claude Code's is. A live run on `gpt-6-astra`, given a task that never
+named squiz, opened a pull request, ran `squiz review` and worked a finding to
+exit 0.
 
-Run before anything here is built. Its findings go in `docs/notes/`, and decide
-how much of the rest M13 builds:
-
-- **The plugin.** Whether `copilot --plugin-dir` loads squiz's plugin directory
-  as it is: its skill, and `bin/` on the shell's `PATH`.
-- **The instruction.** Whether Copilot follows the skill, or the `AGENTS.md`
-  section `squiz init` writes, to run `squiz review` once it opens a pull request,
-  with nothing in its prompt naming squiz.
-- **The hooks.** Whether Copilot's `agentStop` and `subagentStop` hooks fire,
-  what their payload names, and whether anything can wake an idle Copilot session
-  from outside (#499).
-
-### Acceptance criteria
-
-- [ ] The spike's findings, in `docs/notes/`.
-- [ ] A Copilot session reaches `squiz` and the instruction to run it, by the
-      plugin or by `AGENTS.md`, as the spike settles. The harness specification
-      says how, and § 9 says how a project sets it up.
-- [ ] A live run: a Copilot session, given a task and no mention of squiz, opens
-      a pull request, runs `squiz review`, and works a finding to exit 0 or 3.
-- [ ] Where the spike shows Copilot's stop hooks fire, they queue a state as
-      Claude Code's do. Where they do not, or nothing can wake an idle session,
-      the specification states it as a gap, and the coding agent runs the command
-      itself.
+**Its Copilot support ships experimental.** Copilot has no stable way to wake an
+idle session, and loads the extension only with its experimental features on,
+so setting up Copilot includes turning them on. A Copilot session without them
+is unsupported: its reviews still run, and it learns the result only from a
+`squiz review` it runs itself.
 
 ## M11 — Depth `deep`
 
