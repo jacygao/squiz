@@ -135,9 +135,13 @@ async function host(arranged: Arrangement): Promise<Hosted> {
   const worktree = join(root, "tree");
   const binaries = join(root, "bin");
   const previous = process.env["PATH"];
+  const previousTemporary = process.env["TMPDIR"];
   try {
     await mkdir(worktree);
     await mkdir(binaries);
+    // Snapshots go in the temporary directory, and one a host leaves goes with the fixture.
+    await mkdir(join(root, "temporary"));
+    process.env["TMPDIR"] = join(root, "temporary");
     git(worktree, ["init", "--quiet", "--initial-branch", BRANCH]);
     git(worktree, ["config", "user.email", "squiz@example.invalid"]);
     git(worktree, ["config", "user.name", "Squiz"]);
@@ -245,6 +249,8 @@ async function host(arranged: Arrangement): Promise<Hosted> {
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
+    if (previousTemporary === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = previousTemporary;
     await rm(root, { recursive: true, force: true });
   }
 }
@@ -494,7 +500,8 @@ test("the reviewing record names the reviewer's session as soon as the reviewer 
   assert.equal(reviewer.pane, undefined);
   assert.equal(reviewer.process.pid, Number(readFileSync(join(seen, "pid"), "utf8").trim()));
   assert.ok(reviewer.boundEndsAt >= before + 5, `the bound ends at ${reviewer.boundEndsAt}, under five seconds from ${before}`);
-  assert.match(reviewer.snapshot, /\.squiz\/142\/rounds\/1\/tree$/u);
+  assert.match(reviewer.snapshot, /\/squiz-\d+\/[0-9a-f]{16}-142\/rounds\/1\/tree$/u);
+  assert.ok(reviewer.snapshot.startsWith(tmpdir()), `${reviewer.snapshot} is not in the temporary directory`);
 });
 
 test("a round writes the command that resumes its reviewer's session to its resume.txt", async () => {

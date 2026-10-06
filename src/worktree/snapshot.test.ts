@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join, sep } from "node:path";
 import { test } from "node:test";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { addSnapshot, removeSnapshot, type SnapshotAddition } from "./snapshot.ts";
+import { addSnapshot, removeSnapshot, type SnapshotAddition, snapshotPath } from "./snapshot.ts";
 
 /** Run git in `directory` and return its stdout, failing the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): string {
@@ -36,13 +36,33 @@ function commit(directory: string, message: string): string {
   return git(directory, "rev-parse", "HEAD").trim();
 }
 
+/**
+ * Run `body` in a directory of its own, with `TMPDIR` pointing inside it, so the
+ * snapshots it makes land there and go with it.
+ */
 async function withTemporaryDirectory<T>(body: (directory: string) => Promise<T> | T): Promise<T> {
   const directory = realpathSync(await mkdtemp(join(tmpdir(), "squiz-snapshot-")));
+  const temporary = join(directory, "temporary");
+  await mkdir(temporary);
+  const previous = process.env["TMPDIR"];
+  process.env["TMPDIR"] = temporary;
   try {
     return await body(directory);
   } finally {
+    if (previous === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = previous;
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+/** Where this user's snapshots go, under the temporary directory `withTemporaryDirectory` sets. */
+function snapshotsOf(root: string): string {
+  return join(root, "temporary", `squiz-${userInfo().uid}`);
+}
+
+/** Where the round-two snapshot of `worktree` goes. */
+function roundTwoPath(worktree: string): string {
+  return snapshotPath(worktree, roundTwo);
 }
 
 /**
@@ -85,19 +105,78 @@ function reasonOf(result: { readonly outcome: string; readonly reason?: string }
 
 const roundTwo = { pullRequest: 41, round: 2 } as const;
 
-test("a snapshot is a detached worktree at the commit, under the round's directory", async () => {
+test("a snapshot is a detached worktree at the commit, in the temporary directory", async () => {
   await withTemporaryDirectory(async (root) => {
     const { agent, head } = await repositoryWithLinkedWorktree(root);
 
     const path = addedPath(addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)));
 
-    assert.equal(path, join(agent, ".squiz", "41", "rounds", "2", "tree"));
+    assert.equal(path, roundTwoPath(agent));
+    assert.ok(path.startsWith(snapshotsOf(root) + sep), `${path} is not under ${snapshotsOf(root)}`);
+    assert.ok(path.endsWith(join("41", "rounds", "2", "tree")), `${path} does not name the round`);
     assert.equal(git(path, "rev-parse", "HEAD").trim(), head);
     assert.equal(
       spawnSync("git", ["symbolic-ref", "--quiet", "HEAD"], { cwd: path }).status,
       1,
       "the snapshot's HEAD is detached",
     );
+  });
+});
+
+// A suite that matches its own absolute paths against a glob, as mocha's
+// `--ignore` does, skips every file under a component that begins with a dot.
+test("no component of a snapshot's path begins with a dot, though the worktree's does", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, head } = await repositoryWithLinkedWorktree(root);
+    const agent = join(main, ".claude", "worktrees", "agent-1");
+    git(main, "worktree", "add", "--quiet", "--detach", agent, head);
+
+    const path = addedPath(addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)));
+
+    assert.deepEqual(
+      path.split(sep).filter((component) => component.startsWith(".")),
+      [],
+      `${path} has a component beginning with a dot`,
+    );
+  });
+});
+
+test("two worktrees' snapshots of the same round stand apart", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, agent, head } = await repositoryWithLinkedWorktree(root);
+    const other = join(root, "other");
+    git(main, "worktree", "add", "--quiet", "--detach", other, head);
+
+    const first = addedPath(addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)));
+    const second = addedPath(addSnapshot(other, { ...roundTwo, commit: head }, deadlineIn(30_000)));
+
+    assert.notEqual(first, second);
+  });
+});
+
+test("a snapshot directory that is a link is refused, and nothing is added through it", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, head } = await repositoryWithLinkedWorktree(root);
+    const elsewhere = join(root, "elsewhere");
+    await mkdir(elsewhere, { mode: 0o700 });
+    symlinkSync(elsewhere, snapshotsOf(root));
+
+    const addition = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000));
+
+    assert.equal(reasonOf(addition), `${snapshotsOf(root)} is not a directory of this user's alone`);
+    assert.equal(git(agent, "worktree", "list", "--porcelain").includes(elsewhere), false);
+  });
+});
+
+test("a snapshot directory others can write is refused", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, head } = await repositoryWithLinkedWorktree(root);
+    await mkdir(snapshotsOf(root));
+    chmodSync(snapshotsOf(root), 0o777);
+
+    const addition = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000));
+
+    assert.equal(reasonOf(addition), `${snapshotsOf(root)} is not a directory of this user's alone`);
   });
 });
 
@@ -165,7 +244,7 @@ test("a fetch that fails is a failure naming the commit, and nothing is added", 
     const addition = addSnapshot(agent, { ...roundTwo, commit: missing }, deadlineIn(30_000));
 
     assert.match(reasonOf(addition), new RegExp(`^${missing} could not be fetched: git exited \\d+`, "u"));
-    assert.equal(existsSync(join(agent, ".squiz", "41", "rounds", "2", "tree")), false);
+    assert.equal(existsSync(roundTwoPath(agent)), false);
   });
 });
 
@@ -179,7 +258,7 @@ test("a fetch that succeeds without bringing the commit is a failure, and nothin
     );
 
     assert.equal(reasonOf(addition), `the fetch finished without bringing ${missing}`);
-    assert.equal(existsSync(join(agent, ".squiz", "41", "rounds", "2", "tree")), false);
+    assert.equal(existsSync(roundTwoPath(agent)), false);
   });
 });
 
@@ -188,7 +267,7 @@ test("a snapshot already standing at the path is a failure naming it, and is lef
     const { agent, head } = await repositoryWithLinkedWorktree(root);
     // A killed round's leftover, which recovery removes, not this. An empty
     // directory is the case git itself would accept and add into.
-    const leftover = join(agent, ".squiz", "41", "rounds", "2", "tree");
+    const leftover = roundTwoPath(agent);
     await mkdir(leftover, { recursive: true });
 
     const addition = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000));
@@ -207,7 +286,7 @@ test("a deadline with nothing left starts nothing", async () => {
     const addition = addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(0));
 
     assert.match(reasonOf(addition), /ran out of the time it was given/u);
-    assert.equal(existsSync(join(agent, ".squiz", "41", "rounds", "2", "tree")), false);
+    assert.equal(existsSync(roundTwoPath(agent)), false);
   });
 });
 
@@ -221,7 +300,7 @@ test("a fetch that spends the deadline leaves the add unstarted", async () => {
     );
 
     assert.equal(reasonOf(addition), `${missing} could not be fetched: git ran out of the time it was given`);
-    assert.equal(existsSync(join(agent, ".squiz", "41", "rounds", "2", "tree")), false);
+    assert.equal(existsSync(roundTwoPath(agent)), false);
   });
 });
 
@@ -277,7 +356,7 @@ test("an add that fails after git made the snapshot names it for removal, apart 
     const first = await withFakeWorktreeAdd(root, () =>
       addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)),
     );
-    const path = join(agent, ".squiz", "41", "rounds", "2", "tree");
+    const path = roundTwoPath(agent);
     assert.equal(first.outcome, "failed");
     assert.equal(first.outcome === "failed" && first.leftBehind, path);
     assert.deepEqual(removeSnapshot(agent, path), { outcome: "removed" });
@@ -297,6 +376,23 @@ test("removal leaves git worktree list as it was before the add, from a linked w
 
     assert.equal(git(main, "worktree", "list", "--porcelain"), listBefore);
     assert.equal(existsSync(path), false);
+    const episode = dirname(dirname(dirname(path)));
+    assert.equal(existsSync(episode), false, "the directories the snapshot sat in go with it");
+  });
+});
+
+// The snapshot no longer goes with the coding agent's worktree, which whatever
+// made it may remove while a round runs.
+test("removal succeeds after the coding agent's worktree has gone", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, agent, head } = await repositoryWithLinkedWorktree(root);
+    const path = addedPath(addSnapshot(agent, { ...roundTwo, commit: head }, deadlineIn(30_000)));
+    await rm(agent, { recursive: true, force: true });
+
+    assert.deepEqual(removeSnapshot(agent, path), { outcome: "removed" });
+
+    assert.equal(existsSync(path), false);
+    assert.equal(git(main, "worktree", "list", "--porcelain").includes(path), false);
   });
 });
 
@@ -321,7 +417,7 @@ test("removal succeeds where the reviewer left changes, untracked files and buil
 test("a removal that fails says so", async () => {
   await withTemporaryDirectory(async (root) => {
     const { agent } = await repositoryWithLinkedWorktree(root);
-    const path = join(agent, ".squiz", "41", "rounds", "2", "tree");
+    const path = roundTwoPath(agent);
 
     const removal = removeSnapshot(agent, path);
 

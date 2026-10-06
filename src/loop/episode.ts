@@ -82,8 +82,8 @@ export function episodeAt(worktree: string, pullRequest: number): Episode {
 
 /**
  * `<worktree>/.squiz/<number>/rounds/<round>`, which holds what one round
- * wrote: its report file, the reviewer's session under `session/`, its
- * `resume.txt` and its snapshot.
+ * wrote: its report file, the reviewer's session under `session/` and its
+ * `resume.txt`.
  */
 export function roundDirectory(episode: Episode, round: number): string {
   return join(episode.directory, "rounds", String(round));

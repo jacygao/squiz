@@ -3,16 +3,23 @@
  * which only the reviewer reads and writes.
  *
  * The coding agent may be editing its own worktree while the round runs, so the
- * reviewer never reads that. The snapshot sits under the gitignored `.squiz/`
- * inside the agent's worktree and shares its object store, so it shows in
- * neither the agent's `git status` nor its commits.
+ * reviewer never reads that. The snapshot shares the agent's object store and
+ * sits outside its worktree, so it shows in neither the agent's `git status`
+ * nor its commits.
+ *
+ * It sits in the temporary directory, under no component that begins with a
+ * dot, wherever the worktree is. A suite that matches its own absolute paths
+ * against a glob, as mocha's `--ignore` does, skips every file under such a
+ * component, and would fail in the snapshot where it passes in a fresh checkout.
  *
  * Nothing here throws. Each failure comes back as a reason for the caller to
  * report.
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, rmdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
 import { runGit } from "./git.ts";
@@ -46,8 +53,8 @@ export type SnapshotOf = {
 const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 /**
- * Add the round's snapshot at `.squiz/<pull request>/rounds/<round>/tree` inside
- * `worktree`, the coding agent's worktree root.
+ * Add the round's snapshot of `worktree`, the coding agent's worktree root, at
+ * the path `snapshotPath` gives.
  *
  * Where the repository lacks the commit it is fetched from `origin` first, and
  * checked for again before anything is added: a snapshot of anything else is
@@ -57,6 +64,7 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * started. Fails where:
  *
  * - the commit is not a full object name;
+ * - the snapshots directory cannot be made, or is not this user's alone;
  * - anything already stands at the path, which is a killed round's snapshot
  *   for recovery to remove;
  * - the fetch fails, or finishes without bringing the commit;
@@ -70,7 +78,9 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
   if (!FULL_COMMIT_NAME.test(of.commit)) {
     return failed(`${JSON.stringify(of.commit)} is not a full commit name`);
   }
-  const path = join(worktree, ".squiz", String(of.pullRequest), "rounds", String(of.round), "tree");
+  const unowned = ownSnapshotsDirectory();
+  if (unowned !== null) return failed(unowned);
+  const path = snapshotPath(worktree, of);
   // Git adds into an empty directory that is already there, so its own refusal
   // is not enough to keep a leftover from being reused.
   if (existsSync(path)) return failed(`something already stands at ${path}`);
@@ -108,17 +118,83 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
 
 /**
  * Remove the snapshot at `path`, with whatever the reviewer left in it, and
- * prune its registration from the repository.
+ * prune its registration from the repository. The episode's directories above
+ * it go too, where nothing else is in them.
  *
  * Unbounded: it runs after the round has recorded its result, and takes as long
  * as the files in the snapshot take to delete.
  */
 export function removeSnapshot(worktree: string, path: string): SnapshotRemoval {
-  const removed = runGit(worktree, ["worktree", "remove", "--force", path]);
+  // The coding agent's worktree may have been removed while the round ran. Git
+  // removes a worktree from inside it, so the snapshot is its own way back to
+  // the repository.
+  const agentGone = !existsSync(worktree);
+  const removed = runGit(agentGone ? path : worktree, ["worktree", "remove", "--force", path]);
   if (!removed.ran) return failed(`the snapshot at ${path} could not be removed: ${removed.reason}`);
-  const pruned = runGit(worktree, ["worktree", "prune"]);
-  if (!pruned.ran) return failed(`the snapshot at ${path} was removed but not pruned: ${pruned.reason}`);
+  if (!agentGone) {
+    const pruned = runGit(worktree, ["worktree", "prune"]);
+    if (!pruned.ran) return failed(`the snapshot at ${path} was removed but not pruned: ${pruned.reason}`);
+  }
+  // `rounds/<round>`, `rounds` and the episode's own directory. One round of an
+  // episode runs at a time, so no add races these.
+  let directory = path;
+  for (let level = 0; level < 3; level++) {
+    directory = dirname(directory);
+    try {
+      rmdirSync(directory);
+    } catch {
+      break;
+    }
+  }
   return { outcome: "removed" };
+}
+
+/**
+ * Where the snapshot of `worktree` for one round goes:
+ * `<temporary directory>/squiz-<uid>/<worktree digest>-<pull request>/rounds/<round>/tree`.
+ *
+ * The same worktree, pull request and round always give the same path, so a
+ * killed round's snapshot is found from its record's round number.
+ */
+export function snapshotPath(worktree: string, of: Pick<SnapshotOf, "pullRequest" | "round">): string {
+  const digest = createHash("sha256").update(worktree).digest("hex").slice(0, 16);
+  return join(snapshotsDirectory(), `${digest}-${of.pullRequest}`, "rounds", String(of.round), "tree");
+}
+
+// `os.userInfo` throws for a user with no password entry, and this never does.
+// Every system the harness runs on has `getuid`.
+function userId(): number {
+  return process.getuid?.() ?? -1;
+}
+
+// One per user, because the temporary directory may be shared, as `/tmp` is.
+function snapshotsDirectory(): string {
+  return join(tmpdir(), `squiz-${userId()}`);
+}
+
+/**
+ * Make the snapshots directory where it is missing, and say why not where
+ * anyone but this user could put something in it.
+ *
+ * In a shared temporary directory another user can name the path first, with a
+ * link to somewhere of theirs or a directory they can write.
+ */
+function ownSnapshotsDirectory(): string | null {
+  const directory = snapshotsDirectory();
+  try {
+    mkdirSync(directory, { mode: 0o700 });
+  } catch (cause) {
+    if (!(cause instanceof Error && "code" in cause && cause.code === "EEXIST")) {
+      return `${directory} could not be made: ${cause instanceof Error ? cause.message : String(cause)}`;
+    }
+  }
+  try {
+    const found = lstatSync(directory);
+    const alone = found.isDirectory() && found.uid === userId() && (found.mode & 0o022) === 0;
+    return alone ? null : `${directory} is not a directory of this user's alone`;
+  } catch (cause) {
+    return `${directory} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
 }
 
 type Presence =

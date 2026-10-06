@@ -38,7 +38,7 @@ const everyState: readonly StateRecord[] = [
       pane: "@14",
       process: { pid: 4100, startedAt: 1_791_000_003 },
       boundEndsAt: 1_791_000_483,
-      snapshot: "/work/squiz/.squiz/41/rounds/3/tree",
+      snapshot: "/tmp/squiz-501/5e1f0c2a9b3d7e64-41/rounds/3/tree",
     },
   },
   {
@@ -51,7 +51,7 @@ const everyState: readonly StateRecord[] = [
       backend: "detached",
       process: { pid: 4101, startedAt: 1_791_000_004 },
       boundEndsAt: 1_791_000_484,
-      snapshot: "/work/squiz/.squiz/41/rounds/3/tree",
+      snapshot: "/tmp/squiz-501/5e1f0c2a9b3d7e64-41/rounds/3/tree",
     },
   },
   {
