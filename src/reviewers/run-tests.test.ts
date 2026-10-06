@@ -113,6 +113,17 @@ test("a run cut short by the round says so, and not as a failing suite", async (
   });
 });
 
+test("a command killed by a signal is not reported as only a failing suite", async () => {
+  await inPlace(async (place) => {
+    const run = await runTests({ ...place, command: "kill -KILL $$" });
+    assert.equal(run.outcome, "exited");
+    assert.equal(run.outcome === "exited" ? run.status : undefined, 137);
+    const said = describeTestsRun(run).text;
+    assert.match(said, /SIGKILL/u, "the reviewer is not told the status may be a signal");
+    assert.match(said, /may say nothing about whether the tests pass/u);
+  });
+});
+
 test("with too little of the round left to run and stop the tests, nothing runs", async () => {
   await inPlace(async (place) => {
     const ran = join(place.scratch, "ran");

@@ -20,6 +20,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { constants } from "node:os";
 import type { Readable } from "node:stream";
 
 import { deadlineIn, type Deadline } from "./deadline.ts";
@@ -178,11 +179,24 @@ export function describeTestsRun(run: TestsRun): { readonly text: string; readon
   if (run.outcome === "not run") return { text: run.reason, isError: true };
   const head =
     run.outcome === "exited"
-      ? `The test command exited ${run.status}.`
+      ? `The test command exited ${run.status}.${signalIn(run.status)}`
       : run.outcome === "stopped"
         ? `The test command was stopped after ${run.seconds} seconds, because the round's time ran out. It did not finish, so this says nothing about whether the tests pass.`
         : `The test command was ended by ${run.signal} from outside run_tests before it finished, so this says nothing about whether the tests pass.`;
   return { text: `${head}\n\n${outputLine(run.output)}\n${run.output.text}`, isError: false };
+}
+
+/**
+ * What a status above 128 may mean.
+ *
+ * The shell reports a command killed by signal N as 128 + N, and a command can
+ * also exit with that number itself. Nothing tells the two apart, so the
+ * reviewer is told both.
+ */
+function signalIn(status: number): string {
+  const name = Object.entries(constants.signals).find(([, number]) => number === status - 128)?.[0];
+  if (status <= 128 || name === undefined) return "";
+  return ` That is also the status of a command killed by ${name}, so this may say nothing about whether the tests pass.`;
 }
 
 function outputLine(output: Output): string {
