@@ -1,11 +1,11 @@
 /**
  * The hook's payload, read from the stdin the runtime wrote it to.
  *
- * What the payload says is `readFiring`'s to read. This only gets the whole of
- * it off the stream, and never throws.
+ * What the payload says is `readFiringWithSocket`'s to read. This only gets the
+ * whole of it off the stream, and never throws.
  */
 
-import { readFiring, type FiringRead, type HookEnvironment } from "../sessions/firing.ts";
+import { readFiringWithSocket, type FiringRead, type HookEnvironment } from "../sessions/firing.ts";
 
 /** The hook's stdin. The payload arrives on it and nothing else does. */
 export type PayloadStream = AsyncIterable<string | Uint8Array> & {
@@ -34,7 +34,7 @@ export async function readPayloadFrom(stream: PayloadStream, environment: HookEn
   }
   // Decoded once the whole of it has arrived. A character spanning two chunks
   // decoded per chunk would come out as two replacements.
-  return readFiring(Buffer.concat(chunks).toString("utf8"), environment);
+  return readFiringWithSocket(Buffer.concat(chunks).toString("utf8"), environment);
 }
 
 function unreadable(reason: string): FiringRead {

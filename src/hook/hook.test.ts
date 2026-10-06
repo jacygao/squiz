@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -423,6 +424,32 @@ test("a Copilot Stop queues the state owned by the session, and records no socke
 
     assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [{ head: HEAD, activity: null, owner: { sessionId: COPILOT_PARENT }, status: "queued" }]);
+  });
+});
+
+test("a Copilot Stop records the socket squiz's extension listens on beside the session's transcript", async () => {
+  await withPlace(async (place) => {
+    // Under /tmp, where a socket path stays inside the 104 bytes macOS allows.
+    const home = await mkdtemp("/tmp/squiz-ch-");
+    const directory = join(home, "session-state", COPILOT_PARENT);
+    mkdirSync(directory, { recursive: true });
+    const socket = join(directory, "squiz.sock");
+    const extension = createServer((connection) => connection.resume());
+    await new Promise<void>((resolve) => extension.listen(socket, resolve));
+    try {
+      const fields = JSON.parse(copilotStopPayload(place.worktree, COPILOT_PARENT)) as Record<string, unknown>;
+      const payload = JSON.stringify({ ...fields, transcript_path: join(directory, "events.jsonl") });
+
+      const fired = await fire(place, { payload, environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
+
+      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.deepEqual(recordsIn(place), [
+        { head: HEAD, activity: null, owner: { sessionId: COPILOT_PARENT, messagingSocket: socket }, status: "queued" },
+      ]);
+    } finally {
+      await new Promise((resolve) => extension.close(resolve));
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
 

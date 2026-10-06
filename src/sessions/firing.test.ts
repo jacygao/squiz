@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:net";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { readFiring, type Firing, type FiringRead, type HookEnvironment } from "./firing.ts";
+import { readFiring, readFiringWithSocket, type Firing, type FiringRead, type HookEnvironment } from "./firing.ts";
 
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const AGENT_ID = "a1e3196c5ad0f2410";
@@ -294,5 +297,134 @@ test("a Claude Code Stop is read whatever session its transcript's file name giv
       directory: DIRECTORY,
       owner: { sessionId: SESSION_ID, socket: SOCKET },
     });
+  }
+});
+
+/**
+ * Run `body` with a scratch Copilot home, and remove it after.
+ *
+ * It is under `/tmp` rather than the system's temporary directory, whose path
+ * on macOS is long enough that a socket under a session's state directory would
+ * pass the 104 bytes a socket path may take.
+ */
+async function withCopilotHome(body: (home: string) => Promise<void>): Promise<void> {
+  const home = mkdtempSync("/tmp/squiz-ch-");
+  try {
+    await body(home);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+/** `text`, a payload, with its `transcript_path` the events file of `sessionId` under `home`. */
+function transcriptUnder(home: string, sessionId: string, text: string): string {
+  const fields = JSON.parse(text) as Record<string, unknown>;
+  return JSON.stringify({ ...fields, transcript_path: join(home, "session-state", sessionId, "events.jsonl") });
+}
+
+/** A server listening at `path`, standing in for squiz's Copilot extension. */
+async function listeningAt(path: string): Promise<Server> {
+  mkdirSync(dirname(path), { recursive: true });
+  const server = createServer((socket) => socket.resume());
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(path, resolve);
+  });
+  return server;
+}
+
+async function closed(server: Server): Promise<void> {
+  server.close();
+  await new Promise<void>((resolve) => server.once("close", resolve));
+}
+
+test("under Copilot, the owner's socket is the one squiz's extension listens on beside the session's transcript", async () => {
+  await withCopilotHome(async (home) => {
+    const path = join(home, "session-state", COPILOT_PARENT, "squiz.sock");
+    const server = await listeningAt(path);
+    try {
+      const stop = transcriptUnder(home, COPILOT_PARENT, copilotStopText(COPILOT_PARENT));
+      const subagentStop = transcriptUnder(home, COPILOT_PARENT, copilotSubagentStopText());
+
+      assert.deepEqual(firingIn(await readFiringWithSocket(stop, UNDER_COPILOT)), {
+        event: "Stop",
+        directory: "/work/repo",
+        owner: { sessionId: COPILOT_PARENT, socket: path },
+      });
+      // A subagent runs inside its parent's process, so the parent's extension is the one to wake.
+      assert.deepEqual(firingIn(await readFiringWithSocket(subagentStop, UNDER_COPILOT)), {
+        event: "SubagentStop",
+        directory: "/work/repo",
+        owner: { sessionId: COPILOT_PARENT, socket: path },
+        subagent: COPILOT_SUBAGENT,
+      });
+    } finally {
+      await closed(server);
+    }
+  });
+});
+
+test("under Copilot with no extension listening, the owner has no socket, even one its environment carries", async () => {
+  await withCopilotHome(async (home) => {
+    const stop = transcriptUnder(home, COPILOT_PARENT, copilotStopText(COPILOT_PARENT));
+    const owners = [];
+    // Nothing at the path, as in a session started without experimental features.
+    owners.push(firingIn(await readFiringWithSocket(stop, UNDER_COPILOT)).owner);
+    // A file nothing listens on, as an extension that was killed leaves.
+    mkdirSync(join(home, "session-state", COPILOT_PARENT), { recursive: true });
+    writeFileSync(join(home, "session-state", COPILOT_PARENT, "squiz.sock"), "", "utf8");
+    owners.push(firingIn(await readFiringWithSocket(stop, UNDER_COPILOT)).owner);
+
+    assert.deepEqual(owners, [{ sessionId: COPILOT_PARENT }, { sessionId: COPILOT_PARENT }]);
+  });
+});
+
+test("under Copilot, a transcript that is not the owner's session's names no socket, wherever one listens", async () => {
+  await withCopilotHome(async (home) => {
+    // Beside each transcript below, so that a socket found there would be recorded.
+    const servers = [
+      await listeningAt(join(home, "transcripts", "squiz.sock")),
+      await listeningAt(join(home, "session-state", COPILOT_SUBAGENT, "squiz.sock")),
+      await listeningAt(join(home, "squiz.sock")),
+    ];
+    try {
+      const fields = JSON.parse(copilotSubagentStopText()) as Record<string, unknown>;
+      const texts = [
+        JSON.stringify({ ...fields, transcript_path: undefined }),
+        JSON.stringify({ ...fields, transcript_path: join(home, "transcripts", `${COPILOT_PARENT}.jsonl`) }),
+        transcriptUnder(home, COPILOT_SUBAGENT, copilotSubagentStopText()),
+        JSON.stringify({ ...fields, session_id: "..", transcript_path: `${home}/session-state/../events.jsonl` }),
+      ];
+      const owners = [];
+      for (const text of texts) owners.push(firingIn(await readFiringWithSocket(text, UNDER_COPILOT)).owner);
+
+      assert.deepEqual(owners, [
+        { sessionId: COPILOT_PARENT },
+        { sessionId: COPILOT_PARENT },
+        { sessionId: COPILOT_PARENT },
+        { sessionId: ".." },
+      ]);
+    } finally {
+      for (const server of servers) await closed(server);
+    }
+  });
+});
+
+test("outside Copilot, the owner's socket is its environment's, whatever listens beside a Copilot transcript", async () => {
+  await withCopilotHome(async (home) => {
+    const server = await listeningAt(join(home, "session-state", SESSION_ID, "squiz.sock"));
+    try {
+      const read = await readFiringWithSocket(transcriptUnder(home, SESSION_ID, stopText()), WITH_SOCKET);
+
+      assert.deepEqual(firingIn(read).owner, { sessionId: SESSION_ID, socket: SOCKET });
+    } finally {
+      await closed(server);
+    }
+  });
+});
+
+test("a payload with no firing in it reads the same with the socket looked for", async () => {
+  for (const text of [copilotStopText(COPILOT_SUBAGENT), phantomText(), "not json"]) {
+    assert.deepEqual(await readFiringWithSocket(text, UNDER_COPILOT), readFiring(text, UNDER_COPILOT));
   }
 });

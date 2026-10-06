@@ -4,15 +4,16 @@
  *
  * The owner is the session in the payload's `session_id`. On `Stop` that is the
  * session whose turn ended. On `SubagentStop` it is the session that dispatched
- * the subagent, and the subagent is named from `agent_id`. The owner's messaging
- * socket comes from the hook's environment and never from the payload. A
+ * the subagent, and the subagent is named from `agent_id`. Under Claude Code the
+ * owner's messaging socket comes from the hook's environment and never from the
+ * payload. A
  * subagent runs inside its parent's process, so on `SubagentStop` the socket is
  * the parent's.
  *
  * A hook whose environment carries `COPILOT_CLI` runs under Copilot, and its
- * owner has no socket. Copilot puts none in a hook's environment, so one found
- * there belongs to a Claude Code session that started Copilot, and a wake
- * through it would reach that session instead.
+ * owner's socket is never the environment's. Copilot puts none in a hook's
+ * environment, so one found there belongs to a Claude Code session that started
+ * Copilot, and a wake through it would reach that session instead.
  *
  * A `Stop` whose `session_id` is not the session its transcript path names is a
  * subagent's turn. Copilot fires one just before that subagent's
@@ -33,11 +34,13 @@
  * last message is in there.
  */
 
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+
+import { listening } from "./messaging.ts";
 
 export type Owner = {
   readonly sessionId: string;
-  /** Absent where the hook's environment named no socket, or an empty one. */
+  /** Absent where no socket reaches the owner. */
   readonly socket?: string;
 };
 
@@ -106,6 +109,46 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
   return { outcome: "read", firing: { event, directory, owner, subagent: agentId } };
+}
+
+/**
+ * Read `text` as `readFiring` does, and under Copilot give the owner the socket
+ * squiz's extension listens on in its session, where one accepts a connection.
+ *
+ * The extension runs only in a session started with Copilot's experimental
+ * features on. It listens on `squiz.sock` in the session's state directory,
+ * the directory of the transcript a firing for the session names. A socket is
+ * recorded only once a connection to it has been accepted, so a session
+ * without the extension, or one whose extension died, records none.
+ */
+export async function readFiringWithSocket(text: string, environment: HookEnvironment): Promise<FiringRead> {
+  const read = readFiring(text, environment);
+  if (read.outcome !== "read" || !underCopilot(environment)) return read;
+  const { sessionId } = read.firing.owner;
+  const socket = extensionSocket(text, sessionId);
+  if (socket === undefined || !(await listening(socket, PROBE_BOUND_MS))) return read;
+  return { outcome: "read", firing: { ...read.firing, owner: { sessionId, socket } } };
+}
+
+// Copilot waits on its Stop hook before the session goes idle, so a socket that
+// does not answer at once costs the session no more than this.
+const PROBE_BOUND_MS = 1_000;
+
+/**
+ * Where squiz's extension listens for `sessionId`, or none where the payload in
+ * `text` names no Copilot transcript of that session's.
+ *
+ * Copilot's own `COPILOT_HOME` is not in a hook's environment unless the user
+ * set it, and `--config-dir` moves the directory without it, so the transcript
+ * is the one place that says where the session's directory is.
+ */
+function extensionSocket(text: string, sessionId: string): string | undefined {
+  // `readFiring` has already read `text` as a JSON object.
+  const transcript = (JSON.parse(text) as Readonly<Record<string, unknown>>)["transcript_path"];
+  if (typeof transcript !== "string" || !isAbsolute(transcript)) return undefined;
+  // ".." would put the socket outside every session's directory.
+  if (sessionId === "." || sessionId === ".." || transcriptSession(transcript) !== sessionId) return undefined;
+  return join(dirname(transcript), "squiz.sock");
 }
 
 function underCopilot(environment: HookEnvironment): boolean {
