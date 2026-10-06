@@ -1,9 +1,9 @@
 ---
-settles: "§ 4 — whether the Copilot adapter reviews a real pull request as it specifies when detached, whether a Copilot round starts in a Herdr pane, and whether the charter governs the user's default model; § 5 — the summary's cost line for a Copilot review"
-issue: 465
+settles: "§ 4 — whether the Copilot adapter reviews a real pull request as it specifies when detached, whether a Copilot round starts and closes in a Herdr pane, and whether the charter governs the user's default model; § 5 — the summary's cost line for a Copilot review"
+issue: [465, 516]
 recorded: 2026-10-06
-versions: { claude-code: 2.1.290, coding-agent: claude-opus-5-5, copilot: 1.0.92, reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, squiz: 9dccf87 }
-recheck-when: Copilot changes `--agent`, `--usage-output-file` or its usage file, the Herdr start stops typing the line into a fresh shell (#516), or the charter or the Copilot adapter's command line changes
+versions: { claude-code: 2.1.290, coding-agent: claude-opus-5-5, copilot: 1.0.92, reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, squiz: "9dccf87, and the #516 fix" }
+recheck-when: Copilot changes `--agent`, `--usage-output-file` or its usage file, the Herdr start changes how it hands a pane its line, or the charter or the Copilot adapter's command line changes
 ---
 
 # A Copilot round works a thread to exit 0 detached, and never starts in a Herdr pane
@@ -15,7 +15,9 @@ thread on it, and the command exited 2. The fix was pushed with tests, a reply
 was posted with `squiz reply`, and round 2 ruled the thread `fixed`. The command
 exited 0. The first attempt at round 1 ran in the owner's Herdr workspace and
 never started: the round typed a 1.7 KB line into a fresh pane, and macOS cut it
-at 1024 bytes. That is #516. Nothing ran and no quota was spent.
+at 1024 bytes. That is #516. Nothing ran and no quota was spent. With #516
+fixed, a later round on #518 started in a Herdr pane, and the pane closed when
+the review ended.
 
 ## Intent
 
@@ -36,13 +38,15 @@ at 1024 bytes. That is #516. Nothing ran and no quota was spent.
   the usage line once Copilot exited 0, and were read back as reviewed. The
   resume line was written in the specified form.
 
-- **Fix #516 before a Copilot round runs in a Herdr pane.** The start types its
-  gated line as soon as the pane's shell holds the foreground. The shell's line
-  editor has not started yet, so the terminal is in canonical mode, and macOS
-  keeps 1024 bytes of an unfinished line. Copilot's line is cut inside a quoted
-  word, the shell waits for the quote to close, and the gate never writes its
-  pid. `pi`'s line is short enough to fit. The gate held, so the cut line ran
-  nothing.
+- **Never type a pane line over 512 bytes.** The start types its gated line as
+  soon as the pane's shell holds the foreground. The shell's line editor has not
+  started yet, so the terminal is in canonical mode, and macOS keeps 1024 bytes
+  of an unfinished line. Copilot's line is cut inside a quoted word, the shell
+  waits for the quote to close, and the gate never writes its pid. The gate
+  held, so the cut line ran nothing. Since #516, a longer line is written to a
+  file in the gate directory and the line typed runs it. `pi`'s line from a
+  coding agent's worktree is about 935 bytes, under the cut but not by much, so
+  it runs from the file too.
 
 - **Read a Copilot round's cost as § 4 does.** Round 1's 38,236 tokens are
   `inputTokens` 37,717 and `outputTokens` 519 from `modelMetrics`, and its 15.69
@@ -118,6 +122,30 @@ From `session-state/<id>/events.jsonl`, each round's turns were the same shape:
 
 Every `view` named a path under the round's snapshot, `.squiz/515/rounds/<k>/tree/`.
 
+### The round in a pane, after #516
+
+Test pull request #518, a throwaway draft with the same planted `Math.floor`,
+run from the owner's Herdr workspace with `COPILOT_MODEL=gpt-5-mini` exported in
+the shell that ran `squiz review`.
+
+| | Round 1 |
+|---|---|
+| Reviewer | Herdr tab `squiz-518-r1`; `squiz status` named `herdr squiz-518-r1` |
+| Reported | one `high` finding on `scratch/live-516/pages.ts:3` |
+| Exit | 2 |
+| Took | 28 s from the round's start |
+| Model | `gpt-5-mini`, from `modelMetrics` |
+| AI credits | 0.47, `totalNanoAiu` 466,055,000 |
+
+The tab was gone from `herdr tab list` once the command returned. `resume.txt`
+read `COPILOT_HOME=.squiz/518/rounds/1/session copilot --resume=eea6adca-d9ba-4f85-9594-11c990593393`.
+The gate directory was left holding only `pid`: the file the line ran from had
+removed itself, and the leftover `pid` is #453.
+
+`herdr tab create --env COPILOT_ALLOW_ALL=` gives the pane's shell the variable
+set and empty: `${COPILOT_ALLOW_ALL+set}` printed `set`, and the value printed
+nothing.
+
 ### The pane line, by length
 
 A line typed with `herdr pane run` into a tab made the moment before:
@@ -144,17 +172,20 @@ Besides the agent file `confine` writes, the round's session directory held
 
 ## Limits
 
-- **No Copilot round ran in a pane.** The pane's close, the `Resume` line it
-  prints, and the empty `COPILOT_ALLOW_ALL` through Herdr's `--env` were not
-  seen.
+- **The pane round was not watched.** The pane had closed before it was read,
+  so the `Resume` line Copilot prints on exit was not seen there.
+- **The empty `COPILOT_ALLOW_ALL` was seen in a pane, not in the reviewer.** It
+  was read from a shell in a tab created with the same `--env`, after the round.
+  The reviewer's own environment was not read.
+- **One pane round, on `gpt-5-mini`.** The pane round was not taken to exit 0.
 - **Herdr stalled once and it is not known why.** During the failed attempt,
   a `herdr tab list` polled every two seconds took from 12:46:13 to 12:46:42 to
   answer. The typed line cannot account for it: in the reproductions, Herdr
   answered at once with a cut line in the pane.
 - **Exit 3, and a disputed or withdrawn thread, were not reached.** The one
   thread was fixed as suggested.
-- **One model.** `gpt-6-astra`, the owner's default. No other model was run, and
-  no round ran with `COPILOT_MODEL` unset.
+- **Two models.** The detached rounds ran `gpt-6-astra`, the owner's default,
+  and the pane round `gpt-5-mini`. No round ran with `COPILOT_MODEL` unset.
 - **Nobody resumed a session** from `resume.txt`.
 - **The coding agent was the dispatching session's subagent**, running the
   commands itself, not one dispatched with a brief that never named squiz. The
