@@ -97,6 +97,19 @@ test("the script carries the grant, the agent, and every flag that keeps the tre
   assert.ok(!script.includes("--model"), "the model is the user's, set through the environment");
 });
 
+// Copilot confines its reading tools to the working directory and the system's
+// temporary directory, which for the reviewer is the round's scratch space,
+// outside the snapshot.
+test("the reading tools reach the snapshot and nothing else, at both depths", () => {
+  for (const depth of ["read", "deep"] as const) {
+    const script = scriptOf(argv({ ...invocation, depth }));
+    assert.ok(script.includes(" --disallow-temp-dir "), `the ${depth} line leaves the temporary directory readable: ${script}`);
+    for (const widens of ["--allow-all-paths", "--allow-all ", "--yolo", "--add-dir"]) {
+      assert.ok(!script.includes(widens), `the ${depth} line passes ${widens}: ${script}`);
+    }
+  }
+});
+
 test("the script is one line, with no character a Herdr pane's shell would refuse", () => {
   for (const terminal of ["pane", "none"] as const) {
     const { args } = argv({ ...invocation, terminal });

@@ -187,7 +187,7 @@ export function refuse(call: ToolCall): Refusal | undefined {
 }
 
 /** One refusal, opened with the marker. */
-function refusal(said: string): Refusal {
+export function refusal(said: string): Refusal {
   return { block: true, reason: `${REFUSED}${said}` };
 }
 

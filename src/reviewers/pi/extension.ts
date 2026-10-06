@@ -1,8 +1,8 @@
 /**
  * The extension `pi` loads: the calls the reviewer reports each finding
  * through and the `deep` tools, registered through `pi`'s API, the handler that
- * refuses the calls which would change what the coding agent commits, and the
- * end of the review.
+ * refuses the calls which would change what the coding agent commits or read
+ * outside the snapshot, and the end of the review.
  *
  * Nothing in the harness imports this. `pi` loads it from the path on the
  * command line, compiles it and the modules it imports, and runs the default
@@ -30,6 +30,7 @@ import { deepTools } from "../deep-tools.ts";
 import { reportCalls } from "../report-calls.ts";
 import { reportFileAt, REPORTS_VARIABLE, type UsageLine } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
+import { refuseRead } from "./reads.ts";
 import { type Refusal, refuse, type ToolCall } from "./refusals.ts";
 
 /** One block of what a call answers with. Only text is ever returned here. */
@@ -136,7 +137,7 @@ const deepLabels: Readonly<Record<string, string>> = {
  * not grant.
  */
 export default function reportAsYouGo(pi: Registrar): void {
-  reportInto(pi, process.env[REPORTS_VARIABLE]);
+  reportInto(pi, process.env[REPORTS_VARIABLE], process.cwd());
   serveDeepTools(pi, process.env);
 }
 
@@ -167,15 +168,16 @@ export function serveDeepTools(pi: Registrar, environment: Readonly<Record<strin
 
 /**
  * Register the three calls and subscribe the handlers, recording into the
- * file at `reports`, or nowhere where it is not given.
+ * file at `reports`, or nowhere where it is not given, and refusing a read
+ * outside `snapshot`, which is where `pi` runs.
  */
-export function reportInto(pi: Registrar, reports: string | undefined): void {
+export function reportInto(pi: Registrar, reports: string | undefined, snapshot: string): void {
   const reporting = reportCalls(reportFileAt(reports));
 
   // `pi` runs a tool the moment no handler objects, so a subscription that goes
   // missing takes the whole refusal with it and says nothing.
   pi.on("tool_call", (call) => {
-    const refusal = refuse(call);
+    const refusal = refuse(call) ?? refuseRead(call, snapshot);
     if (refusal === undefined) return undefined;
     return { ...refusal, reason: reporting.stopped(call.toolName, refusal.reason) };
   });
