@@ -1,6 +1,7 @@
 #!/bin/sh
-# The `squiz` binary. A plugin's bin/ is on the Bash tool's PATH while the
-# plugin is enabled, so the coding agent runs this by name.
+# The `squiz` binary. A plugin's bin/ is on Claude Code's Bash tool PATH while
+# the plugin is enabled, and any other coding agent reaches this file through
+# the link `squiz init` makes, so either runs it by name.
 # (review-harness-spec, "The `squiz` binary")
 #
 # The hook is given no such PATH and reaches this same file through the plugin

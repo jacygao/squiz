@@ -96,12 +96,16 @@ type Run = {
 async function run(
   command: string,
   args: readonly string[],
-  options: { cwd: string; path?: string; input?: string },
+  options: { cwd: string; path?: string; home?: string; input?: string },
 ): Promise<Run> {
   return await new Promise<Run>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...(options.path === undefined ? {} : { PATH: options.path }) },
+      env: {
+        ...process.env,
+        ...(options.path === undefined ? {} : { PATH: options.path }),
+        ...(options.home === undefined ? {} : { HOME: options.home }),
+      },
     });
     // A child that reads no stdin can exit before the write lands, and the
     // failed write belongs to the pipe rather than to the test.
@@ -567,33 +571,76 @@ test("a throw inside squiz review exits 1, which never reads as a result", async
   }
 });
 
-test("squiz init adds the review section to AGENTS.md, and prints the line that says so", async () => {
-  const root = await mkdtemp(join(tmpdir(), "squiz-init-cli-"));
+/**
+ * A home of its own whose ~/.local/bin is on a PATH of its own, so that `squiz
+ * init` links into neither the developer's home nor a directory their PATH
+ * already has. Beyond the system's own directories, the PATH reaches `node`,
+ * which the shim needs, through a link to it alone.
+ */
+async function initSandbox(): Promise<{ readonly home: string; readonly localBin: string; readonly path: string }> {
+  const home = realpathSync(await mkdtemp(join(tmpdir(), "squiz-553-home-")));
+  const localBin = join(home, ".local", "bin");
+  await mkdir(localBin, { recursive: true });
+  const tools = join(home, "tools");
+  await mkdir(tools);
+  await symlink(process.execPath, join(tools, "node"));
+  return { home, localBin, path: `${localBin}:${tools}:/usr/bin:/bin` };
+}
+
+test("squiz init adds the review section to AGENTS.md and links squiz, and prints the lines that say so", async () => {
+  const root = await mkdtemp(join(tmpdir(), "squiz-553-init-cli-"));
+  const { home, localBin, path } = await initSandbox();
   try {
     gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
 
-    const result = await run(shim, ["init"], { cwd: root });
+    const result = await run(shim, ["init"], { cwd: root, path, home });
 
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, "squiz: added the review section to AGENTS.md\n");
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      `squiz: added the review section to AGENTS.md\nsquiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n`,
+    );
     assert.equal(result.stderr, "");
     assert.match(await readFile(join(root, "AGENTS.md"), "utf8"), /^## Review\n/u);
   } finally {
     await rm(root, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   }
 });
 
-test("squiz init outside a git repository exits 1, and writes nothing", async () => {
-  const outside = await mkdtemp(join(tmpdir(), "squiz-init-outside-"));
+test("squiz init run by name through its own link finds the link already there", async () => {
+  const root = await mkdtemp(join(tmpdir(), "squiz-553-init-cli-"));
+  const { home, localBin, path } = await initSandbox();
   try {
-    const result = await run(shim, ["init"], { cwd: outside });
+    gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
+    await run(shim, ["init"], { cwd: root, path, home });
+
+    const result = await run("squiz", ["init"], { cwd: root, path, home });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      "squiz: AGENTS.md already has the review section; nothing changed\n" +
+        `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n`,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("squiz init outside a git repository exits 1, and writes no AGENTS.md", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "squiz-553-outside-"));
+  const { home, path } = await initSandbox();
+  try {
+    const result = await run(shim, ["init"], { cwd: outside, path, home });
 
     assert.equal(result.code, 1, "a person runs squiz init, and the exit is how they learn it did nothing");
-    assert.equal(result.stdout, "");
     assert.match(result.stderr, /^squiz: nothing changed: the repository's root could not be found: [^\n]+\n$/u);
     await assert.rejects(stat(join(outside, "AGENTS.md")));
   } finally {
     await rm(outside, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   }
 });
 

@@ -2074,14 +2074,16 @@ Everything the harness ships to be run: one binary, one slash command, and one s
 ### The `squiz` binary
 
 A plugin's `bin/` is added to the Bash tool's `PATH` while the plugin is
-enabled, so a coding agent in Claude Code runs the binary by name. How `squiz`
-reaches the `PATH` of any other coding agent is not specified.
+enabled, so a coding agent in Claude Code runs the binary by name. Every other
+coding agent's shell, Copilot's included, gets the `PATH` it was started with,
+and runs `squiz` by name through the link `squiz init` makes in a directory
+already on it.
 
 | Command | Run by | What it does |
 |---|---|---|
 | `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. |
 | `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
-| `squiz init` | A person | Adds the review section under § 9 to the host project's `AGENTS.md`, for coding agents other than Claude Code. |
+| `squiz init` | A person | Adds the review section under § 9 to the host project's `AGENTS.md`, and links `squiz` onto `PATH`, for coding agents other than Claude Code. |
 | `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for the payload's `cwd` and returns, as § 3 sets out. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
@@ -2361,13 +2363,51 @@ taken for none.
 
 ### `squiz init`
 
-`squiz init` adds the review section § 9 gives to the `AGENTS.md` at the root of
-the repository, creating the file where there is none. Where the section is
-already there it changes nothing and says so.
+`squiz init` does two things, each whether or not the other could be done, and
+prints a line for each. It exits 0 where both are in place afterwards, and 1
+otherwise, with the line for what failed on stderr.
+
+**The review section.** It adds the section § 9 gives to the `AGENTS.md` at the
+root of the repository, creating the file where there is none. Where the section
+is already there it changes nothing and says so.
+
+**The link.** It links `squiz` into a directory already on `PATH`, so that a
+coding agent whose shell does not have the plugin's `bin/` on its `PATH` runs
+`squiz` by name. Only Claude Code puts the plugin's `bin/` there, and only in its
+own Bash tool.
+
+- **The link's target is this squiz:** the real path of the `bin/squiz` that is
+  running, every symlink resolved, so the link holds an absolute path.
+- **The directory is `~/.local/bin`, or else `~/bin`:** the first of the two
+  that is on `PATH`, is a directory, and can be written to. No other directory
+  on `PATH` is used, even a writable one. `squiz init` creates no directory and
+  edits no shell startup file.
+- **Every `squiz` already on `PATH` is read first,** in each of its
+  directories. One person may run several coding agents on one machine, and
+  none of them may change which `squiz` another runs. So nothing named `squiz`
+  that is not this squiz is replaced, or shadowed by a link put ahead of it:
+
+| Already on `PATH` | `squiz init` |
+|---|---|
+| A link to this squiz | Changes nothing, and says so |
+| A link to another version of the same plugin-cache install, `plugins/cache/<marketplace>/squiz/<version>/bin/squiz`, whether or not that version is still there | Moves the link to this version |
+| This squiz's own `bin/` | Ignores it, as only Claude Code's shell has it |
+| A link to another squiz checkout or install | Makes no link, names it, and says to remove it and run `squiz init` again to use this one |
+| Another squiz's own `bin/`, as Claude Code puts an enabled plugin's | Makes no link, and says to run `squiz init` by name in that session, so the link points at the squiz Claude Code uses |
+| Anything else named `squiz`, or a link to something missing | Makes no link, names it, and leaves it alone |
+| Nothing, and neither directory can take the link | Makes no link, and says to add `~/.local/bin` to `PATH` |
+
+A squiz is a `bin/squiz` whose plugin's `.claude-plugin/plugin.json` names it
+`squiz`.
 
 ```
 squiz: added the review section to AGENTS.md
 squiz: AGENTS.md already has the review section; nothing changed
+squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz
+squiz: /Users/ana/.local/bin/squiz already links to this squiz; nothing changed
+squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz, in place of /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, an earlier version of this install
+squiz: made no link: /Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again
+squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a directory on PATH that you can write to. Add /Users/ana/.local/bin to PATH, creating it if it does not exist, then run squiz init again
 ```
 
 ### The setup check
@@ -2378,6 +2418,10 @@ dependencies is missing or unauthenticated, and how the instruction to run
 whether `AGENTS.md` has the review section. Where neither is there, it says no
 coding agent is told to run the command. The reviewer it checks for is the one
 `reviewer` names, `pi` or `copilot`.
+
+It also reports what `squiz init`'s link would find on `PATH`, whichever coding
+agent is in use: no link to this squiz, a link to an earlier version, or a
+`squiz` that is not this one, named as `squiz init` names it.
 
 ## 7. Failure modes
 
@@ -2616,12 +2660,12 @@ plugin is the package, so there is no separate packaging step.
 hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code and Copilot triggers
 commands/                    slash commands; the setup check is the first
 skills/squiz-review/SKILL.md the instruction to run squiz review, for a Claude Code or Copilot coding agent
-bin/                         the CLI, on the Bash tool's PATH while enabled
+bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
 charter.md                   the standing review instructions, shipped as one file
 src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
-  review/                    the squiz review entry point, what it prints and exits with, and squiz status
+  review/                    the squiz review entry point, what it prints and exits with, squiz status, and squiz init
   hook/                      the Stop and SubagentStop trigger, which resolves the pull request and queues the review
   host/                      the round host, which takes queued states and runs their rounds
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, and the note and its wake; no review knowledge
@@ -2679,8 +2723,8 @@ until something asks.
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
-| **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review` |
-| **P1** | `squiz init` | Adds the review section to `AGENTS.md`, for coding agents other than Claude Code |
+| **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review`, and whether `squiz init`'s link puts this squiz on `PATH` |
+| **P1** | `squiz init` | Adds the review section to `AGENTS.md`, and links `squiz` onto `PATH` without replacing another, for coding agents other than Claude Code |
 | **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server, the custom agent that carries the charter, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
@@ -2792,6 +2836,15 @@ wait for it to finish and read its output before you do anything else.
 - **Exit 1, or anything else:** the review could not run, or it failed. Put the
   lines it printed in your report, and do not run it again.
 ```
+
+**Any other coding agent reaches `squiz` through a link `squiz init` makes,**
+because no runtime but Claude Code puts the plugin's `bin/` on its shell's
+`PATH`. Run `squiz init` once on each machine, by name from a Claude Code
+session where squiz is enabled, so that every agent runs the squiz Claude Code
+uses. It links `~/.local/bin/squiz`, or `~/bin/squiz`, to the plugin's
+`bin/squiz`, and makes no link where a `squiz` that is not this one is already on
+`PATH` (§ 6 `squiz init`). A Copilot session then runs `squiz` by name, with the
+plugin loaded by `copilot --plugin-dir <plugin directory>`.
 
 `AGENTS.md` also carries the conventions a reviewer cannot derive from reading
 code, and it can point at whatever else the project treats as authoritative. The
