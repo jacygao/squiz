@@ -26,7 +26,8 @@ import { STOP_MARGIN_MS } from "../run-tests.ts";
 import { pi } from "./adapter.ts";
 
 const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url));
-const scratchDirectory = ".squiz/agent-1/scratch";
+/** The scratch space, absolute and outside the snapshot, where the round host puts it. */
+const scratchIn = (tree: string): string => join(tree, "..", "worktree", ".squiz", "1", "scratch");
 
 /** What one call answered: its text, and whether `pi` would read it as an error. */
 type Answered = { readonly text: string; readonly failed: boolean };
@@ -74,7 +75,7 @@ function invocationIn(tree: string, command: string): Invocation {
     sessionDirectory: ".squiz/agent-1/session",
     promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile: ".squiz/1/rounds/1/reports.jsonl",
-    scratchDirectory,
+    scratchDirectory: scratchIn(tree),
     githubConfigDirectory: ".squiz/1/rounds/1/gh",
     depth: "deep",
     test: command,
@@ -85,7 +86,7 @@ function invocationIn(tree: string, command: string): Invocation {
 }
 
 function answeredIn(tree: string): Readonly<Record<string, Answered>> {
-  return JSON.parse(readFileSync(join(tree, scratchDirectory, "answered.json"), "utf8")) as Record<
+  return JSON.parse(readFileSync(join(scratchIn(tree), "answered.json"), "utf8")) as Record<
     string,
     Answered
   >;

@@ -1225,7 +1225,7 @@ they run in a process the CLI started and the round cannot pass arguments to. At
 backend, to a JSON object:
 
 ```json
-{"snapshot":"/…/snapshot","scratch":"/…/.squiz/41/scratch","test":"npm test","endsAt":1791273600000}
+{"snapshot":"/…/squiz-501/3f9c2e07b1d4a8c6-41/rounds/2/tree","scratch":"/…/.squiz/41/scratch","test":"npm test","endsAt":1791273600000}
 ```
 
 | Field | Value |
