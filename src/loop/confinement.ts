@@ -24,11 +24,25 @@
  * composed from the closing round's readings alone would say a tree nobody
  * touched for an episode whose first round named a mutated file.
  *
+ * **At `deep` the git files the snapshot shares are read as well.** The test
+ * command can write the repository's config and hooks, which the coding agent's
+ * worktree reads too and the snapshot's files do not show. Unlike the snapshot,
+ * those files are not the reviewer's alone: the coding agent and every other
+ * worktree of the repository write them, so a change found there is named as one
+ * the reviewer's tests may have made. At `read` the reviewer runs nothing, and
+ * they are not read.
+ *
  * Nothing here throws, and nothing here changes what the round does. A mutated
  * tree is reported rather than acted on.
  */
 
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
+import {
+  compareSharedConfig,
+  readSharedConfig,
+  type SharedConfigComparison,
+  type SharedConfigReading,
+} from "../worktree/shared-config.ts";
 import {
   compareTrackedFiles,
   readTrackedFiles,
@@ -58,10 +72,18 @@ type NotTaken = { readonly outcome: "not-taken"; readonly reason: string };
  */
 export type TrackedFilesAnswer = TrackedFilesComparison | NotTaken;
 
+/** What the comparison of the shared git files came to, in the same four answers. */
+export type SharedConfigAnswer = SharedConfigComparison | NotTaken;
+
 /** What the round established about the snapshot its reviewer ran in. */
 export type RoundConfinement = {
   /** What the reviewer did to the paths a commit could carry, and to `HEAD`. */
   readonly trackedFiles: TrackedFilesAnswer;
+  /**
+   * What changed in the git files the snapshot shares. Absent at `read`, where
+   * the reviewer runs nothing that could write them.
+   */
+  readonly sharedConfig?: SharedConfigAnswer;
 };
 
 /**
@@ -88,6 +110,13 @@ export type ConfinementEvidence = {
    * one adds nothing.
    */
   readonly uncompared: readonly string[];
+  /**
+   * Every key or file a round found changed among the shared git files, once
+   * each, in the order the rounds found them, as the comment writes it.
+   */
+  readonly sharedChanged: readonly string[];
+  /** Why a round could not compare the shared git files, as `uncompared` holds it. */
+  readonly sharedUncompared: readonly string[];
 };
 
 /** An episode whose rounds established nothing, which is no note at all. */
@@ -95,6 +124,8 @@ export const nothingEstablished: ConfinementEvidence = {
   changed: [],
   moved: [],
   uncompared: [],
+  sharedChanged: [],
+  sharedUncompared: [],
 };
 
 /**
@@ -131,6 +162,8 @@ export function evidenceWith(
     changed: byValue(had.changed, pathsChanged(round.trackedFiles)),
     moved: byRound(had.moved, listed(headMovedIn(round))),
     uncompared: byRound(had.uncompared, whyUncompared(round.trackedFiles)),
+    sharedChanged: byRound(had.sharedChanged, sharedChanges(round.sharedConfig)),
+    sharedUncompared: byRound(had.sharedUncompared, whyUncompared(round.sharedConfig)),
   };
   return anything(evidence) ? evidence : undefined;
 }
@@ -153,7 +186,16 @@ function listed(entry: string | undefined): readonly string[] {
   return entry === undefined ? [] : [entry];
 }
 
-function whyUncompared(answer: TrackedFilesAnswer): readonly string[] {
+/** Each change as the comment names it: the key and its file, or the file alone. */
+function sharedChanges(answer: SharedConfigAnswer | undefined): readonly string[] {
+  if (answer?.outcome !== "changed") return [];
+  return answer.changes.map((change) =>
+    change.key === undefined ? `\`${change.file}\`` : `\`${change.key}\` in \`${change.file}\``,
+  );
+}
+
+function whyUncompared(answer: TrackedFilesAnswer | SharedConfigAnswer | undefined): readonly string[] {
+  if (answer === undefined) return [];
   switch (answer.outcome) {
     case "unchanged":
     case "changed":
@@ -186,7 +228,13 @@ function byRound(had: readonly string[], found: readonly string[]): readonly str
 }
 
 function anything(evidence: ConfinementEvidence): boolean {
-  const lists = [evidence.changed, evidence.moved, evidence.uncompared];
+  const lists = [
+    evidence.changed,
+    evidence.moved,
+    evidence.uncompared,
+    evidence.sharedChanged,
+    evidence.sharedUncompared,
+  ];
   return lists.some((list) => list.length > 0);
 }
 
@@ -196,6 +244,16 @@ export type BeforeTheReviewer = {
   readonly tree: string;
   /** The first reading, or why the round took none. */
   readonly reading: TrackedFilesReading | NotTaken;
+  /**
+   * The first reading of the shared git files, and the coding agent's worktree
+   * they were read for. Absent at `read`.
+   */
+  readonly shared?: SharedBefore;
+};
+
+type SharedBefore = {
+  readonly worktree: string;
+  readonly reading: SharedConfigReading | NotTaken;
 };
 
 /**
@@ -203,18 +261,28 @@ export type BeforeTheReviewer = {
  * compared against.
  *
  * `until` is the moment the reading has to be inside, which is the end of the
- * part of the round before the review.
+ * part of the round before the review. `worktree` is the coding agent's worktree,
+ * given at `deep` alone, and the shared git files it reads are read too where it
+ * is.
  *
  * Never throws. A reading that failed is carried rather than raised, and does
  * not stop the round.
  */
-export function readBeforeReviewer(tree: string, until: Deadline): BeforeTheReviewer {
+export function readBeforeReviewer(
+  tree: string,
+  until: Deadline,
+  worktree?: string,
+): BeforeTheReviewer {
   const phase = phaseInside(until);
   if (phase === null) {
     const reason = "the round had too little of its window left to read the worktree";
-    return { tree, reading: { outcome: "not-taken", reason } };
+    const notTaken: NotTaken = { outcome: "not-taken", reason };
+    if (worktree === undefined) return { tree, reading: notTaken };
+    return { tree, reading: notTaken, shared: { worktree, reading: notTaken } };
   }
-  return { tree, reading: readTrackedFiles(tree, phase) };
+  const reading = readTrackedFiles(tree, phase);
+  if (worktree === undefined) return { tree, reading };
+  return { tree, reading, shared: { worktree, reading: readSharedConfig(worktree, phase) } };
 }
 
 /**
@@ -228,7 +296,23 @@ export function readBeforeReviewer(tree: string, until: Deadline): BeforeTheRevi
  * Never throws.
  */
 export function readAfterReviewer(before: BeforeTheReviewer, until: Deadline): RoundConfinement {
-  return { trackedFiles: compared(before, phaseInside(until)) };
+  const phase = phaseInside(until);
+  const trackedFiles = compared(before, phase);
+  if (before.shared === undefined) return { trackedFiles };
+  return { trackedFiles, sharedConfig: sharedCompared(before.shared, phase) };
+}
+
+function sharedCompared(shared: SharedBefore, phase: Deadline | null): SharedConfigAnswer {
+  const { worktree, reading } = shared;
+  if (reading.outcome === "not-taken") return reading;
+  if (phase === null) {
+    return {
+      outcome: "not-taken",
+      reason: "the round had too little of its window left to read the shared git files a second time",
+    };
+  }
+  const after = reading.outcome === "failed" ? reading : readSharedConfig(worktree, phase);
+  return compareSharedConfig(reading, after);
 }
 
 function compared(before: BeforeTheReviewer, phase: Deadline | null): TrackedFilesAnswer {

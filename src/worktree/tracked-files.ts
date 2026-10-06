@@ -334,7 +334,7 @@ function kindOf(entry: Stats): string {
  * The clock is read between chunks, because one file can be larger than
  * everything else in the worktree together.
  */
-function hashOfFile(path: string, until?: Deadline): string | null {
+export function hashOfFile(path: string, until?: Deadline): string | null {
   const digest = createHash("sha256");
   const chunk = Buffer.allocUnsafe(64 * 1024);
   const file = openSync(path, "r");
