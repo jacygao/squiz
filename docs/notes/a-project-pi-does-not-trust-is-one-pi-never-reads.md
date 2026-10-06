@@ -28,6 +28,8 @@ recheck-when: pi upgrades, or pi's project trust resolution changes
   in front of it.** `pi` no longer reads the project's file, so a prefix it
   configured runs only if the mirror carries it. The project's value replaces the
   global one rather than adding to it, which is what merging two strings comes to.
+  2026-10-06: removed. No depth grants `pi` a shell, so the adapter writes no
+  settings and no prefix.
 
 - **Do not write `<cwd>/.pi/settings.json`.** It is the one other way to make the
   round's line effective, and the file stands in the worktree under review, where

@@ -1,6 +1,6 @@
 /**
- * A round whose reviewer reaches for the calls that would change the commit,
- * driven over a real git repository with a stand-in for `pi`.
+ * A round whose reviewer reaches for the tools that write, driven over a real
+ * git repository with a stand-in for `pi`.
  *
  * **The stand-in loads the extension the way `pi` loads it** — from the path on
  * the command line, through the same default export — and dispatches each call
@@ -10,7 +10,7 @@
  * `pi`'s would compile and fail only in a round. This is what puts the real
  * event shape through the real handler.
  *
- * **A call the handler lets through is really made.** The stand-in commits, and
+ * **A call the handler lets through is really made.** The stand-in writes, and
  * the repository is read afterwards. A round that came back clean because
  * nothing was attempted and a round that came back clean because everything was
  * refused are the same round from outside, so the count and the repository are
@@ -45,7 +45,7 @@ export function lastSaid(comments: readonly string[]): string | undefined {
 `;
 
 /** The calls the stand-in reaches for, every one of which must be refused. */
-const ATTEMPTS = 3;
+const ATTEMPTS = 2;
 
 const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url));
 
@@ -55,10 +55,8 @@ const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url
  */
 const BOUND_SECONDS = 60;
 
-test("the calls that would change the commit are refused, and the round counts them", async () => {
+test("the tools that write are refused, and the round counts them", async () => {
   await inTheFixture(async (tree) => {
-    const before = headOf(tree);
-
     const round = await runRound(pi, invocationIn(tree), BOUND_SECONDS);
 
     assert.equal(round.outcome, "reviewed", `the round came back as ${JSON.stringify(round)}`);
@@ -66,11 +64,6 @@ test("the calls that would change the commit are refused, and the round counts t
       round.refusals,
       ATTEMPTS,
       "the round counted a different number of refusals than the reviewer was given",
-    );
-    assert.equal(
-      headOf(tree),
-      before,
-      "the reviewer moved HEAD, so a refused call reached a shell after all",
     );
     assert.equal(
       git(["status", "--porcelain"], tree),
@@ -94,7 +87,7 @@ test("the reviewer is told why, in the refused call's own error", async () => {
     assert.ok(finding !== undefined, "the stand-in reports what it was told, and reported nothing");
     const told = finding.reference ?? "";
     assert.match(told, /^squiz refused this call: /u, `the reviewer read back: ${told}`);
-    assert.match(told, /changes what the coding agent commits/u);
+    assert.match(told, /changes the code you are reviewing/u);
   });
 });
 
@@ -129,25 +122,15 @@ function invocationIn(tree: string): Invocation {
     test: null,
     thinking: "medium",
     // No space, so nothing records a group. What a refused call does is the whole
-    // of what this reads, and it never reaches a shell.
+    // of what this reads, and nothing here runs the test command.
     roundSpace: undefined,
     terminal: "none",
   };
 }
 
-/** The commit the repository is on, which a refused call must leave where it is. */
-function headOf(tree: string): string {
-  return git(["rev-parse", "HEAD"], tree).trim();
-}
-
 /**
- * A git repository with two commits on it and the stand-in on `PATH` as `pi`.
- *
- * The repository carries its own identity, so that the commit the stand-in
- * attempts would really land if nothing refused it. A fixture whose commit
- * failed for want of a `user.email` would pass this test with the refusal
- * deleted. Two commits for the same reason: the reset the stand-in attempts
- * needs a commit to move back to.
+ * A git repository with the reviewed file committed, and the stand-in on `PATH`
+ * as `pi`, so a write that escaped shows in `git status`.
  */
 async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void> {
   const under = mkdtempSync(join(tmpdir(), "squiz-refused-"));
@@ -156,14 +139,11 @@ async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void>
   try {
     mkdirSync(join(tree, dirname(reviewedFile)), { recursive: true });
     writeFileSync(join(tree, ".gitignore"), ".squiz/\n");
-    writeFileSync(join(tree, reviewedFile), "export const nothing = 0;\n");
+    writeFileSync(join(tree, reviewedFile), reviewedContent);
     git(["init", "--quiet"], tree);
     git(["config", "user.name", "squiz fixture"], tree);
     git(["config", "user.email", "fixture@squiz.invalid"], tree);
     git(["config", "commit.gpgsign", "false"], tree);
-    git(["add", "--all"], tree);
-    git(["commit", "--quiet", "--message", "Read a thread's comments"], tree);
-    writeFileSync(join(tree, reviewedFile), reviewedContent);
     git(["add", "--all"], tree);
     git(["commit", "--quiet", "--message", "Add lastSaid"], tree);
 
@@ -213,7 +193,6 @@ const reviewer = `#!/usr/bin/env node
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
 
 const args = process.argv.slice(2);
 const after = (name) => {
@@ -237,7 +216,7 @@ const blocked = (reason) => ({
 async function review() {
   const extension = after("--extension");
   if (extension === undefined) give("the command line carries no extension");
-  // No depth grants a shell or a writer, so every call below stands for a
+  // No depth grants a writer, so every call below stands for a
   // grant that stopped being passed, which is what the refusal is there for.
 
   const tools = new Map();
@@ -293,16 +272,10 @@ async function review() {
   const named = args[args.length - 1] ?? "";
   const prompt = named.startsWith("@") ? fs.readFileSync(named.slice(1), "utf8") : undefined;
   if (prompt !== triesNothing) {
-    // The reset first, so that a commit which escaped lands somewhere other
-    // than where HEAD started and the repository reads as changed.
-    const reset = "git reset --soft HEAD~1";
-    attempt("bash", { command: reset }, () =>
-      execFileSync("sh", ["-c", reset], { cwd: process.cwd(), encoding: "utf8" }),
-    );
-    const commit = "git commit --allow-empty -m squiz-reviewer-escaped";
-    attempt("bash", { command: commit }, () =>
-      execFileSync("sh", ["-c", commit], { cwd: process.cwd(), encoding: "utf8" }),
-    );
+    attempt("edit", { path: ${JSON.stringify(reviewedFile)}, oldText: "length]", newText: "length - 1]" }, () => {
+      fs.writeFileSync(path.join(process.cwd(), ${JSON.stringify(reviewedFile)}), "edited\\n");
+      return "edited";
+    });
     attempt("write", { path: ${JSON.stringify(reviewedFile)}, content: "escaped" }, () => {
       fs.writeFileSync(path.join(process.cwd(), ${JSON.stringify(reviewedFile)}), "escaped\\n");
       return "written";

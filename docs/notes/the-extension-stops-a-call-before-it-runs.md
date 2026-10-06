@@ -30,7 +30,9 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
   primitive, so the two tools need nothing read out of their arguments. The
   commands are the ones that move `HEAD` while leaving the worktree as it was:
   `git commit`, `git commit --amend`, `git reset --soft`, `git checkout -B`,
-  `git update-ref` and `git push`.
+  `git update-ref` and `git push`. 2026-10-06: the six commands are no longer
+  refused, and no command line is read. No depth grants a shell, so no call the
+  reviewer makes carries one. `edit` and `write` are still refused by name.
 
 - **Read the line the way the shell splits it, in a function of its own that is
   tested on its own, and match a name only where a command runs.** A substring of
@@ -39,18 +41,20 @@ recheck-when: pi upgrades, pi changes the tool_call event, or pi changes what it
   the splitter honours the quoting rules, skips a comment, keeps an empty quoted
   word, and reads a short option's value written onto its flag. The subcommand is
   the first word after `git` that is not an option, and a listed flag counts
-  wherever it sits.
+  wherever it sits. 2026-10-06: removed with the command list.
 
 - **Say in the code, where the list is defined, that splitting a line into words
   is not a boundary.** It refuses a reviewer that is not trying to get around the
   list. A word the shell would build out of quoting or substitution is left alone,
   so `git "com"mit` and `git $(echo commit)` run, and so do a script file, an
   encoded string and `sh -c`. Escalating the matching is an arms race, and a
-  comment claiming more than the code delivers is worse than none.
+  comment claiming more than the code delivers is worse than none. 2026-10-06:
+  removed with the command list.
 
 - **Refuse a `bash` call whose command cannot be read, rather than running it.**
   The field the command arrives in is `pi`'s, and one it renames would leave every
   pattern matching nothing, which reads exactly like a reviewer that ran no git.
+  2026-10-06: removed with the command list.
 
 - **Count the refusals off the stream, by the text every refusal opens with.** A
   blocked call comes back as that call's own error result carrying the reason, so

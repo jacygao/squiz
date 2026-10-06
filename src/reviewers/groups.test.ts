@@ -560,8 +560,8 @@ type ShellOutput = {
 };
 
 /**
- * Run one command the way `pi` runs a shell tool: the prefix on the line before
- * it, the shell detached so that it leads its own group, and the record named in
+ * Run one command behind the prefix, on the line before it, with the shell
+ * detached so that it leads its own group, and the record named in
  * the environment.
  *
  * It waits for the shell's own exit rather than for its output to close, because

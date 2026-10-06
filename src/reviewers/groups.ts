@@ -1,12 +1,12 @@
 /**
- * The process groups of the shells the reviewer starts, recorded by the shells
- * themselves, and how a round reaches them when it ends.
+ * The process groups the test command leads, recorded by the shell that leads
+ * each one, and how a round reaches them when it ends.
  *
- * A reviewer CLI that starts each shell tool detached makes that shell a group
- * leader, so the round's own signal to the reviewer's group never reaches it.
- * The shell is told to write its own group identifier before it runs the command
- * it was given, which reaches a tool started in the last instant before the
- * reviewer exits: the line is written whatever happens next.
+ * `run_tests` starts the test command in a group of its own, so the round's own
+ * signal to the reviewer's group never reaches it. The shell leading that group
+ * writes its own group identifier before it runs the command, which reaches a
+ * run started in the last instant before the reviewer exits: the line is written
+ * whatever happens next.
  *
  * **A recorded identifier is not an identity.** The shell that wrote it exits
  * first and is reaped, and the number is then free for anything to hold. The
@@ -27,10 +27,10 @@
  * and the keeper cannot supply it: the keeper is in the group the `SIGTERM` went
  * to, and a keeper that answered it is gone by the second reading.
  *
- * The guard is against a stale number and against a record the reviewer garbled,
- * not against a reviewer that sets out to forge one. It cannot be: the record's
- * path is in the reviewer's own environment, and at the depth that grants a shell
- * the reviewer can write whatever it likes there.
+ * The guard is against a stale number and against a garbled record, not against
+ * a test command that sets out to forge one. It cannot be: the record's path is
+ * in the environment the test command runs with, and the command can write
+ * whatever it likes there.
  *
  * Nothing here throws. Every outcome is a value the caller reads, because the
  * round host has to record a result for every round it takes.
@@ -46,7 +46,7 @@ import { deadlineIn, type Deadline } from "./deadline.ts";
 /**
  * The variable naming the record, read by the prefix inside the shell.
  *
- * The harness puts it on the reviewer's environment and every shell the reviewer
+ * The harness puts it on the reviewer's environment and the shell `run_tests`
  * starts inherits it, so the prefix below carries no path of its own and is the
  * same text every round.
  */
@@ -74,7 +74,7 @@ export const KEEPER_VARIABLE = "SQUIZ_KEEPER";
 const KEEPER_SECONDS = 900;
 
 /**
- * The lines every shell runs before the command it was given.
+ * The lines the shell leading the test command's group runs before the command.
  *
  * `$$` is the shell's own identifier, and a shell started detached leads the
  * group that identifier names, so the first line records the group that holds
@@ -130,7 +130,7 @@ export type RoundSpace = {
    * never taken for a later round's, and it goes when the round ends.
    */
   readonly directory: string;
-  /** The file every shell the reviewer starts records the group it leads in. */
+  /** The file each run of the test command records the group it leads in. */
   readonly shellRecord: string;
   /**
    * What this round's keepers are called, which no other round uses.
@@ -193,8 +193,8 @@ export function discardRoundSpace(space: RoundSpace): void {
  * As much of the record as is read.
  *
  * More than this is more identifiers than a system has process slots, so a file
- * longer than it was written by something other than the shells of one round.
- * The bound is what keeps a record the reviewer filled from being read into
+ * longer than it was written by something other than one round's runs.
+ * The bound is what keeps a record something else filled from being read into
  * memory whole.
  */
 const RECORD_LIMIT = 1024 * 1024;
@@ -400,7 +400,7 @@ type Membership =
 /**
  * How many groups one `ps` is asked about.
  *
- * A round's shells number in the tens, so the batching is for a record that
+ * A round's runs number in the tens, so the batching is for a record that
  * holds more identifiers than an argument list can carry rather than for an
  * ordinary round.
  */

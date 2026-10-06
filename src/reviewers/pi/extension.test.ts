@@ -257,14 +257,14 @@ test("finishing the review is answered, and asks for nothing of its own", async 
  * The one assertion that tells a handler which is never reached from a round
  * where the reviewer tried nothing. Both produce a clean round and no refusals.
  */
-test("the extension subscribes a handler that refuses a commit", () => {
-  const refused = subscribedHandler()({ toolName: "bash", input: { command: "git commit -m x" } });
-  assert.equal(refused?.block, true, "the subscribed handler let a commit through");
-  assert.match(refused?.reason ?? "", /changes what the coding agent commits/u);
+test("the extension subscribes a handler that refuses a write", () => {
+  const refused = subscribedHandler()({ toolName: "write", input: { path: "src/a.ts", content: "x" } });
+  assert.equal(refused?.block, true, "the subscribed handler let a write through");
+  assert.match(refused?.reason ?? "", /changes the code you are reviewing/u);
 });
 
-test("the subscribed handler lets a command nothing objects to through", () => {
-  assert.equal(subscribedHandler()({ toolName: "bash", input: { command: "npm test" } }), undefined);
+test("the subscribed handler lets a call nothing objects to through", () => {
+  assert.equal(subscribedHandler()({ toolName: "read", input: { path: "src/a.ts" } }), undefined);
 });
 
 test("every call describes itself to the reviewer", () => {
@@ -324,11 +324,11 @@ test("a report the call refused is recorded with its refusal, as one that ran", 
 test("a call stopped before it ran is recorded with its refusal", (t) => {
   const reports = reportsFile(t);
   const handler = subscribedHandler(reports);
-  const refused = handler({ toolName: "bash", input: { command: "git push" } });
-  handler({ toolName: "bash", input: { command: "npm test" } });
+  const refused = handler({ toolName: "edit", input: { path: "src/a.ts" } });
+  handler({ toolName: "read", input: { path: "src/a.ts" } });
 
   assert.deepEqual(linesIn(reports), [
-    { type: "refused", call: "bash", reason: refused?.reason, stopped: true },
+    { type: "refused", call: "edit", reason: refused?.reason, stopped: true },
   ]);
 });
 
@@ -407,7 +407,7 @@ test("the lines are in the order the reviewer did things", async (t) => {
   const handler = onlyHandler(extension, "tool_call") as Handler;
 
   message({ type: "message_end", message: assistantMessage });
-  handler({ toolName: "bash", input: { command: "git commit -m x" } });
+  handler({ toolName: "write", input: { path: "src/a.ts", content: "x" } });
   await toolOf(extension, REPORT_FINDING).execute("call_2", lineFinding);
   message({ type: "message_end", message: { ...assistantMessage, stopReason: "stop" } });
   await toolOf(extension, FINISH_REVIEW).execute("call_3", {});
@@ -443,8 +443,8 @@ test("a finish that cannot be recorded is refused", async (t) => {
 /** The call is stopped either way, and what the reviewer reads still opens as a refusal. */
 test("a refusal that cannot be recorded still refuses, and says it was not recorded", (t) => {
   const refused = subscribedHandler(unwritable(t))({
-    toolName: "bash",
-    input: { command: "git push" },
+    toolName: "edit",
+    input: { path: "src/a.ts" },
   });
   assert.equal(refused?.block, true);
   assert.match(refused?.reason ?? "", /^squiz refused this call: /u);

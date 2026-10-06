@@ -737,10 +737,10 @@ test("at deep the reviewer is handed the round's snapshot, test command, scratch
 
 test("what the adapter puts on the environment reaches the reviewer", async () => {
   await inATree(async (tree) => {
-    const running = reviewer(reporting("process.env.PI_CODING_AGENT_DIR"));
+    const running = reviewer(reporting("process.env.AN_ADAPTER_SETTING"));
     const adapter: Adapter = {
       ...running.adapter,
-      confine: () => ({ outcome: "prepared", environment: { PI_CODING_AGENT_DIR: "/somewhere" } }),
+      confine: () => ({ outcome: "prepared", environment: { AN_ADAPTER_SETTING: "/somewhere" } }),
     };
     assert.equal(headlineOf(await runRound(adapter, atDeep(tree), 10)), "/somewhere");
   });
@@ -1275,8 +1275,7 @@ function obedient(tree: string): string {
  * A reviewer that starts a tool through a shell of its own group, waits for the
  * tool to be up, and then does what it is told.
  *
- * It is what a CLI that starts each shell tool detached leaves behind: the shell
- * leads a group the reviewer's own signal never reaches, and the lines the shell
+ * It is what a run of `run_tests` leaves behind: the shell leads a group the reviewer's own signal never reaches, and the lines the shell
  * runs first are what name it and hold its number.
  *
  * The shell runs the real prefix, so the group is recorded and held the way a

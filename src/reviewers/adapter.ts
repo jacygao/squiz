@@ -68,14 +68,11 @@ export type Invocation = {
    */
   readonly thinking: Thinking;
   /**
-   * The round's own space: where every shell the reviewer starts records the
-   * group it leads, and where the adapter writes whatever its CLI reads from a
-   * file.
+   * The round's own space: where each run of the test command records the
+   * group it leads.
    *
-   * `undefined` at a depth that grants no shell, where there is nothing to
-   * record and nothing to reach. It is the one thing that says so, and both the
-   * adapter and the round read it: an adapter that delivered the prefix anyway
-   * would have the reviewer writing to a record nothing reads.
+   * `undefined` at `read`, where nothing runs the test command and there is
+   * nothing to record and nothing to reach.
    */
   readonly roundSpace: RoundSpace | undefined;
   /**
@@ -242,12 +239,6 @@ export type Adapter = {
    * round calls it once, before the first process starts, and reports a failure
    * as a setup problem: a confinement that is not in place is not a round to run
    * anyway.
-   *
-   * **A CLI that starts each shell tool detached is told here to record the group
-   * that shell leads**, in `invocation.roundSpace`. Without that the round's
-   * signal to the reviewer's own group reaches none of those tools. An adapter
-   * whose CLI leaves its shells in the reviewer's group has nothing to deliver
-   * and adds nothing to the environment.
    */
   readonly confine: (invocation: Invocation) => Confinement;
   /**
