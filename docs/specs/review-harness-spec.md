@@ -957,9 +957,13 @@ against those, so it can name a different commit than it would in the coding
 agent's worktree. A full commit name or a revision from `HEAD` resolves alike in
 both.
 
-The repository's local config does not reach the snapshot either. A filter or
-`core.autocrlf` set there, and not in the user's own config, is not applied when
-the snapshot is checked out, as it would not be in a fresh clone.
+The repository's local config does not reach the snapshot either, as it would
+not reach a fresh clone. A setting made there and not in the user's own config
+is missing in the snapshot:
+
+- a filter or `core.autocrlf` is not applied when the snapshot is checked out;
+- a `user.name` and `user.email` are not there for a test command that commits,
+  and its commit fails where the user's own config has no identity either.
 
 **The path is `<temporary directory>/squiz-<uid>/<digest>-<number>/rounds/<k>/tree`:**
 

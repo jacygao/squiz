@@ -2947,6 +2947,11 @@ function movedIn(conclusion: RoundConclusion & { readonly outcome: "block" }): s
   return conclusion.confinement === undefined ? "" : (headMovedIn(conclusion.confinement) ?? "");
 }
 
+// The snapshot is a clone, which has none of the fixture repository's config,
+// so a commit in it names its author or fails wherever no global identity is set.
+const COMMITS_IN_THE_SNAPSHOT =
+  "git -c user.email=squiz@example.invalid -c user.name=Squiz -c commit.gpgsign=false commit --quiet --allow-empty --message moved";
+
 /** A reviewer that moved `HEAD` through its shell with `move`, and reviewed. */
 function movesHeadThenReviews(move: string, findings: readonly Finding[]): Reviewer {
   return { command: "/bin/sh", args: ["-c", move], parse: reviews({ findings }).parse };
@@ -2961,7 +2966,7 @@ test("a reviewer that committed in its snapshot is read as a move of HEAD", asyn
   const ran = await runInFixture({
     answers: TWO_ROUNDS,
     sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: movesHeadThenReviews("git commit --quiet --allow-empty --message moved", [
+    reviewer: movesHeadThenReviews(COMMITS_IN_THE_SNAPSHOT, [
       finding("The flag is never read"),
     ]),
     andThen: [{ reviewer: FIXES_IT }],
@@ -3297,7 +3302,7 @@ test("a failure comment lists the file the killed reviewer changed", async () =>
 function commitsThenHangs(cost: RoundCost): Reviewer {
   return {
     command: "/bin/sh",
-    args: ["-c", "git commit --quiet --allow-empty --message moved; sleep 30"],
+    args: ["-c", `${COMMITS_IN_THE_SNAPSHOT}; sleep 30`],
     parse: hangs(cost).parse,
   };
 }
