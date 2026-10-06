@@ -14,7 +14,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readlinkSync } from "node:fs";
+import { lstatSync, readdirSync, readlinkSync, statSync, type Stats } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
@@ -196,7 +196,7 @@ function readConfig(common: string, name: string, until?: Deadline): Read {
   // A config that is not there holds no keys, so one that appears or goes away is
   // named by the keys it holds.
   if (plain.stands.stands === "absent") return { read: true, stands: { ...plain.stands, keys: new Map() } };
-  if (!plain.stands.stands.startsWith("file:")) return plain;
+  if (!plain.stands.stands.includes("file:")) return plain;
   const listed = runGit(common, ["config", "--file", join(common, name), "--list", "-z"], {
     until,
     ranOut: RAN_OUT,
@@ -300,13 +300,29 @@ function readTree(
 }
 
 /**
- * What stands at one path, or `null` where the deadline passed inside it. A link
- * is read rather than followed, and only a regular file is opened, because
- * opening a pipe waits for a writer that may never come.
+ * What stands at one path, or `null` where the deadline passed inside it.
+ *
+ * A link is both read and followed, because git reads a linked config or hook
+ * through its link, and what it points at can change while the link does not.
+ * Only a regular file is opened, because opening a pipe waits for a writer that
+ * may never come.
  */
 function standsAt(path: string, until?: Deadline): string | null {
   const entry = lstatSync(path);
-  if (entry.isSymbolicLink()) return `link:${digestOf(readlinkSync(path, "buffer"))}`;
+  if (!entry.isSymbolicLink()) return contentOf(path, entry, until);
+  const link = `link:${digestOf(readlinkSync(path, "buffer"))}`;
+  let target: Stats;
+  try {
+    target = statSync(path);
+  } catch (cause) {
+    if (isMissing(cause)) return `${link} absent`;
+    throw cause;
+  }
+  const content = contentOf(path, target, until);
+  return content === null ? null : `${link} ${content}`;
+}
+
+function contentOf(path: string, entry: Stats, until?: Deadline): string | null {
   if (entry.isFile()) {
     const hashed = hashOfFile(path, until);
     return hashed === null ? null : `file:${hashed}`;

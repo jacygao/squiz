@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, realpathSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -274,6 +274,22 @@ test("a subsection replaced under the same value is named beside another key tha
         { file: "config", key: "core.hookspath" },
         { file: "config", key: "url.*.insteadof" },
       ],
+    });
+  });
+});
+
+// Git reads a linked config through its link, so what the link points at is
+// what is compared.
+test("a key set through a linked config is named, though the link itself is unchanged", async () => {
+  await withSnapshot(async (repository) => {
+    await writeFile(join(repository.common, "agent-config"), "[squiz]\n\tkept = one\n", "utf8");
+    await symlink(join(repository.common, "agent-config"), join(repository.common, "config.worktree"));
+    const comparison = await around(repository, () =>
+      appendFile(join(repository.common, "agent-config"), "[core]\n\thooksPath = .husky/_\n", "utf8"),
+    );
+    assert.deepEqual(comparison, {
+      outcome: "changed",
+      changes: [{ file: "config.worktree", key: "core.hookspath" }],
     });
   });
 });
