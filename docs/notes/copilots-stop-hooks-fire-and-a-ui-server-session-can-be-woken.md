@@ -31,11 +31,10 @@ idle:
 ## Decisions
 
 - **Let the plugin's own `Stop` and `SubagentStop` registrations serve Copilot,
-  and have both queue and exit 0, as under Claude Code.** Copilot loads the
-  plugin's `hooks/hooks.json` under `--plugin-dir`, as
-  `copilot-loads-the-plugin-directory-but-leaves-bin-off-path.md` records. Its
-  `Stop` fired on every `agentStop` and its `SubagentStop` on every
-  `subagentStop`, with Claude Code's payload shape. Copilot waits for a hook
+  and have both queue and exit 0, as under Claude Code.** Copilot loads a
+  plugin's `hooks/hooks.json` under `--plugin-dir`, as it is. Its `Stop` fired
+  on every `agentStop` and its `SubagentStop` on every `subagentStop`, with
+  Claude Code's payload shape. Copilot waits for a hook
   before it goes idle, so the hook must return as soon as it has queued.
 - **Take the owner and the subagent from the same fields as under Claude Code.**
   On `SubagentStop`, `session_id` was the parent session's id and `agent_id` was
