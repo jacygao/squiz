@@ -158,11 +158,10 @@ A line typed with `herdr pane run` into a tab made the moment before:
 | Copilot's line for this round, 1.7 KB | no; the screen shows it cut near byte 1024 |
 | the same 1.7 KB line, typed into a pane open for some seconds | yes |
 
-### What § 4 lists as not established
+### Two earlier unknowns this run settled
 
-The run measured two of the items under § 4 The Copilot adapter, Not
-established. The charter governed a model other than `gpt-5-mini`, and Copilot
-ran detached with `/dev/null` as standard input. The spec still lists both.
+The charter governed a model other than `gpt-5-mini`, and Copilot ran detached
+with `/dev/null` as standard input.
 
 ### What Copilot wrote into `COPILOT_HOME`
 

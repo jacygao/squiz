@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.82 (draft)
+**Version:** 0.83 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1219,8 +1219,7 @@ which leaves the round thinking at the level those settings hold.
 ### The Copilot adapter
 
 The adapter for the GitHub Copilot CLI, which a project chooses with
-`"reviewer": "copilot"`. It grants depth `read` alone. What `deep` would need
-from it is the last part of this section.
+`"reviewer": "copilot"`. It grants depth `read` alone, as The grant sets out.
 
 #### The command line
 
@@ -1264,6 +1263,8 @@ command substitution would otherwise drop, and `${prompt%.}` takes the `.` off
 again, so Copilot is handed the file's bytes exactly. The quotes keep it one
 word and expand nothing inside it. Where the file cannot be read, Copilot is not
 started. No newline from the prompt reaches the line a Herdr pane's shell reads.
+The prompt must fit in one argument, which Linux limits to 128 KiB, and nothing
+here handles a prompt longer than that.
 
 **The charter reaches Copilot's system prompt as a custom agent's
 instructions.** `confine` writes the agent file
@@ -1281,8 +1282,7 @@ description: Reviews a pull request for squiz.
 `--agent squiz-reviewer` chooses it, and Copilot puts its body in the system
 prompt as `<agent_instructions>`, under a preamble telling the model to follow
 them. A tree's own agent of the same name, in `.github/agents/`, loses to the
-one in `COPILOT_HOME`. The reporting server is handed no charter, so its answer
-to `initialize` carries no instructions.
+one in `COPILOT_HOME`.
 
 **The usage reaches the report file only where Copilot exits 0 by itself and
 wrote a usage file.** The file is several lines of JSON. The first `&&` reads it
@@ -1290,9 +1290,8 @@ into `usage` with its newlines taken out, and fails where there is no file to
 read. The second appends it as one usage line, written by one `printf`. Copilot
 has stopped the reporting server by then, so nothing else is writing the file.
 
-**Copilot runs with `-p` in a pane and detached alike.** In a pane it prints
-each call and its answer as text, then its usage, and exits by itself once the
-reviewer's last message is written. `-i` is never used: it waits at its prompt
+**Copilot runs with `-p` in a pane and detached alike.** In a pane it exits by
+itself once the reviewer's last message is written. `-i` is never used: it waits at its prompt
 once the work is done, and no flag or extension ends it. Detached, the round
 hands the shell `/dev/null` as standard input, as it does `pi`, and Copilot
 inherits it.
@@ -1321,9 +1320,10 @@ the model Copilot runs. Nothing is written into the adapter's `COPILOT_HOME` for
 it. Where the round host's own environment already carries a `COPILOT_MODEL`,
 that is the user's default, and `confine` returns it in place of the setting, so
 that a pane, which does not inherit the host's environment, runs it too. A
-`settings.json` that cannot be read as JSON fails `confine`. Where the user has
-neither, the round runs on whatever Copilot falls back to. The later `model`
-setting maps to the same variable.
+`settings.json` that is there and cannot be read, or does not hold a JSON object,
+fails `confine`. Where the user has neither, the round runs on whatever Copilot
+falls back to, and nothing makes sure that is a different model from the coding
+agent's, as § 2 requires. The later `model` setting maps to the same variable.
 
 #### Keeping the project and the user out
 
@@ -1364,11 +1364,18 @@ servers and hooks are code that would run with the round's environment.
 
 The reporting calls are named `<server>-<call>` under `--available-tools`, so
 the grant carries `squiz-report_finding`, `squiz-report_verdict` and
-`squiz-finish_review`. The model may be shown a granted tool under another name,
-as `grep` is shown as `rg` to some models, and the grant still holds it.
+`squiz-finish_review`.
 
 At `read` the grant is the whole of the confinement, as Confinement sets out.
 Nothing is refused by pattern, so the run's refusals are always zero.
+
+`deep` is not granted until the adapter can do two things it cannot yet. Copilot
+runs each shell call in a session of its own, so each shell would have to record
+the group it leads. Copilot's nearest to `pi`'s settings line is `--bash-env`,
+which enables `BASH_ENV`, and whether bash reads that file under `--norc
+--noprofile` is not measured. A call `--deny-tool` refuses is recorded in
+Copilot's own event stream and never in the report file, so the round would
+count none of the refusals.
 
 #### The reporting server
 
@@ -1382,9 +1389,7 @@ extension does. It writes the same lines to the report file that
 `SQUIZ_REPORTS` names, so the round reads the file as it reads `pi`'s.
 
 **The server applies the report checks to every call, because Copilot validates
-none.** Copilot hands the server the arguments exactly as the model sent them:
-a severity outside the schema's `enum`, a missing `headline`, a `line` written as
-the string `"12"`. The checks refuse each one, and the server answers with
+none**, as Adapters sets out. It answers a call the checks refuse with
 `isError: true` and the refusal as its text. Copilot hands that to the model as
 the call's own error, and the model can make the call again. Nothing converts an
 argument first, so the value a report records is always what the model sent.
@@ -1393,15 +1398,12 @@ The server exits when its standard input closes, and on `SIGTERM` and `SIGHUP`.
 Copilot sends it `SIGTERM` as it exits, and `SIGHUP` where a signal reached
 Copilot's own pid rather than its group.
 
-The report file carries no assistant message's usage line while the run goes
-on, because Copilot reports no usage per call.
-
 #### How the run ends and is read back
 
-**Copilot exits by itself once the reviewer's last message is written**, whether
-or not the reviewer finished its review. The finish in the report file is what
-says it did. A run that exits with no finish recorded is a review that stopped
-without finishing, as § 7 sets out, unless it reached no model at all.
+**Copilot exits by itself whether or not the reviewer finished its review.** The
+finish in the report file is what says it did. A run that exits with no finish
+recorded is a review that stopped without finishing, as § 7 sets out, unless it
+reached no model at all.
 
 **The shell records what the run spent once Copilot has exited 0.** It appends
 the usage file Copilot wrote to the report file, whole, as one usage line:
@@ -1419,16 +1421,15 @@ The adapter's read takes three figures from that line:
 | Messages | The sum, over every model, of `requests.count`. |
 
 A Copilot round has no dollar figure. AI credits are shown where `totalNanoAiu`
-is there. A usage line whose `usage` carries no token counts the read can sum is
-a plan that reports no usable cost: the round records no cost for it, and reads
-the rest of the line as the table below does.
+is there. A usage line with no model in `modelMetrics`, or with a model that
+lacks `inputTokens` or `outputTokens`, reports no usable cost: the round records
+no cost for it, and reads the rest of the line as the table below does.
 
 Where Copilot could not be started at all, the shell exits 127 having written
 nothing to the report file, and its stderr says `copilot` was not found.
 Detached, the round adds that stderr to the reason, as it does for any reviewer
 whose run completed no message. In a pane, stderr is the screen, and the reason
-names no cause. Where Copilot exits non-zero, or writes no usage file, nothing is
-appended. A run whose model provider refused it exits 1, with the provider's
+names no cause. A run whose model provider refused it exits 1, with the provider's
 message on stderr, so it too is read as completing no message.
 
 **What the read concludes:**
@@ -1476,50 +1477,6 @@ identifier from there, and the round writes the command that resumes it to
 ```
 COPILOT_HOME=.squiz/41/rounds/2/session copilot --resume=99b4a257-0666-4e1f-a9a2-94d9c79b14be
 ```
-
-The pane prints the same identifier on its `Resume` line before it closes.
-
-#### Not established
-
-These were not measured:
-
-- **What model Copilot falls back to** where `COPILOT_MODEL` is not set. § 2
-  requires the reviewer to run a different model from the coding agent, and
-  nothing here makes sure of it.
-- **Whether the charter governs a model other than `gpt-5-mini`**, given as an
-  agent's instructions.
-- **Whether every model takes every `--reasoning-effort` level**, and what
-  Copilot does with one a model does not.
-- **A prompt the size of one argument.** Linux limits a single argument to
-  128 KiB, and a prompt carrying many threads can be longer.
-- **What a run reports when GitHub's own routing refuses it.** Only a refusal
-  by a stand-in provider was run.
-- **Whether `reasoningTokens` is part of `outputTokens`**, as it is in `pi`.
-- **Whether the resume line resumes from the coding agent's worktree**, after
-  the snapshot is gone, and whether it opens the folder-trust dialog there.
-- **Copilot detached with `/dev/null` as standard input, and Copilot in a Herdr
-  pane.** The pane runs were in tmux.
-
-**`deep` waits for M11, and needs two things this section does not have.**
-
-- **A record of each shell's group.** Copilot runs each shell call as
-  `/bin/bash --norc --noprofile -c '<command>'`, leading a session of its own,
-  so the round's signal to the reviewer's group never reaches it. Copilot
-  signals its shells as it exits, and that is all that does: a shell that ignores
-  `SIGTERM` and `SIGHUP` outlives Copilot, and so does every shell after
-  `SIGKILL`. Copilot's nearest to `pi`'s shell prefix is `--bash-env`, which
-  enables `BASH_ENV`. Whether bash reads that file under `--norc --noprofile` is
-  not measured.
-- **Refusals the round can count.** `--deny-tool='shell(git commit)'` refuses a
-  git subcommand wherever it is the command, with git's options before it and
-  inside a compound line, a subshell or a command substitution. A flag needs
-  the `:*` form, as in `shell(git reset --soft:*)`, and `shell(git checkout -B)`
-  matches nothing, so `git checkout` would be refused whole. `env git commit`,
-  `sh -c 'git commit'` and `git "com"mit` each run, and `git switch -C` matches
-  none of the patterns. A refusal reaches the model as the call's own error, with
-  `"code": "denied"`, in Copilot's event stream and in
-  `session-state/<session id>/events.jsonl`. It never reaches the report file,
-  so the round would count none of them.
 
 ### Charter
 
