@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether the Copilot adapter reviews a real pull request as it specifies, detached and in a Herdr pane, and whether the charter governs the user's default model; § 5 — the summary's cost line for a Copilot review"
+settles: "§ 4 — whether the Copilot adapter reviews a real pull request as it specifies when detached, whether a Copilot round starts in a Herdr pane, and whether the charter governs the user's default model; § 5 — the summary's cost line for a Copilot review"
 issue: 465
 recorded: 2026-10-06
 versions: { claude-code: 2.1.290, coding-agent: claude-opus-5-5, copilot: 1.0.92, reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, squiz: 9dccf87 }
