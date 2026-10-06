@@ -63,13 +63,21 @@ showed something the successful one did not.
 
 ## Needs your input
 
+- **Whether run 7 is enough, given that its reviewer ran the coding agent's
+  model.** § 2 requires the reviewer to run a different model from the coding
+  agent. Both ran `gpt-6-astra`, the user's default, which the Copilot adapter
+  takes for the reviewer. Run 7 shows the loop the session ran, not a review
+  by a second model. Recommended: accept it for M13, whose criterion is about
+  what the coding agent does, and record that nothing makes a Copilot reviewer
+  differ from a Copilot coding agent on the same default model.
 - **Whether § 9 should say that the skill reaches only some Copilot models.**
-  Under the same setup, `gpt-5-mini` (runs 3 and 5) and `claude-haiku-4.5`
-  (run 6) opened their pull requests and stopped. They never loaded the skill
-  and never ran `squiz`. The hook's round then ran with nobody to read its
-  result. Recommended: run the `AGENTS.md` route once each with `gpt-5-mini` and
-  `claude-haiku-4.5` before changing § 9, since that route puts the text in the
-  system prompt rather than leaving it to the model to load.
+  Under the same setup, `gpt-5-mini` in run 5 and `claude-haiku-4.5` in run 6
+  opened their pull requests and stopped. They never loaded the skill and never
+  ran `squiz`. The hook's round then ran with nobody to read its result. Run 3,
+  also `gpt-5-mini`, opened no pull request, so it did not reach the point where
+  the skill applies. Recommended: run the `AGENTS.md` route once each with
+  `gpt-5-mini` and `claude-haiku-4.5` before changing § 9, since that route puts
+  the text in the system prompt rather than leaving it to the model to load.
 - **#588: a `squiz review` straight after a reply and a push waited out its
   540-second deadline with no round running.** In run 7 the session chained
   `squiz reply`, `git push` and `squiz review 20` in one shell call. The reply's
@@ -107,39 +115,21 @@ that does not name squiz, and a committed `.gitignore` listing `.squiz/`.
 
 ### The runs
 
-| Run | Coding model | Pull request | Skill and `squiz review` | Review | Session AI credits | Reviewer AI credits |
-|---|---|---|---|---|---|---|
-| 1 | `gpt-6-astra`, `medium` | #15 | loaded, ran it | exit 0, no findings; the session had fixed the defect | 60.39 | 18.09 |
-| 2 | `gpt-6-astra`, `medium` | #16 | loaded, ran it | exit 0, no findings; the session had fixed the defect | 55.32 | 20.65 |
-| 3 | `gpt-5-mini` | none: `gh pr create --web` | neither | none | 1.46 | — |
-| 4 | `gpt-6-astra`, `medium` | #17 | loaded, ran it | exit 0, no findings; the session worked around the defect | 49.02 | 17.91 |
-| 5 | `gpt-5-mini` | #18 | neither | the hook's round: exit 2, one `medium` thread on the planted defect | 1.49 | 19.45 |
-| 6 | `claude-haiku-4.5` | #19 | neither | the hook's round: exit 2, three `medium` threads, the planted defect among them | 7.81 | 21.24 |
-| 7 | `gpt-6-astra`, `low` | #20 | loaded, ran it three times | exit 2, then 4, then 0 | 83.89 | 41.76 |
+The coding model of each, with the effort `session.start` recorded:
 
-The session's credits are `totalNanoAiu` over 10⁹, from `session.shutdown` in
-its `events.jsonl`. `medium` is the effort `session.start` recorded where none
-was set, and `low` was set with `--reasoning-effort low`. Each `gpt-6-astra` session was one
-premium request, and run 6 was 0.33. The reviewer's credits are from the summary
-comment. Run 7's two rounds used 66,937 and 57,873 tokens. Run 7's session used
-219,496 input tokens, 175,902 of them cache reads, and 2,364 output tokens.
+- Runs 1, 2 and 4: `gpt-6-astra` at `medium`, the default.
+- Run 7: `gpt-6-astra` at `low`, set with `--reasoning-effort low`.
+- Runs 3 and 5: `gpt-5-mini` at `medium`, set with `--model gpt-5-mini`.
+- Run 6: `claude-haiku-4.5`, set with `--model claude-haiku-4.5`.
 
-### Run 7, as the session's events record it
+The reviewer was `gpt-6-astra` in every round.
 
-| Time (UTC) | Call | Result |
-|---|---|---|
-| 08:53:43 | the prompt | |
-| 08:54:29 | `npm test`, `git commit`, `git push`, `gh pr create` in one call | PR #20 |
-| 08:54:39 | `skill` `squiz-review` | loaded from `<plugin>/skills/squiz-review/SKILL.md` |
-| 08:54:41 | `squiz review 20`, `initial_wait: 600` | exit 2 at 08:55:28: `Squiz reviewed PR #20 at 984d9d5: round 1 of 3, 1 new finding.` |
-| 08:55:37 | `apply_patch` on `test/cli.test.js` | |
-| 08:55:41 | `npm test`, `squiz reply PRRT_kwDOUP9_Ns6pY6Lt "<text>"`, `git commit`, `git push`, `squiz review 20` in one call | exit 4 at 09:04:46: `Squiz is reviewing PR #20 at 33e58f5 instead of 984d9d5.` |
-| 09:04:52 | `squiz review 20`, `initial_wait: 600` | exit 0 at 09:05:27: `Squiz reviewed PR #20 at 33e58f5: round 2 of 3, no new findings.` |
-| 09:05:31 | `agentStop` | queued nothing |
+### What it cost
 
-The reply posted was `Updated the CLI test runner to use fileURLToPath from
-node:url so checkout paths containing spaces are decoded correctly.` The session's
-last message ended `Squiz review is closed with no open findings.`
+Run 7's session spent 83.89 AI credits and one premium request, and its two
+review rounds 41.76 AI credits, 66,937 and 57,873 tokens. A session's credits
+are `totalNanoAiu` over 10⁹, in the `session.shutdown` event of its
+`events.jsonl`. The rounds' are in the summary comment.
 
 ### Setup
 
@@ -194,6 +184,9 @@ ends only when it is signalled. `SIGTERM` while it was idle made it write
 - **One successful run.** It was on `gpt-6-astra` at effort `low`. The three
   runs at `medium` had no finding to work, so whether a session at `medium`
   works one was not seen.
+- **The reviewer and the coding agent shared a model in every run on
+  `gpt-6-astra`**, against § 2. Only runs 5 and 6 had two models, and in
+  those no session worked the threads.
 - **Exit 3, and a disputed thread, were not reached.** The one thread worked was
   `low`, and the session took its suggested fix.
 - **The background wake was not exercised.** No session ran `squiz review` in
