@@ -60,7 +60,7 @@ recheck-when: git changes how worktree add checks out or how worktree remove del
   as not measured.** The time and disk part is settled here. What installing
   dependencies at `deep` adds is still open. Recommend narrowing both to that.
 
-  2026-10-05: settled. § 4 The snapshot tabulates these times.
+  2026-10-05: settled. The times are in Reference below.
 
   2026-10-06: what `deep`'s install adds is open as #496, and very large
   repositories as #358.
