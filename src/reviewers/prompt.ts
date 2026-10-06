@@ -1,7 +1,6 @@
 /**
  * The task prompt the reviewer is handed each round: the pull request under
- * review, the threads already on it, and the one command its tests are run
- * with.
+ * review, the threads already on it, and at `deep` what its tools are for.
  *
  * It sits above the adapters rather than inside one. Every adapter hands its
  * CLI the same prompt, so a second reviewer is a second command line and not a
@@ -39,11 +38,9 @@ export type UnderReview = {
 };
 
 /**
- * How the reviewer is to run the project's tests.
- *
- * The depth comes with the command because the two together decide whether it is
- * written into the prompt at all. Only `deep` grants a shell, and a command named
- * to a reviewer with no way to run it invites a finding that the tests fail.
+ * The configured test command, and the depth that decides whether the reviewer
+ * hears of it. Only `deep` grants `run_tests`, and a command named to a reviewer
+ * with no way to run it invites a finding that the tests fail.
  */
 export type TestCommand = {
   readonly depth: Depth;
@@ -70,7 +67,7 @@ export function composePrompt(underReview: UnderReview, tests: TestCommand): str
     `Head \`${pullRequest.headRef}\`, base \`${pullRequest.baseRef}\`.`,
     "## Description",
     described(pullRequest.description),
-    ...testSection(tests),
+    ...toolSection(tests),
     "## Diff",
     block(diff, "diff"),
     ...threadSections(threads),
@@ -78,32 +75,31 @@ export function composePrompt(underReview: UnderReview, tests: TestCommand): str
 }
 
 /**
- * The one command the reviewer may run the tests with, or nothing at all.
+ * What the `deep` tools are for, or nothing at `read`, where none is granted.
  *
- * It is handed over as the only command and not as a preference, because that is
- * the whole of what it is for: a runner invoked another way can rewrite what it
- * checks, and turn a failing test green by editing the code under review. A
- * reviewer that reads it as one option among several is back to inferring a
- * command, which is what naming one prevents.
- *
- * Nothing is carried where the project named no command, and the reviewer works
- * out how to run the tests as it does when nothing is configured. Nothing is
- * carried at `read` either, where there is no shell to run a command with.
+ * The reviewer is told to call `run_tests` and is shown the command it runs, so
+ * it knows what the call ran. It is not told to run the command itself: it has
+ * no shell, and a command it cannot run is one it can only describe.
  *
  * The command is text the project wrote, so it is fenced like the diff: what it
  * carries cannot close the block and read as a section of the prompt's own.
  */
-function testSection(tests: TestCommand): readonly string[] {
+function toolSection(tests: TestCommand): readonly string[] {
   if (tests.depth !== "deep") return [];
   const command = tests.command?.trim() ?? "";
   // A command of nothing but space names no command, and a block holding it
-  // would tell the reviewer to run a blank line.
-  if (command === "") return [];
+  // would show the reviewer a blank line.
+  const testing =
+    command === ""
+      ? ["No test command is configured, so `run_tests` has nothing to run."]
+      : [
+          "Call `run_tests` to run the tests. It takes no arguments, and runs the command the project configured, in the commit under review:",
+          block(command, "sh"),
+        ];
   return [
-    "## The test command",
-    "Run the tests with this command, and with no other:",
-    block(command, "sh"),
-    "It is the only test command to run. A runner invoked any other way may rewrite what it checks, which turns a failing test green by editing the code you are reviewing. So do not run a variant of this command, a single test out of it, or a command of your own.",
+    "## Tests and history",
+    ...testing,
+    "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
   ];
 }
 

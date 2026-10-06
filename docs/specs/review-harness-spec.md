@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.95 (draft)
+**Version:** 0.96 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -763,13 +763,30 @@ Five things are handed to it:
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
 
-**A configured test command reaches the reviewer in the prompt, and only at depth
-`deep`.** The prompt is the only channel a project's own text reaches the model
-through: the charter ships with the harness, and the command line is flags and
-tool names. It is named there as the command `run_tests` runs. `run_tests` itself
-reads the command from `SQUIZ_ROUND`, as Adapters sets out, and no tool the
-reviewer is granted reads a variable. At `read` the command is in neither,
-because no tool runs it.
+**At depth `deep`, the prompt tells the reviewer what the `deep` tools are for.**
+It carries this section between the description and the diff, with the
+configured test command fenced like the diff:
+
+````markdown
+## Tests and history
+
+Call `run_tests` to run the tests. It takes no arguments, and runs the command the project configured, in the commit under review:
+
+```sh
+npm test
+```
+
+Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.
+````
+
+Where no test command is configured, the paragraph and the command are replaced
+by "No test command is configured, so `run_tests` has nothing to run." The
+command is shown so that the reviewer knows what `run_tests` ran. The prompt is
+the only channel a project's own text reaches the model through: the charter
+ships with the harness, and the command line is flags and tool names.
+`run_tests` itself reads the command from `SQUIZ_ROUND`, as Adapters sets out,
+and no tool the reviewer is granted reads a variable. At `read` the prompt
+carries no such section, because none of these tools is granted.
 
 **There is no file-selection or budgeting stage.** The reviewer decides what to
 open, one read at a time.
