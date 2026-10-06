@@ -1,5 +1,5 @@
 /**
- * The `.squiz.json` loader: the six settings, their defaults and their ranges.
+ * The `.squiz.json` loader: the seven settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
  */
@@ -8,6 +8,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const configFileName = ".squiz.json";
+
+/** The reviewer CLIs a project can choose between. */
+export type Reviewer = "pi" | "copilot";
 
 /**
  * The two grants a reviewer can be given. A union of string literals stands
@@ -23,6 +26,7 @@ export type Depth = "read" | "deep";
 export type Thinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type Config = {
+  reviewer: Reviewer;
   // The round cap.
   rounds: number;
   // `deep` adds the shell.
@@ -42,6 +46,7 @@ export type Config = {
 
 // Every setting has a default, so a project that writes no file still runs.
 export const defaultConfig: Readonly<Config> = Object.freeze({
+  reviewer: "pi",
   rounds: 3,
   depth: "read",
   test: null,
@@ -66,9 +71,11 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["rounds", "depth", "test", "timeout", "tokens", "thinking"] as const;
+const settingNames = ["reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking"] as const;
 
-const settingList = `"rounds", "depth", "test", "timeout", "tokens" and "thinking"`;
+const settingList = `"reviewer", "rounds", "depth", "test", "timeout", "tokens" and "thinking"`;
+
+const reviewers = ["pi", "copilot"] as const;
 
 const depths = ["read", "deep"] as const;
 
@@ -136,6 +143,7 @@ function parse(source: string, path: string): Config {
   // is truthy. `0` is a value a person wrote, and it is refused as out of range
   // rather than replaced by the default.
   return {
+    reviewer: has(raw, "reviewer") ? reviewerOf(path, raw["reviewer"]) : defaultConfig.reviewer,
     rounds: has(raw, "rounds")
       ? wholeNumber(path, "rounds", raw["rounds"], 1, 8, "a whole number from 1 to 8")
       : defaultConfig.rounds,
@@ -191,14 +199,22 @@ function wholeNumber(
   return value;
 }
 
+function reviewerOf(path: string, value: unknown): Reviewer {
+  for (const reviewer of reviewers) {
+    if (value === reviewer) return reviewer;
+  }
+  throw new ConfigError(reject(path, "reviewer", value, `"pi" or "copilot"`));
+}
+
 function depthOf(path: string, value: unknown): Depth {
   for (const depth of depths) {
     if (value !== depth) continue;
     // `deep` grants the shell, the shell writes, and the comparison of tracked
     // files that detects such a write is not built. Refusing says so; loading
     // `read` in its place would leave a project believing its tests were being
-    // run when only files were being read. Deleting this branch is the whole of
-    // accepting `deep` again.
+    // run when only files were being read. It also refuses `deep` for Copilot,
+    // whose adapter grants nothing there, so accepting `deep` for `pi` must keep
+    // refusing it for `copilot`.
     if (depth === "deep") {
       throw new ConfigError(
         `${path}: "depth" is "deep", which is not supported yet: it grants the shell, and the comparison of tracked files that detects a write made through the shell is not built. Use "read".`,

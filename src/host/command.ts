@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "../config/config.ts";
 import { reportFailure } from "../hook/report.ts";
 import type { HookExit } from "../hook/trap.ts";
-import { pi } from "../reviewers/pi/adapter.ts";
+import { adapterFor } from "../reviewers/adapters.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
 import { runHost } from "./host.ts";
 
@@ -50,7 +50,7 @@ export async function hostCommand(args: readonly string[], directory: string): P
   await runHost({
     worktree: worktree.path,
     pullRequest,
-    round: { config, adapter: pi, charterFile, sessionEnvironment: process.env },
+    round: { config, adapter: adapterFor(config.reviewer), charterFile, sessionEnvironment: process.env },
   });
   return 0;
 }

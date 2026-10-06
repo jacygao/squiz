@@ -45,8 +45,9 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the six defaults", () => {
+test("an absent .squiz.json is not an error, and yields the seven defaults", () => {
   assert.deepEqual(load(null), {
+    reviewer: "pi",
     rounds: 3,
     depth: "read",
     test: null,
@@ -56,7 +57,7 @@ test("an absent .squiz.json is not an error, and yields the six defaults", () =>
   });
 });
 
-test("a .squiz.json with no keys yields the same six defaults", () => {
+test("a .squiz.json with no keys yields the same seven defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -69,9 +70,9 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "tokens": 400000, "thinking": "high"}`,
+      `{"reviewer": "copilot", "rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "tokens": 400000, "thinking": "high"}`,
     ),
-    { rounds: 5, depth: "read", test: "npm test", timeout: 90, tokens: 400_000, thinking: "high" },
+    { reviewer: "copilot", rounds: 5, depth: "read", test: "npm test", timeout: 90, tokens: 400_000, thinking: "high" },
   );
 });
 
@@ -150,6 +151,31 @@ test("depth is read, and anything else is refused", () => {
   rejection(`{"depth": ""}`);
 });
 
+test("reviewer is pi or copilot, and anything else is refused", () => {
+  assert.equal(load(`{"reviewer": "pi"}`).reviewer, "pi");
+  assert.equal(load(`{"reviewer": "copilot"}`).reviewer, "copilot");
+  rejection(`{"reviewer": "claude"}`);
+  rejection(`{"reviewer": "Copilot"}`);
+  rejection(`{"reviewer": "pi "}`);
+  rejection(`{"reviewer": ""}`);
+  rejection(`{"reviewer": null}`);
+});
+
+// A project that writes no reviewer is reviewed by pi, as every project was
+// before the setting existed.
+test("reviewer defaults to pi", () => {
+  assert.equal(load("{}").reviewer, "pi");
+  assert.equal(load(`{"rounds": 3}`).reviewer, "pi");
+});
+
+// The Copilot adapter grants nothing at `deep`, so the pair must never reach a round.
+test("depth deep is refused for copilot with the refusal every reviewer gets", () => {
+  // Each load is from its own temporary directory, so the path is left out.
+  const refusal = (contents: string): string =>
+    rejection(contents).message.replace(/^.*?\.squiz\.json: /u, "");
+  assert.equal(refusal(`{"reviewer": "copilot", "depth": "deep"}`), refusal(`{"depth": "deep"}`));
+});
+
 // The refusal is what stands between a project that asked for `deep` and a
 // reviewer holding a shell whose writes nothing detects.
 test("depth deep is refused, and the refusal says so rather than loading read", () => {
@@ -218,6 +244,8 @@ test("every refusal names the setting, the value given and what was expected", (
     given: string;
     expected: RegExp;
   }> = [
+    { contents: `{"reviewer": "claude"}`, setting: "reviewer", given: `"claude"`, expected: /"pi" or "copilot"/ },
+    { contents: `{"reviewer": 1}`, setting: "reviewer", given: "1", expected: /"pi" or "copilot"/ },
     { contents: `{"rounds": 12}`, setting: "rounds", given: "12", expected: /whole number from 1 to 8/ },
     { contents: `{"rounds": "3"}`, setting: "rounds", given: `"3"`, expected: /whole number from 1 to 8/ },
     { contents: `{"depth": "shallow"}`, setting: "depth", given: `"shallow"`, expected: /"read" or "deep"/ },
@@ -269,7 +297,7 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"rounds", "depth", "test", "timeout", "tokens" and "thinking"/);
+  assert.match(error.message, /"reviewer", "rounds", "depth", "test", "timeout", "tokens" and "thinking"/);
 });
 
 // What a project upgrading from the dollar bound meets. Silently ignoring it
