@@ -3387,11 +3387,36 @@ function setsTheHooksPathThenReviews(): Reviewer {
   };
 }
 
-test("at deep, a key set in the config the snapshot shares is named in the summary", async () => {
+/**
+ * A reviewer whose test command set `core.hooksPath` in the coding agent's
+ * repository by its path, which the snapshot's `origin` names.
+ */
+function setsTheRepositorysHooksPathThenReviews(): Reviewer {
+  return {
+    command: "/bin/sh",
+    args: ["-c", 'git config --file "$(git remote get-url origin)/config" core.hooksPath .husky/_'],
+    parse: reviews({}).parse,
+  };
+}
+
+test("at deep, a key the test command set from the snapshot stays in it and is not named", async () => {
   const ran = await runInFixture({
     config: { depth: "deep" },
     answers: POSTING,
     reviewer: setsTheHooksPathThenReviews(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
+  assert.deepEqual(ran.conclusion.confinement?.sharedConfig, { outcome: "unchanged" });
+  assert.doesNotMatch(summaryBody(ran), /git config or hooks/u);
+});
+
+test("at deep, a key set in the coding agent's repository by its path is named in the summary", async () => {
+  const ran = await runInFixture({
+    config: { depth: "deep" },
+    answers: POSTING,
+    reviewer: setsTheRepositorysHooksPathThenReviews(),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
@@ -3402,11 +3427,11 @@ test("at deep, a key set in the config the snapshot shares is named in the summa
   );
 });
 
-test("at read, the config the snapshot shares is not compared and the summary has no notes", async () => {
+test("at read, the coding agent's config is not compared and the summary has no notes", async () => {
   const ran = await runInFixture({
     config: { depth: "read" },
     answers: POSTING,
-    reviewer: setsTheHooksPathThenReviews(),
+    reviewer: setsTheRepositorysHooksPathThenReviews(),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
