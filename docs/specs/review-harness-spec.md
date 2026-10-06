@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 0.85 (draft)
+**Version:** 0.86 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -556,6 +556,15 @@ request it writes the line under step 1 naming the branch and the directory.
 A subagent runs inside its parent's process and has no socket of its own, so the
 socket in a `SubagentStop` hook's environment is the parent's.
 
+**GitHub Copilot CLI runs the same two registrations from the plugin, and the
+hook records no socket under it.** Copilot fires the plugin's `Stop` and
+`SubagentStop` with Claude Code's payload fields, and the owner and the subagent
+come from the same fields as in the table. A firing is Copilot's where the
+hook's environment carries `COPILOT_CLI` with any value but the empty string.
+Copilot puts no socket in a hook's environment, so a
+`CLAUDE_CODE_MESSAGING_SOCKET` found there belongs to a Claude Code session that
+started Copilot, and the hook records no socket from it.
+
 The `Stop` registration runs in the background, so the session does not wait on
 it. After it has queued, it stays to deliver a note, as The report sets out. The
 `SubagentStop` hook returns as soon as it has queued.
@@ -573,6 +582,16 @@ dispatch, for a state already queued or reviewed, queues nothing.
 an interactive session, Claude Code fires several of them after a turn ends, each
 with a new `agent_id`, the parent's `session_id`, and no transcript. The hook
 does nothing for one: it resolves nothing, records no owner and queues nothing.
+
+**A `Stop` firing whose `session_id` is not the session its `transcript_path`
+names is a subagent's turn.** Copilot fires one when a subagent's turn ends, just
+before that subagent's `SubagentStop`. It carries the subagent's id as
+`session_id` and the parent's transcript, so read as it stands it would make the
+subagent the owner. The hook does nothing for one, as for an empty `agent_type`,
+and the `SubagentStop` that follows queues the work. Only a Copilot transcript
+path, `<COPILOT_HOME>/session-state/<session id>/events.jsonl`, names a session.
+Claude Code fires no `Stop` for a subagent, so its transcript path is not read,
+and a Claude Code `Stop` is never dropped by this rule.
 
 The hook's shell does not have the plugin's `bin/` on its `PATH`, so the
 registration names the binary through `${CLAUDE_PLUGIN_ROOT}`.

@@ -39,6 +39,8 @@ export async function runHook(call: HookCall): Promise<HookExit> {
     // Claude Code fires these after an interactive turn ends, with no subagent
     // behind them, so there is no work to queue a review of.
     if (read.outcome === "no subagent's work") return 0;
+    // The subagent's own SubagentStop follows, and queues its work.
+    if (read.outcome === "a subagent's turn") return 0;
     if (read.outcome === "unreadable") {
       reportFailure(`nothing was queued: ${read.reason}`);
       return 0;

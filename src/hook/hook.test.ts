@@ -311,6 +311,47 @@ test("a SubagentStop with an empty agent_type asks the trigger nothing and says 
   });
 });
 
+// Copilot's firings name the parent's transcript, whichever turn ended.
+const COPILOT_PARENT = "57444f75-0c1e-4d6b-9a2f-3b8e1d7c5a60";
+const COPILOT_SUBAGENT = "829422d1-6f3a-4b9e-8c2d-7e1f0a5b4c39";
+
+function copilotStopPayload(sessionId: string): string {
+  return JSON.stringify({
+    hook_event_name: "Stop",
+    session_id: sessionId,
+    timestamp: "2026-10-06T05:34:54.854Z",
+    cwd: "/work/repo",
+    transcript_path: `/Users/someone/.copilot/session-state/${COPILOT_PARENT}/events.jsonl`,
+    stop_reason: "end_turn",
+    stop_hook_active: false,
+  });
+}
+
+test("a Copilot Stop queues the state owned by the session, and records no socket its environment carries", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: copilotStopPayload(COPILOT_PARENT),
+      environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET },
+    });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(recordsIn(place), [{ head: HEAD, activity: null, owner: { sessionId: COPILOT_PARENT }, status: "queued" }]);
+  });
+});
+
+test("a Copilot Stop for a subagent's turn asks the trigger nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: copilotStopPayload(COPILOT_SUBAGENT),
+      environment: { COPILOT_CLI: "1" },
+      trigger: { as: "recording" },
+    });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(reported(place), "", "the trigger was asked");
+  });
+});
+
 test("a payload that cannot be read asks the trigger nothing, exits 0, and says why in one line", async () => {
   await withPlace(async (place) => {
     for (const payload of ["", "{not json", subagentStopPayload({ agent_id: "" })]) {

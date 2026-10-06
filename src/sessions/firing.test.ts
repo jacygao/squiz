@@ -207,3 +207,77 @@ test("an empty payload is unreadable", () => {
     assert.match(reasonFrom(readFiring(text, WITH_SOCKET)), /no payload/u);
   }
 });
+
+// Copilot CLI 1.0.92's firings through the plugin's Claude-format registration,
+// as logged. The ids keep the logged prefixes.
+const COPILOT_PARENT = "57444f75-0c1e-4d6b-9a2f-3b8e1d7c5a60";
+const COPILOT_SUBAGENT = "829422d1-6f3a-4b9e-8c2d-7e1f0a5b4c39";
+const COPILOT_TRANSCRIPT = `/Users/someone/.copilot/session-state/${COPILOT_PARENT}/events.jsonl`;
+
+/** A Copilot hook's environment, where Copilot was started inside a Claude Code session that passed its socket down. */
+const UNDER_COPILOT: HookEnvironment = {
+  COPILOT_CLI: "1",
+  COPILOT_CLI_BINARY_VERSION: "1.0.92",
+  CLAUDE_CODE_MESSAGING_SOCKET: SOCKET,
+};
+
+/** A Copilot `Stop`, which names the parent's transcript whichever turn ended. */
+function copilotStopText(sessionId: string): string {
+  return JSON.stringify({
+    hook_event_name: "Stop",
+    session_id: sessionId,
+    timestamp: "2026-10-06T05:34:54.854Z",
+    cwd: "/work/repo",
+    transcript_path: COPILOT_TRANSCRIPT,
+    stop_reason: "end_turn",
+    stop_hook_active: false,
+  });
+}
+
+function copilotSubagentStopText(): string {
+  return JSON.stringify({
+    hook_event_name: "SubagentStop",
+    session_id: COPILOT_PARENT,
+    timestamp: "2026-10-06T05:34:55.034Z",
+    cwd: "/work/repo",
+    transcript_path: COPILOT_TRANSCRIPT,
+    agent_id: COPILOT_SUBAGENT,
+    agent_type: "explore",
+    agent_name: "explore",
+    last_assistant_message: SECRET,
+    stop_reason: "end_turn",
+  });
+}
+
+test("under Copilot, a Stop for the session's own turn is owned by the session, with no socket", () => {
+  assert.deepEqual(firingIn(readFiring(copilotStopText(COPILOT_PARENT), UNDER_COPILOT)), {
+    event: "Stop",
+    owner: { sessionId: COPILOT_PARENT },
+  });
+});
+
+test("under Copilot, a SubagentStop is owned by the parent session, with no socket, and names the subagent", () => {
+  assert.deepEqual(firingIn(readFiring(copilotSubagentStopText(), UNDER_COPILOT)), {
+    event: "SubagentStop",
+    owner: { sessionId: COPILOT_PARENT },
+    subagent: COPILOT_SUBAGENT,
+  });
+});
+
+test("a Copilot Stop whose session_id is not its transcript's session is a subagent's turn", () => {
+  // Copilot fires it for a subagent's turn just before that subagent's
+  // SubagentStop, which is the firing that names the work.
+  for (const environment of [UNDER_COPILOT, {}]) {
+    assert.deepEqual(readFiring(copilotStopText(COPILOT_SUBAGENT), environment), { outcome: "a subagent's turn" });
+  }
+});
+
+test("a Claude Code Stop is read whatever session its transcript's file name gives", () => {
+  const other = "0f1e2d3c-4b5a-6978-8a9b-acbdcedf0011";
+  for (const path of [`/Users/someone/.claude/projects/-work-repo/${other}.jsonl`, `/transcripts/${other}/events.jsonl`]) {
+    assert.deepEqual(firingIn(readFiring(stopText({ transcript_path: path }), WITH_SOCKET)), {
+      event: "Stop",
+      owner: { sessionId: SESSION_ID, socket: SOCKET },
+    });
+  }
+});
