@@ -3025,8 +3025,8 @@ copilot --experimental --plugin-dir <plugin directory>
 
 Each writes `"experimental": true` to `<COPILOT_HOME>/settings.json`, and every
 later session of that user starts with experimental features on, with or without
-the flag. `copilot --no-experimental` and `/experimental off` each write
-`false`, which turns them off for every later session. The same key in a repository's
+the flag. `copilot --no-experimental` writes `false`, which turns them off for
+every later session. The same key in a repository's
 `.github/copilot/settings.json` turns nothing on. Experimental features turn on
 more than extensions, for every session of that user; `/experimental show`
 lists them. Without them, a Copilot session works as before, and a note for it
