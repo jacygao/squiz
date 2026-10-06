@@ -9,7 +9,8 @@
  *
  * The grant is the confinement. Copilot hides from the model every tool
  * `--available-tools` leaves out, so `--available-tools` is on every line, and
- * nothing is granted at `deep`.
+ * no shell tool is on it at either depth. The `deep` tools are the reporting
+ * server's, which finds the round's values on the environment it inherits.
  *
  * Nothing here runs a process.
  */
@@ -20,6 +21,7 @@ import { join, resolve } from "node:path";
 import type { Depth, Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
+import { deepToolNames } from "../deep-tools.ts";
 import { reportingTools } from "../reporting.ts";
 
 /** The custom agent whose instructions are the charter, which `confine` writes. */
@@ -37,9 +39,16 @@ export const serverFile = fileURLToPath(new URL("server.ts", import.meta.url));
  * `skill` is left out, which is what keeps the tree's skills away from the
  * reviewer, since they load whether or not the folder is trusted.
  */
+const readGrant: readonly string[] = Object.freeze([
+  "view",
+  "grep",
+  "glob",
+  ...reportingTools.map((call) => `${SERVER_NAME}-${call}`),
+]);
+
 export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze({
-  read: Object.freeze(["view", "grep", "glob", ...reportingTools.map((call) => `${SERVER_NAME}-${call}`)]),
-  deep: Object.freeze([]),
+  read: readGrant,
+  deep: Object.freeze([...readGrant, ...deepToolNames.map((name) => `${SERVER_NAME}-${name}`)]),
 });
 
 /** The file Copilot writes the run's usage into, in the session directory. */
@@ -47,19 +56,8 @@ export function usageFile(invocation: Invocation): string {
   return join(resolve(invocation.directory, invocation.sessionDirectory), "usage.json");
 }
 
-/**
- * Build the line for one round, for a reviewer in a pane or one with no
- * terminal.
- *
- * Throws at `deep`. The configuration refuses `deep` for Copilot before any
- * round starts, and `confine` refuses it first, so reaching this at `deep` is a
- * bug: the only line there is to build grants the reviewer what `read` does,
- * which is the adapter choosing a depth.
- */
+/** Build the line for one round, for a reviewer in a pane or one with no terminal. */
 export function argv(invocation: Invocation): CommandLine {
-  if (invocation.depth !== "read") {
-    throw new Error(`the Copilot adapter grants nothing at ${invocation.depth}`);
-  }
   const prompt = quoted(resolve(invocation.directory, invocation.promptFile));
   const reports = resolve(invocation.directory, invocation.reportsFile);
   const usage = quoted(usageFile(invocation));
@@ -81,7 +79,7 @@ export function argv(invocation: Invocation): CommandLine {
     `&& copilot -p "\${prompt%.}"`,
     `--agent ${AGENT_NAME}`,
     "--no-ask-user --allow-all-tools",
-    `--available-tools=${grants.read.join(",")}`,
+    `--available-tools=${grants[invocation.depth].join(",")}`,
     "--no-custom-instructions",
     "--disable-builtin-mcps",
     '--additional-mcp-config "$0"',

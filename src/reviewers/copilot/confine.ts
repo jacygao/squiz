@@ -27,10 +27,6 @@ import { AGENT_NAME } from "./argv.ts";
  * Copilot settings and default model are found.
  */
 export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv = process.env): Confinement {
-  if (invocation.depth !== "read") {
-    return { outcome: "failed", reason: `the Copilot adapter grants nothing at ${invocation.depth}` };
-  }
-
   const model = modelOf(environment);
   if (typeof model === "object") return { outcome: "failed", reason: model.problem };
 
