@@ -134,6 +134,20 @@ function adapterOf(scripts: { readonly inPane: string; readonly detached: string
   };
 }
 
+/** `adapter`, confining with `COPILOT_ALLOW_ALL` set to the empty string. */
+function confiningEmpty(adapter: Adapter): Adapter {
+  return { ...adapter, confine: () => ({ outcome: "prepared", environment: { COPILOT_ALLOW_ALL: "" } }) };
+}
+
+/** A stand-in in a pane that writes down its `COPILOT_ALLOW_ALL`, then reviews and finishes. */
+function noticingAllowAll(tree: string): string {
+  const file = JSON.stringify(join(tree, "allow-all.json"));
+  return [
+    `require("node:fs").writeFileSync(${file}, JSON.stringify(process.env.COPILOT_ALLOW_ALL ?? null));`,
+    finishingInAPane(join(tree, "note.json")),
+  ].join("\n");
+}
+
 /** `script` written beside the reports, for a stand-in that takes a file rather than `-e`. */
 function scriptFile(invocation: Invocation, script: string): string {
   const file = join(invocation.directory, "stand-in.cjs");
@@ -255,6 +269,21 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     assert.ok(place?.backend === "tmux", `the reviewer started in ${JSON.stringify(place)}`);
     assert.equal(place.identity.pid, note.pid, "the identity is not the reviewer's own");
     assert.ok(!server.windows().includes(place.window.id), "the reviewer's window is still open");
+  });
+
+  // The Copilot adapter turns trust off this way, and the server carries it on.
+  test("a variable the adapter sets empty reaches the reviewer in a window as set and empty", async (t) => {
+    const server = privateTmux(t);
+    server.tmux("set-environment", "-g", "COPILOT_ALLOW_ALL", "true");
+    const tree = treeFor(t);
+    const round = await runRound(
+      confiningEmpty(adapterOf({ inPane: noticingAllowAll(tree), detached: "process.exit(3)" })),
+      invocationIn(tree),
+      30,
+      { environment: server.environment, name: "squiz-142-r1" },
+    );
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(readFileSync(join(tree, "allow-all.json"), "utf8"), '""');
   });
 
   test("at the bound the round stops the reviewer's own group, not just its window, and the window is gone", async (t) => {
@@ -475,6 +504,18 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     assert.ok(place?.backend === "herdr", `the reviewer started in ${JSON.stringify(place)}`);
     assert.equal(place.identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
     assert.match(herdr(["pane", "get", place.pane]), /pane_not_found/u, "the reviewer's pane is still open");
+  });
+
+  test("a variable the adapter sets empty reaches the reviewer in a pane as set and empty", async (t) => {
+    const tree = treeFor(t);
+    const round = await runRound(
+      confiningEmpty(adapterOf({ inPane: noticingAllowAll(tree), detached: "process.exit(3)" }, "pi")),
+      invocationIn(tree),
+      40,
+      { environment: { ...environment, COPILOT_ALLOW_ALL: "true" }, name: "squiz-142-r1" },
+    );
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(readFileSync(join(tree, "allow-all.json"), "utf8"), '""');
   });
 
   test("a reviewer in a pane that finishes at once is a review, not a start that failed", async (t) => {

@@ -99,6 +99,8 @@ export type RoundCost = {
   readonly tokens: number;
   /** How many assistant messages the two figures cover. */
   readonly messages: number;
+  /** AI credits, where the CLI prices a run in them rather than in dollars. */
+  readonly credits?: number;
   /**
    * The figures are at least what was spent and may be less than it, because
    * the run's end could not confirm that every message's spend was counted.

@@ -715,6 +715,24 @@ test("what the adapter puts on the environment reaches the reviewer", async () =
   });
 });
 
+// The Copilot adapter turns trust off by setting a variable empty, over a host
+// whose own value would turn it on.
+test("a variable the adapter sets empty reaches a reviewer with no terminal as set and empty", async () => {
+  await inATree(async (tree) => {
+    const running = reviewer(reporting("JSON.stringify(process.env.COPILOT_ALLOW_ALL)"));
+    const adapter: Adapter = {
+      ...running.adapter,
+      confine: () => ({ outcome: "prepared", environment: { COPILOT_ALLOW_ALL: "" } }),
+    };
+    const { TMUX: _tmux, HERDR_SOCKET_PATH: _herdr, ...host } = process.env;
+    const round = await runRound(adapter, at(tree), 10, {
+      name: "squiz-reviewer",
+      environment: { ...host, COPILOT_ALLOW_ALL: "true" },
+    });
+    assert.equal(headlineOf(round), '""');
+  });
+});
+
 /**
  * A confinement that is not in place is not a round to run: at `deep` it is what
  * the round reaches a detached tool by, and a round that ran anyway would leave
@@ -901,6 +919,25 @@ test("a last line cut short keeps the cost a floor through a retry that reviewed
     const round = await runRound(reviewer(first, second).adapter, at(tree), 10);
     assert.equal(round.outcome, "reviewed", accountOf(round));
     assert.equal(round.cost.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
+  });
+});
+
+test("the AI credits of two attempts are added up with the rest of their cost", async () => {
+  await inATree(async (tree) => {
+    let reads = 0;
+    const crediting: Adapter = {
+      ...reviewer(sayingNothing).adapter,
+      parse: async () => {
+        reads += 1;
+        const cost = { dollars: 0, tokens: 100, messages: 1, credits: reads === 1 ? 0.5 : 0.25 };
+        return reads === 1
+          ? { cost, result: { kind: "unparsed", reason: "the reviewer did not finish its review" } }
+          : { cost, result: { kind: "reviewed", findings: [], verdicts: [] } };
+      },
+    };
+    const round = await runRound(crediting, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0, tokens: 200, messages: 2, credits: 0.75 });
   });
 });
 
