@@ -1,0 +1,163 @@
+---
+settles: "§ 4 — whether the Copilot adapter reviews a real pull request as it specifies when detached, whether a Copilot round starts in a Herdr pane, and whether the charter governs the user's default model; § 5 — the summary's cost line for a Copilot review"
+issue: 465
+recorded: 2026-10-06
+versions: { claude-code: 2.1.290, coding-agent: claude-opus-5-5, copilot: 1.0.92, reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, squiz: 9dccf87 }
+recheck-when: Copilot changes `--agent`, `--usage-output-file` or its usage file, the Herdr start stops typing the line into a fresh shell (#516), or the charter or the Copilot adapter's command line changes
+---
+
+# A Copilot round works a thread to exit 0 detached, and never starts in a Herdr pane
+
+Copilot reviewed a real pull request as § 4 sets out, once it ran detached. Test
+pull request #515 carried a planted off-by-one, a `pageCount` using
+`Math.floor`, and a test that only divided evenly. Round 1 posted one `high`
+thread on it, and the command exited 2. The fix was pushed with tests, a reply
+was posted with `squiz reply`, and round 2 ruled the thread `fixed`. The command
+exited 0. The first attempt at round 1 ran in the owner's Herdr workspace and
+never started: the round typed a 1.7 KB line into a fresh pane, and macOS cut it
+at 1024 bytes. That is #516. Nothing ran and no quota was spent.
+
+## Intent
+
+- Whether a project with `"reviewer": "copilot"` gets a round on a real pull
+  request, with a finding posted as a thread.
+- Whether the coding agent works that finding through `squiz review` to exit 0
+  or 3.
+- Whether the summary carries the round's cost as § 4 and § 5 set out for
+  Copilot.
+- Whether the reviewer keeps to the charter's reporting contract when the charter
+  arrives as a custom agent's instructions, on the user's own default model.
+- Where the reviewer runs, and whether its pane closes.
+
+## Decisions
+
+- **Keep the Copilot adapter's command line, grant, reporting server and read as
+  § 4 sets them out.** Both detached rounds ran the line as specified, appended
+  the usage line once Copilot exited 0, and were read back as reviewed. The
+  resume line was written in the specified form.
+
+- **Fix #516 before a Copilot round runs in a Herdr pane.** The start types its
+  gated line as soon as the pane's shell holds the foreground. The shell's line
+  editor has not started yet, so the terminal is in canonical mode, and macOS
+  keeps 1024 bytes of an unfinished line. Copilot's line is cut inside a quoted
+  word, the shell waits for the quote to close, and the gate never writes its
+  pid. `pi`'s line is short enough to fit. The gate held, so the cut line ran
+  nothing.
+
+- **Read a Copilot round's cost as § 4 does.** Round 1's 38,236 tokens are
+  `inputTokens` 37,717 and `outputTokens` 519 from `modelMetrics`, and its 15.69
+  AI credits are `totalNanoAiu` 15,687,150,000 over 10⁹. The summary carried
+  both, with no dollar figure.
+
+- **Keep the charter as Copilot's agent instructions.** On `gpt-6-astra`, the
+  user's default model, the reviewer wrote no prose in either round. It read
+  `AGENTS.md`, reported through `squiz-report_finding` or `squiz-report_verdict`,
+  then called `squiz-finish_review`, and its last message was empty.
+
+## Needs your input
+
+Nothing.
+
+## Reference
+
+### The run
+
+Test pull request #515, squiz at 9dccf87. The project's `.squiz.json` was
+`{"reviewer": "copilot"}`, left uncommitted in the checkout, because the round
+host reads it from the worktree.
+
+| | Round 1, first attempt | Round 1 | Round 2 |
+|---|---|---|---|
+| State | `81d2878` | `81d2878` | `a1ec885 with reply PRRC_kwDOUEd2qM75ycD-` |
+| Reviewer | Herdr tab `squiz-515-r1`, never started; the round closed it | `backend: detached` | `backend: detached` |
+| Reported | nothing | one `high` finding on `scratch/live-465/pages.ts:4` | `report_verdict` `fixed` on `PRRT_kwDOUEd2qM6pSg5T`, then `finish` |
+| Exit | 1 | 2 | 0 |
+| Took | 36 s | 21.3 s, and 1.7 s posting | 16.6 s, and 1.5 s posting |
+| Tokens | — | 38,236 | 40,002 |
+| AI credits | — | 15.69 | 12.88 |
+| Messages | — | 5 | 5 |
+
+The first attempt printed:
+
+```
+squiz: review failed: the reviewer could not run: the reviewer could not be started: the command did not start in the pane within 15000ms
+squiz: the failure is posted on PR #515
+```
+
+The detached rounds ran from the same shell with every `HERDR_*` and `TMUX*`
+variable unset.
+
+The thread was headed `pageCount drops the partially filled last page`, and
+suggested `Math.ceil` with tests for a partial last page and a list shorter than
+a page. The reply read `Fixed in a1ec885: pageCount now uses Math.ceil, and new
+tests cover 11 items in pages of 5, 1 item in pages of 5, and no items.` The
+thread is resolved. The summary read:
+
+```
+**Squiz review — 2 rounds, 1 finding**
+
+Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0
+78,238 tokens over 2 rounds: 38,236, 40,002 · 28.57 AI credits
+```
+
+The failure comment from the first attempt stays on the pull request beside the
+summary, as § 7 says it does.
+
+Each round wrote `resume.txt`, for round 1 as
+`COPILOT_HOME=.squiz/515/rounds/1/session copilot --resume=1ee7acf1-7a58-4ea4-a8f7-6df164adeb76`.
+
+### What the reviewer did
+
+From `session-state/<id>/events.jsonl`, each round's turns were the same shape:
+
+1. `glob` for `**/AGENTS.md`, and `view` on the changed files and `package.json`.
+2. `view` on `AGENTS.md`, and a search shown to the model as `rg`.
+3. The report: `squiz-report_finding` in round 1, `squiz-report_verdict` in round 2.
+4. `squiz-finish_review`.
+5. An empty message, after which Copilot exited.
+
+Every `view` named a path under the round's snapshot, `.squiz/515/rounds/<k>/tree/`.
+
+### The pane line, by length
+
+A line typed with `herdr pane run` into a tab made the moment before:
+
+| Line | Ran |
+|---|---|
+| 456 bytes: the gate and `sh -c 'echo REACHED'` | yes, pid in 270 ms |
+| 847 and 1007 bytes | yes |
+| 1047 and 1247 bytes | no, nothing in 20 s |
+| Copilot's line for this round, 1.7 KB | no; the screen shows it cut near byte 1024 |
+| the same 1.7 KB line, typed into a pane open for some seconds | yes |
+
+### What § 4 lists as not established
+
+The run measured two of the items under § 4 The Copilot adapter, Not
+established. The charter governed a model other than `gpt-5-mini`, and Copilot
+ran detached with `/dev/null` as standard input. The spec still lists both.
+
+### What Copilot wrote into `COPILOT_HOME`
+
+Besides the agent file `confine` writes, the round's session directory held
+`config.json`, holding only `firstLaunchAt`, with `session-store.db`,
+`installed-plugins/`, `logs/`, `session-state/` and `usage.json`.
+
+## Limits
+
+- **No Copilot round ran in a pane.** The pane's close, the `Resume` line it
+  prints, and the empty `COPILOT_ALLOW_ALL` through Herdr's `--env` were not
+  seen.
+- **Herdr stalled once and it is not known why.** During the failed attempt,
+  a `herdr tab list` polled every two seconds took from 12:46:13 to 12:46:42 to
+  answer. The typed line cannot account for it: in the reproductions, Herdr
+  answered at once with a cut line in the pane.
+- **Exit 3, and a disputed or withdrawn thread, were not reached.** The one
+  thread was fixed as suggested.
+- **One model.** `gpt-6-astra`, the owner's default. No other model was run, and
+  no round ran with `COPILOT_MODEL` unset.
+- **Nobody resumed a session** from `resume.txt`.
+- **The coding agent was the dispatching session's subagent**, running the
+  commands itself, not one dispatched with a brief that never named squiz. The
+  hooks and the socket wake were not part of the run.
+- **The planted defect was the one `pi` found in M7.** A defect that takes
+  reading across files was not tried.
