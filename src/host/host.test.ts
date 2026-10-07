@@ -33,6 +33,7 @@ import { episodeAt, type Episode } from "../loop/episode.ts";
 import { putRecord, type Owner, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
+import { squizStatus } from "../review/status.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 
@@ -104,6 +105,8 @@ type Hosted = {
   readonly delivered: Readonly<Record<string, number>>;
   /** Each round's resume.txt, by its round's number, where it wrote one. */
   readonly resumes: Readonly<Record<string, string>>;
+  /** What `squiz status` printed once the host had exited. */
+  readonly status: { readonly stdout: string; readonly stderr: string };
 };
 
 type Arrangement = {
@@ -231,6 +234,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     });
 
     const read = existsSync(worktree) ? readState(episode) : ({ outcome: "absent" } as const);
+    const status = existsSync(worktree) ? squizStatus(worktree) : { stdout: "", stderr: "" };
     const logFile = join(episode.directory, "host.log");
     return {
       end,
@@ -246,6 +250,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       notes: notesIn(episode),
       delivered: deliveredIn(episode),
       resumes: resumesIn(episode),
+      status,
     };
   } finally {
     if (previous === undefined) delete process.env["PATH"];
@@ -774,6 +779,47 @@ test("a host that finds the bound spent before any round ran, with no thread of 
     problems: [`the review of PR #${PULL_REQUEST} closed without its summary: the episode closed before any round ran`],
   });
 });
+
+test("#414: a closing round whose summary GitHub refuses keeps the reason on its record, in host.log and in squiz status", async () => {
+  const ran = await host({ records: atHead, before: refuseSummary });
+
+  const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;
+  assert.ok(ran.kinds.includes("summary"), `gh was asked for ${ran.kinds.join(", ")}`);
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 0, "a close without its summary is a close still");
+  assert.deepEqual(record.problems, [line]);
+  assert.match(ran.log, new RegExp(`round 1: ${escaped(line)}\n`, "u"));
+  assert.match(ran.status.stdout, new RegExp(`\n  ${escaped(line)}\n`, "u"));
+});
+
+test("#414: a close before any review whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
+  const ran = await host({
+    rounds: [COST],
+    config: { rounds: 1 },
+    records: atHead,
+    before: (fixture) => {
+      writeFileSync(join(fixture.binaries, "answer-threads"), ONE_OPEN_THREAD, "utf8");
+      refuseSummary(fixture);
+    },
+  });
+
+  const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
+  const [taken] = recordsOf(ran.state);
+  assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
+  assert.deepEqual(taken.closed?.problems, [line]);
+  assert.match(ran.log, new RegExp(`round 2: ${escaped(line)}\n`, "u"));
+});
+
+/** Have `gh` refuse the summary comment, as it refuses any call it has no answer for. */
+function refuseSummary(fixture: Fixture): void {
+  rmSync(join(fixture.binaries, "answer-summary"));
+}
+
+function escaped(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
 
 /** Record `tokens` spent by attempts that were no round, as a setup problem records them. */
 function spendOutsideRounds(episode: Episode, tokens: number): void {
