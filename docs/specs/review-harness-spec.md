@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.27 (draft)
+**Version:** 1.28 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -3656,9 +3656,25 @@ Each runtime keeps a copy of its own, and runs the hooks from it:
 A person who installs squiz into both updates both, so that the two copies are
 one version.
 
+`claude plugin update squiz@squiz` copies the new version into a directory of
+its own beside the old one, and Claude Code sessions started afterwards run the
+new one. The old version's directory stays, marked orphaned with
+`.orphaned_at`. The first Claude Code start once the mark is 14 days old
+deletes it.
+
+**After updating squiz in Claude Code, run `squiz init` again,** by typing
+`! squiz init` in a Claude Code session started after the update. Until then,
+the link `squiz init` made still names the old version, so a Copilot session or
+a terminal runs the old squiz while Claude Code's hooks run the new one. Once
+the old directory is deleted, the link names nothing, and `squiz` there is
+`command not found`. `squiz init` moves the link to the new version (§ 6
+`squiz init`), and `! squiz doctor` warns about the link until it does. The
+old squiz run through the link reports it as linked to itself, so only the
+squiz Claude Code runs gives the warning.
+
 `/plugin uninstall squiz` removes it from Claude Code. The copied directory
-stays, marked orphaned, until Claude Code deletes it. `copilot plugin uninstall
-squiz` removes it from Copilot.
+stays, marked orphaned in the same way, until Claude Code deletes it.
+`copilot plugin uninstall squiz` removes it from Copilot.
 
 A Copilot session can also load a checkout with `copilot --plugin-dir
 <checkout>`, which loads the same hooks and extension from the checkout

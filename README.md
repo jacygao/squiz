@@ -44,6 +44,13 @@ session:
 
 It links `~/.local/bin/squiz`, or `~/bin/squiz`, to the squiz Claude Code runs.
 
+After updating squiz in Claude Code, start a new session and type
+`! squiz init` again. Each version has a directory of its own, and the link
+still runs the old one until you do. Claude Code deletes the old directory
+the first time it starts 14 days or more after the update, and from then on
+`squiz` outside Claude Code is `command not found`. `! squiz doctor` warns
+about the link until it is moved.
+
 ## Install into Copilot
 
 ```sh
