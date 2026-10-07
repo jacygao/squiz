@@ -266,7 +266,11 @@ test("a round whose only finding GitHub refused exits 1 saying it could not post
 
     assert.equal(printed.exit, 1, `${printed.stdout}${printed.stderr}\n${hostLog(fixture.episode)}`);
     assert.equal(printed.stdout, "");
-    assert.equal(printed.stderr, "squiz: review failed: round 1 found 1 finding and could not post it to PR #41\nsquiz: the failure is posted on PR #41\n");
+    assert.equal(
+      printed.stderr,
+      "squiz: review failed: round 1 found 1 finding and could not post it to PR #41\nsquiz: the failure is posted on PR #41\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
   });
 });
 

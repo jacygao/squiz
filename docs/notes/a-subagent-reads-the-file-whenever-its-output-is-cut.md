@@ -25,6 +25,12 @@ recheck-when: Claude Code changes how it cuts or persists a Bash call's output, 
   and replied on the threads it had not been shown. No change to the text was
   needed, so none was tried.
 
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`. `squiz review`'s first line now says to
+  read the file where the output is cut.
+
 - **Keep writing the whole output to `review.txt` and naming it on the first
   line.** It is what every cut subagent used. None ran `squiz threads`, and none
   opened the file Claude Code itself saved the output to.

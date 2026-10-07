@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.03 (draft)
+**Version:** 1.04 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -288,7 +288,7 @@ commit, is queued behind it:
 The line comes right after the heading of the close the run is handed:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 3f9c2e0: round 3 of 3, no new findings.
 Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.
 ```
@@ -467,36 +467,24 @@ whatever is still open. A cap of 1 reviews once and closes.
 **A round starts when a trigger queues a state and the round host takes it.**
 There are two kinds of trigger:
 
-- **`squiz review <number>`**, which the coding agent runs once it has opened its
-  pull request and again after each push that works the threads. A coordinator or
-  a CI job may run it as well, from a checkout of the pull request's branch. It
-  waits for the review, and prints the result.
 - **The plugin's hooks**, on `Stop` and `SubagentStop`, which queue the state
   and return at once. Claude Code and the GitHub Copilot CLI both fire them, as
-  The Claude Code hooks sets out.
+  The Claude Code hooks sets out. In either runtime they start every round, and
+  the session that owns the work is woken with the result, as The report sets
+  out.
+- **`squiz review <number>`**, which waits for the review and prints the result.
+  The note that wakes the session names it, and the coding agent runs it to read
+  the threads. A coordinator or a CI job may run it as well, from a checkout of
+  the pull request's branch.
 
-**The instruction to run `squiz review` reaches the coding agent two ways.**
-
-- **In Claude Code and in Copilot, a skill the plugin ships.** Its description
-  has the coding agent load it when it opens or updates a pull request. Copilot
-  loads the plugin's skills as Claude Code does, so a project that runs either
-  needs nothing in its own files for this.
-- **For any other agent, a section of the host project's `AGENTS.md`**, which
-  `squiz init` adds.
-
-§ 9 gives the text of both. Nothing forces an agent to follow either. A runtime
-loads a skill when its description matches what the agent is doing, and does not
-promise to. Under Claude Code and Copilot the hooks start a review whether the
-agent follows it or not. An agent in a runtime with no hook that never runs the
-command leaves a pull request no round has read, which carries no comment with
-any of § 2 Identity's markers.
-
-**A Copilot coding agent starts its own rounds, by running `squiz review`.** The
-hooks queue a state only where the agent did not run the command. Copilot fires `Stop` when a
+**Nothing tells a coding agent to run `squiz review` before it is woken.** An
+agent that runs it anyway queues the state itself. Copilot fires `Stop` when a
 turn ends, and a turn that ran the command ends after the command queued the
 state, so that firing finds the state queued or reviewed and queues nothing.
-A round a hook queued wakes the session through the plugin's extension, as The
-report sets out.
+
+**An agent in a runtime with no hook gets a round only by running the command.**
+Squiz does not tell it to. A pull request no round has read carries no comment
+with any of § 2 Identity's markers.
 
 ### The round host
 
@@ -2319,7 +2307,7 @@ are still marked, because what it spent is in none of them.
 
 ## 6. Commands
 
-Everything the harness ships to be run: one binary, one slash command, and one skill.
+Everything the harness ships to be run: one binary and one slash command.
 
 ### The `squiz` binary
 
@@ -2333,7 +2321,7 @@ already on it.
 |---|---|---|
 | `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. |
 | `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
-| `squiz init` | A person | Adds the review section under § 9 to the host project's `AGENTS.md`, and links `squiz` onto `PATH`, for coding agents other than Claude Code. |
+| `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
 | `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for the payload's `cwd` and returns, as § 3 sets out. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
@@ -2378,11 +2366,12 @@ crashed past the harness's own trap, is never read as a result.
 2, 3 or 4 prints its outcome on stdout, and § 7 The command's stderr sets out what
 it adds on stderr. A run that exits 1 prints nothing on stdout.
 
-**The first line names a file holding the whole output.** A run that exits 0, 2,
-3 or 4 writes everything it prints on stdout to `.squiz/<number>/review.txt`, and
-prints that path first. The file is replaced on every run. Claude Code can hand
-the agent less than the command printed, as § 2 sets out, so several open threads
-can be missing from what the agent sees.
+**The first line names a file holding the whole output, and says to read it
+where the output is cut.** A run that exits 0, 2, 3 or 4 writes everything it
+prints on stdout to `.squiz/<number>/review.txt`, and prints that path first. The
+file is replaced on every run. Claude Code can hand the agent less than the
+command printed, as § 2 sets out, so several open threads can be missing from
+what the agent sees. The first line is the part every cut keeps.
 
 A file that cannot be written leaves the outcome and its status as they are. The
 path line still names it, and stderr adds one line:
@@ -2398,7 +2387,7 @@ line, which the `squiz threads` line already carries.
 Threads open, exit 2:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 
 2 threads are open:
@@ -2427,14 +2416,14 @@ A run handed a result it did not produce says so in the line after the path, and
 prints the threads as they stand on the pull request now:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 ```
 
 Nothing open, exit 0:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
 
 Nothing is open. The review is closed, and its summary is on the pull request.
@@ -2443,11 +2432,12 @@ Nothing is open. The review is closed, and its summary is on the pull request.
 Closed with threads open, exit 3:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 77e0f19: round 3 of 3, no new findings.
 
 The round cap is reached. The review is closed with 1 thread open, and its summary
-is on the pull request. A person takes it from here.
+is on the pull request. A person takes it from here, so do not run
+`squiz review 41` again.
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
   …
@@ -2460,14 +2450,14 @@ Still reviewing, exit 4. A run whose deadline arrived while its state's round
 ran:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is still reviewing PR #41 at 3f9c2e0. Run `squiz review 41` again to wait for it.
 ```
 
 A run whose state is queued behind the round of an older one:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run `squiz review 41` again to wait for it.
 ```
 
@@ -2476,7 +2466,7 @@ wait ran out before the episode closed. Exit 0 and the line about the summary
 come only with the close itself:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.
 ```
 
@@ -2485,14 +2475,14 @@ file), and whose wait ran out before the newer state's round ended. The newer
 state is named as the reason for superseding names it:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.
 ```
 
 A run on an episode that has already closed, exit 0 or 3 as the close was:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
 ```
 
@@ -2500,21 +2490,28 @@ Where it closed with threads open, exit 3, the line counts them and the threads
 follow, each as exit 3 prints it:
 
 ```
-Full output: /work/squiz/.squiz/41/review.txt
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz's review of PR #41 closed after 3 rounds, with 2 threads open. No round runs again in this worktree.
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
   …
 ```
 
-The review could not run, exit 1, on stderr. A round that failed prints the
-reason its failure comment gives, then each thing the comment lists, then where
-the comment went:
+The review could not run, exit 1, on stderr. Every exit-1 output ends with the
+line that tells the coding agent to stop:
+
+```
+squiz: put these lines in your report rather than running squiz review again
+```
+
+A round that failed prints the reason its failure comment gives, then each thing
+the comment lists, then where the comment went:
 
 ```
 squiz: review failed: the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings
 squiz: `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 squiz: the failure is posted on PR #41
+squiz: put these lines in your report rather than running squiz review again
 ```
 
 A round that could post none of its findings prints the same way:
@@ -2522,9 +2519,11 @@ A round that could post none of its findings prints the same way:
 ```
 squiz: review failed: round 2 found 3 findings and could not post them to PR #41
 squiz: the failure is posted on PR #41
+squiz: put these lines in your report rather than running squiz review again
 ```
 
-A run that failed before any round, or could not reach GitHub, prints one line:
+A run that failed before any round, or could not reach GitHub, prints one line
+saying why, then the line to stop. The lines saying why:
 
 ```
 squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
@@ -2613,18 +2612,12 @@ taken for none.
 
 ### `squiz init`
 
-`squiz init` does two things, each whether or not the other could be done, and
-prints a line for each. It exits 0 where both are in place afterwards, and 1
-otherwise, with the line for what failed on stderr.
-
-**The review section.** It adds the section § 9 gives to the `AGENTS.md` at the
-root of the repository, creating the file where there is none. Where the section
-is already there it changes nothing and says so.
-
-**The link.** It links `squiz` into a directory already on `PATH`, so that a
-coding agent whose shell does not have the plugin's `bin/` on its `PATH` runs
-`squiz` by name. Only Claude Code puts the plugin's `bin/` there, and only in its
-own Bash tool.
+`squiz init` links `squiz` into a directory already on `PATH`, so that a coding
+agent whose shell does not have the plugin's `bin/` on its `PATH` runs `squiz` by
+name. Only Claude Code puts the plugin's `bin/` there, and only in its own Bash
+tool. It prints a line for what it did, and exits 0 where the link is in
+place afterwards and 1 otherwise, with the line on stderr. It writes nothing in
+the repository it is run from, and runs outside one as well.
 
 - **The link's target is this squiz:** the real path of the `bin/squiz` that is
   running, every symlink resolved, so the link holds an absolute path.
@@ -2652,8 +2645,6 @@ A squiz is a `bin/squiz` whose plugin's `.claude-plugin/plugin.json` names it
 `squiz`.
 
 ```
-squiz: added the review section to AGENTS.md
-squiz: AGENTS.md already has the review section; nothing changed
 squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz
 squiz: /Users/ana/.local/bin/squiz already links to this squiz; nothing changed
 squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz, in place of /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, an earlier version of this install
@@ -2664,10 +2655,7 @@ squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a direc
 ### The setup check
 
 `/squiz doctor` is a slash command, run by a person. It reports which of the
-dependencies is missing or unauthenticated, and how the instruction to run
-`squiz review` reaches a coding agent: whether the plugin's skill is loaded, and
-whether `AGENTS.md` has the review section. Where neither is there, it says no
-coding agent is told to run the command. The reviewer it checks for is the one
+dependencies is missing or unauthenticated. The reviewer it checks for is the one
 `reviewer` names, `pi` or `copilot`.
 
 It also reports what `squiz init`'s link would find on `PATH`, whichever coding
@@ -2758,9 +2746,10 @@ nothing of its own.
 
 ### The command's stderr
 
-The command writes one line on stderr for each thing that failed: the lines a run
-that exits 1 ends on, and the line a run adds where something failed without
-changing its outcome. The outcome itself, the open threads included, is on stdout
+The command writes one line on stderr for each thing that failed: the lines that
+say why a run exits 1, and the line a run adds where something failed without
+changing its outcome. A run that exits 1 then ends with the line telling the
+coding agent to stop, as § 6 `squiz review` shows. The outcome itself, the open threads included, is on stdout
 as § 6 shows. Both reach the coding agent as its shell tool's output.
 
 ```
@@ -2915,7 +2904,6 @@ plugin is the package, so there is no separate packaging step.
 hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code and Copilot triggers
 extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
 commands/                    slash commands; the setup check is the first
-skills/squiz-review/SKILL.md the instruction to run squiz review, for a Claude Code or Copilot coding agent
 bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
 charter.md                   the standing review instructions, shipped as one file
 src/
@@ -2959,7 +2947,6 @@ until something asks.
 | | | |
 |---|---|---|
 | **P0** | The command and the loop | `squiz review <number>`, the pull request gate, the record per head commit and latest reply, the round cap, the exit statuses and what is printed with each, and the time bound on the reviewer |
-| **P0** | The review skill | The skill that tells a Claude Code or Copilot coding agent to run `squiz review` and work what it prints |
 | **P0** | The Claude Code hooks | The `Stop` and `SubagentStop` registrations, which resolve the pull request for their worktree, queue the review and return |
 | **P0** | The round host | `squiz host`, started by a double fork, which runs an episode's rounds one at a time and is found again by pid and start time |
 | **P0** | The reviewer session | A fresh reviewer per round in a tmux or Herdr pane, or detached, whose pane closes at the end and whose session stays resumable |
@@ -2980,8 +2967,8 @@ until something asks.
 | **P1** | A non-mutating test invocation | Named in configuration, so running the tests cannot rewrite the code under review. Reachable only at `deep` |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
-| **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether the skill or the `AGENTS.md` section tells a coding agent to run `squiz review`, and whether `squiz init`'s link puts this squiz on `PATH` |
-| **P1** | `squiz init` | Adds the review section to `AGENTS.md`, and links `squiz` onto `PATH` without replacing another, for coding agents other than Claude Code |
+| **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether `squiz init`'s link puts this squiz on `PATH` |
+| **P1** | `squiz init` | Links `squiz` onto `PATH` without replacing another, for coding agents other than Claude Code |
 | **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server, the custom agent that carries the charter, the `read` grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
 | **P1** | A finding anchored to a range | `start_line` alongside `line`, so a finding about several lines highlights all of them. The anchor validator would have to hold each hunk's span, which it does not today, and the reviewer would have to return a range worth reading |
@@ -3001,7 +2988,7 @@ the part that rests on it is built, and each result is written as a finding in
 - **Linux.** The detach and pane probes ran on macOS alone, and so did every
   Copilot run, whose credential was in macOS's own credential store.
 - **Copilot's own install.** Copilot has loaded the plugin from
-  `--plugin-dir` only. Whether it loads the skill and the hooks the same way
+  `--plugin-dir` only. Whether it loads the hooks and the extension the same way
   from `copilot plugin install` has not been run.
 
 ## 9. Adoption
@@ -3032,41 +3019,16 @@ Three things in the host project, the last one optional.
 
 Then run `/squiz doctor`.
 
-**A Claude Code or Copilot coding agent is told to run `squiz review` by the
-plugin's skill,** `skills/squiz-review/SKILL.md`, which comes with the plugin:
+**A Claude Code or Copilot coding agent needs no instruction to start a review.**
+The plugin's hooks start one each time the agent finishes its work, and the
+session that owns the work is woken with the result, which names
+`squiz review` (§ 3 The report). Nothing goes in the project's `AGENTS.md` for
+this. A `## Review` section that an earlier `squiz init` added there is left as
+it is, and the project may delete it.
 
-```markdown
----
-name: squiz-review
-description: Run squiz's review of a pull request and work what it finds. Load this after opening a pull request and after every push to one, before reporting the work done.
----
-
-# Reviewing a pull request with squiz
-
-Run `squiz review <number>` from the worktree the pull request's branch is
-checked out in. It runs a review and waits for it, which takes several minutes.
-Give the Bash call a `timeout` of 600000. If the command is moved to the
-background anyway, wait for it to finish and read its output before you do
-anything else.
-
-- **Exit 0:** nothing is open. You are done.
-- **Exit 2:** threads are open, and the command prints them. Its first line names
-  a file holding the whole output. Where what you were shown is cut short, read
-  that file. Fix what applies, reply on each thread with `squiz reply <id> <text>`
-  to say what you changed or why you disagree, commit and push what you changed,
-  and run `squiz review <number>` again. A reply is reviewed even with no new
-  commit.
-- **Exit 3:** the review closed with threads still open. Do not run it again. Say
-  in your report which threads are open.
-- **Exit 4:** squiz is still reviewing. Run `squiz review <number>` again.
-- **Exit 1, or anything else:** the review could not run, or it failed. Put the
-  lines it printed in your report, and do not run it again.
-```
-
-**A Copilot session gets the skill by loading the plugin,** with
-`copilot --plugin-dir <plugin directory>`. Copilot does not put the plugin's
-`bin/` on its shell's `PATH`, so `squiz init` links `squiz` into a directory
-already on it, once on each machine.
+**A Copilot session loads the plugin** with `copilot --plugin-dir <plugin
+directory>`. Copilot does not put the plugin's `bin/` on its shell's `PATH`, so
+`squiz init` links `squiz` into a directory already on it, once on each machine.
 
 **Squiz's Copilot support is experimental, because it relies on Copilot's
 experimental features.** Squiz wakes an idle Copilot session through an
@@ -3097,32 +3059,6 @@ default `~/.copilot` fits under a home directory of up to 32 characters on macOS
 and 36 on Linux. Under a longer `COPILOT_HOME` the extension cannot listen, and
 it says so in the session as a warning.
 
-**Any other coding agent is told by a section of `AGENTS.md`**, which
-`squiz init` adds:
-
-```markdown
-## Review
-
-After you open a pull request, and after every push to it, run
-`squiz review <number>` from the worktree its branch is checked out in. It runs a
-review and waits for it, which takes several minutes, so give the command your
-shell tool's longest timeout. If the command is moved to the background anyway,
-wait for it to finish and read its output before you do anything else.
-
-- **Exit 0:** nothing is open. You are done.
-- **Exit 2:** threads are open, and the command prints them. Its first line names
-  a file holding the whole output. Where what you were shown is cut short, read
-  that file. Fix what applies, reply on each thread with `squiz reply <id> <text>`
-  to say what you changed or why you disagree, commit and push what you changed,
-  and run `squiz review <number>` again. A reply is reviewed even with no new
-  commit.
-- **Exit 3:** the review closed with threads still open. Do not run it again. Say
-  in your report which threads are open.
-- **Exit 4:** squiz is still reviewing. Run `squiz review <number>` again.
-- **Exit 1, or anything else:** the review could not run, or it failed. Put the
-  lines it printed in your report, and do not run it again.
-```
-
 **Any other coding agent reaches `squiz` through a link `squiz init` makes,**
 because no runtime but Claude Code puts the plugin's `bin/` on its shell's
 `PATH`. Run `squiz init` once on each machine, by name from a Claude Code
@@ -3132,7 +3068,7 @@ uses. It links `~/.local/bin/squiz`, or `~/bin/squiz`, to the plugin's
 `PATH` (§ 6 `squiz init`). A Copilot session then runs `squiz` by name, with the
 plugin loaded by `copilot --plugin-dir <plugin directory>`.
 
-`AGENTS.md` also carries the conventions a reviewer cannot derive from reading
+`AGENTS.md` carries the conventions a reviewer cannot derive from reading
 code, and it can point at whatever else the project treats as authoritative. The
 reviewer reads it for those. Without them the review still finds correctness
 bugs, security problems and tests that assert nothing, and reports no convention

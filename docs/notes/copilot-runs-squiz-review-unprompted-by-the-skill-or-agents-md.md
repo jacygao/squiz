@@ -51,6 +51,11 @@ recheck-when: Copilot CLI upgrades past 1.0.92, the default Copilot model change
   both runtimes. The `AGENTS.md` section stays the route for a Copilot that
   cannot be started with `--plugin-dir`.
 
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`.
+
 ## Reference
 
 ### The prompt

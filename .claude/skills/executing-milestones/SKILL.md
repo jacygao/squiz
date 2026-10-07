@@ -194,6 +194,10 @@ Every brief carries:
   footer, no session link, no co-author trailer, in the body or in the commits
 - The branch switch above as its first step. It is started in its worktree, so
   the brief names no path, and it works there and never leaves
+- **Once the pull request is open, run `squiz review <number>` and work it to
+  exit 0 or 3.** The command prints the open threads and says what to do with
+  them: fix what applies, answer each with `squiz reply <id> <text>`, push, and
+  run it again
 - Report back: the pull request number, the checks it ran with their output,
   each new test's failure as it first ran, what it filed, and **what it could
   not determine**
@@ -240,8 +244,10 @@ is deleted.
 
 Remove the verification worktree when done.
 
-Until Squiz reviews its own pull requests, this session is the only review the
-code gets before a person sees it.
+**Squiz reviews a subagent's work whether or not the subagent ran the command.**
+When a subagent finishes, the hook queues a review of its pull request, and this
+session is woken with the result. Where threads are open, send the same subagent
+back to work them rather than working them here.
 
 ## 5. Report in plain words
 

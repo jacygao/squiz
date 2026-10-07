@@ -100,6 +100,11 @@ started a turn in it.
   `copilots-stop-hooks-fire-and-a-ui-server-session-can-be-woken.md` to state
   the missing wake as a gap in § 3.
 
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`. There is no instruction left to change.
+
 ## Reference
 
 ### The bash tool's modes

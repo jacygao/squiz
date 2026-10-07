@@ -175,18 +175,27 @@ export function composeReview(result: ReviewResult, path: string): Printed {
     case "closed":
       return { exit: result.exit, stdout: printedAt(path, closedBlocks(result)), stderr: problems };
     case "failed":
-      return { exit: 1, stdout: "", stderr: failedLines(result) + problems };
+      return { exit: 1, stdout: "", stderr: failedLines(result) + problems + NOT_AGAIN };
     case "not run":
-      return { exit: 1, stdout: "", stderr: failureLine(`no review ran: ${result.reason}`) + problems };
+      return { exit: 1, stdout: "", stderr: failureLine(`no review ran: ${result.reason}`) + problems + NOT_AGAIN };
     case "unposted":
-      return { exit: 1, stdout: "", stderr: failureLine(unpostedLine(result)) + problems };
+      return { exit: 1, stdout: "", stderr: failureLine(unpostedLine(result)) + problems + NOT_AGAIN };
   }
 }
 
-/** The output: the path line, then `blocks` set apart by blank lines. */
+// Running the command again after it could not run spends a round on the same
+// failure, so a coding agent is told to stop and report instead.
+const NOT_AGAIN = failureLine("put these lines in your report rather than running squiz review again");
+
+/**
+ * The output: the path line, then `blocks` set apart by blank lines.
+ *
+ * The path line says when to read the file because a coding agent's runtime can
+ * cut a long output, and the first line is the part that always survives.
+ */
 function printedAt(path: string, blocks: readonly string[]): string {
   const [first = "", ...rest] = blocks;
-  return `${[`Full output: ${path}\n${first}`, ...rest].join("\n\n")}\n`;
+  return `${[`Full output, to read where this is cut short: ${path}\n${first}`, ...rest].join("\n\n")}\n`;
 }
 
 function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
@@ -222,7 +231,8 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         withNotReviewed(heading, result, notReviewed),
         [
           `The ${result.closedAt} is reached. The review is closed with ${counted(open.length, "thread")} open, and its summary`,
-          "is on the pull request. A person takes it from here.",
+          "is on the pull request. A person takes it from here, so do not run",
+          `\`squiz review ${result.pullRequest}\` again.`,
         ].join("\n"),
         ...open.map(printedThread),
         ...movedParagraph(result.moved),

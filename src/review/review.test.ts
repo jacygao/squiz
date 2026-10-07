@@ -115,7 +115,7 @@ function request(fixture: Fixture, run: Run, handed: TriggerRequest[] = []): Rev
 
 const queued = (key: StateKey): StateRecord => ({ ...key, status: "queued" });
 const reviewing = (key: StateKey): StateRecord => ({ ...key, status: "reviewing", host: { pid: 4242, startedAt: 1 }, round: { number: 1 } });
-const PATH_LINE = (fixture: Fixture): string => `Full output: ${join(fixture.episode.directory, "review.txt")}`;
+const PATH_LINE = (fixture: Fixture): string => `Full output, to read where this is cut short: ${join(fixture.episode.directory, "review.txt")}`;
 
 test("a round that ends after a few polls is the run's result, with its threads as they stand now", async () => {
   await withWorktree(async (fixture) => {
@@ -264,7 +264,8 @@ test("a round that fails exits 1 with the reason it recorded and nothing on stdo
     assert.equal(printed.stdout, "");
     assert.equal(
       printed.stderr,
-      "squiz: review failed: the reviewer was stopped at the time bound of 900 seconds\nsquiz: the failure is posted on PR #41\n",
+      "squiz: review failed: the reviewer was stopped at the time bound of 900 seconds\nsquiz: the failure is posted on PR #41\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
     );
   });
 });
@@ -376,7 +377,8 @@ test("a round host no one can tell running or gone exits 1 naming it", async () 
     assert.equal(printed.stdout, "");
     assert.equal(
       printed.stderr,
-      "squiz: no review ran: whether round host 4242 for PR #41 is still running could not be told: ps did not answer within 2000ms\n",
+      "squiz: no review ran: whether round host 4242 for PR #41 is still running could not be told: ps did not answer within 2000ms\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
     );
   });
 });
@@ -389,6 +391,10 @@ test("a gate that stops the trigger exits 1 with its reason and nothing on stdou
 
     assert.equal(printed.exit, 1);
     assert.equal(printed.stdout, "");
-    assert.equal(printed.stderr, "squiz: no review ran: no open pull request has \"feature-a\" as its head\n");
+    assert.equal(
+      printed.stderr,
+      "squiz: no review ran: no open pull request has \"feature-a\" as its head\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
   });
 });

@@ -530,7 +530,7 @@ test("squiz review on a detached HEAD exits 1 with the gate's line, and prints n
   const result = await run(shim, ["review", "41"], { cwd: elsewhere });
 
   assert.equal(result.code, 1);
-  assert.equal(result.stderr, detachedHere());
+  assert.equal(result.stderr, `${detachedHere()}squiz: put these lines in your report rather than running squiz review again\n`);
   assert.equal(result.stdout, "");
 });
 
@@ -587,7 +587,7 @@ async function initSandbox(): Promise<{ readonly home: string; readonly localBin
   return { home, localBin, path: `${localBin}:${tools}:/usr/bin:/bin` };
 }
 
-test("squiz init adds the review section to AGENTS.md and links squiz, and prints the lines that say so", async () => {
+test("squiz init links squiz, prints the line that says so, and writes no AGENTS.md (#600)", async () => {
   const root = await mkdtemp(join(tmpdir(), "squiz-553-init-cli-"));
   const { home, localBin, path } = await initSandbox();
   try {
@@ -596,12 +596,9 @@ test("squiz init adds the review section to AGENTS.md and links squiz, and print
     const result = await run(shim, ["init"], { cwd: root, path, home });
 
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(
-      result.stdout,
-      `squiz: added the review section to AGENTS.md\nsquiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n`,
-    );
+    assert.equal(result.stdout, `squiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n`);
     assert.equal(result.stderr, "");
-    assert.match(await readFile(join(root, "AGENTS.md"), "utf8"), /^## Review\n/u);
+    await assert.rejects(stat(join(root, "AGENTS.md")));
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
@@ -620,8 +617,7 @@ test("squiz init run by name through its own link finds the link already there",
     assert.equal(result.code, 0, result.stderr);
     assert.equal(
       result.stdout,
-      "squiz: AGENTS.md already has the review section; nothing changed\n" +
-        `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n`,
+      `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n`,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -629,22 +625,22 @@ test("squiz init run by name through its own link finds the link already there",
   }
 });
 
-test("squiz init outside a git repository exits 1, and writes no AGENTS.md", async () => {
-  const outside = await mkdtemp(join(tmpdir(), "squiz-553-outside-"));
+test("a link squiz init cannot make exits 1, which is how the person running it learns it did nothing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "squiz-553-nolink-"));
   const { home, path } = await initSandbox();
   try {
-    const result = await run(shim, ["init"], { cwd: outside, path, home });
+    // The PATH without ~/.local/bin, so neither directory squiz init links into is on it.
+    const result = await run(shim, ["init"], { cwd: root, path: path.split(":").slice(1).join(":"), home });
 
-    assert.equal(result.code, 1, "a person runs squiz init, and the exit is how they learn it did nothing");
-    assert.match(result.stderr, /^squiz: nothing changed: the repository's root could not be found: [^\n]+\n$/u);
-    await assert.rejects(stat(join(outside, "AGENTS.md")));
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /^squiz: made no link: [^\n]+\n$/u);
   } finally {
-    await rm(outside, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
   }
 });
 
-test("a throw inside squiz init exits 1, which never reads as the section added", async () => {
+test("a throw inside squiz init exits 1, which never reads as the link made", async () => {
   const directory = await mkdtemp(join(tmpdir(), "squiz-cli-"));
   try {
     const fixture = join(directory, "throwing-init.mjs");
@@ -658,7 +654,7 @@ test("a throw inside squiz init exits 1, which never reads as the section added"
         "      return {",
         '        format: "module",',
         "        shortCircuit: true,",
-        '        source: \'export function squizInit() { throw new Error("the append exploded"); }\',',
+        '        source: \'export function squizInit() { throw new Error("the link exploded"); }\',',
         "      };",
         "    }",
         "    return nextLoad(url, context);",
@@ -674,7 +670,7 @@ test("a throw inside squiz init exits 1, which never reads as the section added"
     });
 
     assert.equal(result.code, 1);
-    assert.equal(result.stderr, "squiz: squiz init failed: Error: the append exploded\n");
+    assert.equal(result.stderr, "squiz: squiz init failed: Error: the link exploded\n");
     assert.equal(result.stdout, "");
   } finally {
     await rm(directory, { recursive: true, force: true });

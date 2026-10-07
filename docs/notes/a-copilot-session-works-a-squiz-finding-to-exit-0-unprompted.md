@@ -78,6 +78,11 @@ showed something the successful one did not.
   the skill applies. Recommended: run the `AGENTS.md` route once each with
   `gpt-5-mini` and `claude-haiku-4.5` before changing § 9, since that route puts
   the text in the system prompt rather than leaving it to the model to load.
+
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`. The question is moot.
 - **#588: a `squiz review` straight after a reply and a push waited out its
   540-second deadline with no round running.** In run 7 the session chained
   `squiz reply`, `git push` and `squiz review 20` in one shell call. The reply's

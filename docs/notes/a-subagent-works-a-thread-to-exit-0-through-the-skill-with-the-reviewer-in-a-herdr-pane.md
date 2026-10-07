@@ -39,6 +39,11 @@ when the start's wait ran out, so its finding was never posted; #452 fixed that.
   `squiz review <n>; echo "EXIT=$?"` with the 600000 timeout the skill names, and
   none was moved to the background.
 
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`.
+
 - **Start the Herdr reviewer as 68bea94 does.** Starting it there with
   `herdr agent start` failed twice. Herdr refused a prompt holding a newline
   (#442, fixed by #447). Once the prompt was a file, `agent start` waited for

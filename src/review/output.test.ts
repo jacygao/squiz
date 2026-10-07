@@ -109,7 +109,7 @@ test("threads open, exit 2, prints each thread under its squiz threads line", ()
   assert.equal(printed.stderr, "");
   assert.equal(
     printed.stdout,
-    `Full output: /work/squiz/.squiz/41/review.txt
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 
 2 threads are open:
@@ -143,7 +143,7 @@ test("a result the run did not produce says it was already reviewed", () => {
   );
 
   assert.ok(
-    printed.stdout.startsWith(`Full output: /work/squiz/.squiz/41/review.txt
+    printed.stdout.startsWith(`Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
 `),
     printed.stdout,
@@ -156,7 +156,7 @@ test("nothing open, exit 0", () => {
   assert.equal(printed.exit, 0);
   assert.equal(
     printed.stdout,
-    `Full output: /work/squiz/.squiz/41/review.txt
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
 
 Nothing is open. The review is closed, and its summary is on the pull request.
@@ -164,7 +164,7 @@ Nothing is open. The review is closed, and its summary is on the pull request.
   );
 });
 
-test("closed at the round cap with threads open, exit 3, prints them", () => {
+test("closed at the round cap with threads open, exit 3, prints them and says not to run again (#600)", () => {
   const printed = composeReview(
     reviewed({ exit: 3, commit: "77e0f19", round: 3, threads: [skewThread] }),
     PATH,
@@ -172,11 +172,12 @@ test("closed at the round cap with threads open, exit 3, prints them", () => {
 
   assert.equal(printed.exit, 3);
   assert.ok(
-    printed.stdout.startsWith(`Full output: /work/squiz/.squiz/41/review.txt
+    printed.stdout.startsWith(`Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 77e0f19: round 3 of 3, no new findings.
 
 The round cap is reached. The review is closed with 1 thread open, and its summary
-is on the pull request. A person takes it from here.
+is on the pull request. A person takes it from here, so do not run
+\`squiz review 41\` again.
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
   - `),
@@ -295,7 +296,7 @@ test("still reviewing, exit 4: the run's own state is under review", () => {
   assert.equal(printed.exit, 4);
   assert.equal(
     printed.stdout,
-    `Full output: /work/squiz/.squiz/41/review.txt
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is still reviewing PR #41 at 3f9c2e0. Run \`squiz review 41\` again to wait for it.
 `,
   );
@@ -310,7 +311,7 @@ test("still reviewing, exit 4: the run's state is queued behind the round of an 
   assert.equal(printed.exit, 4);
   assert.equal(
     printed.stdout,
-    `Full output: /work/squiz/.squiz/41/review.txt
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run \`squiz review 41\` again to wait for it.
 `,
   );
@@ -325,7 +326,7 @@ test("still reviewing, exit 4: the run's state was clean and a later one is unde
   assert.equal(printed.exit, 4);
   assert.equal(
     printed.stdout,
-    `Full output: /work/squiz/.squiz/41/review.txt
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run \`squiz review 41\` again to wait for it.
 `,
   );
@@ -340,7 +341,7 @@ test("an episode already closed prints its close, exiting as the close did", () 
   assert.equal(printed.exit, 0);
   assert.equal(
     printed.stdout,
-    `Full output: /work/squiz/.squiz/41/review.txt
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
 `,
   );
@@ -358,7 +359,7 @@ test("an episode closed after one round, with threads open, counts both in the w
 
   assert.equal(one.exit, 3);
   assert.ok(
-    one.stdout.startsWith(`Full output: /work/squiz/.squiz/41/review.txt
+    one.stdout.startsWith(`Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz's review of PR #41 closed after 1 round, with 1 thread open. No round runs again in this worktree.
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
@@ -407,7 +408,7 @@ test("a state the close left unreviewed is printed as it was named, its differen
   );
 });
 
-test("exit 1 for a failed round prints nothing on stdout, and on stderr its reason, each item, and where the comment went", () => {
+test("exit 1 for a failed round prints nothing on stdout, and on stderr its reason, each item, where the comment went, and not to run again (#600)", () => {
   const printed = composeReview(
     {
       outcome: "failed",
@@ -426,11 +427,12 @@ test("exit 1 for a failed round prints nothing on stdout, and on stderr its reas
     `squiz: review failed: the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings
 squiz: \`HEAD\` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 squiz: the failure is posted on PR #41
+squiz: put these lines in your report rather than running squiz review again
 `,
   );
 });
 
-test("exit 1 for a failed round whose comment could not be posted says why in its last line", () => {
+test("exit 1 for a failed round whose comment could not be posted says why", () => {
   const printed = composeReview(
     {
       outcome: "failed",
@@ -447,6 +449,7 @@ test("exit 1 for a failed round whose comment could not be posted says why in it
     printed.stderr,
     `squiz: review failed: the reviewer's output could not be read
 squiz: the failure could not be posted on PR #142: GitHub answered 502
+squiz: put these lines in your report rather than running squiz review again
 `,
   );
 });
@@ -462,10 +465,10 @@ test("exit 1 for a failed round with no comment named prints its reason and its 
     PATH,
   );
 
-  assert.equal(printed.stderr, "squiz: review failed: the round host 4242 for PR #41 stopped before its round ended\n");
+  assert.equal(printed.stderr, "squiz: review failed: the round host 4242 for PR #41 stopped before its round ended\nsquiz: put these lines in your report rather than running squiz review again\n");
 });
 
-test("exit 1 before any round, or with findings it could not post, prints one line", () => {
+test("exit 1 before any round, or with findings it could not post, prints the line saying why, and not to run again (#600)", () => {
   const notRun = composeReview(
     {
       outcome: "not run",
@@ -487,11 +490,12 @@ test("exit 1 before any round, or with findings it could not post, prints one li
   }
   assert.equal(
     notRun.stderr,
-    'squiz: no review ran: PR #41\'s head is "feature-a", and "/work/squiz" has "main" checked out\n',
+    'squiz: no review ran: PR #41\'s head is "feature-a", and "/work/squiz" has "main" checked out\n' +
+      "squiz: put these lines in your report rather than running squiz review again\n",
   );
-  assert.equal(closed.stderr, "squiz: no review ran: PR #41 is closed\n");
-  assert.equal(unposted.stderr, "squiz: round 2 found 3 findings and could not post them to PR #41\n");
-  assert.equal(unpostedOne.stderr, "squiz: round 1 found 1 finding and could not post it to PR #41\n");
+  assert.equal(closed.stderr, "squiz: no review ran: PR #41 is closed\nsquiz: put these lines in your report rather than running squiz review again\n");
+  assert.equal(unposted.stderr, "squiz: round 2 found 3 findings and could not post them to PR #41\nsquiz: put these lines in your report rather than running squiz review again\n");
+  assert.equal(unpostedOne.stderr, "squiz: round 1 found 1 finding and could not post it to PR #41\nsquiz: put these lines in your report rather than running squiz review again\n");
 });
 
 test("a failure that leaves the outcome standing is a stderr line, and the outcome keeps its status", () => {
@@ -519,7 +523,7 @@ test("review.txt holds exactly what was printed on stdout, path line included, a
       reviewed({ exit: 2, newFindings: 2, threads: [backoffThread, skewThread] }),
       worktree,
     );
-    assert.equal(first.stdout.split("\n")[0], `Full output: ${path}`);
+    assert.equal(first.stdout.split("\n")[0], `Full output, to read where this is cut short: ${path}`);
     assert.equal(await readFile(path, "utf8"), first.stdout, "the file drifted from stdout");
 
     const second = printReview(
