@@ -86,7 +86,9 @@ function answer(body) {
   const save = () => fs.writeFileSync(file, JSON.stringify(state));
   const page = (nodes) => ({ pageInfo: { hasNextPage: false, endCursor: null }, nodes });
   if (argv[0] === "pr") {
-    return JSON.stringify([{ number: state.number, id: "PR_pull", baseRefName: "main", headRefName: state.branch, headRefOid: state.head, body: "" }]);
+    const head = (state.staleHeads ?? []).shift() ?? state.head;
+    save();
+    return JSON.stringify([{ number: state.number, id: "PR_pull", baseRefName: "main", headRefName: state.branch, headRefOid: head, body: "" }]);
   }
   if (argv[1] === "graphql") {
     const request = JSON.parse(body);
@@ -168,6 +170,8 @@ type GhState = {
   readonly number: number;
   readonly branch: string;
   readonly head: string;
+  /** Heads the next lookups answer with, one each, before `head`: GitHub not yet showing a push. */
+  readonly staleHeads?: readonly string[];
   readonly diff: string;
   threads: { id: string; isResolved: boolean; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
   readonly issueComments: string[];
@@ -183,6 +187,8 @@ type GhState = {
 
 type Fixture = {
   readonly worktree: string;
+  /** Commit a change in the worktree, and return its sha. The fake `gh` reports it only once it is set as the head. */
+  readonly commit: () => string;
   readonly episode: Episode;
   readonly planFile: string;
   readonly gh: () => GhState;
@@ -218,7 +224,12 @@ async function withPullRequest(starts: readonly PlannedStart[], body: (fixture: 
   const episode = episodeAt(worktree, NUMBER);
   process.env["PATH"] = `${bin}:${originalPath}`;
   try {
-    await body({ worktree, episode, planFile, gh: () => JSON.parse(readFileSync(ghFile, "utf8")) as GhState, setGh });
+    const commit = (): string => {
+      writeFileSync(join(worktree, FILE), "// line 1\n// line 2, which says what it is for\n", "utf8");
+      git("commit", "--quiet", "--all", "--message", "say what the line is for");
+      return git("rev-parse", "HEAD");
+    };
+    await body({ worktree, commit, episode, planFile, gh: () => JSON.parse(readFileSync(ghFile, "utf8")) as GhState, setGh });
   } finally {
     // A host still running would find its worktree gone and exit, so wait for it first.
     const lock = join(episode.directory, "host.lock");
@@ -310,6 +321,58 @@ for (const [ruling, exit, paragraph] of rulings) {
     });
   });
 }
+
+test("a run straight after a reply and a push, which reads the head GitHub has not yet moved, queues the pushed commit and returns its round (#588)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 2, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const old = fixture.gh().head;
+
+    // squiz reply, git push, squiz review: GitHub lists the reply at once, and
+    // answers the run's lookup with the head from before the push.
+    const gh = fixture.gh();
+    gh.threads[0]?.comments.push({
+      id: "PRRC_reply",
+      databaseId: 9500,
+      body: renderReply("The line now says what it is for."),
+      createdAt: "2026-10-05T07:20:00Z",
+    });
+    const pushed = fixture.commit();
+    fixture.setGh({ ...gh, head: pushed, staleHeads: [old] });
+
+    const second = await runReview({
+      directory: fixture.worktree,
+      pullRequest: NUMBER,
+      environment: {},
+      pollMs: 100,
+      until: deadlineIn(20_000),
+      host: (pullRequest) => ({ command: process.execPath, args: [hostFixture, String(pullRequest), fixture.planFile] }),
+    });
+
+    const log = hostLog(fixture.episode);
+    assert.match(
+      log,
+      new RegExp(`round 2: ${old.slice(0, 7)} with reply PRRC_reply not reviewed: superseded by ${pushed.slice(0, 7)}\\n`, "u"),
+      `the run did not read the head from before the push, so this is not the sequence #588 saw:\n${log}`,
+    );
+    assert.match(log, new RegExp(`round 2: reviewing ${pushed.slice(0, 7)} with reply PRRC_reply\\n`, "u"), `no round for the pushed commit started:\n${log}`);
+    assert.equal(second.exit, 0, `${second.stdout}${second.stderr}\n${log}`);
+    assert.equal(second.stdout.split("\n")[1], `Squiz reviewed PR #41 at ${pushed.slice(0, 7)}: round 2 of 3, no new findings.`);
+    const records = stateOf(fixture.episode).records ?? [];
+    assert.deepEqual(
+      records.map((record) => [record.head, record.status]),
+      [
+        [old, "reviewed"],
+        [old, "not reviewed"],
+        [pushed, "reviewed"],
+      ],
+    );
+  });
+});
 
 test("a reason GitHub refuses to post is named on stderr, and the thread stays open (#511)", async () => {
   const starts: PlannedStart[] = [
