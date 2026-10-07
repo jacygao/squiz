@@ -23,7 +23,6 @@ import { loadConfig } from "../config/config.ts";
 import { readComment } from "../findings/comment.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "../github/threads.ts";
 import type { GhCall } from "../github/gh.ts";
-import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { namedStates } from "../loop/round-end.ts";
@@ -31,7 +30,7 @@ import { recordFor, sameState, type ClosingBound, type StateKey, type StateRecor
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import type { Presence, ProcessIdentity } from "../sessions/process.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
-import { printReview, type Printed, type ReviewResult } from "./output.ts";
+import { printReview, unprinted, type Printed, type ReviewResult } from "./output.ts";
 
 // Claude Code gives a shell command at most 600 seconds, and the minute left
 // covers the process starting and stopping.
@@ -154,7 +153,7 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
       const listed = (request.listThreads ?? listReviewThreads)(triggered.pullRequest.nodeId, call);
       if (listed.outcome !== "listed") {
         const reason = `the threads on PR #${pullRequest} could not all be listed to print the review of ${own.head.slice(0, 7)}: ${listed.reason}`;
-        return { exit: 1, stdout: "", stderr: failureLine(reason) };
+        return unprinted(reason);
       }
       return finish(settled, listed.threads);
     }

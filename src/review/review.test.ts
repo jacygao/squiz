@@ -270,6 +270,27 @@ test("a round that fails exits 1 with the reason it recorded and nothing on stdo
   });
 });
 
+test("threads that cannot be listed after the round exit 1 with the reason, and say not to run again (#600)", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
+    ], { rounds: [NO_COST] });
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }),
+      listThreads: () => ({ outcome: "unreadable", reason: "GitHub answered 502" }),
+    });
+
+    assert.equal(printed.exit, 1);
+    assert.equal(printed.stdout, "");
+    assert.equal(
+      printed.stderr,
+      "squiz: the threads on PR #41 could not all be listed to print the review of 3f9c2e0: GitHub answered 502\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
 test("a state left not reviewed by the cap is handed the close, with the line saying why", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

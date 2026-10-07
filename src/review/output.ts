@@ -187,6 +187,11 @@ export function composeReview(result: ReviewResult, path: string): Printed {
 // failure, so a coding agent is told to stop and report instead.
 const NOT_AGAIN = failureLine("put these lines in your report rather than running squiz review again");
 
+/** Exit 1 for a result that could not be printed, `reason` saying why. */
+export function unprinted(reason: string): Printed {
+  return { exit: 1, stdout: "", stderr: failureLine(reason) + NOT_AGAIN };
+}
+
 /**
  * The output: the path line, then `blocks` set apart by blank lines.
  *
