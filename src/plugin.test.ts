@@ -42,6 +42,21 @@ test("the manifest's version is the package's", () => {
   assert.equal(manifest.version, packageVersion);
 });
 
+test("the marketplace lists this repository's plugin under the manifest's name and version", () => {
+  const marketplace = readJson("../.claude-plugin/marketplace.json") as {
+    name?: string;
+    plugins?: { name?: string; source?: unknown; version?: string }[];
+  };
+  // The marketplace's name is the half after the @ in `/plugin install squiz@squiz`.
+  assert.equal(marketplace.name, "squiz");
+  const entries = marketplace.plugins ?? [];
+  assert.equal(entries.length, 1, "the marketplace lists squiz and nothing else");
+  const [entry] = entries;
+  assert.equal(entry?.name, manifest.name, "the entry's name is the one `/plugin install` resolves against plugin.json");
+  assert.equal(entry?.version, manifest.version, "a marketplace version that differs from plugin.json's installs under the wrong one");
+  assert.equal(entry?.source, "./", "the plugin is this repository, at its root");
+});
+
 function commandsOn(event: string): readonly unknown[] {
   return (registration.hooks?.[event] ?? []).flatMap((matcher) => matcher.hooks ?? []);
 }

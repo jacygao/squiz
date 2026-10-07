@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.14 (draft)
+**Version:** 1.15 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2930,6 +2930,7 @@ plugin is the package, so there is no separate packaging step.
 
 ```
 .claude-plugin/plugin.json   manifest: name, version, description, and the Copilot extensions directory
+.claude-plugin/marketplace.json  the marketplace named squiz, listing this repository's root as the one plugin
 hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code and Copilot triggers
 extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
 commands/                    slash commands; the setup check is the first
@@ -3022,16 +3023,22 @@ the part that rests on it is built, and each result is written as a finding in
 
 ### Installing
 
-Squiz is a Claude Code plugin and installs from a marketplace, which is a
-`.claude-plugin/marketplace.json` in a git repository. A private repository
-works.
+Squiz is a Claude Code plugin, and this repository is its marketplace as well.
+`.claude-plugin/marketplace.json` names the marketplace `squiz` and lists one
+plugin, squiz, whose source is the repository's own root.
 
 ```
-/plugin marketplace add <owner>/<repo>
-/plugin install squiz@<marketplace>
+/plugin marketplace add jacygao/squiz
+/plugin install squiz@squiz
 ```
 
-`/plugin uninstall squiz` removes it.
+Claude Code copies the repository into
+`plugins/cache/squiz/squiz/<version>/` under its configuration directory, where
+the version is the one `plugin.json` carries. The marketplace entry carries the
+same version, and `src/plugin.test.ts` fails where the two differ.
+
+`/plugin uninstall squiz` removes it from Claude Code. The copied directory
+stays, marked orphaned, until Claude Code deletes it.
 
 ### Getting started
 
