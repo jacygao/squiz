@@ -288,7 +288,7 @@ test("a link to this squiz is named, as squiz init names it", () => {
   });
 });
 
-test("a link to an earlier version of the same plugin-cache install is a warning saying to run squiz init", () => {
+test("a link to another version of the same plugin-cache install is a warning saying to run squiz init", () => {
   const install = join(directoryOnPath("claude"), "plugins", "cache", "squiz-marketplace", "squiz");
   const earlier = squizCopy(join(install, "0.1.0"));
   const target = squizCopy(join(install, "0.2.0"));
@@ -297,7 +297,7 @@ test("a link to an earlier version of the same plugin-cache install is a warning
 
   assert.deepEqual(linkRow(target, localBin), {
     level: "warning",
-    line: `squiz link: warning: ${join(localBin, "squiz")} links to ${earlier}, an earlier version of this install. Run squiz init to move it to this one`,
+    line: `squiz link: warning: ${join(localBin, "squiz")} links to ${earlier}, another version of this install. Run squiz init to move it to this one`,
   });
 });
 

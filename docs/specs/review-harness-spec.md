@@ -2686,13 +2686,13 @@ with no link, so no link is present rather than missing. Anything `squiz init`
 would refuse or change is a warning, as an optional tool that cannot be run is.
 Where `PATH` holds more than one `squiz`, the row names the one `squiz init`
 would act on: the first that is not squiz or not this squiz, then the first
-earlier version, then a link to this squiz.
+other version of this install, then a link to this squiz.
 
 | Already on `PATH` | Level | The line |
 |---|---|---|
 | A link to this squiz | present | `squiz link: /Users/ana/.local/bin/squiz already links to this squiz` |
 | No link, or only this squiz's own `bin/` | present | `squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init` |
-| A link to an earlier version of the same plugin-cache install | warning | `squiz link: warning: /Users/ana/.local/bin/squiz links to /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, an earlier version of this install. Run squiz init to move it to this one` |
+| A link to another version of the same plugin-cache install | warning | `squiz link: warning: /Users/ana/.local/bin/squiz links to /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, another version of this install. Run squiz init to move it to this one` |
 | A link to another squiz, another squiz's own `bin/`, anything else named `squiz`, or a link to something missing | warning | `squiz link: warning: ` followed by the reason `squiz init` gives, such as `/Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again` |
 
 This squiz's own `bin/` on `PATH`, which Claude Code's Bash tool has, is no

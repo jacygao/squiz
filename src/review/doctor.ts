@@ -218,7 +218,7 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
     if (earlier !== undefined) {
       return {
         level: "warning",
-        line: `squiz link: warning: ${earlier.entry} links to ${earlier.final}, an earlier version of this install. Run squiz init to move it to this one`,
+        line: `squiz link: warning: ${earlier.entry} links to ${earlier.final}, another version of this install. Run squiz init to move it to this one`,
       };
     }
     const linked = found.find((each) => each.kind === "this");
