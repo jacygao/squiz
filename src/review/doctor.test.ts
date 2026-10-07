@@ -369,6 +369,16 @@ test("a .squiz.json that is not JSON is refused, not read as no file", () => {
   assert.equal(row.exit, 1);
 });
 
+test("outside a repository the reviewer is the default, whatever .squiz.json sits in the directory", () => {
+  const base = context(EVERY_FAKE);
+  writeFileSync(join(base.directory, ".squiz.json"), '{"reviewer":"claude"}', "utf8");
+
+  const printed = squizDoctor(base);
+
+  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, /mu);
+  assert.doesNotMatch(printed.stdout, /refused/u);
+});
+
 test("the .squiz.json read is the one at the repository's root, from a directory below it", () => {
   const project = repository('{"reviewer":"copilot"}');
   const below = join(project, "src", "deep");

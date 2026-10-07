@@ -13,7 +13,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { configFileName, loadConfig, type Config } from "../config/config.ts";
+import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
@@ -245,9 +245,10 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
  * starts under it.
  */
 const reviewer: Check = (context) => {
+  const root = repositoryRoot(context);
   let config: Config;
   try {
-    config = loadConfig(repositoryRoot(context) ?? context.directory);
+    config = root === undefined ? { ...defaultConfig } : loadConfig(root);
   } catch (cause) {
     return { level: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
   }
