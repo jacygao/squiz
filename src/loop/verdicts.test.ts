@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { renderOpenReason } from "../findings/comment.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { applyVerdicts, type HandedOverThread } from "./verdicts.ts";
+import { applyVerdicts, unappliedRulings, type HandedOverThread } from "./verdicts.ts";
 
 /** One answer of the fake `gh`, given to any request whose body holds `when`. */
 type Rule = { readonly when: string; readonly answer: string };
@@ -522,4 +522,27 @@ test("no thread handed over is no work and no failure", async () => {
     assert.deepEqual(applied, { threads: [], unapplied: [] });
     assert.deepEqual(sent(gh), []);
   });
+});
+
+test("each ruling that could not be applied is named with its thread, the ruling and why (#605)", () => {
+  const lines = unappliedRulings({
+    threads: [
+      { thread: "PRRT_resolved", ruled: "fixed", outcome: "closed" },
+      { thread: "PRRT_fixed", ruled: "fixed", outcome: "failed", reason: "GitHub answered 502" },
+      { thread: "PRRT_withdrawn", ruled: "withdrawn", outcome: "failed", reason: "GitHub answered 502" },
+      { thread: "PRRT_open", ruled: "open", outcome: "failed", reason: "GitHub answered 403" },
+      { thread: "PRRT_silent", ruled: null, outcome: "failed", reason: "GitHub answered 403" },
+    ],
+    unapplied: [
+      { thread: "PRRT_invented", verdict: "fixed", reason: "no thread with that id was handed to the reviewer" },
+    ],
+  });
+
+  assert.deepEqual(lines, [
+    "the reviewer ruled thread PRRT_fixed fixed, and it could not be resolved: GitHub answered 502",
+    "the reviewer ruled thread PRRT_withdrawn withdrawn, and it could not be resolved: GitHub answered 502",
+    "the reviewer ruled thread PRRT_open open, and it could not be re-opened: GitHub answered 403",
+    "the reviewer gave thread PRRT_silent no ruling, which keeps it open, and it could not be re-opened: GitHub answered 403",
+    "the reviewer ruled thread PRRT_invented fixed, and the ruling was not applied: no thread with that id was handed to the reviewer",
+  ]);
 });

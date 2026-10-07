@@ -56,3 +56,30 @@ test("an episode closed at the token bound before any round ran promises no summ
     "The review is closed: it reached the token bound of 400,000 tokens. No round runs again.",
   );
 });
+
+test("the rulings a failed round could not apply are listed after its findings no thread holds (#605)", () => {
+  const body = renderFailure({
+    reason: REASON,
+    salvaged: { threaded: 1, reported: 2 },
+    unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
+    unapplied: ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)"],
+  });
+  assert.equal(
+    body.split("\n\n")[2],
+    [
+      "- About the change as a whole: The retry queue duplicates the scheduler",
+      "- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)",
+    ].join("\n"),
+  );
+});
+
+test("a failed round that salvaged only rulings lists the ones it could not apply (#605)", () => {
+  const body = renderFailure({
+    reason: REASON,
+    unapplied: ["A ruling of fixed on thread `PRRT_invented`, which was not handed to the reviewer, was not applied"],
+  });
+  assert.equal(
+    body.split("\n\n")[2],
+    "- A ruling of fixed on thread `PRRT_invented`, which was not handed to the reviewer, was not applied",
+  );
+});

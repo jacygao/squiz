@@ -28,6 +28,7 @@ import type { Plan, PlannedStart } from "./host-fixture.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { runReview } from "./review.ts";
+import { squizStatus } from "./status.ts";
 
 const NUMBER = 41;
 const BRANCH = "feature-a";
@@ -101,6 +102,9 @@ function answer(body) {
       return http("200 OK", { data: { addPullRequestReviewThreadReply: { comment: { databaseId: 9900 + n } } } });
     }
     if (query.includes("resolveReviewThread")) {
+      if (state.rejectResolve) {
+        return http("200 OK", { data: null, errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }] });
+      }
       const resolving = !query.includes("unresolveReviewThread");
       const thread = state.threads.find((t) => t.id === request.variables.threadId);
       thread.isResolved = resolving;
@@ -173,6 +177,8 @@ type GhState = {
   readonly rejectSummary?: boolean;
   /** Whether GitHub refuses every reply the round posts on a thread. */
   readonly rejectReply?: boolean;
+  /** Whether GitHub refuses every resolve and re-open the round sends. */
+  readonly rejectResolve?: boolean;
 };
 
 type Fixture = {
@@ -331,6 +337,51 @@ test("a reason GitHub refuses to post is named on stderr, and the thread stays o
     );
     assert.equal(fixture.gh().threads[0]?.comments.length, 2);
     assert.equal(fixture.gh().threads[0]?.isResolved, false);
+  });
+});
+
+test("a ruling GitHub refuses and one naming a thread never handed over are named by squiz review and squiz status (#605)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    {
+      findings: [],
+      verdicts: [
+        { thread: "PRRT_1", verdict: "fixed" },
+        { thread: "PRRT_9", verdict: "withdrawn" },
+      ],
+    },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 2, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    const gh = fixture.gh();
+    gh.threads[0]?.comments.push({
+      id: "PRRC_reply",
+      databaseId: 9500,
+      body: renderReply("The line is a fixture, and says so in the file's header."),
+      createdAt: "2026-10-05T07:20:00Z",
+    });
+    fixture.setGh({ ...gh, rejectResolve: true });
+
+    const second = await review(fixture);
+    assert.equal(
+      second.exit,
+      2,
+      `the thread GitHub would not resolve was counted closed: ${second.stdout}${second.stderr}\n${hostLog(fixture.episode)}`,
+    );
+    assert.equal(fixture.gh().threads[0]?.isResolved, false);
+    const refused =
+      "the reviewer ruled thread PRRT_1 fixed, and it could not be resolved: GitHub reported a GraphQL error: Resource not accessible by integration";
+    const unsent =
+      "the reviewer ruled thread PRRT_9 withdrawn, and the ruling was not applied: no thread with that id was handed to the reviewer";
+    assert.deepEqual(second.stderr.split("\n").filter((line) => line.includes("ruled thread")), [
+      `squiz: ${refused}`,
+      `squiz: ${unsent}`,
+    ]);
+    const status = squizStatus(fixture.worktree).stdout;
+    assert.ok(status.includes(`  ${refused}\n`), `squiz status did not name the refused ruling:\n${status}`);
+    assert.ok(status.includes(`  ${unsent}\n`), `squiz status did not name the unsent ruling:\n${status}`);
   });
 });
 

@@ -157,7 +157,7 @@ function threadsOpened(posted: PostedFindings): readonly Threaded[] {
  * A thread GitHub named no line for is given its file alone, which is the whole
  * of what there is to print for it, and it reads as a file-anchored thread does.
  */
-function locationOf(thread: ReviewThread): string {
+export function locationOf(thread: ReviewThread): string {
   const { anchor } = thread;
   switch (anchor.at) {
     case "line":

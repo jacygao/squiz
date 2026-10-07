@@ -230,6 +230,7 @@ test("the body posted is the body the composer wrote for the episode", async () 
         ],
         findings,
         earlier: carried.earlier,
+        unapplied: [],
         because: "round-cap",
         leftNotReviewed: closing.leftNotReviewed,
       }),

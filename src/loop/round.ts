@@ -31,6 +31,7 @@ import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import type { ClosedBy } from "../github/failure-body.ts";
 import type { CommentPosting } from "../github/summary.ts";
+import { unappliedNotes } from "../github/summary-body.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
@@ -205,6 +206,13 @@ export type RoundAccount = {
   readonly findings: PostedFindings;
   /** What the round did to the threads it handed over, and what it refused to do. */
   readonly verdicts: AppliedVerdicts;
+  /**
+   * The Notes lines of the rulings in `verdicts` that could not be applied.
+   *
+   * Written here because the round still holds where each thread sits. A failed
+   * round's comment lists them, and it is composed after the hand-over is gone.
+   */
+  readonly unappliedNotes: readonly string[];
 };
 
 /** What one round concluded. */
@@ -819,6 +827,7 @@ function nothingDone(pullRequest: number): RoundAccount {
     posted: [],
     findings: { outcomes: [] },
     verdicts: { threads: [], unapplied: [] },
+    unappliedNotes: [],
   };
 }
 
@@ -1093,6 +1102,7 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
     posted: threadsOpened(findings).map((thread) => thread.id),
     findings,
     verdicts,
+    unappliedNotes: unappliedNotes(ruleOn, verdicts),
   };
 }
 

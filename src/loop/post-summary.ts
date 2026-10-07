@@ -17,7 +17,7 @@
  */
 
 import type { GhCall } from "../github/gh.ts";
-import { renderSummary } from "../github/summary-body.ts";
+import { renderSummary, unappliedNotes } from "../github/summary-body.ts";
 import { postSummary, type CommentPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
@@ -100,6 +100,7 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Comment
     threads: classifyAtClose(closing),
     findings: closing.findings,
     earlier: closing.earlier,
+    unapplied: unappliedNotes(closing.handedOver, closing.verdicts),
     because: closing.because,
     leftNotReviewed: closing.leftNotReviewed,
   });

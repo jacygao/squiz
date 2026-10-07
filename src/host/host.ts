@@ -25,7 +25,7 @@ import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { unthreadedNotes } from "../github/summary-body.ts";
-import { unpostedReasons } from "../loop/verdicts.ts";
+import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
@@ -432,6 +432,7 @@ function reportOf(
 ): RoundReport & { readonly closedAt?: ClosingBound } {
   const problems = [
     ...unpostedReasons(conclusion.verdicts),
+    ...unappliedRulings(conclusion.verdicts),
     ...(conclusion.outcome === "close" ? summaryProblems(conclusion) : []),
   ];
   // Only a close that left threads open is printed with its bound.
@@ -462,7 +463,7 @@ export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly o
             : `the failure could not be posted on PR #${comment.pullRequest}: ${comment.posting.reason}`,
         ];
   const verdicts = conclusion.salvaged?.verdicts;
-  return [...(verdicts === undefined ? [] : unpostedReasons(verdicts)), ...went];
+  return [...(verdicts === undefined ? [] : [...unpostedReasons(verdicts), ...unappliedRulings(verdicts)]), ...went];
 }
 
 /** Why a round that reviewed nothing for its state failed. */

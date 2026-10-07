@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.13 (draft)
+**Version:** 1.14 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2046,9 +2046,25 @@ Three blocks, in this order.
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
    finding carries; a thread the closing round kept open whose reason could
-   not be posted, with its location and headline; a round whose review the time
-   bound cut short, with the round's number and the bound; and a cap or bound
-   that ended the episode early, with each queued state it left not reviewed.
+   not be posted, with its location and headline; a ruling of the closing round
+   that could not be applied, with what the reviewer ruled; a round whose review
+   the time bound cut short, with the round's number and the bound; and a cap or
+   bound that ended the episode early, with each queued state it left not
+   reviewed.
+
+**A ruling that could not be applied is a line saying what the reviewer ruled.**
+Its thread stays as GitHub had it, and the line is what a person reads to apply
+the ruling by hand. A ruling on a thread that was handed over names the thread by
+its location and headline. One naming a thread that was not handed over names it
+by the id the reviewer gave. What GitHub answered is left out:
+
+```markdown
+- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)
+- `src/queue.ts:140` — The cap is never read (ruled open, and the thread could not be re-opened)
+- `src/cache.ts:12` — The cache is never cleared (given no ruling, which keeps it open, and the thread could not be re-opened)
+- `src/cache.ts:30` — The key ignores the locale (ruled open a second time, which was not applied: the first ruling stands)
+- A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied
+```
 
 **The findings that no thread holds are the closing round's, and those an
 earlier round left that no later round settled.** A round that leaves the
@@ -2661,7 +2677,7 @@ a path that is silent today.
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. A trigger whose listing fails queues nothing. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
-| A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. Each is named with its thread and the reason: by `squiz review` and `squiz status` for the round, in the summary that closes the episode, and in the failure comment of a round that failed. | `squiz review` stderr (#605), `squiz status` (#605), summary's Notes (#605), failure comment (#605) |
+| A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. stderr names each with its thread, what the reviewer ruled, and why it was not applied, which for a refused mutation is what GitHub answered. `squiz status` does the same for a round that reviewed. The summary that closes the episode, and the failure comment of a round that failed, name each as § 5 What the comment carries shows, without GitHub's answer. Nothing is retried. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. A round that closes the episode lists each in its summary's Notes, and a round that fails lists each in its failure comment. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | The reviewer's reason cannot be posted | The verdict stands, and the thread stays in the state the reviewer ruled. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. A round that closes the episode names the thread in its summary's Notes, without GitHub's answer. Nothing is retried: the next round that keeps the thread open posts a reason of its own. | `squiz review` stderr, `squiz status`, summary's Notes |
 | A round that leaves threads open has findings no thread holds | A finding about the change as a whole, one the harness could anchor to neither a line nor a file, and one whose comment could not be posted reach no thread, and a round that leaves threads open posts no summary. The round's record keeps each. `squiz review` prints each on stderr, and the summary that closes the episode lists each that no later round settled (§ 5). | `squiz review` stderr, summary's Notes |
@@ -2686,8 +2702,9 @@ says how many of them it posted as threads. A list follows, holding each
 salvaged finding that no thread holds, written as the summary's Notes write it
 (§ 5 What the comment carries): a finding about the change as a whole, one the
 harness could anchor to neither a line nor a file, and one whose comment could
-not be posted at all. A failed round posts no summary, so this comment is the
-only place on the pull request such a finding reaches.
+not be posted at all. Each ruling the round could not apply follows them, also
+written as Notes writes it. A failed round posts no summary, so this comment is
+the only place on the pull request such a finding or ruling reaches.
 
 Where a round remains under the round cap and the token bound, the comment says
 the review is still open and that a new commit or reply, or running
@@ -2751,6 +2768,7 @@ as § 6 shows. Both reach the coding agent as its shell tool's output.
 squiz: round 3 found 3 findings and could not post them to PR #142
 squiz: no review ran: HEAD is detached in "/work/squiz", so no pull request has it as its head
 squiz: the review of PR #142 closed without its summary: GitHub answered 502
+squiz: the reviewer ruled thread PRRT_kwDOAbc123 fixed, and it could not be resolved: GitHub answered 502
 squiz: the failure could not be posted on PR #142: GitHub answered 502
 ```
 
