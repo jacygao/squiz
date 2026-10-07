@@ -36,6 +36,9 @@ const commands = ["hook", "threads", "reply", "status", "host", "review", "init"
 // `gh auth status` asks GitHub about each login, so it is given a network's time.
 const PROBE_BOUND_MS = 15_000;
 
+// Copilot's sign-in prompt took 13 seconds when it was measured.
+const SIGN_IN_BOUND_MS = 60_000;
+
 const numberSpelling = /^[1-9][0-9]*$/u;
 
 function dispatch(argv: readonly string[]): number | Promise<number> {
@@ -62,7 +65,7 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return hostCommand(argv.slice(1), process.cwd());
   }
   if (command === "doctor") {
-    const printed = squizDoctor({ environment: process.env, directory: process.cwd(), nodeVersion: process.versions.node, boundMs: PROBE_BOUND_MS, platform: process.platform });
+    const printed = squizDoctor({ environment: process.env, directory: process.cwd(), nodeVersion: process.versions.node, boundMs: PROBE_BOUND_MS, signInBoundMs: SIGN_IN_BOUND_MS, platform: process.platform });
     process.stdout.write(printed.stdout);
     process.stderr.write(printed.stderr);
     return printed.exit;

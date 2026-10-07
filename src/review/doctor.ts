@@ -8,16 +8,20 @@
  *
  * It starts each tool once to ask its version, `gh` a second time for its
  * sign-in, and `git` a second time for the repository whose `.squiz.json`
- * names the reviewer, which every row that reads the repository shares. It
- * reads settings files and plugin manifests, and writes nothing anywhere.
+ * names the reviewer, which every row that reads the repository shares. Where
+ * that reviewer is Copilot, it sends Copilot one prompt to test its sign-in. It
+ * reads settings files and plugin manifests, and writes nothing but the
+ * temporary directory that prompt runs in, which it removes.
  */
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
+import { variablesOf } from "../reviewers/round.ts";
 import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
@@ -41,6 +45,8 @@ export type DoctorContext = {
   readonly nodeVersion: string;
   /** How long one probe may run before it is killed and reported as not answering. */
   readonly boundMs: number;
+  /** How long Copilot's sign-in prompt may run. A model's answer takes longer than a version does. */
+  readonly signInBoundMs: number;
   /** The system whose limit on a socket path applies. */
   readonly platform: NodeJS.Platform;
 };
@@ -74,7 +80,12 @@ export type Probe =
  * could not start, ran out of time, or exited non-zero is `failed`, so a tool
  * that is installed and broken is never read as either missing or present.
  */
-export function probe(command: string, args: readonly string[], context: DoctorContext): Probe {
+export function probe(
+  command: string,
+  args: readonly string[],
+  context: DoctorContext,
+  said: (output: string) => string = firstLine,
+): Probe {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     env: context.environment,
@@ -92,8 +103,8 @@ export function probe(command: string, args: readonly string[], context: DoctorC
   }
   if (result.status !== 0) {
     const exit = result.status === null ? `was killed by ${result.signal ?? "a signal"}` : `exited ${result.status}`;
-    const said = firstLine(result.stderr) || firstLine(result.stdout);
-    return { outcome: "failed", reason: said === "" ? `${command} ${exit} and said nothing` : `${command} ${exit}: ${said}` };
+    const printed = said(result.stderr) || said(result.stdout);
+    return { outcome: "failed", reason: printed === "" ? `${command} ${exit} and said nothing` : `${command} ${exit}: ${printed}` };
   }
   return { outcome: "answered", stdout: result.stdout };
 }
@@ -494,21 +505,90 @@ const reviewer: Check = (context) => {
   if (found.outcome === "absent") return { level: "failed", line: `${label}: not found` };
   if (found.outcome === "failed") return { level: "failed", line: `${label}: could not be run: ${found.reason}` };
   const installed = `${label} ${found.version}`;
-  // No Copilot command reports its login without starting a session.
-  const signIn = config.reviewer === "copilot" ? ". Its sign-in is not checked" : "";
+  const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : { level: "present", line });
 
-  if (config.model !== null) {
-    return { level: "present", line: `${installed}, model ${config.model}, from ${configFileName}${signIn}` };
-  }
+  if (config.model !== null) return usable(`${installed}, model ${config.model}, from ${configFileName}`);
   const cli = config.reviewer === "pi" ? "pi" : "Copilot";
   const user = adapterFor(config.reviewer).userModel?.(context.environment);
-  if (typeof user === "string") return { level: "present", line: `${installed}, model ${user}, ${cli}'s default${signIn}` };
-  if (user === undefined) {
-    return { level: "present", line: `${installed}, model unknown: neither ${configFileName} nor ${cli}'s settings name one${signIn}` };
-  }
+  if (typeof user === "string") return usable(`${installed}, model ${user}, ${cli}'s default`);
+  if (user === undefined) return usable(`${installed}, model unknown: neither ${configFileName} nor ${cli}'s settings name one`);
   if (user.failsTheRound) return { level: "failed", line: `${installed}: model unknown: ${user.problem}` };
   return { level: "warning", line: `${installed}: warning: model unknown: ${user.problem}` };
 };
+
+// The cheapest model the prompt was measured on, whatever model a round runs.
+const SIGN_IN_MODEL = "gpt-5-mini";
+
+/**
+ * `line`, ending with whether Copilot is signed in. Only a request that reaches
+ * the model shows it, because no Copilot command reports its login without one.
+ *
+ * The prompt runs as a round runs the reviewer: under a `COPILOT_HOME` and a
+ * `gh` configuration of its own, with the token variables empty, so it signs in
+ * as a round would. It runs in that temporary directory rather than the
+ * repository, so no project file reaches Copilot, and the directory is removed
+ * afterwards.
+ */
+function copilotSignIn(line: string, context: DoctorContext): Row {
+  let scratch: string;
+  try {
+    scratch = mkdtempSync(join(tmpdir(), "squiz-doctor-"));
+  } catch (error) {
+    return { level: "failed", line: `${line}. Its sign-in could not be checked: ${describe(error)}` };
+  }
+  try {
+    const home = join(scratch, "copilot");
+    const github = join(scratch, "github");
+    mkdirSync(home);
+    mkdirSync(github);
+    const environment = {
+      ...context.environment,
+      ...absolutePath(context),
+      ...variablesOf(github, { COPILOT_HOME: home, COPILOT_ALLOW_ALL: "" }),
+    };
+    const asked = probe(
+      "copilot",
+      ["-p", "Reply with the single word OK.", "--model", SIGN_IN_MODEL, "--no-ask-user"],
+      { ...context, environment, directory: scratch, boundMs: context.signInBoundMs },
+      withIndentedDetail,
+    );
+    if (asked.outcome === "answered") {
+      return { level: "present", line: `${line}. Signed in; the check spent one request on ${SIGN_IN_MODEL}` };
+    }
+    const reason = asked.outcome === "absent" ? "copilot vanished from PATH" : asked.reason;
+    return { level: "failed", line: `${line}. Its sign-in check failed: ${reason}` };
+  } catch (error) {
+    return { level: "failed", line: `${line}. Its sign-in could not be checked: ${describe(error)}` };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
+ * `PATH` with each relative or empty entry read from the directory the check
+ * was run in, so that a probe started elsewhere finds the tools the version
+ * probes found, in the same order.
+ */
+function absolutePath(context: DoctorContext): { PATH?: string } {
+  const path = context.environment["PATH"];
+  if (path === undefined) return {};
+  return { PATH: path.split(delimiter).map((entry) => resolve(context.directory, entry)).join(delimiter) };
+}
+
+/**
+ * The first line printed, joined to the indented lines under it. Copilot
+ * indents the reason GitHub gave below a first line that names none.
+ */
+function withIndentedDetail(output: string): string {
+  const [first, ...rest] = output.split("\n").filter((each) => each.trim() !== "");
+  if (first === undefined) return "";
+  const detail: string[] = [];
+  for (const each of rest) {
+    if (!/^\s/u.test(each)) break;
+    detail.push(each.trim());
+  }
+  return [first.trim(), ...detail].join(" ");
+}
 
 /**
  * The project's own reviewer settings that a review leaves unused, and the

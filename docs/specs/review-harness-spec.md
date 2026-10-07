@@ -2959,10 +2959,11 @@ squiz link: /Users/ana/.local/bin/squiz already links to this squiz
 Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
 ```
 
-It exits 0 where every required dependency is usable and 1 otherwise. It writes
-nothing, in the repository it is run from or anywhere else, and runs outside a
-repository as well. Every tool it starts, it starts in the directory it was run
-from.
+It exits 0 where every required dependency is usable and 1 otherwise. It runs
+outside a repository as well. Every tool it starts, it starts in the directory
+it was run from, except Copilot's sign-in prompt. That prompt runs in a temporary
+directory, which is the only thing the check writes and which it removes once
+the prompt ends.
 
 Each line is one row of a list, in the order printed. A row is at one of three
 levels, and only `failed` changes the exit status:
@@ -2986,7 +2987,7 @@ The rows, in the order they print:
 | Herdr | No | `herdr --version` |
 | The `squiz` link | No | What `squiz init` finds on `PATH` |
 | Copilot's copies of squiz | No, and printed only where `copilot` is on `PATH` and has squiz installed | `.claude-plugin/plugin.json` in each copy under `<COPILOT_HOME>/installed-plugins/` |
-| The reviewer, and its model | Yes | `.squiz.json`, then `pi --version` or `copilot --version`, then the reviewer CLI's own settings |
+| The reviewer, its model, and Copilot's sign-in | Yes | `.squiz.json`, then `pi --version` or `copilot --version`, then the reviewer CLI's own settings, then for Copilot one prompt |
 | The project's `pi` settings a review does not use | No | The repository's root, where the reviewer is `pi` |
 
 **Each tool is found on `PATH` and started once to ask its version.** What
@@ -3127,17 +3128,55 @@ Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json
 Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
 Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one
 Reviewer pi 0.85.1: warning: model unknown: pi's settings /Users/ana/.pi/agent/settings.json are not JSON: Unexpected token
-Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is not checked
-Reviewer copilot 1.0.92: model unknown: the user's Copilot settings /Users/ana/.copilot/settings.json are not an object
+Reviewer copilot 1.0.93, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini
+Reviewer copilot 1.0.93: model unknown: the user's Copilot settings /Users/ana/.copilot/settings.json are not an object
 ```
 
 Settings that cannot be read are a warning for `pi`, which starts without them,
 and a failure for Copilot, whose round fails on them before it starts (The
 Copilot adapter).
 
-**Copilot's sign-in is not checked, and its line says so.** Its login is in the
-system's credential store, and no `copilot` command that leaves the model
-unused reports whether it is signed in.
+**Copilot's sign-in is checked with one prompt, which spends one request.** No
+`copilot` command reports whether it is signed in without reaching the model.
+Where `.squiz.json` names Copilot as the reviewer, and its settings do not
+already fail the row, the row runs:
+
+```
+copilot -p "Reply with the single word OK." --model gpt-5-mini --no-ask-user
+```
+
+It runs with the variables a round gives a Copilot reviewer, so it signs in the
+way a round does. `COPILOT_HOME` and `GH_CONFIG_DIR` name empty directories in
+the prompt's temporary directory, and `COPILOT_ALLOW_ALL` and the four `gh`
+token variables are empty (§ 4 Tools, The Copilot adapter). A relative or
+empty `PATH` entry is read from the directory the check was run in, so the
+prompt reaches the `copilot` whose version the row names. The model is
+`gpt-5-mini` whatever model a round would run on. On Copilot CLI 1.0.93 the
+prompt cost 0.35 AI credits and took 13 seconds. It is bounded at 60 seconds
+rather than the 15 a version is given.
+
+| The prompt | Level | The line ends |
+|---|---|---|
+| Exits 0 | present | `. Signed in; the check spent one request on gpt-5-mini` |
+| Exits non-zero | failed | `. Its sign-in check failed: copilot exited 1: Error: No authentication information found.`, with the first line Copilot printed and the indented lines under it |
+| Does not answer within 60 seconds | failed | `. Its sign-in check failed: copilot did not answer within 60 seconds` |
+| Its temporary directory cannot be made | failed | `. Its sign-in could not be checked: ` followed by the reason |
+
+Copilot exits 1 before any request when it finds no login, and prints one of
+these first:
+
+```
+Error: No authentication information found.
+Error: Authentication token found but could not be validated.
+
+  Failed to fetch PAT user login (401): GitHub returned: Bad credentials
+```
+
+For the second, the line ends `. Its sign-in check failed: copilot exited 1:
+Error: Authentication token found but could not be validated. Failed to fetch
+PAT user login (401): GitHub returned: Bad credentials`.
+
+No prompt is sent where the reviewer is `pi`, or for Copilot as a coding agent.
 
 **Claude Code is required only where Copilot cannot be the coding agent
 instead.** Either can be (§ 2), so where `claude` is not on `PATH` and
@@ -3184,13 +3223,12 @@ warning: copilot's extension cannot listen: its socket /Users/ana/work/tools/cop
 **Where Copilot is both a coding agent and the reviewer, both rows print, and
 each says what the other does not.** The coding agent's row says whether its
 experimental features are on and whether its socket fits. The reviewer's row
-says its model and that its sign-in is not checked. A round runs the reviewer
-under a `COPILOT_HOME` of its own, so neither the features nor the socket bear
-on it.
+says its model and its sign-in. A round runs the reviewer under a
+`COPILOT_HOME` of its own, so neither the features nor the socket bear on it.
 
 ```
 copilot 1.0.92, experimental features on
-Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is not checked
+Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini
 ```
 
 `copilot --version` is started once, however many rows read it.

@@ -153,17 +153,24 @@ Node 24.15.0
 tmux 3.7b
 Herdr 0.9.3
 squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init
-Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is not checked
+Reviewer copilot 1.0.93, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini
 ```
 
 The last line names the reviewer, its version and the model it will run on. It
-fails where that reviewer is not installed or `.squiz.json` is refused. It
-cannot tell whether Copilot is signed in. Where no model is named by
+fails where that reviewer is not installed or `.squiz.json` is refused. For
+Copilot it sends one prompt to `gpt-5-mini`, which costs about 0.35 AI credits
+and 13 seconds, and fails where Copilot is not signed in:
+
+```
+Reviewer copilot 1.0.93, model gpt-6-astra, Copilot's default. Its sign-in check failed: copilot exited 1: Error: No authentication information found.
+```
+
+Where no model is named by
 `.squiz.json`, by `COPILOT_MODEL` or by Copilot's own settings, the line says
 the model is unknown, and still passes:
 
 ```
-Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Its sign-in is not checked
+Reviewer copilot 1.0.93, model unknown: neither .squiz.json nor Copilot's settings name one. Signed in; the check spent one request on gpt-5-mini
 ```
 
 Where the Copilot CLI is installed, a line after Claude Code's gives its
