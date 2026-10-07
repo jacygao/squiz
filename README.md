@@ -3,8 +3,8 @@
 Squiz has a second agent review your coding agent's work, on the pull request.
 When the coding agent stops, a reviewer running a different model reads the
 change and posts its findings as review threads. The coding agent is woken with
-the result, fixes or answers each thread, and the reviewer looks again. When the
-loop ends, you open a pull request that has already been reviewed.
+the result, fixes or answers each thread, and the reviewer looks again. By the
+time you read the pull request, it has already been reviewed.
 
 Squiz is a plugin for Claude Code and for the GitHub Copilot CLI. Its Copilot
 support is experimental, because waking a Copilot session needs Copilot's
@@ -128,6 +128,11 @@ In the repository you want reviewed:
    default, which is also the model a session started without `--model` runs
    on. Nothing checks that the two differ.
 
+   Where Claude Code writes your code and Copilot reviews it, compare the
+   model on `squiz doctor`'s `Reviewer` line with the one Claude Code runs.
+   Copilot's default has been a Claude model as well as a GPT one, so set
+   `model` where the two are the same.
+
 Nothing goes in `AGENTS.md`, and the coding agent needs no instruction. A review
 starts each time it finishes its work on a branch with an open pull request.
 
@@ -202,16 +207,23 @@ repository's own pull request #672, trimmed:
 > Agreed. squizzesOnPath does not order versions, so the doctor line now says "another version of this install", in the code, its test and the § 6 table.
 
 When the review ends, squiz posts one summary comment on the pull request. Here
-is the one from the same pull request:
+is one from a scratch project that Copilot reviewed. A Copilot review is
+counted in AI credits, and one by `pi` in dollars:
 
 > **Squiz review — 2 rounds, 1 finding**
 >
 > Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0
-> 1,371,501 tokens over 2 rounds: 1,070,568, 300,933 · $0.3721
+> 115,302 tokens over 2 rounds: 61,172, 54,130 · 35.86 AI credits
+> Reviewed by `copilot` on `gpt-6-astra`
 >
 > **Needs a person**
 >
 > Nothing needs a person.
+>
+> **Rounds**
+>
+> - Round 1 at 4c25208: raised 1 finding
+> - Round 2 at 01a2f0f: raised nothing, and ruled 1 fixed
 
 Every thread still open or disputed when the review ends is listed under "Needs a person". Those are the ones for you.
 
