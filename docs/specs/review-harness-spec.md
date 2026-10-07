@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.04 (draft)
+**Version:** 1.05 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2573,7 +2573,10 @@ Each column holds:
   no round times, show `—`.
 - **Result:** for a failed state, the reason its failure comment gives. For a
   state not reviewed, why not. For a reviewed state, how many of the reviewer's
-  threads it left open, and "review closed" where it closed the episode.
+  threads it left open, and "review closed" where it closed the episode. Where
+  the round cap or the token bound closed it with threads open, "review closed
+  at the round cap" or "at the token bound". Where GitHub refused some of the
+  round's findings, the count follows, as "2 of 5 findings not posted".
 - **Session:** the backend and the label of the reviewer's tab or window,
   `squiz-<number>-r<k>` as § 4 The reviewer session opens it, with `k` the
   round's number its record keeps. A record that keeps no `k` shows the backend
@@ -2596,6 +2599,22 @@ state file keeps them.
 
 Every cell is one line. A line break in a reason, with the whitespace around it,
 is printed as one space, so each state keeps its one line.
+
+**A reviewed state's problems follow its line, one line each, indented by two
+spaces.** These are what failed without changing the round's outcome, such as a
+summary that could not be posted. Each is one line by the same rule as a cell,
+and none of them widens a column. A reviewed state with no problems, no
+unposted findings and no closing bound prints as the table above shows:
+
+```
+PR    Commit   Replies  State     Started           Elapsed  Result                                                                       Session   Worktree                          Resume
+#39   77e0f19  —        reviewed  2026-10-04 07:20  4m 05s   1 thread open, review closed at the token bound, 2 of 5 findings not posted  detached  .claude/worktrees/agent-a3c91e07  pi --session-dir .squiz/39/rounds/3/session --session 0193f1b2-4d6e-7a1c-9b3f-2c8d5e7f9a14
+  the review of PR #39 closed without its summary: gh: HTTP 502 Bad Gateway
+```
+
+The record keeps how many findings were not posted, and not which. Where the
+round closed the episode, its summary's Notes lists each one, as § 5 sets out.
+Where the round left threads open and the episode with them, nothing lists them.
 
 A state file that cannot be read gets a line of its own on stderr, naming the
 pull request, the worktree and what was wrong, and every other worktree is still
