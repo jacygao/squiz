@@ -16,8 +16,9 @@ each opened a pull request, went idle, and were woken through the socket by
 the round host's note within 40 milliseconds of the post. The one on a plugin
 installed from a local path worked its two threads to a closed episode with
 nothing open. Only the plugin's location changes. Copilot runs the hooks from
-its own copy under `<COPILOT_HOME>/installed-plugins/`, and `squiz init` run by
-path from that copy links `squiz` to it.
+its own copy under `<COPILOT_HOME>/installed-plugins/`, or from the directory
+itself for a local marketplace, and `squiz init` run by path from there links
+`squiz` to it.
 
 ## Intent
 
@@ -153,16 +154,10 @@ with `woke its owner through <socket>`. A session started without
 experimental features logs neither line, has no socket file, and its record's
 owner carries `sessionId` alone.
 
-### The live runs
+### What a wake looks like
 
-On `jacygao/greet-cli`, each on a branch and pull request of its own.
-
-| Install | PR | Idle | After the note |
-|---|---|---|---|
-| Local path | #33 | 41 s | Ran `squiz review 33`, fixed both threads, replied on one, pushed, and round 2 closed the episode `nothing-open` |
-| GitHub marketplace | #32 | 15 min 54 s | Ran `squiz review 32`. Its round 2 ended with one thread open, and the session asked the user what to do rather than working it |
-
-The local-path run, from its `events.jsonl` and `host.log`:
+On `jacygao/greet-cli`, with the plugin installed from a local path, from the
+session's `events.jsonl` and the round's `host.log`:
 
 ```
 08:03:58.238Z events    hook.start agentStop
@@ -172,10 +167,8 @@ The local-path run, from its `events.jsonl` and `host.log`:
 08:04:47.738Z events    bash "squiz review 33"
 ```
 
-The marketplace run's round 1 failed at the reviewer's 900-second bound, so
-its note was the failure's: `Squiz could not review PR #32 at f250701: the
-reviewer was killed at its 900-second bound, …`. It arrived 37 milliseconds
-after `host.log`'s `woke its owner through`.
+The run on the GitHub marketplace shape was woken the same way, 37
+milliseconds after its `host.log` line, by a failed round's note.
 
 ### Setup
 

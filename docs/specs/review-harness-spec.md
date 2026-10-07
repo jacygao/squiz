@@ -3191,7 +3191,8 @@ this. A `## Review` section that an earlier `squiz init` added there is left as
 it is, and the project may delete it.
 
 **Every Copilot session of a user who installed squiz loads it,** with its
-hooks and its extension. Copilot does not put the plugin's `bin/` on its
+hooks, and with its extension where experimental features are on, as below.
+Copilot does not put the plugin's `bin/` on its
 shell's `PATH`, so `squiz init` links `squiz` into a directory already on it,
 once on each machine.
 
