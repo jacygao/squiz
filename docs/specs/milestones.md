@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.32 (draft)
+**Version:** 0.33 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -22,7 +22,7 @@ something that can be run or seen, never in a module written.
 | 9 | M10 — The subagent-era workarounds removed | Done |
 | 10 | M12 — Copilot as the reviewer | Done |
 | 11 | M13 — Copilot as a coding agent | Done |
-| 12 | M11 — Depth `deep` | |
+| 12 | M11 — One review level | |
 | 13 | M8 — Episode boundaries | |
 | 14 | M9 — Install and dogfood | |
 
@@ -100,7 +100,8 @@ Built `charter.md`, the `pi` adapter's command line, stream parsing and grants,
 and the spawn harness that runs the reviewer at depth `read`: its working
 directory and scratch space, `< /dev/null`, the time bound, one parse retry,
 cost extraction, and the prompt carrying the pull request and its threads. Depth
-`deep` was left to M11, in #113.
+`deep` was left to M11, in #113. M11 then replaced both depths with one review
+level.
 
 ## M5 — The round
 
@@ -181,7 +182,8 @@ so Copilot starts in a Herdr pane. A live run worked a planted defect to exit 0.
 It left these for M9: choosing the reviewer's model in `.squiz.json` (#483),
 and the setup check following `reviewer` (#512). Its open questions about
 Copilot are held with `milestone:M9`, and granting `deep` to Copilot is #526,
-with M11.
+with M11. M11 then replaced `deep` with one review level, which grants Copilot
+the history tools as it does `pi`.
 
 ## M13 — Copilot as a coding agent
 
@@ -205,34 +207,33 @@ so setting up Copilot includes turning them on. A Copilot session without them
 is unsupported: its reviews still run, and it learns the result only from a
 `squiz review` it runs itself.
 
-## M11 — Depth `deep`
+## M11 — One review level
 
-The reviewer at `deep` runs the project's tests and reads its history, through
-tools that do one thing each, on the snapshot M7 gives every reviewer. It is
-granted no shell.
+Every reviewer gets one level: the reading tools, the reporting calls, and three
+history tools that read the repository's git history. There are no depths, and
+the reviewer runs nothing of the project's. Everything that existed only to run
+the project's tests is removed.
 
-The snapshot holds no installed dependencies, so the configured test command
-installs or builds what it needs before the tests run. What that adds to a round
-is measured before M11 is planned (#496).
+M11 began as depth `deep`, a reviewer that also ran the project's tests. #590
+measured both depths over 204 reviews of changes with known defects: `deep`
+found no more of them than `read`, and reading caught every defect the tests
+would have. The one clear gain came from the history tools. The owner decided on
+2026-10-07 to keep a single level that runs no code, and to improve reviews
+through the charter, the prompt and the process, measured with #590's rig.
 
 ### Acceptance criteria
 
-- [ ] Depth `deep` grants the `read` tools and these, and no shell, for `pi` and
-      for Copilot:
-  - `run_tests`, which takes no argument and runs the configured test command;
-  - `git_log_search`, `git_blame` and `git_show`, which take a term, a file and
-    line, and a commit, and run only that `git` subcommand.
-- [ ] No argument reaches a shell: each tool runs its command with its arguments
-      as separate words.
-- [ ] The reviewer's environment carries no GitHub token or `gh` credential.
-- [ ] A write the configured test command makes is detected on the snapshot and
-      named in the summary.
-- [ ] A configured test command that works in a fresh checkout runs to
-      completion in the snapshot.
-- [ ] The harness specification's § 4 Confinement says what remains: the test
-      command runs the project's code at the commit under review with the user's
-      access, as the coding agent's own test runs do, and nothing confines it.
-      An operating-system sandbox is held as #529.
+- [ ] Both reviewers are granted the reading tools, the three reporting calls,
+      and `git_log_search`, `git_blame` and `git_show`, at every review. No
+      setting changes the grant.
+- [ ] The `depth` and `test` settings, `run_tests`, the process-group record,
+      and the tracked-file and shared-config comparisons are gone from the code,
+      the tests and the specification.
+- [ ] `pi`'s refusal refuses every tool call outside the grant.
+- [ ] The harness specification's § 4 says what confines the reviewer: no tool
+      writes, no shell, reads confined to the snapshot, and the history tools
+      are read-only and hardened.
+- [ ] `npm run typecheck` and `npm test` pass after each removal.
 
 ## M8 — Episode boundaries
 
