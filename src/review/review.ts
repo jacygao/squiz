@@ -182,7 +182,10 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     const unqueued = unqueuedSuccessor(state, context.own);
     if (unqueued !== undefined && !until.passed()) {
       const again = triggerNow();
-      if (again.outcome !== "decided") return notRun(again.reason);
+      if (again.outcome !== "decided") {
+        // A trigger the run's own deadline cut off is the deadline arriving, not a review that could not run.
+        return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
+      }
       triggered = again;
       // A trigger that read a state other than the one the record names waits on what it read.
       if (!sameState(again.state, unqueued)) context = { ...context, own: again.state };
