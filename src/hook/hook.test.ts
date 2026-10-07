@@ -62,7 +62,8 @@ type Place = {
 
 /**
  * The fake `gh`. `gh pr list` prints `list.out` and exits with `list.status`.
- * Every GraphQL call is a threads listing with no threads.
+ * Every GraphQL call is a threads listing with no threads. Each call's arguments
+ * are appended to `calls.log`, one line per call.
  */
 function fakeGh(directory: string): string {
   const at = `'${directory.replaceAll("'", `'\\''`)}'`;
@@ -72,6 +73,7 @@ function fakeGh(directory: string): string {
   return [
     "#!/bin/sh",
     "cat > /dev/null",
+    `printf '%s\\n' "$*" >> ${at}/calls.log`,
     'for arg in "$@"; do',
     '  if [ "$arg" = graphql ]; then',
     `    printf 'HTTP/2.0 200 OK\\nContent-Type: application/json; charset=utf-8\\r\\n\\r\\n%s' '${noThreads}'`,
@@ -501,6 +503,28 @@ test("a trigger that could not read what it decides from says so in one line", a
 
     assert.equal(fired.code, 0);
     assert.match(fired.stderr, /^squiz: nothing was queued: the pull request for "feature-a" could not be looked up: [^\n]*\n$/u);
+  });
+});
+
+test("a state file that cannot be read queues nothing, starts no host, posts no comment, and says why in one line", async () => {
+  await withPlace(async (place) => {
+    const episode = episodeAt(place.worktree, NUMBER);
+    mkdirSync(episode.directory, { recursive: true });
+    writeFileSync(episode.stateFile, "{ not json", "utf8");
+
+    const fired = await fire(place, { payload: stopPayload(place.worktree) });
+
+    assert.equal(fired.code, 0);
+    assert.ok(
+      fired.stderr.startsWith(`squiz: nothing was queued: ${episode.stateFile} is not valid JSON: `),
+      `the line does not name the file and the parser's error: ${fired.stderr}`,
+    );
+    assert.equal(fired.stderr.split("\n").length, 2, "one line, and nothing else");
+    assert.equal(readFileSync(episode.stateFile, "utf8"), "{ not json", "the hook wrote over the file it could not read");
+    assert.deepEqual(hostsThatTook(place), [], "a host was started for a state nothing queued");
+    const calls = readFileSync(join(place.bin, "calls.log"), "utf8");
+    assert.match(calls, /^pr list /mu, "the stand-in gh was never reached");
+    assert.doesNotMatch(calls, /\/comments/u, "a comment was posted on the pull request");
   });
 });
 
