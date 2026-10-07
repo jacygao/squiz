@@ -9,6 +9,7 @@ import {
   type EpisodeState,
   readState,
   recordRound,
+  recordRulings,
   recordSpendOutsideRounds,
   writeState,
 } from "./episode-state.ts";
@@ -224,6 +225,11 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "records": [3]}`,
   `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "postponed"}]}`,
   `{"rounds": [], "records": [{"head": "3f9c2e0", "status": "queued"}]}`,
+  // A ruling dropped or guessed on reading is a withdrawn finding counted some
+  // other way by a close that runs no reviewer.
+  `{"rounds": [], "rulings": []}`,
+  `{"rounds": [], "rulings": {"PRRT_a": "resolved"}}`,
+  `{"rounds": [], "rulings": {"PRRT_a": null}}`,
   // Two records for one state leave no telling which of them is true.
   `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}]}`,
 ];
@@ -333,6 +339,27 @@ test("a reported close is written and comes back, and one never written is absen
   writeFileSync(episode.stateFile, `{"rounds": []}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
+});
+
+test("the reviewer's last ruling on each thread is written and comes back, and a file with none reads with none", (t) => {
+  const episode = episodeIn(t);
+  const ruled: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    rulings: { PRRT_argued: "withdrawn", PRRT_mended: "fixed", PRRT_kept: "open" },
+  };
+
+  assert.deepEqual(writeState(episode, ruled), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state: ruled });
+
+  writeFileSync(episode.stateFile, `{"rounds": []}`);
+  const read = readState(episode);
+  assert.equal(read.outcome === "read" ? read.state.rulings : "unread", undefined);
+});
+
+test("a ruling replaces the one before it on its thread, and leaves the others", () => {
+  const before: EpisodeState = { rounds: [], spentOutsideRounds: unspent, rulings: { PRRT_a: "open", PRRT_b: "fixed" } };
+  assert.deepEqual(recordRulings(before, { PRRT_a: "withdrawn" }).rulings, { PRRT_a: "withdrawn", PRRT_b: "fixed" });
 });
 
 // Earlier versions compared the snapshot's tracked files and `HEAD` before and

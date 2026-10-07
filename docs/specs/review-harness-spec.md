@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.22 (draft)
+**Version:** 1.23 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -169,8 +169,8 @@ long ago anything happened.
 **An episode is keyed by the number of its pull request.** Its state lives in
 `.squiz/<number>/` inside the worktree. The state file holds the round count, the
 cost of each round, what the episode spent on attempts that were no round,
-and whether the episode has reported its close and what was open at that close.
-The directory also holds:
+whether the episode has reported its close and what was open at that close, and
+the reviewer's last ruling on each thread. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
   handed, the report file the reviewer reports into, the reviewer's session,
@@ -362,6 +362,19 @@ reply started is a round, exactly as one a commit started. A coding agent that
 answers every finding with a dispute spends the cap doing so, and the episode
 closes at the cap with the disputes for a person. A run that returns a recorded
 result is no round and spends nothing.
+
+**The state file keeps the reviewer's last ruling on each thread it ruled on**,
+by the thread's node id: `fixed`, `withdrawn` or `open`. GitHub's resolved state
+says a thread is closed and not which verdict closed it, and a close that runs no
+reviewer counts the thread by this ruling (§ 5). A round writes its rulings in
+the update that records its cost, before it posts anything, each in place of the
+one its thread held before. A state file that will not take that update fails
+the round with nothing posted, so no verdict reaches a thread unless its ruling
+is on record. A thread a finished review gave no verdict is kept as `open`,
+which is the verdict it is treated as. A failed round writes the rulings it
+salvaged, and leaves every other thread's alone. A ruling is kept whether or not
+GitHub then takes it, because the thread's resolved state still says whether it
+is closed. A state file with no rulings holds none.
 
 **A closed episode stays closed in its worktree.** A second episode on the same
 pull request starts in another worktree on the same branch, which holds no state
@@ -1923,7 +1936,8 @@ read.
 
 Every finding posted as a thread ends its episode in one of four states. The
 reviewer names the first two; the harness reads the last two off the thread when
-the episode closes.
+the episode closes. A close that runs no reviewer can also find a resolved thread
+with none of them, as § 5 sets out.
 
 | Status | What it means | Needs a person |
 |---|---|---|
@@ -2035,6 +2049,22 @@ threads are on the pull request, it posts the summary, prints the open ones, and
 exits 3 or 0 as any close does. Only where there are none does it post no summary,
 exit 0, and say on stderr that the episode closed before any round ran.
 
+**A close that runs no reviewer counts each thread by its resolved state and the
+last ruling the state file holds for it** (§ 3 The state file):
+
+| The thread | Counted as |
+|---|---|
+| Unresolved | `open`, or `disputed` where the coding agent replied, as at any close |
+| Resolved, last ruled `fixed` | `fixed` |
+| Resolved, last ruled `withdrawn` | `withdrawn` |
+| Resolved, last ruled `open`, or with no ruling on record | resolved, ruling unknown |
+
+A resolved thread with no ruling on record was resolved by a person, or in an
+episode whose state is in another worktree. One last ruled `open` was resolved
+after the reviewer kept it open. Neither says whether a defect was fixed, so
+neither is counted `fixed` or `withdrawn`. Neither needs a person, because
+someone closed the thread.
+
 ### What the comment carries
 
 Three blocks, in this order.
@@ -2045,7 +2075,12 @@ Three blocks, in this order.
    reviewer's CLI priced the model, and the AI credits where it reported
    those. Findings raised counts every thread of the episode, and every finding
    that no thread holds that Notes lists. The findings that no thread holds carry
-   no status.
+   no status. A close that ran no reviewer adds a count of the threads it found
+   resolved with no ruling to count them by, and only where there are any:
+
+   ```markdown
+   Fixed 1 · Withdrawn 0 · Open 1 · Disputed 0 · Resolved, ruling unknown 2
+   ```
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its headline and where it sits: `file:line` for a
    thread anchored to a line, and the file alone for one anchored to the file.

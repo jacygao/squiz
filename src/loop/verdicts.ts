@@ -109,6 +109,20 @@ export function applyVerdicts(
   return { threads, unapplied: rulings.unapplied };
 }
 
+/**
+ * The verdict `applyVerdicts` will apply to each thread, by thread id, read
+ * before anything is sent.
+ */
+export function rulingsOn(
+  handedOver: readonly HandedOverThread[],
+  verdicts: readonly ThreadVerdict[],
+): Record<string, Verdict> {
+  const { byThread } = rulingsFor(handedOver, verdicts);
+  return Object.fromEntries(
+    handedOver.map((thread) => [thread.id, byThread.get(thread.id)?.verdict ?? defaultVerdict]),
+  );
+}
+
 /** The verdicts to apply, keyed by thread, and the ones that go unapplied. */
 type Rulings = {
   readonly byThread: ReadonlyMap<string, ThreadVerdict>;

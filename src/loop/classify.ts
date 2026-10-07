@@ -45,6 +45,15 @@ export type EpisodeAtClose = {
 };
 
 /**
+ * What the summary counts a thread as: its status, or `resolved` for a resolved
+ * thread with no ruling to count it by.
+ *
+ * Only a close that ran no reviewer has such a thread. A round that reviewed
+ * rules on every thread it handed over.
+ */
+export type CountedStatus = ThreadStatus | "resolved";
+
+/**
  * One thread of this review, as the summary names it.
  *
  * Only what the summary has of it: the counts read the status, and the
@@ -53,7 +62,7 @@ export type EpisodeAtClose = {
  * episode is over.
  */
 export type ClassifiedThread = {
-  readonly status: ThreadStatus;
+  readonly status: CountedStatus;
   // Null where the reviewer left the headline blank, which drops it from the comment.
   readonly headline: string | null;
   /**
@@ -97,11 +106,14 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
     counted.add(thread.id);
     const reading = readThread(thread);
     if (reading.raised !== "finding") continue;
+    const verdict = ruled.get(thread.id);
     classified.push({
-      status: statusOf({
-        verdict: ruled.get(thread.id) ?? null,
-        codingAgentReplied: reading.codingAgentReplied,
-      }),
+      // A resolved thread with no entry is one no ruling on record closed. The
+      // default verdict would count it open, and it is not.
+      status:
+        verdict === undefined && thread.isResolved
+          ? "resolved"
+          : statusOf({ verdict: verdict ?? null, codingAgentReplied: reading.codingAgentReplied }),
       headline: reading.headline,
       location: locationOf(thread),
       ...(unposted.has(thread.id) ? { reasonUnposted: true } : {}),
@@ -138,9 +150,9 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
  * off its position in the list would take the verdict on whichever thread sat
  * there.
  *
- * A thread with no entry and one entered with no ruling are the same answer
- * here, which is that the reviewer ruled on neither. The default that makes a
- * status of that belongs to `statusOf` and is applied there once.
+ * A thread entered with no ruling is one the reviewer passed over, and the
+ * default that makes a status of that belongs to `statusOf`. A thread with no
+ * entry was never ruled on here at all.
  */
 function rulings(verdicts: AppliedVerdicts): ReadonlyMap<string, Verdict | null> {
   return new Map(verdicts.threads.map((applied) => [applied.thread, applied.ruled]));

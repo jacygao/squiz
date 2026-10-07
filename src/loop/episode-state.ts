@@ -18,6 +18,7 @@
 
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
+import type { Verdict } from "../findings/status.ts";
 import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
 import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
@@ -114,7 +115,18 @@ export type EpisodeState = {
    * Absent is none, which is what a file written before records were kept holds.
    */
   readonly records?: readonly StateRecord[];
+  /**
+   * The reviewer's last ruling on each thread a round ruled on, by the thread's
+   * node id. A thread a finished review gave no verdict is held as `open`.
+   *
+   * GitHub's resolved state does not say whether `fixed` or `withdrawn` closed a
+   * thread, and a close that runs no reviewer reads it here. Absent is none.
+   */
+  readonly rulings?: Rulings;
 };
+
+/** A ruling by thread node id. */
+export type Rulings = Readonly<Record<string, Verdict>>;
 
 /**
  * What asking for an episode's state established.
@@ -219,6 +231,11 @@ export function recordPostingSeconds(
   return { ...state, rounds };
 }
 
+/** The state with each of `rulings` in place of whatever its thread held before. */
+export function recordRulings(state: EpisodeState, rulings: Rulings): EpisodeState {
+  return { ...state, rulings: { ...state.rulings, ...rulings } };
+}
+
 /**
  * The state with `cost` added to what the episode spent outside its rounds.
  *
@@ -286,6 +303,13 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   const kept = recordsIn(parsed);
   if ("problem" in kept) return unreadable(`${path}: ${kept.problem}`);
 
+  const rulings = parsed["rulings"];
+  // A ruling guessed or dropped here miscounts the thread at a close that runs
+  // no reviewer.
+  if (rulings !== undefined && !isRulings(rulings)) {
+    return unreadable(`${path}: "rulings" is ${render(rulings)} rather than a ruling for each thread`);
+  }
+
   return {
     outcome: "read",
     state: {
@@ -293,8 +317,14 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       spentOutsideRounds: outside.cost,
       ...(reported === undefined ? {} : { closeReported: reported }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
+      ...(rulings === undefined ? {} : { rulings }),
     },
   };
+}
+
+function isRulings(value: unknown): value is Rulings {
+  const verdicts: readonly unknown[] = ["fixed", "withdrawn", "open"] satisfies readonly Verdict[];
+  return isRecord(value) && Object.values(value).every((ruled) => verdicts.includes(ruled));
 }
 
 type ReadRecords =
