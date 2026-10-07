@@ -151,9 +151,9 @@ Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is no
 
 The last line names the reviewer, its version and the model it will run on. It
 fails where that reviewer is not installed or `.squiz.json` is refused. It
-cannot tell whether Copilot is signed in. Where neither `.squiz.json` nor
-Copilot's own settings name a model, the line says the model is unknown, and
-still passes:
+cannot tell whether Copilot is signed in. Where no model is named by
+`.squiz.json`, by `COPILOT_MODEL` or by Copilot's own settings, the line says
+the model is unknown, and still passes:
 
 ```
 Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Its sign-in is not checked
