@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { renderSummary } from "../github/summary-body.ts";
 import { nothingEstablished } from "./confinement.ts";
 import { decideAfterRound, type EpisodeBounds } from "./round-decision.ts";
-import { decideRoundEnd, namedStates, type EndedRound, type QueuedRecord } from "./round-end.ts";
+import { decideRoundEnd, lastReviewed, namedStates, type EndedRound, type QueuedRecord } from "./round-end.ts";
 
 const reviewedHead = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
 const laterHead = "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6";
@@ -12,6 +12,30 @@ const laterStill = "c47e19b2a0d3f5e6c7b8a9d0e1f2a3b4c5d6e7f8";
 const reply = "PRRC_kwDOL7tYbc6OmQx7a";
 
 const unspentRound = { dollars: 0, tokens: 0, messages: 0 };
+
+/**
+ * A state retried by `squiz review` keeps its place in the records, so the last
+ * record reviewed need not be the last state reviewed. The round's number says.
+ */
+test("the last state reviewed is the one with the highest round number, wherever its record sits", () => {
+  const ran = (number: number) => ({ number, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" as const } });
+  const retried = { head: reviewedHead, activity: null };
+  const records = [
+    { ...retried, status: "reviewed" as const, result: "exited" as const, exitStatus: 2 as const, openThreads: [], round: ran(3) },
+    { head: laterHead, activity: null, status: "reviewed" as const, result: "exited" as const, exitStatus: 2 as const, openThreads: [], round: ran(2) },
+  ];
+
+  assert.deepEqual(lastReviewed(records), retried);
+});
+
+test("records written before rounds were numbered fall back to the last one reviewed", () => {
+  const records = [
+    { head: reviewedHead, activity: null, status: "reviewed" as const, result: "clean, episode open" as const },
+    { head: laterHead, activity: null, status: "reviewed" as const, result: "clean, episode open" as const },
+  ];
+
+  assert.deepEqual(lastReviewed(records), { head: laterHead, activity: null });
+});
 
 const owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
 

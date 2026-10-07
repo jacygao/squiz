@@ -46,9 +46,22 @@ export type LeftNotReviewed = {
 /**
  * The last state the episode reviewed, which a close before the review names the
  * states it left not reviewed after, or `null` where it reviewed none.
+ *
+ * Read off the round's number rather than the record's place. A state that
+ * `squiz review` retried keeps its place, so the last record reviewed need not
+ * be the last state reviewed. A record with no number, written before records
+ * kept one, ranks below every numbered one, and the later of two such wins.
  */
 export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
-  const reviewed = records.findLast((record) => record.status === "reviewed");
+  let reviewed: StateRecord | undefined;
+  let highest = -1;
+  for (const record of records) {
+    if (record.status !== "reviewed") continue;
+    const number = record.round?.number ?? 0;
+    if (number < highest) continue;
+    reviewed = record;
+    highest = number;
+  }
   return reviewed === undefined ? null : { head: reviewed.head, activity: reviewed.activity };
 }
 
