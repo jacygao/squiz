@@ -62,7 +62,7 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return hostCommand(argv.slice(1), process.cwd());
   }
   if (command === "doctor") {
-    const printed = squizDoctor({ environment: process.env, directory: process.cwd(), nodeVersion: process.versions.node, boundMs: PROBE_BOUND_MS });
+    const printed = squizDoctor({ environment: process.env, directory: process.cwd(), nodeVersion: process.versions.node, boundMs: PROBE_BOUND_MS, platform: process.platform });
     process.stdout.write(printed.stdout);
     process.stderr.write(printed.stderr);
     return printed.exit;

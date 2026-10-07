@@ -13,9 +13,11 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
+import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
 /**
@@ -38,19 +40,22 @@ export type DoctorContext = {
   readonly nodeVersion: string;
   /** How long one probe may run before it is killed and reported as not answering. */
   readonly boundMs: number;
+  /** The system whose limit on a socket path applies. */
+  readonly platform: NodeJS.Platform;
 };
 
 /**
  * One dependency's check. It never throws: whatever went wrong is its line.
- * `undefined` prints nothing, for a row with nothing to say in this project.
+ * It may print more than one line, and an empty list prints nothing, for a row
+ * with nothing to say on this machine or in this project.
  */
-export type Check = (context: DoctorContext) => Row | undefined;
+export type Check = (context: DoctorContext) => Row | readonly Row[];
 
 export type DoctorPrinted = { readonly stdout: string; readonly stderr: string; readonly exit: number };
 
 /** Run `checks` in order, printing a line each, and exit 1 where any failed. */
 export function squizDoctor(context: DoctorContext, checks: readonly Check[] = CHECKS): DoctorPrinted {
-  const rows = checks.map((check) => check(context)).filter((row) => row !== undefined);
+  const rows = checks.flatMap((check) => check(context));
   const stdout = rows.map((row) => `${row.line}\n`).join("");
   return { stdout, stderr: "", exit: rows.some((row) => row.level === "failed") ? 1 : 0 };
 }
@@ -101,7 +106,21 @@ type Version =
 // `3.7b` is how tmux numbers a release, so a trailing letter belongs to it.
 const VERSION = /\b\d+(?:\.\d+)+[a-z]?\b/u;
 
+// One run of the check asks each tool its version once, though more than one row reads it.
+const versionsAsked = new WeakMap<DoctorContext, Map<string, Version>>();
+
 function versionOf(command: string, args: readonly string[], context: DoctorContext): Version {
+  const asked = versionsAsked.get(context) ?? new Map<string, Version>();
+  versionsAsked.set(context, asked);
+  const key = [command, ...args].join("\0");
+  const known = asked.get(key);
+  if (known !== undefined) return known;
+  const version = askVersion(command, args, context);
+  asked.set(key, version);
+  return version;
+}
+
+function askVersion(command: string, args: readonly string[], context: DoctorContext): Version {
   const probed = probe(command, args, context);
   if (probed.outcome !== "answered") return probed;
   const found = VERSION.exec(probed.stdout)?.[0];
@@ -119,6 +138,67 @@ function required(label: string, command: string, args: readonly string[]): Chec
     if (found.outcome === "absent") return { level: "failed", line: `${label}: not found` };
     return { level: "failed", line: `${label}: could not be run: ${found.reason}` };
   };
+}
+
+/**
+ * Claude Code. Its absence is no failure where a `copilot` that runs can be
+ * the coding agent instead. One installed and broken still fails.
+ */
+const claudeCode: Check = (context) => {
+  const found = versionOf("claude", ["--version"], context);
+  if (found.outcome === "found") return { level: "present", line: `Claude Code ${found.version}` };
+  if (found.outcome === "failed") return { level: "failed", line: `Claude Code: could not be run: ${found.reason}` };
+  if (versionOf("copilot", ["--version"], context).outcome !== "found") return { level: "failed", line: "Claude Code: not found" };
+  return { level: "present", line: "Claude Code: not found. Not required: copilot is installed, and either can be the coding agent" };
+};
+
+/**
+ * Copilot as a coding agent, wherever `copilot` is installed, since nothing
+ * says whether it writes this person's code. A review wakes its session only
+ * through the plugin's extension, which needs experimental features on and a
+ * socket path the system accepts. For the same reason, nothing here is more
+ * than a warning.
+ */
+const copilot: Check = (context) => {
+  const found = versionOf("copilot", ["--version"], context);
+  if (found.outcome === "absent") return [];
+  if (found.outcome === "failed") return { level: "warning", line: `copilot: warning: could not be run: ${found.reason}` };
+  return [experimentalFeatures(found.version, context), ...socketFits(context)];
+};
+
+function experimentalFeatures(version: string, context: DoctorContext): Row {
+  const unknown = (reason: string): Row => ({
+    level: "warning",
+    line: `warning: copilot ${version}: whether experimental features are on is unknown: ${reason}`,
+  });
+  const read = userSettings(context.environment);
+  if (read.outcome === "unreadable") return unknown(read.problem);
+  const setting = read.outcome === "read" ? read.settings["experimental"] : undefined;
+  if (setting === true) return { level: "present", line: `copilot ${version}, experimental features on` };
+  // Copilot starts without experimental features where its settings do not turn them on.
+  if (setting !== undefined && setting !== false) return unknown(`"experimental" is ${JSON.stringify(setting)} in ${read.file}`);
+  return {
+    level: "warning",
+    line: `warning: copilot ${version} has experimental features off. If Copilot writes your code, it is never woken when a review finishes. Run /experimental on in Copilot, or start it once with copilot --experimental`,
+  };
+}
+
+// Copilot names a session's state directory by its id, a 36-character UUID.
+const SESSION_ID_LENGTH = 36;
+
+/** A warning where the extension's socket path is longer than the system lets a socket be bound at. */
+function socketFits(context: DoctorContext): Row[] {
+  const longest = join(copilotHome(context.environment), "session-state", "x".repeat(SESSION_ID_LENGTH), "squiz.sock");
+  const bytes = Buffer.byteLength(longest, "utf8");
+  const [limit, system] = context.platform === "linux" ? [108, "Linux"] : [104, "macOS"];
+  if (bytes <= limit) return [];
+  const shown = join(copilotHome(context.environment), "session-state", "<session id>", "squiz.sock");
+  return [
+    {
+      level: "warning",
+      line: `warning: copilot's extension cannot listen: its socket ${shown} is ${bytes} bytes, over the ${limit} ${system} allows. Set COPILOT_HOME to a shorter directory`,
+    },
+  ];
 }
 
 const MULTIPLEXER_OPTIONAL = "Not required: without tmux or Herdr, reviews run detached";
@@ -286,12 +366,12 @@ const reviewer: Check = (context) => {
  */
 const projectSettings: Check = (context) => {
   const project = projectOf(context);
-  if (project.outcome === "failed" || project.root === undefined) return undefined;
+  if (project.outcome === "failed" || project.root === undefined) return [];
   const { reviewer } = project.config;
   const read = adapterFor(reviewer).projectSettings;
-  if (read === undefined) return undefined;
+  if (read === undefined) return [];
   const { unused, contextFile } = read(project.root);
-  if (unused.length === 0) return undefined;
+  if (unused.length === 0) return [];
   const named = unused.map(({ path, keys }) => (keys.length === 0 ? path : `${path} (${keys.join(", ")})`));
   const reaches = contextFile === undefined ? "" : `. ${contextFile} still reaches the reviewer`;
   return {
@@ -363,7 +443,8 @@ function reasonFor(cause: unknown): string {
 export const CHECKS: readonly Check[] = [
   required("git", "git", ["--version"]),
   gh,
-  required("Claude Code", "claude", ["--version"]),
+  claudeCode,
+  copilot,
   node,
   optional("tmux", "tmux", ["-V"], MULTIPLEXER_OPTIONAL),
   optional("Herdr", "herdr", ["--version"], MULTIPLEXER_OPTIONAL),
