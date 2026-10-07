@@ -82,6 +82,19 @@ test("a program that cannot be run is a failure that started nothing", async () 
   );
   assert.equal(started.outcome, "failed");
   assert.match(started.outcome === "failed" ? started.reason : "", /squiz-no-such-program/u);
+  assert.equal(started.outcome === "failed" ? started.ran : "started", undefined, "a program that never ran is said to have run");
+});
+
+test("a child whose identity could not be read ran before it was stopped, and says so", async () => {
+  const started = await startChild(
+    { program: "/bin/sh", arguments: ["-c", "sleep 30"], directory: tmpdir() },
+    process.env,
+    BOUND_MS,
+    () => ({ outcome: "unknown", reason: "ps could not be run" }),
+  );
+  stopGroup(started);
+  assert.equal(started.outcome, "failed", JSON.stringify(started));
+  assert.equal(started.outcome === "failed" ? started.ran : undefined, true);
 });
 
 // A command that fails at once can exit before `ps` reads it, more often the

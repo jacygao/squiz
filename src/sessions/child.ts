@@ -26,10 +26,13 @@ export type ChildCommand = {
 
 export type ChildProcessHandle = ChildProcessByStdio<null, Readable, Readable>;
 
-/** `failed`: nothing is left running. */
+/**
+ * `failed`: nothing is left running. `ran` is there where the command ran
+ * before it was stopped, so whatever it did meanwhile is done.
+ */
 export type ChildStart =
   | { readonly outcome: "started"; readonly identity: ProcessIdentity; readonly child: ChildProcessHandle }
-  | { readonly outcome: "failed"; readonly reason: string };
+  | { readonly outcome: "failed"; readonly reason: string; readonly ran?: true };
 
 /**
  * Start `command` in `environment`, which is its whole environment.
@@ -78,7 +81,11 @@ export async function startChild(
   } catch {
     // Its group has already gone.
   }
-  return { outcome: "failed", reason: `${command.program} started as pid ${pid}, and was stopped: ${read.reason}` };
+  return {
+    outcome: "failed",
+    reason: `${command.program} started as pid ${pid}, and was stopped: ${read.reason}`,
+    ran: true,
+  };
 }
 
 function messageOf(cause: unknown): string {

@@ -14,7 +14,7 @@
  */
 
 import { spawnSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -30,6 +30,7 @@ import {
   type ParsedRun,
   type ProgressSoFar,
   type RoundOutput,
+  type RoundCost,
   type RoundProgress,
   type RunResult,
   type Spend,
@@ -222,14 +223,22 @@ export async function runRound(
   let held: RoundOutput = nothingReported;
   for (let attempts = 1; ; attempts += 1) {
     let ran: Attempt;
+    let reviewerRan = false;
     try {
-      ran = await attempt(adapter, invocation, variables, bound, {
-        ...sessions,
-        environment: sessions.environment ?? withoutPanes(process.env),
-        boundEndsAt,
-      });
+      ran = await attempt(
+        adapter,
+        invocation,
+        variables,
+        bound,
+        { ...sessions, environment: sessions.environment ?? withoutPanes(process.env), boundEndsAt },
+        () => {
+          reviewerRan = true;
+        },
+      );
     } catch (cause) {
-      // A throw here is this harness's own bug. The round is still a value.
+      // A throw here is this harness's own bug. The round is still a value, and
+      // a reviewer that ran was paid for whatever the harness did next.
+      if (reviewerRan) spent = plus(spent, await spentBy(adapter, invocation.reportsFile));
       return {
         outcome: "setup",
         cost: spent,
@@ -396,9 +405,10 @@ async function attempt(
   variables: Readonly<Record<string, string>>,
   bound: Deadline,
   sessions: SessionsAt,
+  reviewerRan: () => void,
 ): Promise<Attempt> {
-  const unstartable = (reason: string): Attempt => ({
-    cost: unspent,
+  const unstartable = (reason: string, cost: Spend = unspent): Attempt => ({
+    cost,
     refusals: 0,
     reported: nothingReported,
     kind: "unstartable",
@@ -428,12 +438,17 @@ async function attempt(
     sessions.backends,
   );
   if (start.outcome === "failed") {
+    if (start.mayHaveRun === true) reviewerRan();
     // A failed start may have run the reviewer, so it is stopped and its pane
     // closed rather than another reviewer started beside it.
     await stopFailedStart(start.leftOpen, sessions.environment, invocation.roundSpace);
     const left = start.leftOpen === undefined ? undefined : closeLeftOpen(start.leftOpen, sessions.environment);
-    return unstartable(`the reviewer could not be started: ${start.reason}${left === undefined ? "" : `; ${left}`}`);
+    const reason = `the reviewer could not be started: ${start.reason}${left === undefined ? "" : `; ${left}`}`;
+    if (start.mayHaveRun !== true) return unstartable(reason);
+    // Read once the reviewer is stopped, so the file holds all it will.
+    return unstartable(reason, await spentBy(adapter, invocation.reportsFile));
   }
+  reviewerRan();
   const { place, child } = start;
   try {
     sessions.started?.(place, sessions.boundEndsAt);
@@ -570,6 +585,42 @@ async function read(
   soFar: ProgressSoFar,
 ): Promise<ParsedRun> {
   return adapter.parse(reports, soFar);
+}
+
+/**
+ * What a reviewer the round did not watch to its end spent, as far as its report
+ * file says.
+ *
+ * Never a figure that reads as a known zero. A request in flight when the
+ * reviewer stopped, or was stopped, was spent and never reported, so the cost is
+ * a floor. A CLI that reports its cost only as it exits by itself has reported
+ * the whole of it or nothing, and nothing is a floor of zero: the reviewer ran
+ * and may have spent what it never said.
+ */
+async function spentBy(adapter: Adapter, reportsFile: string): Promise<RoundCost> {
+  let progress: Spend = adapter.costAtExit === true ? undefined : unspent;
+  let cost: Spend;
+  try {
+    const run = await read(adapter, contentsOf(reportsFile), (reached) => {
+      progress = reached.cost;
+    });
+    cost = run.cost;
+  } catch {
+    cost = progress;
+  }
+  if (adapter.costAtExit === true && cost !== undefined) return cost;
+  return { ...(cost ?? unspent), floor: true };
+}
+
+/** The file's bytes as one chunk, or none where it cannot be read. */
+async function* contentsOf(file: string): AsyncIterable<Uint8Array> {
+  let contents: Uint8Array;
+  try {
+    contents = readFileSync(file);
+  } catch {
+    return;
+  }
+  yield contents;
 }
 
 /**
