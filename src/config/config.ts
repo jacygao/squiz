@@ -259,7 +259,8 @@ function testCommandOf(path: string, value: unknown): string {
  * A model name as the reviewer CLIs spell them: `gpt-5-mini`, `openai/gpt-5-mini`,
  * `openrouter/qwen/qwen3-coder:free`. It reaches the CLI as one argument, inside
  * a pane's shell line, so nothing a shell or an option parser reads is allowed:
- * no space, quote, `$`, backtick or operator, and no leading `-`.
+ * no space, quote, `$`, backtick or operator, and nothing but a letter, a digit
+ * or `@` first, so no leading `-`.
  */
 const modelName = /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,199}$/u;
 
@@ -275,7 +276,7 @@ function modelOf(path: string, value: unknown): string {
         path,
         "model",
         value,
-        "a model name of up to 200 letters, digits and . _ : / @ + -, not starting with -",
+        "a model name of up to 200 letters, digits and . _ : / @ + -, starting with a letter, a digit or @",
       ),
     );
   }

@@ -320,6 +320,7 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"thinking": 3}`, setting: "thinking", given: "3", expected: /one of "off"/ },
     { contents: `{"model": "gpt 5"}`, setting: "model", given: `"gpt 5"`, expected: /model name/ },
     { contents: `{"model": ""}`, setting: "model", given: `""`, expected: /leave "model" out/ },
+    { contents: `{"model": ".hidden"}`, setting: "model", given: `".hidden"`, expected: /starting with a letter, a digit or @/ },
   ];
 
   for (const { contents, setting, given, expected } of cases) {

@@ -3160,10 +3160,10 @@ its own branch. Squiz does not create them, and does not remove them.
 round host. No caller's timeout limits it, so it is a guard against a reviewer
 that runs away rather than a fit to a window.
 
-`model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, not
-starting with `-`. An empty string is refused rather than read as none. A model
-the configured reviewer does not offer fails the round at setup, and never runs
-it on another model.
+`model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
+with a letter, a digit or `@`. An empty string is refused rather than read as
+none. A model the configured reviewer does not offer fails the round at setup,
+and never runs it on another model.
 
 `reviewer` chooses the adapter, and nothing else changes with it. `copilot`
 needs the GitHub Copilot CLI installed and signed in.
