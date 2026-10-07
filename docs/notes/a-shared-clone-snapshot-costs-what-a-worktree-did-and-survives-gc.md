@@ -1,6 +1,6 @@
 ---
-settles: "§ 4 — how the snapshot is made and removed, what it shares with the coding agent's repository, and what a gc there does to it; § 7 — whether making it still fits the 30 seconds before the review"
-issue: 570
+settles: "§ 4 — how the snapshot is made and removed, what it costs in time and disk, what it shares with the coding agent's repository, and what a gc there does to it; § 7 — whether making it fits the 30 seconds before the review"
+issue: [302, 570]
 recorded: 2026-10-06
 versions: { git: 2.54.0 (Apple Git-157), macos: 26.6.2 }
 recheck-when: git changes what clone --shared writes, how gc expires unreachable objects or cruft packs, or squiz runs on Linux
@@ -16,6 +16,7 @@ recheck-when: git changes what clone --shared writes, how gc expires unreachable
   the three history tools read.
 - What a `git gc` in the coding agent's repository does to a snapshot while a
   round runs, and whether the round needs to guard against it.
+- How much disk one snapshot takes, and where its removal belongs in the round.
 
 ## Decisions
 
@@ -23,7 +24,14 @@ recheck-when: git changes what clone --shared writes, how gc expires unreachable
   checkout.** On `rust-lang/rust` the clone and checkout took 4.93 seconds
   against 4.66 for `git worktree add`, about 0.3 seconds more. That is a sixth
   of the 30 seconds before the review, as the worktree was. On this repository
-  both took under a tenth of a second.
+  both took under a tenth of a second. The checkout alone would fill the 30
+  seconds at somewhere between 300,000 and 400,000 tracked files on this
+  machine (unverified: extrapolated linearly from the worktree measurements of
+  96 µs per file on a first add and 73 µs warm), a size few repositories reach.
+- **Expect a snapshot to take about as much disk as the checkout itself.** One
+  snapshot of `rust-lang/rust` was 417 MB, nearly all of it the checkout. Each
+  round running at once holds one, so three episodes reviewing at once hold
+  three.
 - **Choose `--shared` over `--no-local`.** A `--no-local` clone copies only
   what the repository's refs reach, so it lacks a head commit that was fetched
   by its name and is on no ref; its checkout fails with
@@ -34,6 +42,11 @@ recheck-when: git changes what clone --shared writes, how gc expires unreachable
   seconds on `rust-lang/rust`, against 3.03 for `git worktree remove --force`.
   Nothing in the repository refers to a clone, so no prune follows, and no entry
   ever appears in `git worktree list`.
+- **Remove it after the round's result is recorded, not before.** Removal grows
+  with every file in the snapshot. On `rust-lang/rust` a worktree with 5,000
+  untracked files beside its checkout took 3.1 seconds to remove, and one with
+  50,000 took 7.9 and 11.9. The reviewer writes nothing into the snapshot, so a
+  snapshot holds its checkout alone, but nothing else bounds its size either.
 - **Set the clone's `remote.origin.pushurl` to `/dev/null`.** A clone's
   `origin` is the coding agent's repository, so without it a `git push` from
   the snapshot would write that repository's refs, which a worktree's push
@@ -89,14 +102,28 @@ commit fetched by its name and on no ref:
 | `git gc --auto`, triggered, run in the foreground | In a cruft pack | As before |
 | `git gc --prune=now` | Gone | `fatal: bad object HEAD` from `log`, `blame` and `status` |
 
-Both repositories were full clones with no promisor remote, on the machine the
-2026-10-04 worktree measurements used: Apple M4, 10 cores, 24 GB, internal SSD
-(APFS), no global config under `core.` or `feature.`.
+Both repositories were full clones with no promisor remote, on an Apple M4, 10
+cores, 24 GB, internal SSD (APFS), with no global config under `core.` or
+`feature.`.
+
+The checkout is almost all system time: on `rust-lang/rust` a worktree add
+spent 3.8 of its 4.6 seconds there, creating files on APFS rather than reading
+objects. `-c checkout.workers=0` brought it to between 3.0 and 4.0 seconds over
+three runs, which changes no decision above. The 12 submodule entries in
+`rust-lang/rust` are checked out as empty directories, and nothing initialises
+a submodule.
 
 ## Limits
 
-- **The clone and checkout were not timed with a cold file cache**, for the
-  same reason the worktree add was not: clearing it needs root.
+- **The clone and checkout were not timed with a cold file cache**, because
+  clearing it with `purge` needs root. A worktree add straight after the clone
+  took 6.1 seconds, against 4.6 warm, and a round on a repository untouched for
+  days may take longer. A round in an active repository, whose coding agent has
+  just committed and pushed, is likely to see the warm number.
+- **Fetching a head commit the repository lacks was not timed.** That is the
+  network, and depends on how far behind the repository is.
+- **The machine was otherwise idle.** A coding agent building in another
+  worktree while the snapshot is checked out would compete for the same disk.
 - **Linux was not run.**
 - **One large repository, at one commit**, with the machine otherwise idle.
 - **A repository whose objects are themselves borrowed**, through alternates of

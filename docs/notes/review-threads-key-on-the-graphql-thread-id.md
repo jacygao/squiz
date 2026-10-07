@@ -11,13 +11,14 @@ recheck-when: GitHub changes the review-thread API
 The full lifecycle works through `gh api`: create anchored to a file and a line,
 reply inside the thread, resolve, re-open, and read back with replies and
 resolved state. Only the GraphQL `PRRT_` thread node id serves every operation,
-so that is what `squiz threads`, `reply` and `resolve` round-trip. Five calls in
+so that is what `squiz threads` and `squiz reply` round-trip, and what a verdict
+resolves. Five calls in
 this area return success while doing the wrong thing, and one of them posts a
 review nobody can see.
 
 ## Decisions
 
-- **`<id>` in `squiz threads`, `reply` and `resolve` is the GraphQL `PRRT_`
+- **`<id>` in `squiz threads` and `squiz reply` is the GraphQL `PRRT_`
   thread node id.** It is the only identifier serving every operation the coding
   agent needs. The REST comment id can only be replied to; the resolve
   mutations reject it.
@@ -62,7 +63,7 @@ A review comment thread has two identifiers, and they are not interchangeable.
 A comment also has a node id of its own, `PRRC_kwDOUEd2qM7q-4A7`. It is the
 comment's, not the thread's, and the resolve mutations reject it.
 
-**`<id>` in `squiz threads`, `squiz reply <id>` and `squiz resolve <id>` is the
+**`<id>` in `squiz threads` and `squiz reply <id>` is the
 `PRRT_` thread node id.** It is the only one of the three that serves every
 operation the coding agent needs, because GraphQL has a reply mutation that
 takes it. It is 21 characters, which is short enough for an agent to copy.

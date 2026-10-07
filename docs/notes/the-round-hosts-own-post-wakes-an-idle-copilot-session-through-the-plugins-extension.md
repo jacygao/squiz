@@ -81,6 +81,10 @@ and its note waited.
 - **Whether § 9 should ask users to turn on every experimental feature for
   this.** The switch is all or nothing, per user, and stays on once flipped.
   Recommendation: keep it optional, as § 9 now says.
+
+  2026-10-07: settled another way. § 9 has a Copilot user turn experimental
+  features on as part of setup, and a Copilot session without them is
+  unsupported.
 - **Whether to file the upstream request to take extensions out of
   experimental now that squiz uses them.** Recommendation: file it, linking
   #1705, #2065 and #3856 in `github/copilot-cli`.
@@ -90,8 +94,8 @@ and its note waited.
 ### What each session did
 
 The coding model, the scratch pull request, how long the session had been idle
-when the note arrived, and how it ended. `squiz review` exit codes are as the
-skill gives them.
+when the note arrived, and how it ended. `squiz review` exit codes are as § 6
+gives them. The plugin still shipped the `squiz-review` skill, since removed.
 
 | Run | Model | PR | Idle | After the note |
 |---|---|---|---|---|

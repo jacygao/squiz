@@ -27,10 +27,13 @@ recheck-when: pi upgrades, or pi starts writing its startup errors to stdout
   about 64KB, and the reviewer stops on the write that fills it, which turns a
   diagnostic into a hang. Keeping only the last 2,000 bytes is what stops a
   reviewer that complains for a whole round being held in memory.
-- **Use it only where the stream explained nothing.** A run that completed an
-  assistant message carries its own reason, and stderr would say the same thing
-  a second way. A run that completed none is the case with nothing else to
-  report.
+- **Use it only where the run's own record explained nothing.** A run that
+  completed an assistant message carries its own reason, now as the message's
+  `errorMessage` in the report file the extension writes, and stderr would say
+  the same thing a second way. A run that completed none is the case with
+  nothing else to report.
+- **Read it only where the reviewer runs detached.** In a pane, stderr is the
+  screen, and the round has no stream to drain.
 - **Read the exit status with it.** Zero against no message is a reviewer that
   ran and said nothing; non-zero is one that never started. The reason names
   which.
@@ -46,7 +49,7 @@ Nothing.
 | | Reached the model and failed | Never started |
 |---|---|---|
 | Exit status | 0 | non-zero |
-| stdout | a complete assistant message, `stopReason` of `error` | empty |
+| stdout under `--mode json`, and now the report file | a complete assistant message, `stopReason` of `error` | empty |
 | stderr | empty | the whole explanation |
 | Where the reason is | `message.errorMessage` | stderr |
 

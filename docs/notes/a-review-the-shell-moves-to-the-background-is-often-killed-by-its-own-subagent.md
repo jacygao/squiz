@@ -1,9 +1,9 @@
 ---
-settles: "§ 7 — the deadline `squiz review` waits within; § 2 — the Bash timeout and the stall watchdog; § 3 — what starts a round; § 9 — the skill's text"
+settles: "§ 7 — the deadline `squiz review` waits within; § 2 — the Bash timeout, the move to the background, and the stall watchdog; § 6 — whether a coding agent follows the exit statuses as `squiz review` explains them"
 issue: 278
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288, coding-agent: claude-opus-5-5 }
-recheck-when: Claude Code changes the Bash tool's timeout or background move, the subagent stall watchdog, the hand-back, or how plugin skills reach a subagent
+recheck-when: Claude Code changes the Bash tool's timeout or background move, the subagent stall watchdog, or the hand-back
 ---
 
 # A review the shell moves to the background is often killed by its own subagent
@@ -16,9 +16,8 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   when the command is moved to the background anyway.
 - What signal reaches a command stopped from outside, and whether a child it
   started outlives it.
-- Whether a subagent given only the § 9 text loops on exit 2 and stops on 0, 1
-  and 3.
-- Whether a subagent loads a plugin's skill when it opens a pull request.
+- Whether a subagent given only a text explaining the exit statuses loops on
+  exit 2 and stops on 0, 1 and 3.
 
 ## Decisions
 
@@ -29,23 +28,20 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   `SubagentStop` hook that held a subagent for the same 90 seconds had it failed
   at 60, so the threshold was in force.
 
-- **End the round before the shell's timeout, with a margin, rather than at
-  it.** Every agent told to pass a `timeout` of 600000 passed it, 28 calls out
+- **Wait within a deadline below the shell's timeout, with a margin, rather
+  than at it.** Every agent told to pass a `timeout` of 600000 passed it, 28 calls out
   of 28. But a review that outruns the timeout is lost more often than not when
   a foreground subagent ran it. The runtime moves the command to the background
   and tells the subagent not to end its turn. Three of five foreground subagents
   ended their run anyway, and the runtime sent the review `SIGTERM` within a
-  second. This contradicts § 7, which makes the window 600 seconds, the same as
-  the longest timeout, and relies on the § 9 instruction to wait when the review
-  outlasts it. The instruction does not hold. Background subagents did wait,
-  two of two, because the finished command started them again.
+  second. An instruction to wait for a moved command does not hold. Background
+  subagents did wait, two of two, because the finished command started them
+  again. The round itself now runs in the round host, so a stopped call ends
+  only `squiz review`'s wait. The 540-second deadline returns exit 4 before the
+  longest timeout, 600 seconds, can move the call.
 
-  2026-10-05: M7 moved the round out of the shell call into the round host
-  (§ 3). The shell call is now `squiz review` waiting within its 540-second
-  deadline (§ 7), and a stopped call ends only the wait.
-
-- **Expect no cleanup from a round stopped from outside, and expect no reviewer
-  left behind.** The runtime sends `SIGTERM` to the command and to every process
+- **Expect no cleanup from a command stopped from outside, and run nothing that
+  must survive inside one.** The runtime sends `SIGTERM` to the command and to every process
   under it at the same instant, including a child started in a session of its
   own. It sends `SIGKILL` one to two seconds later to whatever ignored the first
   signal. That held for all four ways a command was stopped: the end of a
@@ -53,22 +49,13 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   subagent waited, and `SIGINT` to `claude`. Moving a command to the background
   sends nothing.
 
-- **Ship the § 9 text as written for the loop.** Seven subagents given only that
-  text did what it says. On exit 2 each fixed the file, committed, pushed,
-  replied with `squiz reply`, and ran `squiz review` again. Each stopped after 0,
-  1 or 3, reported what the text asks for, and never ran it again.
-
-- **Make the plugin's skill the Claude Code route, and keep `AGENTS.md` for other
-  agents.** Four subagents out of four, briefed only to fix a file, push it and
-  run `gh pr create`, loaded the skill straight after the pull request opened.
-  Each then ran `squiz review 7` with a `timeout` of 600000, before reporting.
-  This held in `auto` and in `acceptEdits`, and in the foreground and the
-  background.
-
-  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
-  wrote are removed (#600). The stop hook starts every review on Claude Code and
-  Copilot, and the wake delivers the result, so nothing relies on an
-  instruction to run `squiz review`.
+- **Explain each exit status in the text the agent reads, and expect it to be
+  followed.** Seven subagents given only a text saying what each exit means did
+  what it says. On exit 2 each fixed the file, committed, pushed, replied with
+  `squiz reply`, and ran `squiz review` again. Each stopped after 0, 1 or 3,
+  reported what the text asks for, and never ran it again. The text was the
+  plugin's skill, since removed. `squiz review` now carries the same
+  instructions in its own output for each exit.
 
 ## Needs your input
 
@@ -79,13 +66,13 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
 
   2026-10-05: settled. 540 seconds is now the deadline `squiz review` waits
   within (§ 7), and no round runs inside a shell call.
-- **Whether § 9 says more about waiting.** The runtime's own message already says
-  "do not end your turn to wait for it", and three subagents ended it anyway, so
-  a sentence in the skill may not help. Recommendation: rely on the margin, and
-  measure any added sentence against a moved command before shipping it.
+- **Whether the text says more about waiting.** The runtime's own message
+  already says "do not end your turn to wait for it", and three subagents ended
+  it anyway. Recommendation: rely on the margin, and measure any added sentence
+  against a moved command before shipping it.
 
-  2026-10-05: § 9's text now tells the agent to wait for a moved command to
-  finish and read its output before doing anything else.
+  2026-10-07: moot. A moved or stopped call ends only the wait, and the round
+  goes on in the round host either way.
 
 ## Reference
 
@@ -146,11 +133,6 @@ received.
 - **A background subagent's background command outlived its hand-back.** It ran
   until the session ended, 13 seconds later, and got `SIGTERM` then.
 
-### The skill
-
-Loaded as `squizprobe:squiz-review`, through the Skill tool. The skill's
-description was the one § 9 gives, word for word.
-
 ## Limits
 
 - **The full 600 seconds was never run.** The stall threshold was lowered to 60
@@ -166,7 +148,6 @@ description was the one § 9 gives, word for word.
 - **Only `general-purpose` subagents, in `-p` sessions, on Opus 5.5.** No
   interactive session, and no other model.
 - **The plugin was loaded with `--plugin-dir`**, not installed from a
-  marketplace. The fake `gh` answered `pr create` with a fixed URL, and no
-  subagent was offered any other skill that matched as closely.
+  marketplace. The fake `gh` answered `pr create` with a fixed URL.
 - **Subagents wrapped the command as `squiz review 7; echo "EXIT=$?"`**, so the
   Bash call itself always exited 0. They read the status from the output.

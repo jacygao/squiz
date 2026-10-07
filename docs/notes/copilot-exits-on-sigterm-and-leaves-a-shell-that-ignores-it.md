@@ -23,16 +23,15 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes how it starts shell t
   status.** Copilot exited 0 on `SIGTERM`, in `-p` and in `-i`. A stopped `-p`
   run ends its stream with `agent.interrupted`, then `abort` with
   `"reason":"user_initiated"`, then `result`, whose `exitCode` is also 0.
-- **Record each shell's group, as § 4 Confinement does for `pi`, because
-  Copilot runs every shell call in a session of its own.** The shell leads its
-  own session and group, so the round's signal to Copilot's group never reaches
-  it. Copilot signals it on the way out, and that is all that does:
+- **Grant Copilot no shell tool.** Copilot runs every shell call in a session
+  of its own, so the round's signal to Copilot's group never reaches it.
+  Copilot signals it on the way out, and that is all that does:
   - a shell that ignored `SIGTERM` and `SIGHUP` outlived Copilot, reparented to
     `launchd`, and was still running 41 seconds later;
   - after `SIGKILL` to Copilot's group, an ordinary `sleep` survived the same way.
 
-  So § 4 Adapters' case of a CLI that starts a shell tool in a group of its own
-  is Copilot's case, at depth `deep`.
+  With no shell granted, everything Copilot starts, the reporting server and
+  the `git` a history tool runs, stays in the group the round signals.
 
 ## Needs your input
 
@@ -69,11 +68,8 @@ none.
   led its group, as it does for a round's reviewer in tmux.
 - Which signal Copilot sends its shells was not read. The shell that ignored
   `SIGTERM` and `SIGHUP` survived it, and Copilot did not wait to escalate.
-- **How a shell would record its group under Copilot.** `pi` runs a settings
-  line before every command. Copilot's nearest is `--bash-env`, which enables
-  `BASH_ENV` for its bash shells *(unverified — read from `--help`, never run)*.
-  Copilot starts bash with `--norc --noprofile`, and nothing here shows that a
-  file `BASH_ENV` names is read then.
 - A shell call that Copilot had moved to the background, the case its
   `read_bash` and `stop_bash` tools serve, was not stopped. Every call here was
   still in its `initial_wait`.
+- **The shell rows were measured with a shell granted**, to find what a group
+  signal misses. No round grants one.

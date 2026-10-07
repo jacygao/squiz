@@ -33,10 +33,10 @@ it.
   parent's. The § 3 table records only `session_id` and `agent_id` for
   `SubagentStop`; the socket can be recorded there too. 2026-10-05: § 3's table
   now records the socket for both events.
-- **Carry the token with the socket, though macOS did not need it.** Posts with
-  and without the token both woke the parent. The token is in the same
-  environment, costs nothing to record, and is what a platform that checks it
-  would want.
+- **Post without the token.** Posts with and without it both woke the parent on
+  macOS, so squiz records the socket alone and its post carries no auth line.
+  A platform that checks the token would refuse that post, and Linux was not
+  run.
 - **Use the socket as the wake for a subagent's result, with the `Stop` waiter
   kept for the case where no socket was recorded.** The socket wake needs no
   process kept alive for the parent, and reached it in every run.

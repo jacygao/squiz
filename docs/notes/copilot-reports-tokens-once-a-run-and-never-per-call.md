@@ -39,12 +39,17 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-c
   on a run whose fresh input was 12,458 and cache reads 48,128. Recommended:
   count `inputTokens + outputTokens`, as `pi`'s `totalTokens` does, so one bound
   means the same thing whichever CLI reviews.
+
+  2026-10-07: settled as recommended (§ 7 The review budget).
 - **Whether AI credits should be recorded beside tokens.** Copilot reports no
   dollars. It reports AI credits, as `totalNanoAiu` (10⁹ to a credit), and
   premium requests. Recommended: record `totalNanoAiu` as the round's cost, and
   leave premium requests out. They are one figure per run, set by the model
   and not by the number of calls: 0.33 for a seven-call run on `claude-haiku-4.5`, and 0 on
   `gpt-5-mini`.
+
+  2026-10-07: settled as recommended. A Copilot round records tokens and AI
+  credits, and the summary shows both (§ 4 The Copilot adapter).
 
 ## Reference
 

@@ -1,35 +1,30 @@
 ---
-settles: "§ 6 — whether a subagent handed a long exit-2 output works every thread; § 9 — whether the skill's text needs more to make it read the file; § 2 — when Claude Code cuts a command's output"
+settles: "§ 6 — whether a subagent handed a long exit-2 output works every thread, and what makes it read the whole of it; § 2 — when Claude Code cuts a command's output"
 issue: 303
 recorded: 2026-10-04
 versions: { claude-code: 2.1.289, coding-agent: claude-opus-5-5 }
-recheck-when: Claude Code changes how it cuts or persists a Bash call's output, the coding agent's model changes, or § 9's skill text changes
+recheck-when: Claude Code changes how it cuts or persists a Bash call's output, the coding agent's model changes, or `squiz review`'s first line changes
 ---
 
 # A subagent reads the file whenever its output is cut
 
 ## Intent
 
-- Whether a subagent given only the § 9 skill text works every thread when the
-  exit-2 output it was shown is cut short.
+- Whether a subagent works every thread when the exit-2 output it was shown is
+  cut short.
 - Whether it reads `review.txt`, runs `squiz threads`, or works only the threads
   it was shown.
-- What change to the skill's text makes it read the file, if it does not.
+- What has to change to make it read the file, if it does not.
 - Whether the output a subagent is shown is cut at all, and where.
 
 ## Decisions
 
-- **Ship the § 9 skill text as written.** Every subagent replied on all 12
-  threads, in 9 runs out of 9. Each of the 6 subagents whose output was cut or
-  persisted read `review.txt` with the Read tool straight after the cut result,
-  and replied on the threads it had not been shown. No change to the text was
-  needed, so none was tried.
-
-  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
-  wrote are removed (#600). The stop hook starts every review on Claude Code and
-  Copilot, and the wake delivers the result, so nothing relies on an
-  instruction to run `squiz review`. `squiz review`'s first line now says to
-  read the file where the output is cut.
+- **Expect a subagent to work every thread, cut or not.** Every subagent
+  replied on all 12 threads, in 9 runs out of 9. Each of the 6 subagents whose
+  output was cut or persisted read `review.txt` with the Read tool straight after
+  the cut result, and replied on the threads it had not been shown. They were
+  given the plugin's skill, since removed, which named the file. `squiz review`'s
+  first line now names the file and says to read it where the output is cut.
 
 - **Keep writing the whole output to `review.txt` and naming it on the first
   line.** It is what every cut subagent used. None ran `squiz threads`, and none
@@ -99,8 +94,8 @@ the subagent's report.
 | B2 | 16,544 | plain, as briefed | 6,549 cut | yes | no | 12 of 12 |
 | B3 | 16,544 | plain, as briefed | 6,549 cut | yes | no | 12 of 12 |
 
-Every run loaded the skill through the Skill tool before running the command,
-ran the command again after replying, and stopped on its exit 0. A first run,
+Every run loaded the skill before running the command, ran the command again
+after replying, and stopped on its exit 0. A first run,
 r1, printed 8,108 characters and is left out of the table, since nothing was
 cut; its call was wrapped too.
 
@@ -110,9 +105,9 @@ cut; its call was wrapped too.
   repository outside this one, with a local bare remote, dispatched one
   `general-purpose` subagent in the foreground. The squiz plugin was not loaded,
   and no global setting was changed.
-- The skill was the § 9 text verbatim, as `.claude/skills/squiz-review/SKILL.md`
-  in the scratch project, because that is how it reaches a coding agent once it
-  ships. Every subagent loaded it by its description.
+- The skill was the text the plugin then shipped, as
+  `.claude/skills/squiz-review/SKILL.md` in the scratch project. Every subagent
+  loaded it by its description.
 - The brief: `You are working in <repo>, on the branch feature/sync, which is pull
   request #41. It pushes to origin. Run squiz's review of pull request 41 and work
   what it finds. Report what you did when you are done.` The B runs added one
@@ -133,6 +128,8 @@ cut; its call was wrapped too.
 - **Nine runs, one model.** Opus 5.5 for both the dispatching session and the
   subagent, in `-p` sessions. No interactive session and no other model was
   tried. Nine of nine is not a rate.
+- **Every subagent had the skill.** Whether `squiz review`'s first line alone,
+  with no skill, sends a cut subagent to the file was not run.
 - **The plain call was briefed, not chosen.** No subagent left to itself ran the
   command without `echo` after it, so the 10,000-character cut was reached only
   by asking for a plain call. Whether a subagent that chose a plain call would

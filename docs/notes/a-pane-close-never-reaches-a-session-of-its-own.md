@@ -11,16 +11,14 @@ recheck-when: tmux or Herdr change how they close a pane or signal its processes
 tmux's `kill-window` sends one `SIGHUP` to the pane's own process and nothing
 after it. Herdr's `pane close` sends `SIGHUP`, then `SIGTERM`, then `SIGKILL`, to
 every process in the pane's shell session. Neither reaches a process in a
-session of its own. When `pi` is the pane's command, it answers the close by
-killing the group of each shell it started, so a pane close does stop the
-reviewer and its shells. A process that one of those shells moved into a further
-session is reached by nothing here.
+session of its own, so the round signals the reviewer's group itself and treats
+the close as tidying the screen.
 
 ## Intent
 
 - Which processes tmux's `kill-window` signals, and with what: the pane's
   command, its children, a grandchild in the same group, and a process in a
-  session of its own, as a `pi` shell is. The same where the window's command
+  session of its own. The same where the window's command
   exits by itself.
 - The same for Herdr's `pane close`, and where the pane's command exits.
 - Whether Herdr returns a pane to its shell when the `pi` that
@@ -42,21 +40,16 @@ session is reached by nothing here.
   the call, `SIGTERM` about 260 ms after that, and was gone within 6 seconds
   with nothing logged, which is `SIGKILL`. That included the members of a job
   whose leader had exited and which was no longer in the foreground. The order
-  the spec gives in § 4 — the reviewer's group, the recorded groups, then the
-  pane — stays right for both backends.
+  § 4 gives, the reviewer's group and then the pane, is right for both
+  backends.
 
-- **Keep signalling the groups the shells recorded. A pane close reaches none
-  of them.** A process in a session of its own got no signal from either
-  backend, in any run. With `pi` as the command, its own handler does the work:
-  on `SIGHUP`, on `SIGTERM` and on a normal exit, it sends `SIGKILL` to the group
-  of each shell it started. Those groups were gone, with nothing logged, after
-  every close and every quit.
-
-- **Expect a process a tool moved into a further session to outlive the round
-  whenever it does not write to `pi`'s output.** Below a `pi` shell, such a
-  process died of `SIGPIPE` on its next write once `pi` had gone. One that never
-  wrote ran on, after both backends' close and after `pi` quitting. Nothing in
-  § 4 reaches it: it is in neither the reviewer's group nor a recorded one.
+- **Never grant a reviewer a tool that leaves the reviewer's group.** A process
+  in a session of its own got no signal from either backend, in any run. `pi`'s
+  shell tool starts each command that way, and `pi` kills those groups itself on
+  `SIGHUP`, `SIGTERM` and a normal exit. A process one of those shells moved
+  into a further session ran on after both backends' close and after `pi`
+  quitting, unless it wrote to `pi`'s output and died of `SIGPIPE`. No reviewer
+  is granted a shell, so nothing the reviewer starts leaves its group.
 
 - **Read a tmux pane's pid with `#{pane_pid}`, and signal its group.** It is
   the command itself wherever the command line is one command, because tmux runs
@@ -92,17 +85,7 @@ session is reached by nothing here.
 
 ## Needs your input
 
-- **Whether § 4 should state the gap below a `pi` shell.** A tool that moves a
-  process into a session of its own, a daemon for instance, and sends it no
-  output through `pi`, outlives the round on both backends and detached. The
-  recorded groups are each shell's own, and this process is outside them.
-  Recommendation: state it in Confinement as a hole for a later milestone, and
-  build nothing for it now. Reaching it means finding processes by something
-  other than group, such as an environment marker or the scratch directory as a
-  working directory, and that is a design of its own.
-
-  2026-10-05: settled as recommended. § 4 The reviewer session states the gap,
-  and says nothing in this version detects it.
+Nothing.
 
 ## Reference
 

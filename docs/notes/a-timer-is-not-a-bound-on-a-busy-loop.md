@@ -16,7 +16,7 @@ recheck-when: Node's major version changes, or the reviewer's output stops arriv
   under the load a round puts on the process.
 - **Nothing said what a bound should do once it fires.** A killed reviewer that
   goes on running spends API budget the episode is no longer watching, and one
-  that ignores the signal would hold the round open past the hook's ceiling.
+  that ignores the signal would hold the round open past its bound.
 
 ## Decisions
 
@@ -29,9 +29,9 @@ recheck-when: Node's major version changes, or the reviewer's output stops arriv
   look, so a wait that ran long, a clock that jumped, or a timer that fired early
   costs one more look rather than the round.
 - **Signal the reviewer's process group, not the reviewer.** A reviewer that is
-  stopped leaves its tools running otherwise, and a tool still running can write
-  to the tree the coding agent is about to commit. The reviewer is started as
-  its own group leader so that its identifier names the group.
+  stopped leaves its tools running otherwise, such as the `git` a history tool
+  started. The reviewer is started as its own group leader so that its
+  identifier names the group.
 - **The reviewer's own exit does not end the round's cleanup.** A tool sits in
   the reviewer's group and can outlive it, whether because the reviewer finished
   first or because the reviewer took the signal and the tool did not. Both
@@ -104,11 +104,10 @@ and `error` are the other two ways the same fact arrives.
 - **One machine, one Node version.** The phase ordering is Node's own and not
   this machine's, but the figures above were taken here.
 - **A group is not a fence.** A tool that makes a process group of its own is
-  not signalled with the reviewer's. `pi`'s shell tool detaches every command it
-  runs and reaps them from a handler of its own, so a shell tool outliving the
-  reviewer is outside what this reaches; its read-grant tools do not detach, and
-  `grep` and `find` both start ripgrep inside the reviewer's own group. A
-  harness killed outright by the runtime signals nothing at all.
+  not signalled with the reviewer's. `pi`'s shell tool does that, and no
+  reviewer is granted it. The granted tools do not: `grep` and `find` start
+  ripgrep inside the reviewer's own group, and the history tools start `git`
+  there. A harness killed outright signals nothing at all.
 - **`SIGKILL` was exercised only against a process built to ignore `SIGTERM`.**
   Nothing establishes that a real reviewer ever needs it.
 - **Nothing here was measured against `pi` itself.** The reviewers in the tests

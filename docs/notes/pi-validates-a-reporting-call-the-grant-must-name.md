@@ -1,8 +1,8 @@
 ---
-settles: "§ 4 — whether a finding can arrive as a call the reviewer's CLI validates, what that costs the grant, and where the harness reads the report back from"
-issue: 165
+settles: "§ 4 — whether a finding can arrive as a call the reviewer's CLI validates, what `--tools` withholds and how a grant short of a name fails, why `pi` needs `/dev/null` on stdin, and where the harness reads the report back from"
+issue: [11, 165]
 recorded: 2026-09-25
-versions: { pi: 0.85.1, node: 24.15.0 }
+versions: { pi: "0.84.2, 0.85.1", model: deepseek-v4-pro, node: 24.15.0 }
 recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi changes what tool_execution_end carries
 ---
 
@@ -23,6 +23,8 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
 - **Nothing said what ends the run once the review is complete.** A run that goes
   on after the last finding spends the round's remaining time on a review that is
   already finished.
+- **Nothing said whether `--tools` withholds a tool or only discourages it**, or
+  what a name that matches no tool does.
 - **Nothing said whether an extension may share code with the harness.** The
   harness has no runtime dependencies, and an extension that needed `typebox`
   would give it one.
@@ -35,11 +37,22 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   stops. Without it, an extension installed on the machine or sitting in the
   tree under review registers a tool of the same name and takes the round's
   reports, because a later registration replaces an earlier one by name.
-- **Put every reporting call in the grant, at both depths.** `--tools` filters
+- **Put every reporting call and history tool in the grant.** `--tools` filters
   extension tools exactly as it filters built-in ones: a call the grant does not
   name is not registered, is not in `getAllTools()`, and the run exits 0 with an
   empty stderr. A grant short of a reporting call is a reviewer with no way to
   report and a round with nothing to say about why.
+- **Rely on `--tools` to withhold `edit`, `write` and `bash`.** A tool the grant
+  leaves out is absent rather than discouraged: its schema is never sent, and it
+  has no implementation in the run. A name that matches no tool withholds and
+  never grants: beside real names it is dropped, and alone it leaves the run no
+  tools at all rather than `pi`'s default set of `read`, `bash`, `edit` and
+  `write`. Either way the run exits 0 with an empty stderr.
+- **Give a headless `pi` `/dev/null` on stdin, whatever it is granted.** With an
+  open pipe on stdin, `pi --print` emitted nothing and never exited, with one
+  tool granted and with none, until it was killed at 25 seconds. With
+  `< /dev/null` it returned in about a second. A hang and a refusal look alike
+  from outside, so every run also needs the round's time bound.
 - **Read a report out of the call's answer rather than out of its arguments.**
   `pi` converts an argument to the type the schema declares before the call
   runs, so a `line` of `"128"` reaches the call as `128` and is accepted. The
@@ -91,8 +104,22 @@ The flags, exactly: `--extension <path>` (repeatable, `-e`), and
 `--no-extensions` (`-ne`), which stops discovery and leaves explicit paths
 loading.
 
-The tool names the grant carries: `report_finding`, `report_verdict`,
+The reporting calls the grant carries: `report_finding`, `report_verdict`,
 `finish_review`.
+
+Where the grant is enforced: in `core/agent-session.js`, `--tools` becomes a set
+that every registered tool name is filtered against, for both the definitions
+sent to the model and the executable registry. At 0.84.2 a typo beside real
+names, `read,grep,find,ls,bahs`, produced a request identical in size and
+behaviour to `read,grep,find,ls`. A grant of `notatool` alone matched
+`--no-tools` at 662 tokens, and the model, holding nothing, wrote a textual
+imitation of a tool call.
+
+`pi`'s own documentation: "Pi does not include a built-in sandbox. Built-in
+tools can read files, write files, edit files, and run shell commands with the
+permissions of the pi process." Granted `bash` at 0.84.2, a reviewer asked for
+a fix used it to modify a tracked file on its first attempt, unprompted and
+unrefused, so a grant that carries a shell confines nothing.
 
 What a registered tool is: an object with `name`, `label`, `description`,
 `parameters` and `execute`, passed to `pi.registerTool` by the module's default
@@ -142,6 +169,8 @@ What validation does and does not refuse, measured against the shipped schema:
 - **What `terminate: true` does was read out of `pi`'s agent loop and driven
   offline**, with the loop's own tool executor over two batches. No live round
   was run against a provider to watch it.
+- **The filtering and the stdin hang were measured at `pi` 0.84.2**, with
+  `deepseek-v4-pro`, and not run again at 0.85.1.
 - **One machine, macOS, `pi` 0.85.1.** The tool registry, the grant filter and
   the argument conversion are all `pi` internals, and none of them is in its
   documented interface.

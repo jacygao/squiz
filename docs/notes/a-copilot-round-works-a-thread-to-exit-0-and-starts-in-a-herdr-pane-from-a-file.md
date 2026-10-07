@@ -120,7 +120,8 @@ From `session-state/<id>/events.jsonl`, each round's turns were the same shape:
 4. `squiz-finish_review`.
 5. An empty message, after which Copilot exited.
 
-Every `view` named a path under the round's snapshot, `.squiz/515/rounds/<k>/tree/`.
+Every `view` named a path under the round's snapshot, then made at
+`.squiz/515/rounds/<k>/tree/` and now in the temporary directory.
 
 ### The round in a pane, after #516
 

@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — how a Copilot coding agent learns a review's result without waiting in its turn, and that no route from outside the session starts a turn in it; § 6 — how a Copilot session should run `squiz review`; § 9 — what the instruction tells a Copilot session"
+settles: "§ 2 — that Copilot starts a turn in an idle session when a background command it started ends; § 3 — how a Copilot session with no socket learns a review's result, and which routes from outside a session do not start a turn in it"
 issue: 556
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-6-astra, effort: high, node: 24.15.0, macos: 26.6.2, squiz-plugin: 6725452 }
@@ -11,11 +11,11 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes its bash tool's `mode
 A Copilot session that runs `squiz review` with the bash tool in `async` mode
 can end its turn and go idle. When the command exits, Copilot starts a turn in
 the session by itself. The turn gets a `<system_notification>` prompt and the
-command's whole output with its exit code. This is Claude Code's wake in shape:
-the session started the work, and the work's end tells it. It needs no flag, no
-port and no hook, and nothing outside the session can use it. A background
-subagent wakes its parent the same way. No route from outside the session
-started a turn in it.
+command's whole output with its exit code. It needs no flag, no port and no hook,
+and nothing outside the session can use it. A background subagent wakes its
+parent the same way. None of the routes from outside the session tried here
+started a turn in it. The plugin's extension, found later, is the one that does,
+and this wake is the fallback for a session without it.
 
 ## Intent
 
@@ -32,9 +32,10 @@ started a turn in it.
 
 ## Decisions
 
-- **Wake a Copilot coding agent with Copilot's own background-shell
-  notification, and build no wake in squiz for it.** The session runs
-  `squiz review <number>` with `"mode": "async"` and ends its turn. In every run
+- **Count Copilot's own background-shell notification as the fallback wake.**
+  A session with no socket learns a round's result only from its own
+  `squiz review`, and this is how that command reaches it while idle. The
+  session runs `squiz review <number>` with `"mode": "async"` and ends its turn. In every run
   the turn ended, and no model call was made until the command exited. Where
   hooks were registered, `agentStop` fired at the turn's end. Copilot started the
   next turn within 1.5 seconds of the command's exit. The longest idle
@@ -66,10 +67,10 @@ started a turn in it.
   subagent's `squiz review 14` ended. But the parent receives the subagent's
   summary of the output, not the output, and the subagent costs a turn of its
   own.
-- **Under Copilot, only a round the session started itself can wake it.** The
+- **Expect this wake only for a round the session's own command waited on.** The
   wake comes from the command's exit. A round queued by the plugin's `Stop` hook
-  has no command in the session to end, and Copilot gives the hook no socket, as
-  `copilots-stop-hooks-fire-and-a-ui-server-session-can-be-woken.md` records.
+  has no command in the session to end, so it reaches the session through the
+  plugin's extension or not at all.
 - **Use no route from outside the session.** `--acp` and `--connect` ran their
   prompt in a second process or a second session, and the idle session never saw
   it. `--remote` takes prompts only from GitHub's web and mobile clients, signed
@@ -84,26 +85,7 @@ started a turn in it.
 
 ## Needs your input
 
-- **Whether the instruction tells a Copilot session to run `squiz review` in the
-  background.** As the skill and the `AGENTS.md` section read now, the session
-  runs the command in the foreground. In
-  `copilot-runs-squiz-review-unprompted-by-the-skill-or-agents-md.md` it gave
-  the call `initial_wait: 600`. A review that outlives that wait still wakes the session: Copilot moves
-  the command to the background, tells the agent it will be notified, and wakes
-  it when the command exits. The run with a 30-second wait and a 45-second
-  command did just that. So the session gets a result either way. The only
-  question is whether it stays in its turn for up to the wait first.
-  Recommendation: add one sentence for Copilot to the `AGENTS.md` section and
-  the skill, saying to run `squiz review` with the bash tool's `async` mode and
-  end the turn, since Copilot announces when it exits. § 9 holds both texts. This
-  supersedes the recommendation in
-  `copilots-stop-hooks-fire-and-a-ui-server-session-can-be-woken.md` to state
-  the missing wake as a gap in § 3.
-
-  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
-  wrote are removed (#600). The stop hook starts every review on Claude Code and
-  Copilot, and the wake delivers the result, so nothing relies on an
-  instruction to run `squiz review`. There is no instruction left to change.
+Nothing.
 
 ## Reference
 
@@ -206,6 +188,6 @@ turn of its own.
   were not tried.
 - **Not tried:** a command that ends while a turn is running, two background
   reviews at once, a model other than `gpt-6-astra`, `-p` mode, and whether a
-  session told only by the instruction picks `async` mode by itself.
+  session picks `async` mode by itself.
 - **The plugin was not loaded**, so squiz's own `Stop` hook did not fire in these
   runs.
