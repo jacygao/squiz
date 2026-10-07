@@ -372,20 +372,8 @@ function confinementIn(parsed: Record<string, unknown>): ReadEvidence {
   if ("problem" in moved) return moved;
   const uncompared = linesIn(found, "uncompared");
   if ("problem" in uncompared) return uncompared;
-  const sharedChanged = linesIn(found, "sharedChanged");
-  if ("problem" in sharedChanged) return sharedChanged;
-  const sharedUncompared = linesIn(found, "sharedUncompared");
-  if ("problem" in sharedUncompared) return sharedUncompared;
 
-  return {
-    evidence: {
-      changed: changed.lines,
-      moved: moved.lines,
-      uncompared: uncompared.lines,
-      sharedChanged: sharedChanged.lines,
-      sharedUncompared: sharedUncompared.lines,
-    },
-  };
+  return { evidence: { changed: changed.lines, moved: moved.lines, uncompared: uncompared.lines } };
 }
 
 type ReadLines = { readonly lines: readonly string[] } | { readonly problem: string };

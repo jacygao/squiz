@@ -213,34 +213,7 @@ export function worktreeNotes(found: ConfinementEvidence): readonly string[] {
     ...whatChanged(found.changed),
     ...whereHeadMoved(found.moved),
     ...whatWasNotCompared(found.uncompared),
-    ...whatChangedInShared(found.sharedChanged),
-    ...whatSharedWasNotCompared(found.sharedUncompared),
   ];
-}
-
-/**
- * Every key or file a round found changed among the git files the repository's
- * worktrees share, on one line.
- *
- * The coding agent and every other worktree write these files too, so the line
- * names the reviewer's tests as one possible writer and never as the writer.
- */
-function whatChangedInShared(changes: readonly string[]): readonly string[] {
-  if (changes.length === 0) return [];
-  return [
-    "The git config or hooks this repository's worktrees share changed while the reviewer ran." +
-      " The reviewer's tests may have changed them, or anything else using the repository may have:" +
-      ` ${changes.map(oneLine).join(", ")}`,
-  ];
-}
-
-/** One line per round that could not say whether the shared git files changed. */
-function whatSharedWasNotCompared(reasons: readonly string[]): readonly string[] {
-  return reasons.map(
-    (reason) =>
-      "A round could not tell whether the git config or hooks this repository's worktrees share" +
-      ` changed while the reviewer ran: ${oneLine(reason)}`,
-  );
 }
 
 /** Every file a reviewer changed, on one line, where any round found one. */

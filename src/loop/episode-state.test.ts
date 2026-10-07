@@ -216,8 +216,6 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "confinement": {"changed": "src/card.ts"}}`,
   `{"rounds": [], "confinement": {"changed": [3]}}`,
   `{"rounds": [], "confinement": {"uncompared": [null]}}`,
-  `{"rounds": [], "confinement": {"sharedChanged": "config"}}`,
-  `{"rounds": [], "confinement": {"sharedUncompared": [false]}}`,
   // How long a round ran and posted, and the bound that cut it short, are the measurements a
   // later reading takes from this file. A figure that is there and cannot be read
   // would be a measurement nobody took.
@@ -359,8 +357,6 @@ test("what the rounds established about the worktree is written and comes back",
       changed: ["src/card.ts"],
       moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
       uncompared: ["the round had too little of its window left to read the worktree"],
-      sharedChanged: ["`core.hookspath` in `config`"],
-      sharedUncompared: ["the reading after could not be taken: info/exclude could not be read"],
     },
   };
 
@@ -399,8 +395,6 @@ test("a state file naming some of the worktree lists reads the ones it names", (
     changed: ["src/card.ts"],
     moved: [],
     uncompared: [],
-    sharedChanged: [],
-    sharedUncompared: [],
   });
 });
 
@@ -432,8 +426,6 @@ test("a state file written before HEAD was compared reads with no move", (t) => 
         changed: ["src/card.ts"],
         moved: [],
         uncompared: [],
-        sharedChanged: [],
-        sharedUncompared: [],
       },
     },
   });
@@ -469,9 +461,38 @@ test("a state file holding the other-episodes and could-not-tell lists reads wit
         changed: ["src/card.ts"],
         moved: [],
         uncompared: ["the worktree is shared with live episode ef56ab78"],
-        sharedChanged: [],
-        sharedUncompared: [],
       },
+    },
+  });
+});
+
+// Earlier versions compared the git config and hooks the worktrees share, and
+// kept what they found. Unreadable, the file would end every round of that
+// episode before the reviewer ran; read, what it held would still be reported.
+test("a state file holding the shared git file lists reads without them", (t) => {
+  const episode = episodeIn(t);
+  mkdirSync(episode.directory, { recursive: true });
+  writeFileSync(
+    episode.stateFile,
+    JSON.stringify({
+      rounds: [firstRound],
+      spentOutsideRounds: unspent,
+      confinement: {
+        changed: ["src/card.ts"],
+        moved: [],
+        uncompared: [],
+        sharedChanged: ["`core.hookspath` in `config`"],
+        sharedUncompared: ["the reading after could not be taken: info/exclude could not be read"],
+      },
+    }),
+  );
+
+  assert.deepEqual(readState(episode), {
+    outcome: "read",
+    state: {
+      rounds: [firstRound],
+      spentOutsideRounds: unspent,
+      confinement: { changed: ["src/card.ts"], moved: [], uncompared: [] },
     },
   });
 });
