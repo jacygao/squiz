@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.06 (draft)
+**Version:** 1.07 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -642,11 +642,28 @@ text=Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2
 ```
 
 The note points, and carries no finding. `subagent` is there only where a
-subagent did the work. For a round that failed, the text gives the reason, names
-`squiz status`, and says that a new commit, or running `squiz review` once,
-retries it. A failed state gets one note, however many times it fails, and a
-state not reviewed gets one saying why. A state no hook recorded an owner for gets
-no note.
+subagent did the work. A failed state gets one note, however many times it fails,
+and a state not reviewed gets one saying why. A state no hook recorded an owner
+for gets no note.
+
+For a round that failed, the text gives the reason and names `squiz status`.
+Where a round remains under the round cap and the token bound, it says that a new
+commit, or running `squiz review` once, retries it:
+
+```
+text=Squiz could not review PR #41 at 3f9c2e0: the reviewer could not run: the provider refused the credential. `squiz status` lists it. A new commit, or running `squiz review 41` once, retries it.
+```
+
+Where the failed round leaves no round to run, the note says the review is closed
+and which bound closed it, in the failure comment's words. Whether a round
+remains is read as that comment reads it (§ 7 The failure comment):
+
+```
+text=Squiz could not review PR #41 at 3f9c2e0: round 3 found 2 findings and could not post them to PR #41. `squiz status` lists it. The review is closed: it has run 3 rounds, and the round cap allows 3. No round runs again. A new commit, or running `squiz review 41`, posts its summary.
+```
+
+A note for an episode that ran no round ends at "No round runs again.", as the
+comment does.
 
 **Then it wakes a Claude Code owner, one of two ways.** Whichever delivers a note
 moves it into `delivered/` beside it, so the other does not deliver it again.

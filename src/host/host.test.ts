@@ -896,6 +896,62 @@ test("a failed round writes its owner a note giving the reason, naming squiz sta
   );
 });
 
+/**
+ * A round that reviews, finds one finding and cannot post it, which fails the
+ * round after the round is counted.
+ */
+function postingRefused(config: Partial<Config>): Arrangement {
+  return {
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    config,
+    findings: [[finding("The name says nothing.")]],
+    before: (fixture) => rmSync(join(fixture.binaries, "answer-create")),
+  };
+}
+
+test("#622: a failed round that was the last the round cap allows tells its owner the review is closed", async () => {
+  const ran = await host(postingRefused({ rounds: 1 }));
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz could not review PR #${PULL_REQUEST} at ${short}: round 1 found 1 finding and could not post it to PR #${PULL_REQUEST}. ` +
+      "`squiz status` lists it. The review is closed: it has run 1 round, and the round cap allows 1. No round runs again. " +
+      `A new commit, or running \`squiz review ${PULL_REQUEST}\`, posts its summary.`,
+  );
+});
+
+test("#622: a failed round that reached the token bound tells its owner the review is closed", async () => {
+  const ran = await host(postingRefused({ tokens: 1_000 }));
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz could not review PR #${PULL_REQUEST} at ${short}: round 1 found 1 finding and could not post it to PR #${PULL_REQUEST}. ` +
+      "`squiz status` lists it. The review is closed: it reached the token bound of 1,000 tokens. No round runs again. " +
+      `A new commit, or running \`squiz review ${PULL_REQUEST}\`, posts its summary.`,
+  );
+});
+
+test("#622: a failed attempt that reached the token bound before any round ran promises its owner no summary", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    config: { tokens: 1_000 },
+    incomplete: "the provider refused the credential",
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz could not review PR #${PULL_REQUEST} at ${short}: ${record.reason}. \`squiz status\` lists it. ` +
+      "The review is closed: it reached the token bound of 1,000 tokens. No round runs again.",
+  );
+});
+
 test("a failed state with no owner recorded is recorded as not noted", async () => {
   const ran = await host({ records: atHead, listedNumber: 143 });
 
