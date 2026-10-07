@@ -39,38 +39,12 @@ import {
 import { type Deadline, deadlineIn } from "./deadline.ts";
 import { roundVariable } from "./deep-tools.ts";
 import { follow } from "./follow.ts";
-import {
-  KEEPER_VARIABLE,
-  RECORD_VARIABLE,
-  type RoundSpace,
-  stopRecordedGroups,
-} from "./groups.ts";
 
 /**
  * How long a killed reviewer is given to exit before it is killed outright, and
  * again before the round stops waiting for it.
- *
- * The reviewer's own group is stopped first and the groups its shells recorded
- * after it, each on its own escalation, so the signals a round sends after
- * reaching its time bound take four times this at most. What the readings between
- * them take is bounded separately, below.
  */
 const GRACE_MS = 2_000;
-
-/**
- * The longest one round's shutdown spends asking the system what is in the groups
- * its shells recorded.
- *
- * Its own bound, and not part of the round's. It covers the readings rather than
- * the signals, which keep the grace above: a `ps` that will not answer has no
- * bound of its own, and the round would sit in its cleanup indefinitely — with
- * the review already paid for, its spend unrecorded and nothing posted. A reading cut short at this leaves the groups it covered alone,
- * which is the same answer a machine without `ps` gets.
- *
- * This and four times the grace together are what the posting reserve has
- * to cover.
- */
-const INSPECTION_MS = 5_000;
 
 /**
  * What one round of review came to, and how many of the reviewer's calls it
@@ -202,7 +176,7 @@ export async function runRound(
 
   // What the CLI reads from a file rather than from its command line is put in
   // place before anything starts. A confinement that is not in place is not a
-  // round to run: at `deep` it is what the round reaches a detached tool by.
+  // round to run.
   const confinement = adapter.confine(invocation);
   if (confinement.outcome === "failed") {
     return {
@@ -214,7 +188,7 @@ export async function runRound(
     };
   }
 
-  const variables = variablesOf(invocation, scratch, github, confinement.environment, bound);
+  const variables = variablesOf(invocation, scratch, github, confinement.environment);
 
   let spent: Spend = undefined;
   // Added up rather than replaced, unlike the reports below: each refusal is a
@@ -306,9 +280,7 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * What the round adds to the reviewer's environment, on every backend.
  *
  * `TMPDIR` is the scratch space, so a probe script cannot land in the tree under
- * review. The record's own variable is named here rather than by the adapter: it
- * is the harness's, and every shell the reviewer starts inherits it, so the line
- * the adapter delivers carries no path of its own.
+ * review.
  *
  * **No GitHub credential reaches the reviewer through a variable or `gh`'s
  * configuration.** The token variables are set empty rather than left out,
@@ -317,32 +289,19 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * `GH_CONFIG_DIR` names `github`, which the round has emptied. They come after
  * the confinement's, so no adapter puts a token back.
  *
- * At `deep` the tools the CLI serves are handed the snapshot and the moment the
- * round ends. The moment is on the wall clock, because that is the one clock the
- * tools can read as well.
+ * At `deep` the tools the CLI serves are handed the snapshot.
  */
 function variablesOf(
   invocation: Invocation,
   scratch: string,
   github: string,
   confinement: Readonly<Record<string, string>>,
-  bound: Deadline,
 ): Readonly<Record<string, string>> {
-  const space = invocation.roundSpace;
-  const deep =
-    invocation.depth === "deep"
-      ? roundVariable({
-          snapshot: resolve(invocation.directory),
-          endsAt: Date.now() + bound.remaining(),
-        })
-      : {};
+  const deep = invocation.depth === "deep" ? roundVariable({ snapshot: resolve(invocation.directory) }) : {};
   return {
     TMPDIR: scratch,
     ...confinement,
     ...deep,
-    ...(space === undefined
-      ? {}
-      : { [RECORD_VARIABLE]: space.shellRecord, [KEEPER_VARIABLE]: space.keeperName }),
     ...Object.fromEntries(GITHUB_TOKENS.map((name) => [name, ""])),
     GH_CONFIG_DIR: github,
   };
@@ -439,7 +398,7 @@ async function attempt(
     if (start.mayHaveRun === true) reviewerRan();
     // A failed start may have run the reviewer, so it is stopped and its pane
     // closed rather than another reviewer started beside it.
-    await stopFailedStart(start.leftOpen, sessions.environment, invocation.roundSpace);
+    await stopFailedStart(start.leftOpen, sessions.environment);
     const left = start.leftOpen === undefined ? undefined : closeLeftOpen(start.leftOpen, sessions.environment);
     const reason = `the reviewer could not be started: ${start.reason}${left === undefined ? "" : `; ${left}`}`;
     if (start.mayHaveRun !== true) return unstartable(reason);
@@ -465,7 +424,6 @@ async function attempt(
       else child.kill(sent);
     },
     ...(child === undefined ? { groupRuns: () => groupHasLiving(place.identity.pid) } : {}),
-    space: invocation.roundSpace,
   };
 
   const watching = new AbortController();
@@ -558,7 +516,7 @@ async function attempt(
   } catch (cause) {
     // Nothing after this attempt stops the reviewer, and the caller reads what it
     // spent from a file it would otherwise still be writing.
-    await stopReviewer(owned);
+    await stop(owned);
     throw cause;
   } finally {
     watching.abort();
@@ -715,7 +673,7 @@ function endedAs(command: string, child: ChildProcess): string {
 /** How often the reviewer's group is asked whether anything of it is left. */
 const POLL_MS = 25;
 
-/** What one round owns: the reviewer, its own group, and the groups its shells led. */
+/** What one round owns: the reviewer and its own group. */
 type Owned = {
   /** The group's identifier, which is the reviewer's own. */
   readonly group: number | undefined;
@@ -728,45 +686,24 @@ type Owned = {
    * group's own answer would count a zombie the round cannot reap.
    */
   readonly groupRuns?: () => boolean;
-  /**
-   * Where the shells the reviewer started recorded the groups they lead. Absent
-   * at a depth granting no shell, where nothing detaches and nothing records.
-   */
-  readonly space: RoundSpace | undefined;
 };
 
 /**
- * Stop the reviewer and everything it started, and do not return while any of
- * it might still be running.
- *
- * Two groups of processes, because `run_tests` starts the test command in a
- * group of its own, which the reviewer's group is not. The reviewer's group goes
- * first, so that nothing new starts while the record is being read, and the
- * groups the test command's runs recorded go after it.
- *
- * **The reviewer's own exit does not end this.** A tool it started can outlive
- * it, whether because the reviewer finished first or because the reviewer took
- * the signal and the tool did not. At depth `read` the grant is the only thing
- * keeping the round off the code under review, and a tool that outlives the
- * round is outside the grant as much as outside the bound.
- */
-async function stop(owned: Owned): Promise<void> {
-  await stopReviewer(owned);
-  const { space } = owned;
-  // One deadline for the whole of the inspection, so that a record naming many
-  // groups is bounded as well as a single `ps` that will not answer.
-  if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
-}
-
-/**
- * Stop the reviewer's own process group.
+ * Stop the reviewer's own process group, and do not return while any of it
+ * might still be running.
  *
  * `SIGTERM` first, which makes the reviewer kill its own children and exit.
  * Anything of the group still there after the grace is killed outright, and each
  * wait is bounded, so a reviewer that answers neither signal cannot hold the
  * round open.
+ *
+ * **The reviewer's own exit does not end this.** A tool it started can outlive
+ * it, whether because the reviewer finished first or because the reviewer took
+ * the signal and the tool did not. The grant is the only thing keeping the round
+ * off the code under review, and a tool that outlives the round is outside the
+ * grant as much as outside the bound.
  */
-async function stopReviewer(owned: Owned): Promise<void> {
+async function stop(owned: Owned): Promise<void> {
   if (owned.gone() && !groupRuns(owned)) return;
   signal(owned, "SIGTERM");
   if (await settled(owned, GRACE_MS)) return;
@@ -1021,34 +958,21 @@ function closePlace(place: SessionPlace, environment: Environment): string | und
 
 /**
  * Stop whatever a failed start may have left running, as a reviewer is stopped
- * at the bound: its group, then the groups its shells recorded.
- *
- * The recorded groups are stopped whether or not a pane was left open. A shell
- * the reviewer detached leads a session of its own, which no pane's close
- * reaches, and a start that failed after the reviewer ran may have closed its
- * pane already.
+ * at the bound.
  *
  * tmux closes a window with one `SIGHUP`, which a command may ignore, so the
- * window's command is found from tmux and its group signalled first. Herdr's
- * own close escalates to `SIGKILL` across the pane's shell session, which holds
- * the command, so a Herdr pane has only its recorded groups to stop here.
+ * window's command is found from tmux and its group signalled before the window
+ * is closed. Herdr's own close escalates to `SIGKILL` across the pane's shell
+ * session, which holds the command, so a Herdr pane has nothing to stop here.
  */
-async function stopFailedStart(
-  left: LeftOpen | undefined,
-  environment: Environment,
-  space: RoundSpace | undefined,
-): Promise<void> {
+async function stopFailedStart(left: LeftOpen | undefined, environment: Environment): Promise<void> {
   const pid = left?.backend === "tmux" ? windowProcess(left.window, environment, SESSION_BOUND_MS) : undefined;
-  if (pid === undefined) {
-    if (space !== undefined) await stopRecordedGroups(space, GRACE_MS, deadlineIn(INSPECTION_MS));
-    return;
-  }
+  if (pid === undefined) return;
   await stop({
     group: pid,
     gone: () => !running(pid),
     alone: (sent) => process.kill(pid, sent),
     groupRuns: () => groupHasLiving(pid),
-    space,
   });
 }
 

@@ -702,7 +702,7 @@ function deepLoaded(environment: Readonly<Record<string, string | undefined>>): 
 }
 
 /** A round whose snapshot is this repository, which has a history to read. */
-const thisRound = roundVariable({ snapshot: process.cwd(), endsAt: Date.now() + 600_000 });
+const thisRound = roundVariable({ snapshot: process.cwd() });
 
 /** The tools `pi` brings itself, which the extension does not register. */
 const builtIn = new Set(["read", "grep", "find", "ls"]);

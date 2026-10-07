@@ -11,7 +11,6 @@ import type { Backends } from "../sessions/session.ts";
 import { type Adapter, type Confinement, type Invocation, type ParsedRun, unspent } from "./adapter.ts";
 import { copilot } from "./copilot/adapter.ts";
 import { ROUND_VARIABLE } from "./deep-tools.ts";
-import { makeRoundSpace, shellPrefix } from "./groups.ts";
 import { pi } from "./pi/adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { readReports as parse } from "./pi/reports.ts";
@@ -703,48 +702,12 @@ test("a tool that outlives a reviewer which took the signal is stopped too", asy
   });
 });
 
-/**
- * A tool the reviewer put in a group of its own is outside the group the round
- * signals, so the round's own signal never reaches it. What reaches it is the
- * record the shell wrote before it ran anything.
- */
-test("a tool the reviewer detached into a group of its own is stopped with the round", async () => {
-  await inATree(async (tree) => {
-    const round = await runRound(reviewer(detachingAndLeaving(tree)).adapter, atDeep(tree), 10);
-    assert.equal(round.outcome, "reviewed", accountOf(round));
-    assert.ok(
-      await gone(toolIn(tree)),
-      "a tool in a group of its own outlived the round that started it",
-    );
-  });
-});
-
-test("the reviewer is told where to record, and told nothing where there is no record", async () => {
-  await inATree(async (tree) => {
-    const invocation = atDeep(tree);
-    const told = await runRound(reviewer(reporting("process.env.SQUIZ_GROUPS")).adapter, invocation, 10);
-    assert.equal(headlineOf(told), invocation.roundSpace?.shellRecord);
-
-    const none = await runRound(reviewer(reporting("process.env.SQUIZ_GROUPS")).adapter, at(tree), 10);
-    assert.equal(headlineOf(none), "undefined", "a depth granting no shell has nothing to record");
-  });
-});
-
 // The deep tools run inside the reviewer's CLI, where the round's values are
 // readable only off the environment.
-test("at deep the reviewer is handed the round's snapshot and end, and nothing else", async () => {
+test("at deep the reviewer is handed the round's snapshot, and nothing else", async () => {
   await inATree(async (tree) => {
-    const seconds = 30;
-    const before = Date.now();
-    const round = await runRound(reviewer(reporting(`process.env.${ROUND_VARIABLE}`)).adapter, atDeep(tree), seconds);
-    const after = Date.now();
-    const handed = JSON.parse(headlineOf(round)) as Record<string, unknown>;
-    assert.deepEqual({ ...handed, endsAt: undefined }, { snapshot: tree, endsAt: undefined });
-    const endsAt = handed["endsAt"];
-    assert.ok(
-      typeof endsAt === "number" && endsAt >= before + seconds * 1_000 && endsAt <= after + seconds * 1_000,
-      `the round ends at ${String(endsAt)}, outside the ${seconds} seconds it was given`,
-    );
+    const round = await runRound(reviewer(reporting(`process.env.${ROUND_VARIABLE}`)).adapter, atDeep(tree), 30);
+    assert.deepEqual(JSON.parse(headlineOf(round)), { snapshot: tree });
 
     const read = await runRound(reviewer(reporting(`String(process.env.${ROUND_VARIABLE})`)).adapter, at(tree), 10);
     assert.equal(headlineOf(read), "undefined", "a depth with no deep tools is handed nothing for them");
@@ -870,11 +833,6 @@ test("a gh the reviewer starts finds no login", { skip: ghInstalled ? false : "g
   });
 });
 
-/**
- * A confinement that is not in place is not a round to run: at `deep` it is what
- * the round reaches a detached tool by, and a round that ran anyway would leave
- * every tool the reviewer detached running.
- */
 test("a confinement that could not be put in place is a setup problem, and nothing is run", async () => {
   await inATree(async (tree) => {
     const running = reviewer(reviewing);
@@ -1474,44 +1432,6 @@ function obedient(tree: string): string {
   return withTool(tree, "setInterval(() => {}, 1000);");
 }
 
-/**
- * A reviewer that starts a tool through a shell of its own group, waits for the
- * tool to be up, and then does what it is told.
- *
- * It is what a run of `run_tests` leaves behind: the shell leads a group the reviewer's own signal never reaches, and the lines the shell
- * runs first are what name it and hold its number.
- *
- * The shell runs the real prefix, so the group is recorded and held the way a
- * round's own shells record and hold theirs. A fixture that wrote the number
- * itself would leave the round judging a group nothing of the round was in.
- */
-function detaching(tree: string, andThen: string): string {
-  const pidFile = join(tree, "pids");
-  const readyFile = join(tree, "ready");
-  const toolFile = join(tree, "tool.js");
-  const command = [
-    shellPrefix,
-    `'${process.execPath}' '${toolFile}' &`,
-    `printf '%s %s\\n' "$$" "$!" > '${pidFile}'`,
-  ].join("\n");
-  return [
-    'const { spawn } = require("node:child_process");',
-    'const fs = require("node:fs");',
-    `fs.writeFileSync(${JSON.stringify(toolFile)}, ${JSON.stringify(deafly(readyFile))});`,
-    `spawn("/bin/bash", ["-c", ${JSON.stringify(command)}], { stdio: "ignore", detached: true });`,
-    "const until = Date.now() + 10000;",
-    `const up = () => fs.existsSync(${JSON.stringify(readyFile)}) && fs.existsSync(${JSON.stringify(pidFile)});`,
-    "while (!up() && Date.now() < until) {}",
-    andThen,
-  ].join("\n");
-}
-
-/** A reviewer that detaches a tool, reviews, and leaves while the tool is running. */
-function detachingAndLeaving(tree: string): string {
-  const answer = reportingMessage + reported + closing;
-  return detaching(tree, `${appending(answer)}\nprocess.exit(0);`);
-}
-
 /** A reviewer that never reached the model, which says so on stderr and exits. */
 const refusingToStart = [
   "process.stderr.write('Error: Unknown provider \"nosuchprovider\". Use --list-models to see available providers/models.\\n');",
@@ -1596,20 +1516,13 @@ function at(tree: string): Invocation {
     depth: "read",
     thinking: "medium",
     model: null,
-    roundSpace: undefined,
     terminal: "none",
   };
 }
 
-/** The same invocation at the depth that grants a shell, with a record to match. */
+/** The same invocation at `deep`. */
 function atDeep(tree: string): Invocation {
-  const made = makeRoundSpace(join(tree, ".squiz/agent-1"));
-  assert.equal(made.outcome, "made", "the round's own space must be there before the reviewer starts");
-  return {
-    ...at(tree),
-    depth: "deep",
-    roundSpace: made.outcome === "made" ? made.space : undefined,
-  };
+  return { ...at(tree), depth: "deep" };
 }
 
 /** The Copilot adapter, running the test's command line in place of Copilot's. */

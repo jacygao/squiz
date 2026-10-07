@@ -55,7 +55,6 @@ function fixture(t: TestContext, listing: string, status = 0): Fixture {
     depth: "read",
     thinking: "medium",
     model: null,
-    roundSpace: undefined,
     terminal: "none",
   };
   return { invocation, environment: { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` }, ran };
