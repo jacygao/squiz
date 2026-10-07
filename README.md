@@ -118,9 +118,11 @@ Run `squiz doctor`. In Claude Code, type it after `!`:
 ! squiz doctor
 ```
 
-Elsewhere, run `squiz doctor` in a shell once `squiz init` has linked it. It
-prints a line per dependency and exits 1 where a required one is missing,
-unusable or signed out:
+Elsewhere, run `squiz doctor` in a shell once `squiz init` has linked it. Run
+it in the repository you want reviewed, because the last line reads that
+repository's `.squiz.json`. It prints a line per dependency and exits 1 where a
+required one is missing, unusable or signed out. In a project whose
+`.squiz.json` names Copilot, it printed:
 
 ```
 git 2.54.0
@@ -130,10 +132,13 @@ Node 24.15.0
 tmux 3.7b
 Herdr 0.9.3
 squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init
+Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is not checked
 ```
 
-It does not yet check the reviewer or the Copilot CLI. It does require Claude
-Code, so on a machine where only Copilot is installed it fails that one line.
+The last line names the reviewer, its version and the model it will run on. It
+fails where that reviewer is not installed or `.squiz.json` is refused. It
+cannot tell whether Copilot is signed in. Doctor also requires Claude Code, so
+on a machine where only Copilot is installed it fails that one line.
 
 ## What you see
 
