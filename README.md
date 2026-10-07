@@ -93,6 +93,15 @@ In the repository you want reviewed:
    }
    ```
 
+   In Copilot, start the session with `squiz` allowed:
+
+   ```sh
+   copilot --allow-tool='shell(squiz:*)'
+   ```
+
+   Without it, Copilot asks before it runs `squiz`, and a session run with
+   `-p --no-ask-user` is refused it.
+
 3. Optionally, add a `.squiz.json` at the root. Every setting has a default,
    so a project without one still runs. This one reviews with Copilot on a
    chosen model:
@@ -106,6 +115,11 @@ In the repository you want reviewed:
 
    The settings are `reviewer`, `model`, `rounds`, `timeout`, `tokens` and
    `thinking`. The specification gives each one's range and default.
+
+   Where Copilot writes your code and reviews it too, set `model` to one your
+   coding sessions do not use. Without it the reviewer runs on Copilot's
+   default, which is also the model a session started without `--model` runs
+   on. Nothing checks that the two differ.
 
 Nothing goes in `AGENTS.md`, and the coding agent needs no instruction. A review
 starts each time it finishes its work on a branch with an open pull request.
@@ -137,11 +151,22 @@ Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is no
 
 The last line names the reviewer, its version and the model it will run on. It
 fails where that reviewer is not installed or `.squiz.json` is refused. It
-cannot tell whether Copilot is signed in.
+cannot tell whether Copilot is signed in. Where neither `.squiz.json` nor
+Copilot's own settings name a model, the line says the model is unknown, and
+still passes:
+
+```
+Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Its sign-in is not checked
+```
 
 Where the Copilot CLI is installed, a line after Claude Code's gives its
-version and says whether its experimental features are on. Off is a warning,
-which leaves the exit status alone:
+version and says whether its experimental features are on:
+
+```
+copilot 1.0.92, experimental features on
+```
+
+Off is a warning, which leaves the exit status alone:
 
 ```
 warning: copilot 1.0.92 has experimental features off. If Copilot writes your code, it is never woken when a review finishes. Run /experimental on in Copilot, or start it once with copilot --experimental
