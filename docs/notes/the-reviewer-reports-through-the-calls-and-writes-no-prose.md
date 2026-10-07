@@ -65,11 +65,15 @@ recheck-when: pi upgrades, the reviewer's model changes, or the charter or its r
   and ends its turn does carry `stop`, which is the row asking for a retry, and a
   run with a bad credential completes one errored message, so deciding the row on
   whether any message completed would retry a setup problem forever.
-- **Read the reviewer's own tool calls to tell an empty review from an absent
-  one.** `tool_execution_start` carries the name and the arguments of every call
-  the reviewer makes, so a round that reported nothing is readable as one that
-  opened nothing or one that opened a great deal. The three rounds made 4, 43
-  and 24 calls that were not reports.
+- **Tell an empty review from an absent one by the finish.** A round that
+  reported nothing and recorded a finish is a review that found nothing. One
+  with no finish is a review that stopped without finishing. The round reads
+  that from the report file, which records reports, refusals, usage and the
+  finish but no read-tool call. Where a person needs to know how widely such a
+  reviewer read, its calls are in the session `pi` keeps under
+  `rounds/<k>/session/`. When this was measured they were read from the
+  stream's `tool_execution_start` events, and the three rounds made 4, 43 and 24
+  calls that were not reports.
 - **Bound a round on tokens, and set no bound below the widest round measured.**
   The three rounds used 53,933, 873,569 and 321,396 tokens, took 70, 314 and 188
   seconds, and cost $0.0472, $0.2048 and $0.1090. The widest is the round that

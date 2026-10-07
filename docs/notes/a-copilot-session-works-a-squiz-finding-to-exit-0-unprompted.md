@@ -3,7 +3,7 @@ settles: "§ 3 — whether a Copilot coding agent, never told about squiz, runs 
 issue: 573
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, models: "gpt-6-astra (medium and low effort), gpt-5-mini, claude-haiku-4.5", reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, macos: 26.6.2, squiz-plugin: 21ed14b }
-recheck-when: Copilot CLI upgrades past 1.0.92, the default Copilot model changes, the note's text changes, or `squiz reply` or the round host's handling of a superseded state changes
+recheck-when: Copilot CLI upgrades past 1.0.92, the default Copilot model changes, the text of the owner's note or of `squiz review`'s output changes, or `squiz reply` or the round host's handling of a superseded state changes
 ---
 
 # A Copilot session works a squiz finding to exit 0, unprompted, on gpt-6-astra
