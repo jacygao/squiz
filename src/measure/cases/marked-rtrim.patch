@@ -1,0 +1,39 @@
+diff --git a/src/helpers.ts b/src/helpers.ts
+index edfeaa69..a696b0f9 100644
+--- a/src/helpers.ts
++++ b/src/helpers.ts
+@@ -109,27 +109,18 @@ export function splitCells(tableRow: string, count?: number) {
+  * @param invert Remove suffix of non-c chars instead. Default falsey.
+  */
+ export function rtrim(str: string, c: string, invert?: boolean) {
+-  const l = str.length;
+-  if (l === 0) {
++  if (str.length === 0) {
+     return '';
+   }
+ 
+-  // Length of suffix matching the invert condition.
+-  let suffLen = 0;
+-
+-  // Step left until we fail to match the invert condition.
+-  while (suffLen < l) {
+-    const currChar = str.charAt(l - suffLen - 1);
+-    if (currChar === c && !invert) {
+-      suffLen++;
+-    } else if (currChar !== c && invert) {
+-      suffLen++;
+-    } else {
+-      break;
+-    }
++  // Index of the last character to keep. A character is trimmed while it
++  // matches `c`, or while it does not when inverted.
++  let last = str.length - 1;
++  while (last > 0 && (str.charAt(last) === c) !== !!invert) {
++    last--;
+   }
+ 
+-  return str.slice(0, l - suffLen);
++  return str.slice(0, last + 1);
+ }
+ 
+ export function trimTrailingBlankLines(str: string) {

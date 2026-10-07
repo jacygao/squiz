@@ -1,0 +1,29 @@
+diff --git a/lib/utils.js b/lib/utils.js
+index adde8c0..fd4e006 100644
+--- a/lib/utils.js
++++ b/lib/utils.js
+@@ -299,15 +299,16 @@ var encode = function encode(str, defaultEncoder, charset, kind, format) {
+     }
+ 
+     var out = '';
+-    for (var j = 0; j < string.length; j += limit) {
+-        var segment = string.length >= limit ? string.slice(j, j + limit) : string;
+-        if (j + limit < string.length) {
+-            var last = segment.charCodeAt(segment.length - 1);
+-            if (last >= 0xD800 && last <= 0xDBFF) {
+-                segment = segment.slice(0, -1);
+-                j -= 1;
+-            }
++    var j = 0;
++    while (j < string.length) {
++        var end = Math.min(j + limit, string.length);
++        // a segment never ends between the two halves of a surrogate pair
++        var last = string.charCodeAt(end);
++        if (end < string.length && last >= 0xD800 && last <= 0xDBFF) {
++            end -= 1;
+         }
++        var segment = string.slice(j, end);
++        j = end;
+         var arr = [];
+ 
+         for (var i = 0; i < segment.length; ++i) {

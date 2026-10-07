@@ -1,0 +1,13 @@
+diff --git a/src/rules.ts b/src/rules.ts
+index 81da76a9..fdaf1b3a 100644
+--- a/src/rules.ts
++++ b/src/rules.ts
+@@ -54,7 +54,7 @@ export const other = {
+   tabCharGlobal: /\t/g,
+   leadingSpaceTab: /^[ \t]+/,
+   multipleSpaceGlobal: /\s+/g,
+-  blankLine: /^[ \t]*$/,
++  blankLine: /^\s*$/,
+   doubleBlankLine: /\n[ \t]*\n[ \t]*$/,
+   blockquoteStart: /^ {0,3}>/,
+   blockquoteSetextReplace: /\n {0,3}((?:=+|-+) *)(?=\n|$)/g,

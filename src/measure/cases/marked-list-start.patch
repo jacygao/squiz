@@ -1,0 +1,29 @@
+diff --git a/src/Renderer.ts b/src/Renderer.ts
+index fe617ace..7800ef6e 100644
+--- a/src/Renderer.ts
++++ b/src/Renderer.ts
+@@ -62,19 +62,12 @@ export class _Renderer<ParserOutput = string, RendererOutput = string> {
+     return '<hr>\n' as RendererOutput;
+   }
+ 
+-  list(token: Tokens.List): RendererOutput {
+-    const ordered = token.ordered;
+-    const start = token.start;
+-
+-    let body = '';
+-    for (let j = 0; j < token.items.length; j++) {
+-      const item = token.items[j];
+-      body += this.listitem(item);
+-    }
+-
++  list({ ordered, start, items }: Tokens.List): RendererOutput {
++    const body = items.map((item) => this.listitem(item)).join('');
+     const type = ordered ? 'ol' : 'ul';
+-    const startAttr = (ordered && start !== 1) ? (' start="' + start + '"') : '';
+-    return '<' + type + startAttr + '>\n' + body + '</' + type + '>\n' as RendererOutput;
++    // An ordered list counts from 1 unless told otherwise, so only a later start is written out.
++    const startAttr = ordered && Number(start) > 1 ? ` start="${start}"` : '';
++    return `<${type}${startAttr}>\n${body}</${type}>\n` as RendererOutput;
+   }
+ 
+   listitem(item: Tokens.ListItem): RendererOutput {

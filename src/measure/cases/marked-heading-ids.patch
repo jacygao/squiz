@@ -1,0 +1,97 @@
+diff --git a/docs/USING_ADVANCED.md b/docs/USING_ADVANCED.md
+index 094b8518..8ae134e5 100644
+--- a/docs/USING_ADVANCED.md
++++ b/docs/USING_ADVANCED.md
+@@ -50,6 +50,7 @@ console.log(marked.parse(markdownString));
+ |:-----------|:---------|:--------|:--------|:-------------|
+ |async       |`boolean` |`false`  |4.1.0    |If true, `walkTokens` functions can be async and `marked.parse` will return a promise that resolves when all walk tokens functions resolve.|
+ |breaks      |`boolean` |`false`  |v0.2.7   |If true, add `<br>` on a single line break (copies GitHub behavior on comments, but not on rendered markdown files). Requires `gfm` be `true`.|
++|headingIds  |`boolean` |`false`  |18.1.0   |If true, give each heading an `id` made from its text, unique within the document, so a link can point at it.|
+ |gfm         |`boolean` |`true`   |v0.2.1   |If true, use approved [GitHub Flavored Markdown (GFM) specification](https://github.github.com/gfm/).|
+ |pedantic    |`boolean` |`false`  |v0.2.1   |If true, conform to the original `markdown.pl` as much as possible. Don't fix original markdown bugs or behavior. Turns off and overrides `gfm`.|
+ |renderer    |`object`  |`new Renderer()`|v0.3.0|An object containing functions to render tokens to HTML. See [extensibility](/using_pro) for more details.|
+diff --git a/src/MarkedOptions.ts b/src/MarkedOptions.ts
+index 6ef33533..a38f8828 100644
+--- a/src/MarkedOptions.ts
++++ b/src/MarkedOptions.ts
+@@ -60,6 +60,12 @@ export interface MarkedExtension<ParserOutput = string, RendererOutput = string>
+    */
+   breaks?: boolean;
+ 
++  /**
++   * Give each heading an `id` made from its text, so that a link can point at it.
++   * Each id is unique within one call to `parse`.
++   */
++  headingIds?: boolean;
++
+   /**
+    * Add tokenizers and renderers to marked
+    */
+diff --git a/src/Renderer.ts b/src/Renderer.ts
+index fe617ace..64213f6a 100644
+--- a/src/Renderer.ts
++++ b/src/Renderer.ts
+@@ -8,6 +8,13 @@ import type { MarkedOptions } from './MarkedOptions.ts';
+ import type { Tokens } from './Tokens.ts';
+ import type { _Parser } from './Parser.ts';
+ 
++/**
++ * A heading's text as an id: lower case, with each run of spaces as one hyphen.
++ */
++function slug(text: string) {
++  return text.trim().toLowerCase().replace(/\s+/g, '-');
++}
++
+ /**
+  * Renderer
+  */
+@@ -54,8 +61,12 @@ export class _Renderer<ParserOutput = string, RendererOutput = string> {
+     return '' as RendererOutput;
+   }
+ 
+-  heading({ tokens, depth }: Tokens.Heading): RendererOutput {
+-    return `<h${depth}>${this.parser.parseInline(tokens)}</h${depth}>\n` as RendererOutput;
++  heading({ tokens, depth, text }: Tokens.Heading): RendererOutput {
++    const body = this.parser.parseInline(tokens);
++    if (!this.options.headingIds) {
++      return `<h${depth}>${body}</h${depth}>\n` as RendererOutput;
++    }
++    return `<h${depth} id="${slug(text)}">${body}</h${depth}>\n` as RendererOutput;
+   }
+ 
+   hr(token: Tokens.Hr): RendererOutput {
+diff --git a/src/defaults.ts b/src/defaults.ts
+index 28314f36..e973b40a 100644
+--- a/src/defaults.ts
++++ b/src/defaults.ts
+@@ -9,6 +9,7 @@ export function _getDefaults<ParserOutput = string, RendererOutput = string>():
+     breaks: false,
+     extensions: null,
+     gfm: true,
++    headingIds: false,
+     hooks: null,
+     pedantic: false,
+     renderer: null,
+diff --git a/test/unit/marked.test.js b/test/unit/marked.test.js
+index 52d001fa..93102890 100644
+--- a/test/unit/marked.test.js
++++ b/test/unit/marked.test.js
+@@ -31,6 +31,18 @@ describe('marked unit', () => {
+     });
+   });
+ 
++  describe('headingIds', () => {
++    it('should leave headings without an id by default', () => {
++      assert.strictEqual(marked.parse('# Hello World'), '<h1>Hello World</h1>\n');
++    });
++
++    it('should give a heading an id from its text', () => {
++      marked.setOptions({ headingIds: true });
++      assert.strictEqual(marked.parse('# Hello World'), '<h1 id="hello-world">Hello World</h1>\n');
++      assert.strictEqual(marked.parse('## Getting  Started'), '<h2 id="getting-started">Getting  Started</h2>\n');
++    });
++  });
++
+   describe('inlineLexer', () => {
+     it('should send html to renderer.html', () => {
+       const renderer = new Renderer();

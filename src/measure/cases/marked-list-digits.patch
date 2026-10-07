@@ -1,0 +1,44 @@
+diff --git a/src/Tokenizer.ts b/src/Tokenizer.ts
+index ac9c7469..dd208585 100644
+--- a/src/Tokenizer.ts
++++ b/src/Tokenizer.ts
+@@ -320,7 +320,7 @@ export class _Tokenizer<ParserOutput = string, RendererOutput = string> {
+         items: [],
+       };
+ 
+-      bull = isordered ? `\\d{1,9}\\${bull.slice(-1)}` : `\\${bull}`;
++      bull = isordered ? `\\d{1,10}\\${bull.slice(-1)}` : `\\${bull}`;
+ 
+       if (this.options.pedantic) {
+         bull = isordered ? bull : '[*+-]';
+diff --git a/src/rules.ts b/src/rules.ts
+index 81da76a9..ea046c37 100644
+--- a/src/rules.ts
++++ b/src/rules.ts
+@@ -95,7 +95,7 @@ export const other = {
+   notSpaceStart: /^\S*/,
+   endingNewline: /\n$/,
+   listItemRegex: (bull: string) => new RegExp(`^( {0,3}${bull})((?:[\t ][^\\n]*)?(?:\\n|$))`),
+-  nextBulletRegex: cachedIndentRegex((indent: number) => new RegExp(`^ {0,${indent}}(?:[*+-]|\\d{1,9}[.)])((?:[ \t][^\\n]*)?(?:\\n|$))`)),
++  nextBulletRegex: cachedIndentRegex((indent: number) => new RegExp(`^ {0,${indent}}(?:[*+-]|\\d{1,10}[.)])((?:[ \t][^\\n]*)?(?:\\n|$))`)),
+   hrRegex: cachedIndentRegex((indent: number) => new RegExp(`^ {0,${indent}}((?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\\*[ \t]*){3,})(?:\\n+|$)`)),
+   fencesBeginRegex: cachedIndentRegex((indent: number) => new RegExp(`^ {0,${indent}}(?:\`\`\`|~~~)`)),
+   headingBeginRegex: cachedIndentRegex((indent: number) => new RegExp(`^ {0,${indent}}#`)),
+@@ -114,7 +114,7 @@ const blockCode = /^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/;
+ const fences = /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/;
+ const hr = /^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/;
+ const heading = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/;
+-const bullet = / {0,3}(?:[*+-]|\d{1,9}[.)])/;
++const bullet = / {0,3}(?:[*+-]|\d{1,10}[.)])/;
+ const lheadingCore = /^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |fences|blockquote|heading|hr|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/;
+ const lheading = edit(lheadingCore)
+   .replace(/bull/g, bullet) // lists can interrupt
+@@ -188,7 +188,7 @@ const paragraph = createParagraph(/ {0,3}(?:[*+-]|1[.)])[ \t]+[^ \t\n]/);
+ // inside a blockquote a bare list marker (any number) starts a sibling list,
+ // so it must not be lazily continued as paragraph text (unlike a top level
+ // paragraph, where an empty list cannot interrupt)
+-const blockquoteParagraph = createParagraph(/ {0,3}(?:[*+-]|\d{1,9}[.)])(?:[ \t]|\n|$)/);
++const blockquoteParagraph = createParagraph(/ {0,3}(?:[*+-]|\d{1,10}[.)])(?:[ \t]|\n|$)/);
+ 
+ const blockquote = edit(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/)
+   .replace('paragraph', blockquoteParagraph)
