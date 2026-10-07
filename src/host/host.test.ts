@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -322,7 +322,7 @@ function resumesIn(episode: Episode): Record<string, string> {
   if (!existsSync(directory)) return resumes;
   for (const round of readdirSync(directory)) {
     const file = join(directory, round, "resume.txt");
-    if (existsSync(file)) resumes[round] = readFileSync(file, "utf8");
+    if (existsSync(file) && statSync(file).isFile()) resumes[round] = readFileSync(file, "utf8");
   }
   return resumes;
 }
@@ -524,6 +524,47 @@ test("a round writes the command that resumes its reviewer's session to its resu
 
   assert.deepEqual(ran.resumes, { "1": "pi --session-dir .squiz/142/rounds/1/session --session 0193f2c4\n" });
   assert.match(asked[0] ?? "", /^\/.*\/\.squiz\/142\/rounds\/1\/session$/u, "the session was looked for somewhere else");
+});
+
+test("a resume command that cannot be written is reported in host.log, and the round's result is unchanged", async () => {
+  const ran = await host({
+    records: atHead,
+    resume: (_sessionDirectory, spelled) => ["pi", "--session-dir", spelled, "--session", "0193f2c4"],
+    before: ({ episode }) => {
+      // A directory where resume.txt goes refuses the write.
+      mkdirSync(join(episode.directory, "rounds", "1", "resume.txt"), { recursive: true });
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 0);
+  assert.deepEqual(ran.resumes, {});
+  assert.match(ran.log, /^.*round 1: its resume command could not be written: .*EISDIR.*$/mu);
+});
+
+test("a posting time the state file refuses is reported in host.log, and the round's result is unchanged", async () => {
+  const ran = await host({
+    records: atHead,
+    before: (fixture) => {
+      // The summary is the round's last post, so the episode's directory refuses
+      // the state's lock from then until the host records the result.
+      writeFileSync(join(fixture.binaries, "on-summary.sh"), `chmod 555 '${fixture.episode.directory}'\n`, "utf8");
+    },
+    host: {
+      update: (episode, change, options) => {
+        chmodSync(episode.directory, 0o755);
+        return updateState(episode, change, options);
+      },
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 0);
+  assert.ok(ran.kinds.includes("summary"), `the round posted no summary: ${ran.kinds.join(", ")}`);
+  assert.equal(ran.state?.rounds[0]?.postingSeconds, undefined, "the posting time was written after all");
+  assert.match(ran.log, /^.*round 1: its posting time could not be written: .*state\.json could not be written: .*$/mu);
 });
 
 test("the reviewer's tab opens in the Herdr workspace the state's record names", async () => {

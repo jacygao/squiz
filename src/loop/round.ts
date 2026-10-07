@@ -161,6 +161,10 @@ export type RoundSetup = {
    * it stands. Told once the round has its conclusion, which it never changes.
    */
   readonly snapshotLeft?: (reason: string) => void;
+  /** Told why the round's posting time could not be written. The round's result stands. */
+  readonly postingTimeUnwritten?: (reason: string) => void;
+  /** Told why the round's resume command could not be written. The round's result stands. */
+  readonly resumeUnwritten?: (reason: string) => void;
 };
 
 /** An episode's lock as its caller took it, and the pull request it was taken for. */
@@ -410,7 +414,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
             ),
           },
         };
-  keepPostingTime(episode, stopwatch);
+  keepPostingTime(episode, stopwatch, setup.postingTimeUnwritten);
   return reported;
 }
 
@@ -460,17 +464,18 @@ function timed<T>(stopwatch: Stopwatch, reserve: Deadline, post: () => T): T {
  * Add how long the round's posting took to the round's entry in the state.
  *
  * Written after the posting, so under a wait of its own rather than the reserve
- * the posting may have spent. A write that fails is not reported: the time is a
- * measurement, the round's result is decided already, and nothing reads it to
- * decide anything.
+ * the posting may have spent. A write that fails is told to `unwritten` and fails
+ * nothing: the time is a measurement, the round's result is decided already, and
+ * nothing reads it to decide anything.
  */
-function keepPostingTime(episode: Episode, stopwatch: Stopwatch): void {
+function keepPostingTime(episode: Episode, stopwatch: Stopwatch, unwritten?: (reason: string) => void): void {
   const { first, last, round } = stopwatch;
   if (first === undefined || last === undefined || round === undefined) return;
   const seconds = Math.round((last - first) / 100) / 10;
-  updateState(episode, (current) => recordPostingSeconds(current, round, seconds), {
+  const kept = updateState(episode, (current) => recordPostingSeconds(current, round, seconds), {
     until: deadlineIn(STATE_LOCK_WAIT_MS),
   });
+  if (kept.outcome === "failed") unwritten?.(kept.reason);
 }
 
 /** The calls before the review, under the one deadline the snapshot's add runs under too. */
@@ -580,7 +585,7 @@ async function reviewOn(
     clock,
   );
   const elapsedSeconds = Math.round((clock() - reviewStarted) / 100) / 10;
-  writeResume(setup.adapter, sessionDirectory, directory, join(ownDirectory, "resume.txt"));
+  writeResume(setup.adapter, sessionDirectory, directory, join(ownDirectory, "resume.txt"), setup.resumeUnwritten);
 
   // Everything from here to the last post runs on the posting reserve, which
   // starts as the review ends.
@@ -883,15 +888,21 @@ function placeOf(place: SessionPlace): ReviewerPlace {
  *
  * Nothing is written where the adapter has no session to resume. A file that
  * cannot be written leaves the round without one, which `squiz status` shows as
- * a round with nothing to resume, and fails nothing.
+ * a round with nothing to resume. Why is told to `unwritten`, and fails nothing.
  */
-function writeResume(adapter: Adapter, sessionDirectory: string, worktree: string, file: string): void {
+function writeResume(
+  adapter: Adapter,
+  sessionDirectory: string,
+  worktree: string,
+  file: string,
+  unwritten?: (reason: string) => void,
+): void {
   const line = adapter.resume?.(sessionDirectory, relative(worktree, sessionDirectory));
   if (line === undefined) return;
   try {
     writeFileSync(file, `${line.join(" ")}\n`, "utf8");
-  } catch {
-    // The review stands without it.
+  } catch (cause) {
+    unwritten?.(reasonFor(cause));
   }
 }
 
