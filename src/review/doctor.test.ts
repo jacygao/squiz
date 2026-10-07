@@ -21,14 +21,18 @@ const SIGNED_IN = JSON.stringify({
 });
 
 /** What each fake prints, keyed by its name. A name left out has no fake, so nothing by that name is on `PATH`. */
-type Fakes = Partial<Record<"git" | "gh" | "claude" | "tmux" | "herdr", string>>;
+type Fakes = Partial<Record<"git" | "gh" | "claude" | "tmux" | "herdr" | "pi" | "copilot", string>>;
+
+// Every call but the version goes to the real git, so the reviewer's row finds the repository it runs in.
+const GIT = 'if [ "$1" = "--version" ]; then echo "git version 2.51.0 (Apple Git-157)"; exit 0; fi\nexec /usr/bin/git "$@"';
 
 const EVERY_FAKE: Fakes = {
-  git: 'echo "git version 2.51.0 (Apple Git-157)"',
+  git: GIT,
   gh: ghAnswering(SIGNED_IN),
   claude: 'echo "2.4.1 (Claude Code)"',
   tmux: 'echo "tmux 3.7b"',
   herdr: 'echo "herdr 0.9.3"',
+  pi: 'echo "0.85.1"',
 };
 
 /** A `gh` that prints its version, and answers `gh auth status --json hosts --active` with `json`. */
@@ -46,14 +50,17 @@ function ghAnswering(json: string): string {
 
 /**
  * A directory holding only the fakes named, and a context whose `PATH` is that
- * directory alone, so no tool installed on this machine can answer.
+ * directory alone, so no tool installed on this machine can answer. `HOME` is an
+ * empty directory of its own, and the check runs outside any repository.
  */
 function context(fakes: Fakes, overrides: Partial<DoctorContext> = {}): DoctorContext {
   made += 1;
   const bin = join(scratch, `bin-${made}`);
-  mkdirSync(bin);
+  const home = join(scratch, `home-${made}`);
+  const outside = join(scratch, `outside-${made}`);
+  for (const directory of [bin, home, outside]) mkdirSync(directory);
   for (const [name, script] of Object.entries(fakes)) standIn(bin, name, script);
-  return { environment: { PATH: bin, HOME: scratch }, nodeVersion: "24.6.0", boundMs: 10_000, ...overrides };
+  return { environment: { PATH: bin, HOME: home }, directory: outside, nodeVersion: "24.6.0", boundMs: 10_000, ...overrides };
 }
 
 test("every dependency present prints a line each and exits 0", () => {
@@ -69,6 +76,7 @@ test("every dependency present prints a line each and exits 0", () => {
       "tmux 3.7b",
       "Herdr 0.9.3",
       NO_LINK,
+      "Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one",
       "",
     ].join("\n"),
   );
@@ -89,6 +97,7 @@ test("nothing on PATH names every required dependency as not found and exits 1",
       "tmux: not found. Not required: without tmux or Herdr, reviews run detached",
       "Herdr: not found. Not required: without tmux or Herdr, reviews run detached",
       NO_LINK,
+      "Reviewer pi: not found",
       "",
     ].join("\n"),
   );
@@ -196,6 +205,180 @@ test("a row a later check adds prints after the others, and only a failed one ch
   assert.equal(failure.exit, 1);
 });
 
+// The reviewer's row.
+
+/** A repository holding `squizJson` as its `.squiz.json`, or none where it is left out. */
+function repository(squizJson?: string): string {
+  made += 1;
+  const root = join(scratch, `repository-${made}`);
+  mkdirSync(root);
+  const init = spawnSync("git", ["init", "--quiet"], { cwd: root, encoding: "utf8" });
+  assert.equal(init.status, 0, init.stderr);
+  if (squizJson !== undefined) writeFileSync(join(root, ".squiz.json"), squizJson, "utf8");
+  return root;
+}
+
+/** Write `settings` as the JSON file at `path` under `root`, making its directories. */
+function settingsAt(root: string, path: string, settings: string): void {
+  const file = join(root, path);
+  mkdirSync(join(file, ".."), { recursive: true });
+  writeFileSync(file, settings, "utf8");
+}
+
+/** The reviewer's line, run in `directory` with `fakes` on `PATH`, and the exit. */
+function reviewerRow(fakes: Fakes, directory: string, environment: NodeJS.ProcessEnv = {}): { line: string; exit: number } {
+  const base = context(fakes);
+  const printed = squizDoctor({ ...base, directory, environment: { ...base.environment, ...environment } });
+  const line = printed.stdout.split("\n").find((row) => row.startsWith("Reviewer")) ?? "no reviewer line";
+  return { line, exit: printed.exit };
+}
+
+const COPILOT = 'echo "GitHub Copilot CLI 1.0.92."\necho "Run \'copilot update\' to check for updates."';
+
+test("with no reviewer set, the row names pi and the default model in pi's own settings", () => {
+  const base = context(EVERY_FAKE);
+  settingsAt(String(base.environment.HOME), ".pi/agent/settings.json", '{"defaultProvider":"deepseek","defaultModel":"deepseek-v4-pro"}');
+
+  const printed = squizDoctor({ ...base, directory: repository() });
+
+  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model deepseek\/deepseek-v4-pro, pi's default$/mu);
+  assert.equal(printed.exit, 0);
+});
+
+test("a model .squiz.json names is the one the row names, over pi's own default", () => {
+  const base = context(EVERY_FAKE);
+  settingsAt(String(base.environment.HOME), ".pi/agent/settings.json", '{"defaultProvider":"deepseek","defaultModel":"deepseek-v4-pro"}');
+
+  const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"pi","model":"openai/gpt-5-mini"}') });
+
+  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model openai\/gpt-5-mini, from \.squiz\.json$/mu);
+});
+
+test("pi's default is read from PI_CODING_AGENT_DIR where it is set", () => {
+  const agent = join(scratch, "pi-agent-elsewhere");
+  settingsAt(agent, "settings.json", '{"defaultProvider":"openrouter","defaultModel":"qwen/qwen3-coder"}');
+
+  const row = reviewerRow(EVERY_FAKE, repository(), { PI_CODING_AGENT_DIR: agent });
+
+  assert.equal(row.line, "Reviewer pi 0.85.1, model openrouter/qwen/qwen3-coder, pi's default");
+});
+
+test("a project's own .pi/settings.json is not read as the model, because a review does not apply it", () => {
+  const project = repository();
+  settingsAt(project, ".pi/settings.json", '{"defaultProvider":"openai","defaultModel":"gpt-5-mini"}');
+
+  const row = reviewerRow(EVERY_FAKE, project);
+
+  assert.equal(row.line, "Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one");
+});
+
+test("pi settings that are not JSON leave the model unknown with the reason, as a warning", () => {
+  const base = context(EVERY_FAKE);
+  const home = String(base.environment.HOME);
+  settingsAt(home, ".pi/agent/settings.json", "{ not json");
+
+  const printed = squizDoctor({ ...base, directory: repository() });
+
+  assert.match(
+    printed.stdout,
+    new RegExp(`^Reviewer pi 0\\.85\\.1: warning: model unknown: pi's settings ${home}/\\.pi/agent/settings\\.json are not JSON: .+$`, "mu"),
+  );
+  assert.equal(printed.exit, 0);
+});
+
+test("a pi that is not installed fails the row and names pi", () => {
+  const { pi: _pi, ...rest } = EVERY_FAKE;
+
+  const row = reviewerRow(rest, repository());
+
+  assert.equal(row.line, "Reviewer pi: not found");
+  assert.equal(row.exit, 1);
+});
+
+test("with copilot as the reviewer, the row names Copilot and its default model, and says its sign-in is not checked", () => {
+  const base = context({ ...EVERY_FAKE, copilot: COPILOT });
+  settingsAt(String(base.environment.HOME), ".copilot/settings.json", '// Managed by Copilot\n{"model":"gpt-6-astra"}');
+
+  const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
+
+  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-6-astra, Copilot's default\. Its sign-in is not checked$/mu);
+  assert.doesNotMatch(printed.stdout, /^Reviewer pi/mu);
+  assert.equal(printed.exit, 0);
+});
+
+test("Copilot's default is COPILOT_MODEL where the environment sets it", () => {
+  const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, repository('{"reviewer":"copilot"}'), { COPILOT_MODEL: "claude-sonnet-5" });
+
+  assert.equal(row.line, "Reviewer copilot 1.0.92, model claude-sonnet-5, Copilot's default. Its sign-in is not checked");
+});
+
+test("with copilot as the reviewer and no model anywhere, the model is unknown", () => {
+  const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, repository('{"reviewer":"copilot"}'));
+
+  assert.equal(
+    row.line,
+    "Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Its sign-in is not checked",
+  );
+});
+
+test("Copilot settings a round could not read fail the row, because the round would fail on them", () => {
+  const base = context({ ...EVERY_FAKE, copilot: COPILOT });
+  settingsAt(String(base.environment.HOME), ".copilot/settings.json", "[1, 2]");
+
+  const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
+
+  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92: model unknown: the user's Copilot settings .+ are not an object$/mu);
+  assert.equal(printed.exit, 1);
+});
+
+test("a model .squiz.json names leaves Copilot's own settings unread, as a round leaves them", () => {
+  const base = context({ ...EVERY_FAKE, copilot: COPILOT });
+  settingsAt(String(base.environment.HOME), ".copilot/settings.json", "[1, 2]");
+
+  const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot","model":"gpt-5-mini"}') });
+
+  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-5-mini, from \.squiz\.json\. Its sign-in is not checked$/mu);
+  assert.equal(printed.exit, 0);
+});
+
+test("a Copilot that is not installed fails the row and names copilot, though pi is installed", () => {
+  const row = reviewerRow(EVERY_FAKE, repository('{"reviewer":"copilot"}'));
+
+  assert.equal(row.line, "Reviewer copilot: not found");
+  assert.equal(row.exit, 1);
+});
+
+test("a .squiz.json the configuration refuses is reported as refused, naming the setting, and is not checked as pi", () => {
+  const project = repository('{"reviewer":"claude"}');
+
+  const row = reviewerRow(EVERY_FAKE, project);
+
+  assert.equal(
+    row.line,
+    `Reviewer: .squiz.json refused: ${project}/.squiz.json: "reviewer" is "claude", but it must be "pi" or "copilot"`,
+  );
+  assert.equal(row.exit, 1);
+});
+
+test("a .squiz.json that is not JSON is refused, not read as no file", () => {
+  const project = repository("{ reviewer: copilot");
+
+  const row = reviewerRow(EVERY_FAKE, project);
+
+  assert.match(row.line, new RegExp(`^Reviewer: \\.squiz\\.json refused: ${project}/\\.squiz\\.json is not valid JSON: `, "u"));
+  assert.equal(row.exit, 1);
+});
+
+test("the .squiz.json read is the one at the repository's root, from a directory below it", () => {
+  const project = repository('{"reviewer":"copilot"}');
+  const below = join(project, "src", "deep");
+  mkdirSync(below, { recursive: true });
+
+  const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, below);
+
+  assert.match(row.line, /^Reviewer copilot 1\.0\.92, /u);
+});
+
 /** Every path under `root` with its size and modification time, so any write shows. */
 function snapshot(root: string): string[] {
   const entries: string[] = [];
@@ -257,7 +440,7 @@ function linkRow(target: string, path: string) {
   return pathLink(
     () => target,
     () => scratch,
-  )({ environment: { PATH: path, HOME: scratch }, nodeVersion: "24.6.0", boundMs: 10_000 });
+  )({ environment: { PATH: path, HOME: scratch }, directory: scratch, nodeVersion: "24.6.0", boundMs: 10_000 });
 }
 
 const NO_LINK =

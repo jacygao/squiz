@@ -6,12 +6,15 @@
  * more check appended there. Only a check that fails changes the exit status.
  * A warning is printed and leaves it alone.
  *
- * It starts each tool once to ask its version, and `gh` a second time for its
- * sign-in. It writes nothing anywhere.
+ * It starts each tool once to ask its version, `gh` a second time for its
+ * sign-in, and `git` a second time for the repository whose `.squiz.json`
+ * names the reviewer. It reads settings files and writes nothing anywhere.
  */
 
 import { spawnSync } from "node:child_process";
 
+import { configFileName, loadConfig, type Config } from "../config/config.ts";
+import { adapterFor } from "../reviewers/adapters.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
 /**
@@ -28,6 +31,8 @@ export type Row = { readonly level: Level; readonly line: string };
 export type DoctorContext = {
   /** The environment every probe runs in. Its `PATH` decides which tools are found. */
   readonly environment: NodeJS.ProcessEnv;
+  /** Where it was run. Every probe starts there, and the reviewer is the one its repository configures. */
+  readonly directory: string;
   /** The version of the Node running squiz, without the leading `v`. */
   readonly nodeVersion: string;
   /** How long one probe may run before it is killed and reported as not answering. */
@@ -63,6 +68,7 @@ export function probe(command: string, args: readonly string[], context: DoctorC
   const result = spawnSync(command, args, {
     encoding: "utf8",
     env: context.environment,
+    cwd: context.directory,
     timeout: context.boundMs,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -230,6 +236,55 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
   };
 }
 
+/**
+ * The reviewer `.squiz.json` names, whether it is installed, and the model it
+ * runs on.
+ *
+ * Outside a repository, or in one without the file, the reviewer is the
+ * default. A file the configuration refuses fails the row, because no round
+ * starts under it.
+ */
+const reviewer: Check = (context) => {
+  let config: Config;
+  try {
+    config = loadConfig(repositoryRoot(context) ?? context.directory);
+  } catch (cause) {
+    return { level: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
+  }
+
+  const label = `Reviewer ${config.reviewer}`;
+  const found = versionOf(config.reviewer, ["--version"], context);
+  if (found.outcome === "absent") return { level: "failed", line: `${label}: not found` };
+  if (found.outcome === "failed") return { level: "failed", line: `${label}: could not be run: ${found.reason}` };
+  const installed = `${label} ${found.version}`;
+  // No Copilot command reports its login without starting a session.
+  const signIn = config.reviewer === "copilot" ? ". Its sign-in is not checked" : "";
+
+  if (config.model !== null) {
+    return { level: "present", line: `${installed}, model ${config.model}, from ${configFileName}${signIn}` };
+  }
+  const cli = config.reviewer === "pi" ? "pi" : "Copilot";
+  const user = adapterFor(config.reviewer).userModel?.(context.environment);
+  if (typeof user === "string") return { level: "present", line: `${installed}, model ${user}, ${cli}'s default${signIn}` };
+  if (user === undefined) {
+    return { level: "present", line: `${installed}, model unknown: neither ${configFileName} nor ${cli}'s settings name one${signIn}` };
+  }
+  if (user.failsTheRound) return { level: "failed", line: `${installed}: model unknown: ${user.problem}` };
+  return { level: "warning", line: `${installed}: warning: model unknown: ${user.problem}` };
+};
+
+/** The root of the repository the check runs in, or `undefined` where git names none. */
+function repositoryRoot(context: DoctorContext): string | undefined {
+  const asked = probe("git", ["rev-parse", "--show-toplevel"], context);
+  if (asked.outcome !== "answered") return undefined;
+  const root = asked.stdout.trim();
+  return root === "" ? undefined : root;
+}
+
+function reasonFor(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /** Every dependency a project needs, in the order they print. */
 export const CHECKS: readonly Check[] = [
   required("git", "git", ["--version"]),
@@ -239,6 +294,7 @@ export const CHECKS: readonly Check[] = [
   optional("tmux", "tmux", ["-V"], MULTIPLEXER_OPTIONAL),
   optional("Herdr", "herdr", ["--version"], MULTIPLEXER_OPTIONAL),
   pathLink(),
+  reviewer,
 ];
 
 function firstLine(output: string): string {

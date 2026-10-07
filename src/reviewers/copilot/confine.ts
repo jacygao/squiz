@@ -28,7 +28,7 @@ import { AGENT_NAME } from "./argv.ts";
  */
 export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv = process.env): Confinement {
   // A configured model is on the command line, where `--model` wins over the variable.
-  const model = invocation.model === null ? modelOf(environment) : undefined;
+  const model = invocation.model === null ? userModel(environment) : undefined;
   if (typeof model === "object") return { outcome: "failed", reason: model.problem };
 
   let charter: string;
@@ -71,7 +71,7 @@ function agentFile(charter: string): string {
  * The user's default model: the host's `COPILOT_MODEL`, or else `model` in the
  * user's own `settings.json`. `undefined` where the user has neither.
  */
-function modelOf(environment: NodeJS.ProcessEnv): string | undefined | { readonly problem: string } {
+export function userModel(environment: NodeJS.ProcessEnv): string | undefined | { readonly problem: string } {
   const set = environment["COPILOT_MODEL"];
   if (set !== undefined && set.trim() !== "") return set;
 

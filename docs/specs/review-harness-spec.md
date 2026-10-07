@@ -2613,11 +2613,13 @@ Node 24.6.0
 tmux: not found. Not required: without tmux or Herdr, reviews run detached
 Herdr 0.9.3
 squiz link: /Users/ana/.local/bin/squiz already links to this squiz
+Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
 ```
 
 It exits 0 where every required dependency is usable and 1 otherwise. It writes
 nothing, in the repository it is run from or anywhere else, and runs outside a
-repository as well.
+repository as well. Every tool it starts, it starts in the directory it was run
+from.
 
 Each line is one row of a list, in the order printed. A row is at one of three
 levels, and only `failed` changes the exit status:
@@ -2628,7 +2630,7 @@ levels, and only `failed` changes the exit status:
 | warning | Something a person should see, which squiz runs without | `tmux: warning: could not be run: tmux exited 134: dyld: Library not loaded` |
 | failed | A required dependency is missing, unusable or unauthenticated | `gh 2.97.0: not signed in. Run gh auth login` |
 
-The rows:
+The rows, in the order they print, the reviewer last:
 
 | Row | Required | Read from |
 |---|---|---|
@@ -2639,6 +2641,7 @@ The rows:
 | tmux | No | `tmux -V` |
 | Herdr | No | `herdr --version` |
 | The `squiz` link | No | What `squiz init` finds on `PATH` |
+| The reviewer, and its model | Yes | `.squiz.json`, then `pi --version` or `copilot --version`, then the reviewer CLI's own settings |
 
 **Each tool is found on `PATH` and started once to ask its version.** What
 starting it came to decides the line, and only a version read from its output
@@ -2700,13 +2703,60 @@ link: another agent's shell does not have it. The squiz that is running is the
 real path of its `bin/squiz`, so `squiz doctor` run through the link still
 finds the link pointing at itself.
 
+**The reviewer is the one `reviewer` names in `.squiz.json`** at the root of the
+repository the check is run in, which `git rev-parse --show-toplevel` gives.
+Outside a repository, or in one with no `.squiz.json`, it is the default, `pi`.
+The file is read as a round reads it (§ 9 Configuration). A file that reading
+refuses fails the row, with the reason it was refused:
+
+```
+Reviewer: .squiz.json refused: /work/app/.squiz.json: "reviewer" is "claude", but it must be "pi" or "copilot"
+```
+
+Otherwise the reviewer's CLI is started for its version, as every tool is, and a
+missing one fails the row by name:
+
+```
+Reviewer pi: not found
+Reviewer copilot: not found
+```
+
+**The model named is the one a round would run on.** It is `model` from
+`.squiz.json` where the file sets it. Otherwise it is the user's default, as
+the reviewer CLI's own settings give it:
+
+| Reviewer | The user's default |
+|---|---|
+| `pi` | `defaultProvider` and `defaultModel`, as `provider/id`, in `settings.json` under `PI_CODING_AGENT_DIR`, or under `~/.pi/agent` where that is unset |
+| `copilot` | `COPILOT_MODEL`, or else `model` in the user's own `settings.json`, as `confine` reads it (§ 4 The Copilot adapter) |
+
+A project's own `.pi/settings.json` is not read, because a review runs `pi`
+with the project untrusted (§ 4 The `pi` adapter), and Copilot does not use a
+project's `.github/copilot/settings.json` for the model. Where neither
+`.squiz.json` nor the CLI's settings name a model, the model is unknown:
+
+```
+Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json
+Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
+Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one
+Reviewer pi 0.85.1: warning: model unknown: pi's settings /Users/ana/.pi/agent/settings.json are not JSON: Unexpected token
+Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is not checked
+Reviewer copilot 1.0.92: model unknown: the user's Copilot settings /Users/ana/.copilot/settings.json are not an object
+```
+
+Settings that cannot be read are a warning for `pi`, which starts without them,
+and a failure for Copilot, whose round fails on them before it starts (The
+Copilot adapter).
+
+**Copilot's sign-in is not checked, and its line says so.** Its login is in the
+system's credential store, and no `copilot` command that leaves the model
+unused reports whether it is signed in.
+
 The rows below are each added to the list by a later change, and until then the
 check does not report them:
 
-- the reviewer `reviewer` names, `pi` or `copilot`, and its model;
-- the Copilot CLI wherever Copilot is the reviewer or a coding agent, and, for a
-  Copilot coding agent, whether Copilot's experimental features are on, as a
-  warning;
+- the Copilot CLI wherever Copilot is a coding agent, and whether Copilot's
+  experimental features are on, as a warning;
 - the reviewer settings squiz overrides in this project.
 
 ## 7. Failure modes
