@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.34 (draft)
+**Version:** 0.35 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -217,8 +217,8 @@ and `git_show`, at every review, and no setting changes the grant. It removed
 the `depth` and `test` settings, `run_tests`, the process-group record, the
 tracked-file and shared-config comparisons, and the scratch `TMPDIR`. `pi`'s
 refusal became an allow-list of the grant. The reviewer's reads are confined to
-the snapshot, its environment carries no GitHub credentials, and the snapshot is
-a clone with its own git directory, outside the repository. M11 also added the
+the snapshot, its environment carries no GitHub token and no `gh` login beyond
+the credential its CLI needs for the model, and the snapshot is a clone with its own git directory, outside the repository. M11 also added the
 `model` setting (#483), and removed the review skill and the `AGENTS.md` section
 `squiz init` wrote (#600).
 
