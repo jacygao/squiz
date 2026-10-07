@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.18 (draft)
+**Version:** 1.19 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -3125,30 +3125,50 @@ the part that rests on it is built, and each result is written as a finding in
 
 - **Linux.** The detach and pane probes ran on macOS alone, and so did every
   Copilot run, whose credential was in macOS's own credential store.
-- **Copilot's own install.** Copilot has loaded the plugin from
-  `--plugin-dir` only. Whether it loads the hooks and the extension the same way
-  from `copilot plugin install` has not been run.
 
 ## 9. Adoption
 
 ### Installing
 
-Squiz is a Claude Code plugin, and this repository is its marketplace as well.
-`.claude-plugin/marketplace.json` names the marketplace `squiz` and lists one
-plugin, squiz, whose source is the repository's own root.
+Squiz is a plugin for Claude Code and for Copilot, and this repository is its
+marketplace for both. `.claude-plugin/marketplace.json` names the marketplace
+`squiz` and lists one plugin, squiz, whose source is the repository's own root.
+
+Into Claude Code:
 
 ```
 /plugin marketplace add jacygao/squiz
 /plugin install squiz@squiz
 ```
 
-Claude Code copies the repository into
-`plugins/cache/squiz/squiz/<version>/` under its configuration directory, where
-the version is the one `plugin.json` carries. The marketplace entry carries the
-same version, and `src/plugin.test.ts` fails where the two differ.
+Into Copilot:
+
+```
+copilot plugin marketplace add jacygao/squiz
+copilot plugin install squiz@squiz
+```
+
+Each runtime keeps a copy of its own, and runs the hooks from it:
+
+- **Claude Code** copies the repository into
+  `plugins/cache/squiz/squiz/<version>/` under its configuration directory,
+  where the version is the one `plugin.json` carries. The marketplace entry
+  carries the same version, and `src/plugin.test.ts` fails where the two
+  differ.
+- **Copilot** copies it into `<COPILOT_HOME>/installed-plugins/squiz/squiz/`,
+  and runs the extension from there too. `copilot plugin update squiz` replaces
+  the copy in place, so the path does not change.
+
+A person who installs squiz into both updates both, so that the two copies are
+one version.
 
 `/plugin uninstall squiz` removes it from Claude Code. The copied directory
-stays, marked orphaned, until Claude Code deletes it.
+stays, marked orphaned, until Claude Code deletes it. `copilot plugin uninstall
+squiz` removes it from Copilot.
+
+A Copilot session can also load a checkout with `copilot --plugin-dir
+<checkout>`, which loads the same hooks and extension from the checkout
+itself.
 
 ### Getting started
 
@@ -3170,9 +3190,11 @@ session that owns the work is woken with the result, which names
 this. A `## Review` section that an earlier `squiz init` added there is left as
 it is, and the project may delete it.
 
-**A Copilot session loads the plugin** with `copilot --plugin-dir <plugin
-directory>`. Copilot does not put the plugin's `bin/` on its shell's `PATH`, so
-`squiz init` links `squiz` into a directory already on it, once on each machine.
+**Every Copilot session of a user who installed squiz loads it,** with its
+hooks, and with its extension where experimental features are on, as below.
+Copilot does not put the plugin's `bin/` on its
+shell's `PATH`, so `squiz init` links `squiz` into a directory already on it,
+once on each machine.
 
 **Squiz's Copilot support is experimental, because it relies on Copilot's
 experimental features.** Squiz wakes an idle Copilot session through an
@@ -3181,7 +3203,7 @@ features on. Setting up Copilot includes turning them on once, for the user, by
 either of:
 
 ```
-copilot --experimental --plugin-dir <plugin directory>
+copilot --experimental
 ```
 
 ```
@@ -3205,12 +3227,18 @@ it says so in the session as a warning.
 
 **Any other coding agent reaches `squiz` through a link `squiz init` makes,**
 because no runtime but Claude Code puts the plugin's `bin/` on its shell's
-`PATH`. Run `squiz init` once on each machine, by name from a Claude Code
-session where squiz is enabled, so that every agent runs the squiz Claude Code
-uses. It links `~/.local/bin/squiz`, or `~/bin/squiz`, to the plugin's
-`bin/squiz`, and makes no link where a `squiz` that is not this one is already on
-`PATH` (§ 6 `squiz init`). A Copilot session then runs `squiz` by name, with the
-plugin loaded by `copilot --plugin-dir <plugin directory>`.
+`PATH`. Run `squiz init` once on each machine. Where Claude Code has squiz
+enabled, run it by name from a Claude Code session, so that every agent runs
+the squiz Claude Code uses. Where only Copilot has it, run it by path from
+Copilot's copy:
+
+```
+<COPILOT_HOME>/installed-plugins/squiz/squiz/bin/squiz init
+```
+
+It links `~/.local/bin/squiz`, or `~/bin/squiz`, to that plugin's `bin/squiz`,
+and makes no link where a `squiz` that is not this one is already on `PATH`
+(§ 6 `squiz init`). A Copilot session then runs `squiz` by name.
 
 `AGENTS.md` carries the conventions a reviewer cannot derive from reading
 code, and it can point at whatever else the project treats as authoritative. The
