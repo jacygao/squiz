@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -404,6 +404,84 @@ test("the .squiz.json read is the one at the repository's root, from a directory
   const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, below);
 
   assert.match(row.line, /^Reviewer copilot 1\.0\.92, /u);
+});
+
+// The row naming the project's pi settings a review does not use.
+
+/** Every line of a run in `directory` that names the project's pi settings. */
+function projectSettingsRows(directory: string, fakes: Fakes = EVERY_FAKE): { rows: string[]; exit: number } {
+  const printed = squizDoctor({ ...context(fakes), directory });
+  return { rows: printed.stdout.split("\n").filter((row) => row.startsWith("pi project settings")), exit: printed.exit };
+}
+
+test("the project's pi settings are named as unused, with the context file that still reaches the reviewer", () => {
+  const project = repository();
+  settingsAt(project, ".pi/settings.json", '{"defaultModel":"gpt-5-mini","retry":{"enabled":false}}');
+  settingsAt(project, ".pi/SYSTEM.md", "You are a pirate.");
+  settingsAt(project, ".agents/skills/deploy/SKILL.md", "# Deploy");
+  settingsAt(project, "AGENTS.md", "# Agents");
+  settingsAt(project, "CLAUDE.md", "# Claude");
+
+  const { rows, exit } = projectSettingsRows(project);
+
+  assert.deepEqual(rows, [
+    "pi project settings: a review does not use .pi/settings.json (defaultModel, retry), .pi/SYSTEM.md or .agents/skills, and takes your own pi settings instead. AGENTS.md still reaches the reviewer",
+  ]);
+  assert.equal(exit, 0, "a setting a review overrides fails nothing");
+});
+
+test("the row prints only where pi reviews a project with settings pi would take from it", () => {
+  const settings = '{"defaultModel":"gpt-5-mini"}';
+  const piProject = repository();
+  settingsAt(piProject, ".pi/settings.json", settings);
+  const copilotProject = repository('{"reviewer":"copilot"}');
+  settingsAt(copilotProject, ".pi/settings.json", settings);
+  const bare = repository();
+  mkdirSync(join(bare, ".pi"));
+  settingsAt(bare, "AGENTS.md", "# Agents");
+
+  assert.equal(projectSettingsRows(piProject).rows.length, 1, "the pi project's settings are named");
+  assert.deepEqual(projectSettingsRows(copilotProject, { ...EVERY_FAKE, copilot: COPILOT }).rows, [], "Copilot does not read .pi/");
+  assert.deepEqual(projectSettingsRows(bare).rows, [], "pi itself reads a bare .pi as nothing to trust");
+  assert.deepEqual(projectSettingsRows(repository()).rows, []);
+});
+
+test("pi settings that are not JSON are named without keys, and a lone CLAUDE.md is the file that reaches the reviewer", () => {
+  const project = repository();
+  settingsAt(project, ".pi/settings.json", "{ not json");
+  mkdirSync(join(project, ".pi", "extensions"));
+  settingsAt(project, "CLAUDE.md", "# Claude");
+
+  assert.deepEqual(projectSettingsRows(project).rows, [
+    "pi project settings: a review does not use .pi/settings.json or .pi/extensions, and takes your own pi settings instead. CLAUDE.md still reaches the reviewer",
+  ]);
+});
+
+test("with no context file in the project, the row names none as reaching the reviewer", () => {
+  const project = repository();
+  settingsAt(project, ".pi/APPEND_SYSTEM.md", "Be terse.");
+
+  assert.deepEqual(projectSettingsRows(project).rows, [
+    "pi project settings: a review does not use .pi/APPEND_SYSTEM.md, and takes your own pi settings instead",
+  ]);
+});
+
+test("the row reads the repository the reviewer's row found, and git is asked for it once", () => {
+  const project = repository();
+  settingsAt(project, ".pi/settings.json", '{"defaultModel":"gpt-5-mini"}');
+  const asked = join(project, ".git", "asked-for-the-root");
+  const counting = [
+    'if [ "$1" = "--version" ]; then echo "git version 2.51.0"; exit 0; fi',
+    `if [ "$1" = "rev-parse" ]; then echo asked >> '${asked}'; fi`,
+    'exec /usr/bin/git "$@"',
+  ].join("\n");
+  const below = join(project, "src");
+  mkdirSync(below);
+
+  const { rows } = projectSettingsRows(below, { ...EVERY_FAKE, git: counting });
+
+  assert.equal(rows.length, 1);
+  assert.equal(readFileSync(asked, "utf8"), "asked\n", "the root is found once, for both rows");
 });
 
 /** Every path under `root` with its size and modification time, so any write shows. */
