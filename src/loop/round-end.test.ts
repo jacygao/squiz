@@ -160,6 +160,7 @@ test("the close of a clean last round hands the summary the cap and the state it
     threads: [],
     findings: { outcomes: [] },
     earlier: [],
+    unapplied: [],
     because: ended.because,
     leftNotReviewed: ended.leftNotReviewed,
   });

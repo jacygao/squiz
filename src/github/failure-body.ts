@@ -20,6 +20,11 @@ export type FailureReport = {
    */
   readonly unthreaded?: readonly string[];
   /**
+   * Each ruling the round could not apply, one line each, as the summary's Notes
+   * write it. Listed after `unthreaded`, for the same reason.
+   */
+  readonly unapplied?: readonly string[];
+  /**
    * How many of the findings the reviewer reported landed as threads. Absent
    * where the round salvaged no findings, which leaves nothing to count.
    */
@@ -53,7 +58,7 @@ export function renderFailure(report: FailureReport): string {
       ? ["The review is still open.", "A new commit or reply, or running `squiz review` again, retries it."]
       : closedLines(report.closed, "A new commit or reply, or running `squiz review`, posts its summary.");
   const blocks = [`${marker}${report.reason}**`, [...counted, ...next].join(" ")];
-  const items = report.unthreaded ?? [];
+  const items = [...(report.unthreaded ?? []), ...(report.unapplied ?? [])];
   if (items.length > 0) blocks.push(items.map((item) => `- ${item}`).join("\n"));
   return blocks.join("\n\n");
 }

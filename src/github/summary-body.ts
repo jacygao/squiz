@@ -16,12 +16,15 @@
 
 import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
-import type { ClassifiedThread } from "../loop/classify.ts";
+import { readThread } from "../findings/thread.ts";
+import { locationOf, type ClassifiedThread } from "../loop/classify.ts";
 import { costOf, type RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import { namedStates, type LeftNotReviewed, type StoppingBound } from "../loop/round-end.ts";
+import { mutated, type AppliedVerdicts } from "../loop/verdicts.ts";
 import { renderSpendLine } from "./spend-line.ts";
+import type { ReviewThread } from "./threads.ts";
 
 /** What the episode came to, which is everything the comment is written from. */
 export type ClosedEpisode = {
@@ -42,6 +45,8 @@ export type ClosedEpisode = {
    * no round after it settled.
    */
   readonly earlier: readonly string[];
+  /** The Notes lines of the closing round's rulings that could not be applied. */
+  readonly unapplied: readonly string[];
   /**
    * Which bound closed the episode. `null` where none of them did, which is a
    * close Notes says nothing about.
@@ -177,16 +182,19 @@ function oneLine(text: string): string {
  *
  * An earlier round's findings come first, then the closing round's in the order
  * they were posted, which runs `high` severity first, then the threads kept open
- * with no reason on them. The rounds the time bound cut short follow them, and
- * the bound that closed the episode comes last: the findings and the threads are
- * each about one defect, the cuts are about the rounds, and the bound is about
- * the episode.
+ * with no reason on them, then the rulings that could not be applied. The rounds
+ * the time bound cut short follow them, and the bound that closed the episode
+ * comes last: the findings and the threads are each about one defect, the cuts
+ * are about the rounds, and the bound is about the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
   const lines = [
-    ...[...episode.earlier, ...unthreadedNotes(episode.findings), ...unpostedReasonNotes(episode.threads)].map(
-      (note) => `- ${note}`,
-    ),
+    ...[
+      ...episode.earlier,
+      ...unthreadedNotes(episode.findings),
+      ...unpostedReasonNotes(episode.threads),
+      ...episode.unapplied,
+    ].map((note) => `- ${note}`),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
@@ -265,6 +273,37 @@ function unpostedReasonNotes(threads: readonly ClassifiedThread[]): readonly str
     .map((thread) =>
       line(thread.location, thread.headline, "kept open, and the reviewer's reason could not be posted on its thread"),
     );
+}
+
+/**
+ * Each ruling the round could not apply, one line each and with no bullet: the
+ * thread where it sits, and what the reviewer ruled on it.
+ *
+ * A failed round posts no summary, so its failure comment lists the same lines.
+ * What GitHub said is left out, as it is for a finding. A ruling naming a thread
+ * that was not handed over has nowhere to point at, and is named by the id the
+ * reviewer gave.
+ */
+export function unappliedNotes(handedOver: readonly ReviewThread[], verdicts: AppliedVerdicts): readonly string[] {
+  const byId = new Map(handedOver.map((thread) => [thread.id, thread]));
+  const at = (thread: ReviewThread, what: string): string => {
+    const reading = readThread(thread);
+    return line(locationOf(thread), reading.raised === "finding" ? reading.headline : null, what);
+  };
+  const refused = verdicts.threads.flatMap((applied) => {
+    const thread = byId.get(applied.thread);
+    if (applied.outcome !== "failed" || thread === undefined) return [];
+    const ruled = applied.ruled === null ? "given no ruling, which keeps it open" : `ruled ${applied.ruled}`;
+    return [at(thread, `${ruled}, and the thread could not be ${mutated(applied.ruled)}`)];
+  });
+  const unsent = verdicts.unapplied.map((ruling) => {
+    const thread = byId.get(ruling.thread);
+    if (thread === undefined) {
+      return `A ruling of ${ruling.verdict} on thread \`${oneLine(ruling.thread)}\`, which was not handed to the reviewer, was not applied`;
+    }
+    return at(thread, `ruled ${ruling.verdict} a second time, which was not applied: the first ruling stands`);
+  });
+  return [...refused, ...unsent];
 }
 
 /** One Notes line: where the defect is, what it is, and what became of the finding. */

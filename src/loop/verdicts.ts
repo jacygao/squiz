@@ -198,6 +198,37 @@ export function unpostedReasons(verdicts: AppliedVerdicts): readonly string[] {
   );
 }
 
+/**
+ * Each ruling the round could not apply, as one line naming the thread, what the
+ * reviewer ruled and why it was not applied.
+ *
+ * The thread stays as GitHub has it, so the line carries the ruling in full: it
+ * is what a person reads to apply the ruling by hand.
+ */
+export function unappliedRulings(verdicts: AppliedVerdicts): readonly string[] {
+  const refused = verdicts.threads.flatMap((applied) =>
+    applied.outcome === "failed"
+      ? [`${rulingOn(applied.thread, applied.ruled)}, and it could not be ${mutated(applied.ruled)}: ${applied.reason}`]
+      : [],
+  );
+  const unsent = verdicts.unapplied.map(
+    (ruling) =>
+      `the reviewer ruled thread ${ruling.thread} ${ruling.verdict}, and the ruling was not applied: ${ruling.reason}`,
+  );
+  return [...refused, ...unsent];
+}
+
+/** What the reviewer ruled on `thread`, as the opening of a line. */
+function rulingOn(thread: string, ruled: Verdict | null): string {
+  if (ruled === null) return `the reviewer gave thread ${thread} no ruling, which keeps it open`;
+  return `the reviewer ruled thread ${thread} ${ruled}`;
+}
+
+/** What the mutation a ruling asks for would have done to its thread. */
+export function mutated(ruled: Verdict | null): "resolved" | "re-opened" {
+  return (ruled ?? defaultVerdict) === "open" ? "re-opened" : "resolved";
+}
+
 /** What the mutation did, or the reason it did nothing. */
 function outcomeOf(action: ThreadAction, acted: "closed" | "reopened"): VerdictOutcome {
   if (action.outcome === "failed") return { outcome: "failed", reason: action.reason };

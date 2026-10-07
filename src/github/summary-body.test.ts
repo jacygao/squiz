@@ -7,12 +7,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { renderComment } from "../findings/comment.ts";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
 import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
-import { renderSummary, type ClosedEpisode } from "./summary-body.ts";
+import { renderSummary, unappliedNotes, type ClosedEpisode } from "./summary-body.ts";
+import type { ReviewThread } from "./threads.ts";
 
 function round(dollars: number, tokens: number): RoundCost {
   return { dollars, tokens, messages: 4 };
@@ -60,6 +62,7 @@ const quiet: ClosedEpisode = {
   threads: [],
   findings: posted(),
   earlier: [],
+  unapplied: [],
   because: "nothing-open",
   leftNotReviewed: null,
 };
@@ -112,6 +115,7 @@ test("the episode renders as the specification shows", () => {
       ),
     ),
     earlier: [],
+    unapplied: [],
     because: "nothing-open",
     leftNotReviewed: null,
   };
@@ -573,6 +577,74 @@ test("a thread kept open whose reason could not be posted is named in Notes (#51
       "**Notes**\n\n- `src/queue.ts:134` — Retry backoff resets (kept open, and the reviewer's reason could not be posted on its thread)",
     ),
     `the thread was not named in Notes: ${comment}`,
+  );
+});
+
+/** The thread a finding's comment opened on `file:line`, as the round handed it over. */
+function handedOver(id: string, file: string, line: number, headline: string): ReviewThread {
+  return {
+    id,
+    isResolved: false,
+    isOutdated: false,
+    path: file,
+    anchor: { at: "line", line },
+    comments: [
+      {
+        id: `PRRC_of_${id}`,
+        databaseId: 1,
+        author: "squiz",
+        body: renderComment(onLine(file, line, headline)),
+        createdAt: "2026-09-06T07:13:05Z",
+      },
+    ],
+  };
+}
+
+test("each ruling that could not be applied is a Notes line saying what the reviewer ruled (#605)", () => {
+  const notes = unappliedNotes(
+    [
+      handedOver("PRRT_fixed", "src/queue.ts", 134, "Retry backoff resets"),
+      handedOver("PRRT_open", "src/queue.ts", 140, "The cap is never read"),
+      handedOver("PRRT_silent", "src/cache.ts", 12, "The cache is never cleared"),
+      handedOver("PRRT_twice", "src/cache.ts", 30, "The key ignores the locale"),
+    ],
+    {
+      threads: [
+        { thread: "PRRT_fixed", ruled: "fixed", outcome: "failed", reason: "GitHub answered 502" },
+        { thread: "PRRT_open", ruled: "open", outcome: "failed", reason: "GitHub answered 403" },
+        { thread: "PRRT_silent", ruled: null, outcome: "failed", reason: "GitHub answered 403" },
+        { thread: "PRRT_twice", ruled: "fixed", outcome: "closed" },
+      ],
+      unapplied: [
+        {
+          thread: "PRRT_twice",
+          verdict: "open",
+          reason: "the reviewer ruled on that thread more than once, and the first ruling stands",
+        },
+        { thread: "PRRT_invented", verdict: "withdrawn", reason: "no thread with that id was handed to the reviewer" },
+      ],
+    },
+  );
+
+  assert.deepEqual(notes, [
+    "`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)",
+    "`src/queue.ts:140` — The cap is never read (ruled open, and the thread could not be re-opened)",
+    "`src/cache.ts:12` — The cache is never cleared (given no ruling, which keeps it open, and the thread could not be re-opened)",
+    "`src/cache.ts:30` — The key ignores the locale (ruled open a second time, which was not applied: the first ruling stands)",
+    "A ruling of withdrawn on thread `PRRT_invented`, which was not handed to the reviewer, was not applied",
+  ]);
+});
+
+test("the rulings that could not be applied are listed in Notes (#605)", () => {
+  const comment = renderSummary({
+    ...quiet,
+    unapplied: ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)"],
+  });
+  assert.ok(
+    comment.endsWith(
+      "**Notes**\n\n- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)",
+    ),
+    `the ruling was not named in Notes: ${comment}`,
   );
 });
 

@@ -3308,3 +3308,78 @@ test("each kind of failure says the same reason on the pull request and on stder
   }
 });
 
+/** A thread mutation GitHub refused inside an HTTP 200, as it refuses one it will not apply. */
+const MUTATION_REFUSED = included(
+  "200 OK",
+  JSON.stringify({ data: null, errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }] }),
+);
+
+test("a closing round names in its summary each ruling it could not apply (#605)", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_closed", isResolved: true }]),
+      unresolve: MUTATION_REFUSED,
+      reply: REPLIED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({
+      verdicts: [
+        { thread: "PRRT_closed", verdict: "open", reason: "Still wrong." },
+        { thread: "PRRT_invented", verdict: "fixed" },
+      ],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "unresolve", "reply", "summary"]);
+  const summary = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
+  assert.match(
+    summary,
+    /\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled open, and the thread could not be re-opened\)\n- A ruling of fixed on thread `PRRT_invented`, which was not handed to the reviewer, was not applied$/u,
+  );
+  assert.ok(!summary.includes("Resource not accessible"), `GitHub's own words reached the summary: ${summary}`);
+});
+
+test("a failed round names each ruling it could not apply in its failure comment and on stderr (#605)", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      resolve: MUTATION_REFUSED,
+      failure: FAILURE_POSTED,
+    },
+    reviewer: hangs(ANSWER_COST, {
+      verdicts: [
+        { thread: "PRRT_one", verdict: "fixed" },
+        { thread: "PRRT_invented", verdict: "withdrawn" },
+      ],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "failure"]);
+  assert.match(
+    failureBody(ran),
+    /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the thread could not be resolved\)\n- A ruling of withdrawn on thread `PRRT_invented`, which was not handed to the reviewer, was not applied$/u,
+  );
+  const stderr = composeReview(
+    { outcome: "failed", pullRequest: PULL_REQUEST, reason: ran.conclusion.reason, items: failureLinesOf(ran.conclusion) },
+    "/unwritten",
+  ).stderr;
+  assert.match(
+    stderr,
+    /\nsquiz: the reviewer ruled thread PRRT_one fixed, and it could not be resolved: GitHub reported a GraphQL error: Resource not accessible by integration\n/u,
+  );
+  assert.match(
+    stderr,
+    /\nsquiz: the reviewer ruled thread PRRT_invented withdrawn, and the ruling was not applied: no thread with that id was handed to the reviewer\n/u,
+  );
+});
+
