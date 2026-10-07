@@ -1,5 +1,5 @@
 /**
- * The `.squiz.json` loader: the eight settings, their defaults and their ranges.
+ * The `.squiz.json` loader: the seven settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
  */
@@ -31,12 +31,6 @@ export type Config = {
   rounds: number;
   // `deep` adds the shell.
   depth: Depth;
-  /**
-   * The non-mutating command that runs the tests, read only at depth `deep`.
-   * `null` where the file names none, so a caller can tell "no test command"
-   * from a command that runs and does nothing.
-   */
-  test: string | null;
   // Seconds one round's reviewer may run.
   timeout: number;
   // Tokens one round may spend.
@@ -54,7 +48,6 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   reviewer: "pi",
   rounds: 3,
   depth: "read",
-  test: null,
   timeout: 900,
   // Well above the widest round a legitimate review has been measured spending,
   // so a reviewer that reads widely does not reach it.
@@ -77,9 +70,9 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking", "model"] as const;
+const settingNames = ["reviewer", "rounds", "depth", "timeout", "tokens", "thinking", "model"] as const;
 
-const settingList = `"reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking" and "model"`;
+const settingList = `"reviewer", "rounds", "depth", "timeout", "tokens", "thinking" and "model"`;
 
 const reviewers = ["pi", "copilot"] as const;
 
@@ -154,7 +147,6 @@ function parse(source: string, path: string): Config {
       ? wholeNumber(path, "rounds", raw["rounds"], 1, 8, "a whole number from 1 to 8")
       : defaultConfig.rounds,
     depth: has(raw, "depth") ? depthOf(path, raw["depth"]) : defaultConfig.depth,
-    test: has(raw, "test") ? testCommandOf(path, raw["test"]) : defaultConfig.test,
     timeout: has(raw, "timeout")
       ? wholeNumber(
           path,
@@ -237,22 +229,6 @@ function thinkingOf(path: string, value: unknown): Thinking {
   // Matched exactly, and refused here because the reviewer CLI will not refuse
   // it: a level it does not know costs it nothing and changes nothing.
   throw new ConfigError(reject(path, "thinking", value, `one of ${thinkingList}`));
-}
-
-function testCommandOf(path: string, value: unknown): string {
-  // An empty command is one that runs and does nothing, which is not the same
-  // as running no tests. Absence is how a project says it has none.
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new ConfigError(
-      reject(
-        path,
-        "test",
-        value,
-        `a command to run; leave "test" out for no test command`,
-      ),
-    );
-  }
-  return value;
 }
 
 /**

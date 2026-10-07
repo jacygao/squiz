@@ -1,6 +1,6 @@
 /**
  * The MCP server Copilot starts to serve the three reporting calls, and at
- * `deep` the four `deep` tools, over standard input and output in
+ * `deep` the three `deep` tools, over standard input and output in
  * newline-delimited JSON-RPC 2.0.
  *
  * Nothing in the harness runs this. Copilot starts it by path, with the Node
@@ -264,17 +264,10 @@ async function deepCalled(tool: DeepTool, args: unknown, signal: AbortSignal): P
   return { result: { content: [{ type: "text", text }], ...(isError ? { isError } : {}) } };
 }
 
-/**
- * The `deep` tools, where the round handed its variable over, or none.
- *
- * They run in the environment the server was started with, less the variables
- * that configure the server itself, so a test command is handed what the
- * reviewer is and not the report file's path.
- */
+/** The `deep` tools, where the round handed its variable over, or none. */
 function deepOf(environment: NodeJS.ProcessEnv): readonly DeepTool[] {
   if ((environment[ROUND_VARIABLE] ?? "") === "") return [];
-  const { [CHARTER_VARIABLE]: _charter, [REPORTS_VARIABLE]: _reports, ...reviewers } = environment;
-  return deepTools(reviewers);
+  return deepTools(environment);
 }
 
 function fieldOf(value: unknown, field: string): unknown {

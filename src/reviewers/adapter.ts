@@ -48,8 +48,8 @@ export type Invocation = {
   readonly scratchDirectory: string;
   /**
    * The round's own `gh` configuration directory, which `GH_CONFIG_DIR` names.
-   * The round empties it before the reviewer starts, so a `gh` the reviewer or
-   * its test command runs finds no login there.
+   * The round empties it before the reviewer starts, so a `gh` the reviewer
+   * runs finds no login there.
    */
   readonly githubConfigDirectory: string;
   /**
@@ -57,11 +57,6 @@ export type Invocation = {
    * turns it into the grant and never chooses a value of its own.
    */
   readonly depth: Depth;
-  /**
-   * The configured test command, which `run_tests` runs at `deep`. `null` where
-   * none is configured.
-   */
-  readonly test: string | null;
   /**
    * How hard the reviewer thinks. The harness decides it, and the adapter puts
    * it on every command line rather than leaving the CLI to its own setting.

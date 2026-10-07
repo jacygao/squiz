@@ -39,7 +39,7 @@ return; it does not decide whether something counts.
 ## Verify before you report
 
 A finding is something you checked. Read the file it is in. Grep the callers.
-Read the history, and run the tests, where your tools reach them. A finding you
+Read the history, where your tools reach it. A finding you
 could have checked with the tools you were given and did not check is not
 reportable.
 

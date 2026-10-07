@@ -107,11 +107,11 @@ test("each deep call is kept with its arguments, whether it failed, and the end 
   const long = `${"x".repeat(5_000)}not ok 3 boundary`;
   const stream = [
     call("read", { path: "docs/notes/a.md" }),
-    JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "run_tests", args: {} }),
+    JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "git_log_search", args: { term: "boundary" } }),
     JSON.stringify({
       type: "tool_execution_end",
       toolCallId: "t",
-      toolName: "run_tests",
+      toolName: "git_log_search",
       result: { content: [{ type: "text", text: long }] },
       isError: false,
     }),
@@ -120,11 +120,11 @@ test("each deep call is kept with its arguments, whether it failed, and the end 
   ].join("\n");
   const summary = summarise(run, stream, diff);
   assert.equal(summary.deepCalls.length, 2);
-  const [tests, blame] = summary.deepCalls;
-  assert.equal(tests?.tool, "run_tests");
-  assert.equal(tests?.failed, false);
-  assert.ok(tests?.answered?.endsWith("not ok 3 boundary"));
-  assert.ok((tests?.answered?.length ?? Infinity) <= 2_000);
+  const [search, blame] = summary.deepCalls;
+  assert.equal(search?.tool, "git_log_search");
+  assert.equal(search?.failed, false);
+  assert.ok(search?.answered?.endsWith("not ok 3 boundary"));
+  assert.ok((search?.answered?.length ?? Infinity) <= 2_000);
   assert.deepEqual(blame, { tool: "git_blame", args: { file: "a.js", line: 3 }, failed: true, answered: "no such path" });
 });
 
@@ -142,9 +142,9 @@ test("a Copilot deep call that failed keeps the error it answered with", () => {
 });
 
 test("a deep call the run was stopped during is kept with nothing answered", () => {
-  const stream = JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "run_tests", args: {} });
+  const stream = JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "git_log_search", args: { term: "boundary" } });
   assert.deepEqual(summarise(run, stream, diff).deepCalls, [
-    { tool: "run_tests", args: {}, failed: undefined, answered: undefined },
+    { tool: "git_log_search", args: { term: "boundary" }, failed: undefined, answered: undefined },
   ]);
 });
 

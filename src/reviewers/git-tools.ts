@@ -4,8 +4,7 @@
  *
  * Each runs its one git subcommand in the snapshot, by `execFile` with an
  * argument array, never through a shell. The repository under review is
- * hostile: its tracked files, and its local config once a test command has
- * run, are the code under review's to set. So:
+ * hostile: its tracked files are the code under review's to set. So:
  *
  * - no argument the reviewer sends can be read as an option or as anything
  *   but the one commit, term or file it is meant as;

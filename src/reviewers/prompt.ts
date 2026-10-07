@@ -6,10 +6,6 @@
  * CLI the same prompt, so a second reviewer is a second command line and not a
  * second prompt.
  *
- * The test command is carried here because the prompt is the only channel a
- * project's own text reaches the reviewer through. The command line the adapter
- * builds is flags and tool names.
- *
  * Three things are deliberately absent. The charter reaches the reviewer
  * separately and is the same every round, so nothing here restates it.
  * `AGENTS.md` and `CLAUDE.md` are not carried, because the reviewer's CLI
@@ -38,17 +34,6 @@ export type UnderReview = {
 };
 
 /**
- * The configured test command, and the depth that decides whether the reviewer
- * hears of it. Only `deep` grants `run_tests`, and a command named to a reviewer
- * with no way to run it invites a finding that the tests fail.
- */
-export type TestCommand = {
-  readonly depth: Depth;
-  /** What the project configured, or `null` where it configured nothing. */
-  readonly command: string | null;
-};
-
-/**
  * The prompt for one round.
  *
  * Each thread is written under its own identifier, which is what a verdict
@@ -60,45 +45,25 @@ export type TestCommand = {
  * Never throws, and refuses nothing. A field that arrived empty is carried as
  * it is, because a round with a thin description is still a round to review.
  */
-export function composePrompt(underReview: UnderReview, tests: TestCommand): string {
+export function composePrompt(underReview: UnderReview, depth: Depth): string {
   const { pullRequest, diff, threads } = underReview;
   return [
     `# Review pull request #${pullRequest.number}`,
     `Head \`${pullRequest.headRef}\`, base \`${pullRequest.baseRef}\`.`,
     "## Description",
     described(pullRequest.description),
-    ...toolSection(tests),
+    ...historySection(depth),
     "## Diff",
     block(diff, "diff"),
     ...threadSections(threads),
   ].join("\n\n");
 }
 
-/**
- * What the `deep` tools are for, or nothing at `read`, where none is granted.
- *
- * The reviewer is told to call `run_tests` and is shown the command it runs, so
- * it knows what the call ran. It is not told to run the command itself: it has
- * no shell, and a command it cannot run is one it can only describe.
- *
- * The command is text the project wrote, so it is fenced like the diff: what it
- * carries cannot close the block and read as a section of the prompt's own.
- */
-function toolSection(tests: TestCommand): readonly string[] {
-  if (tests.depth !== "deep") return [];
-  const command = tests.command?.trim() ?? "";
-  // A command of nothing but space names no command, and a block holding it
-  // would show the reviewer a blank line.
-  const testing =
-    command === ""
-      ? ["No test command is configured, so `run_tests` has nothing to run."]
-      : [
-          "Call `run_tests` to run the tests. It takes no arguments, and runs the command the project configured, in the commit under review:",
-          block(command, "sh"),
-        ];
+/** What the history tools are for, or nothing at `read`, where none is granted. */
+function historySection(depth: Depth): readonly string[] {
+  if (depth !== "deep") return [];
   return [
-    "## Tests and history",
-    ...testing,
+    "## History",
     "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
   ];
 }
