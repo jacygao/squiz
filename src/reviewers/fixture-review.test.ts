@@ -251,11 +251,10 @@ test("the prompt, the read grant, the charter and the tree all reach the reviewe
 });
 
 /**
- * At depth `read` the tool grant is the only thing keeping the reviewer off the
- * code under review, and the comparison of tracked files that would detect a
- * write is not built. So this assertion is what stands in for it, and it is
- * checked to have teeth in the same test: a tree that is dirty must read as
- * dirty here, or a clean answer means nothing.
+ * The tool grant is the only thing keeping the reviewer off the code under
+ * review, and nothing in a round checks the tree afterwards. So this assertion
+ * is the check, and it is shown to have teeth in the same test: a tree that is
+ * dirty must read as dirty here, or a clean answer means nothing.
  */
 test("the round leaves the fixture tree as it found it", async () => {
   await inTheFixture(async ({ tree }) => {

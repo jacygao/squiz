@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { renderSummary } from "../github/summary-body.ts";
-import { nothingEstablished } from "./confinement.ts";
 import { decideAfterRound, type EpisodeBounds } from "./round-decision.ts";
 import { decideRoundEnd, lastReviewed, namedStates, type EndedRound, type QueuedRecord } from "./round-end.ts";
 
@@ -162,7 +161,6 @@ test("the close of a clean last round hands the summary the cap and the state it
     findings: { outcomes: [] },
     earlier: [],
     because: ended.because,
-    confinement: nothingEstablished,
     leftNotReviewed: ended.leftNotReviewed,
   });
   assert.ok(

@@ -1,9 +1,8 @@
 /**
- * The body of the comment a failed round posts: the reason it failed, what it
- * salvaged, and what else it established.
+ * The body of the comment a failed round posts: the reason it failed, and what it
+ * salvaged.
  *
- * The reason on the first line is the line the caller prints on stderr, and each
- * item of the list is a line there too. Both are read from one report, so this
+ * The reason on the first line is the line the caller prints on stderr, so this
  * renders the report's own strings and rewords none of them.
  */
 
@@ -20,8 +19,6 @@ export type FailureReport = {
    * holds them.
    */
   readonly unthreaded?: readonly string[];
-  /** What else the round established, one item each, as one line each. */
-  readonly established: readonly string[];
   /**
    * How many of the findings the reviewer reported landed as threads. Absent
    * where the round salvaged no findings, which leaves nothing to count.
@@ -56,9 +53,7 @@ export function renderFailure(report: FailureReport): string {
       ? ["The review is still open.", "A new commit or reply, or running `squiz review` again, retries it."]
       : closedLines(report.closed, "A new commit or reply, or running `squiz review`, posts its summary.");
   const blocks = [`${marker}${report.reason}**`, [...counted, ...next].join(" ")];
-  // The findings come first and the worktree after, the order the summary's
-  // Notes keep.
-  const items = [...(report.unthreaded ?? []), ...report.established];
+  const items = report.unthreaded ?? [];
   if (items.length > 0) blocks.push(items.map((item) => `- ${item}`).join("\n"));
   return blocks.join("\n\n");
 }

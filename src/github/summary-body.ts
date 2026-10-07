@@ -17,7 +17,6 @@
 import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
-import type { ConfinementEvidence } from "../loop/confinement.ts";
 import { costOf, type RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
@@ -48,14 +47,6 @@ export type ClosedEpisode = {
    * close Notes says nothing about.
    */
   readonly because: ClosingReason | null;
-  /**
-   * What every round of the episode established about the worktree its reviewer
-   * ran in.
-   *
-   * The episode's and not the closing round's. A round that leaves threads open
-   * posts no summary, so a file it found changed is named here or nowhere.
-   */
-  readonly confinement: ConfinementEvidence;
   /**
    * The queued states the close recorded not reviewed, and the bound that
    * stopped them. `null` where nothing was queued.
@@ -185,75 +176,19 @@ function oneLine(text: string): string {
  * Notes, or nothing at all.
  *
  * An earlier round's findings come first, then the closing round's in the order
- * they were posted, which runs `high` severity first. What the episode established about the worktree follows them, then the
- * rounds the time bound cut short, and the bound that closed the episode comes
- * last: the findings are each about one defect, the worktree and the cuts are
- * about the rounds, and the bound is about the episode.
+ * they were posted, which runs `high` severity first. The rounds the time bound
+ * cut short follow them, and the bound that closed the episode comes last: the
+ * findings are each about one defect, the cuts are about the rounds, and the
+ * bound is about the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
   const lines = [
-    ...[
-      ...episode.earlier,
-      ...unthreadedNotes(episode.findings),
-      ...worktreeNotes(episode.confinement),
-    ].map(
-      (note) => `- ${note}`,
-    ),
+    ...[...episode.earlier, ...unthreadedNotes(episode.findings)].map((note) => `- ${note}`),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
-}
-
-/**
- * What the readings around the reviewer established, one note per line and with
- * no bullet, in the order Notes lists them.
- *
- * A failed round's failure comment lists the same notes, and its stderr prints
- * each as a line of its own.
- */
-export function worktreeNotes(found: ConfinementEvidence): readonly string[] {
-  return [
-    ...whatChanged(found.changed),
-    ...whereHeadMoved(found.moved),
-    ...whatWasNotCompared(found.uncompared),
-  ];
-}
-
-/** Every file a reviewer changed, on one line, where any round found one. */
-function whatChanged(paths: readonly string[]): readonly string[] {
-  if (paths.length === 0) return [];
-  const many = paths.length === 1 ? "A file" : "Files";
-  // A path git gives can hold a newline, which left in would make a second bullet
-  // out of one note.
-  const which = paths.map((path) => `\`${oneLine(path)}\``).join(", ");
-  return [`${many} changed in the worktree while the reviewer ran: ${which}`];
-}
-
-/** One line per move of `HEAD` a round found, each naming both ends. */
-function whereHeadMoved(moves: readonly string[]): readonly string[] {
-  return moves.map((move) => `\`HEAD\` moved while the reviewer ran: ${oneLine(move)}`);
-}
-
-/**
- * One line per round that could not say what changed in the worktree.
- *
- * A round that compared and found nothing is no note, and a round that could not
- * compare is one. The two compose the same comment otherwise, and the one a person
- * would act on is the one that then reads as reassurance.
- *
- * A comparison that was taken and could not be had, and one a round never took,
- * are written alike. What a person does about either is the same — read the diff,
- * because nothing else here says the reviewer left it alone — and the reason,
- * which is the whole of the difference, is on the line.
- */
-function whatWasNotCompared(reasons: readonly string[]): readonly string[] {
-  return reasons.map(
-    (reason) =>
-      "A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-      ` ${oneLine(reason)}`,
-  );
 }
 
 /**

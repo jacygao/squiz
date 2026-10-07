@@ -89,8 +89,6 @@ export type ClosingBound = "round cap" | "token bound";
 export type RoundReport = {
   /** How many threads the round's findings opened. */
   readonly newFindings?: number;
-  /** The move of `HEAD` the round's comparison found, as "from … to …". */
-  readonly moved?: string;
   /** What failed without changing the round's outcome, a line each. */
   readonly problems?: readonly string[];
   /** How many of the findings the round posted GitHub refused, of how many it posted. */
@@ -144,10 +142,7 @@ export type StateRecord = Shared &
         readonly reason: string;
         readonly ownerNoted: boolean;
         readonly round?: FinishedRound;
-        /**
-         * What `squiz review` prints on stderr after the reason: what else the
-         * round established, and where its failure comment went.
-         */
+        /** What `squiz review` prints on stderr after the reason: where the failure comment went. */
         readonly lines?: readonly string[];
       }
     | {
@@ -438,8 +433,6 @@ function reportFrom(entry: Record<string, unknown>): ReadReport {
   if (newFindings !== undefined && !(typeof newFindings === "number" && Number.isInteger(newFindings) && newFindings >= 0)) {
     return { problem: `has "newFindings" as ${render(newFindings)} rather than a whole number` };
   }
-  const moved = entry["moved"];
-  if (moved !== undefined && !isText(moved)) return { problem: `has "moved" as ${render(moved)}` };
   const problems = entry["problems"];
   if (problems !== undefined && !isLines(problems)) {
     return { problem: `has "problems" as ${render(problems)} rather than an array of lines` };
@@ -462,7 +455,6 @@ function reportFrom(entry: Record<string, unknown>): ReadReport {
     report: {
       ...(unpostedRead === undefined ? {} : { unposted: unpostedRead }),
       ...(newFindings === undefined ? {} : { newFindings }),
-      ...(moved === undefined ? {} : { moved }),
       ...(problems === undefined ? {} : { problems }),
       ...(unthreaded === undefined ? {} : { unthreaded }),
     },

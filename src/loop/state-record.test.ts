@@ -97,7 +97,7 @@ const everyState: readonly StateRecord[] = [
     round: { number: 4, startedAt: 1_791_000_000, endedAt: 1_791_000_002 },
   },
   // What `squiz review` prints for a round: its new findings, the bound that
-  // closed it, a move of `HEAD`, and what failed without changing its outcome.
+  // closed it, and what failed without changing its outcome.
   {
     head,
     activity: reply,
@@ -107,7 +107,6 @@ const everyState: readonly StateRecord[] = [
     openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
     newFindings: 2,
     closedAt: "token bound",
-    moved: "from a detached HEAD at 3f9c2e0 to a detached HEAD at 8d21a4f",
     problems: ["the round closed the episode on PR #41 having failed to post the episode's summary: GitHub answered 502"],
   },
   { head, activity: reply, status: "reviewed", result: "clean, episode open", newFindings: 0 },
@@ -267,7 +266,6 @@ const malformed: readonly [string, unknown][] = [
   ["new findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: -1 }],
   ["new findings counted with a fraction", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1.5 }],
   ["a close at a bound that is neither", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "deadline" }],
-  ["a move of HEAD that is not a string", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], moved: 1 }],
   ["a successor with no activity field", { head, activity: null, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: { head: laterHead } }],
   ["a successor that is not an object", { head, activity: null, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: "8d21a4f" }],
   ["unposted findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: "1", of: 1 } }],
@@ -307,6 +305,15 @@ test("a field this reader has no name for is ignored", () => {
   assert.deepEqual(recordFrom({ head, activity: null, status: "queued", postingSeconds: 3.2 }), {
     record: { head, activity: null, status: "queued" },
   });
+});
+
+// Earlier versions kept the move of `HEAD` a round's worktree comparison found.
+// Read, it would still be printed; unreadable, the episode's state would be too.
+test("a record holding a move of HEAD reads without it", () => {
+  const reviewed = { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [] };
+  for (const moved of ["from a detached HEAD at 3f9c2e0 to a detached HEAD at 8d21a4f", 1]) {
+    assert.deepEqual(recordFrom({ ...reviewed, moved }), { record: reviewed }, JSON.stringify(moved));
+  }
 });
 
 test("the same head and the same activity are the same state", () => {

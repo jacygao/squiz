@@ -38,7 +38,6 @@ import { startChild } from "../sessions/child.ts";
 import type { Backends } from "../sessions/session.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { snapshotPath } from "../worktree/snapshot.ts";
-import { headMovedIn } from "./confinement.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
@@ -401,7 +400,7 @@ function attempts(...runs: readonly ParsedRun[]): Reviewer {
   };
 }
 
-/** A reviewer that wrote to the file under review through its shell, and reviewed. */
+/** A reviewer that wrote to the file under review in its snapshot, and reviewed. */
 function writesThenReviews(findings: readonly Finding[] = []): Reviewer {
   return {
     command: "/bin/sh",
@@ -411,37 +410,13 @@ function writesThenReviews(findings: readonly Finding[] = []): Reviewer {
 }
 
 /**
- * A reviewer that wrote to the file under review and then never finished, so the
- * bound kills it.
- *
- * The write a killed reviewer left behind is the one the comparison exists for.
+ * A reviewer that took the write permission off the episode's directory, so the
+ * round cannot record what it spent.
  */
-function writesThenHangs(cost: RoundCost): Reviewer {
+function locksTheState(): Reviewer {
   return {
     command: "/bin/sh",
-    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; sleep 30`],
-    parse: hangs(cost).parse,
-  };
-}
-
-/**
- * A reviewer that wrote to the file under review and then took the write
- * permission off the episode's directory, so the round cannot record what it
- * spent.
- */
-function writesThenLocksTheState(): Reviewer {
-  return {
-    command: "/bin/sh",
-    args: ["-c", `printf '// line 2\\n' >> ${TRACKED}; chmod 500 "$AGENT_WORKTREE/.squiz/${PULL_REQUEST}"`],
-    parse: reviews({}).parse,
-  };
-}
-
-/** A reviewer that corrupted its snapshot's git index, so the reading after it cannot be taken. */
-function breaksGit(): Reviewer {
-  return {
-    command: "/bin/sh",
-    args: ["-c", "printf 'not an index' > \"$(git rev-parse --git-dir)/index\""],
+    args: ["-c", `chmod 500 "$AGENT_WORKTREE/.squiz/${PULL_REQUEST}"`],
     parse: reviews({}).parse,
   };
 }
@@ -2857,38 +2832,6 @@ function startsBroken(): Backends {
   };
 }
 
-/**
- * A reviewer at `deep` can write to the tree through its shell, and two readings
- * taken around it are the only thing that names the file it changed. A round
- * reports what they say and does nothing else with it.
- */
-test("a tracked file the reviewer wrote to is named, and the round posts what it found", async () => {
-  const ran = await runInFixture({
-    answers: POSTING,
-    reviewer: writesThenReviews([finding("The flag is never read")]),
-  });
-
-  assert.ok(ran.conclusion.outcome === "block");
-  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, {
-    outcome: "changed",
-    paths: [TRACKED],
-  });
-  assert.deepEqual(
-    ran.kinds,
-    ["prlist", "threads", "diff", "create", "lookup"],
-    "a mutated tree is reported rather than acted on, so the round posts what it always would",
-  );
-});
-
-/** A reviewer during whose run the coding agent edits the file under review in its own worktree. */
-function agentEditsWhileItReviews(): Reviewer {
-  return {
-    command: "/bin/sh",
-    args: ["-c", `printf '// line 2\\n' >> "$AGENT_WORKTREE/${TRACKED}"`],
-    parse: reviews({}).parse,
-  };
-}
-
 test("the reviewer runs in a snapshot of the head commit, at either depth, with scratch space outside it", async () => {
   for (const depth of ["read", "deep"] as const) {
     const ran = await runInFixture({ config: { depth }, answers: POSTING, reviewer: reviews({}) });
@@ -2920,18 +2863,7 @@ test("at deep the round hands the deep tools the snapshot the reviewer was given
   }
 });
 
-/**
- * The coding agent goes on working while the reviewer reads, and nothing it does
- * in its own worktree is the reviewer's.
- */
-test("an edit the coding agent makes to its worktree during the review appears in no comparison", async () => {
-  const ran = await runInFixture({ answers: POSTING, reviewer: agentEditsWhileItReviews() });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.deepEqual(ran.conclusion.confinement?.trackedFiles, { outcome: "unchanged" });
-});
-
-test("a change the reviewer makes in its snapshot is named, and the coding agent's worktree is left alone", async () => {
+test("a change made in the reviewer's snapshot leaves the coding agent's worktree alone", async () => {
   const ran = await runInFixture({
     answers: POSTING,
     reviewer: writesThenReviews([finding("The flag is never read")]),
@@ -2948,11 +2880,7 @@ test("a change the reviewer makes in its snapshot is named, and the coding agent
     ],
   });
 
-  assert.ok(ran.conclusions[0]?.outcome === "block");
-  assert.deepEqual(ran.conclusions[0].confinement?.trackedFiles, {
-    outcome: "changed",
-    paths: [TRACKED],
-  });
+  assert.equal(ran.conclusions[0]?.outcome, "block");
 });
 
 test("a snapshot stands until the round's result is posted, and is gone once the round ends", async () => {
@@ -3010,89 +2938,17 @@ test("a head commit the repository cannot get runs no review", async () => {
   assert.deepEqual(ran.snapshotsLeft, []);
 });
 
-/**
- * The reading after the reviewer is taken on every path the reviewer can end on.
- *
- * A reviewer killed at its time bound is the one most likely to have left a write
- * behind, and it is the path where the round is already handling a failure. A
- * comparison taken only where the review finished would be missing from the case
- * it exists for, and every other test here would still pass.
- */
-test("a round killed at its bound takes the reading after the reviewer all the same", async () => {
-  const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
-  const ran = await runInFixture({
-    config: { timeout: 1 },
-    answers: POSTING,
-    reviewer: writesThenHangs(floor),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "timed-out");
-  assert.deepEqual(
-    ran.conclusion.confinement?.trackedFiles,
-    { outcome: "changed", paths: [TRACKED] },
-    "the write the kill left behind is what the comparison exists to name",
-  );
-});
-
-test("a reading that could not be taken is not a tree that did not change", async () => {
+// A round that posted its findings and recorded nothing is one the next round
+// repeats comment for comment.
+test("a cost that could not be recorded posts none of the findings", async () => {
   const ran = await runInFixture({
     answers: POSTING,
-    reviewer: breaksGit(),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  const trackedFiles = ran.conclusion.confinement?.trackedFiles;
-  assert.equal(
-    trackedFiles?.outcome,
-    "unknown",
-    "a git that failed, read as a clean tree, would report a reviewer that touched nothing",
-  );
-  assert.match(
-    trackedFiles?.outcome === "unknown" ? trackedFiles.reason : "",
-    /the reading after could not be taken/u,
-  );
-  assert.ok(ran.kinds.includes("summary"), "the episode closed on its own terms all the same");
-});
-
-test("a round with too little left before the review takes no reading", async () => {
-  const ran = await runInFixture({
-    // Less left than a reading is given, and nothing interrupts one that has
-    // started: the round takes none rather than one that overruns the part.
-    preReviewMs: 4_000,
-    answers: POSTING,
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  const trackedFiles = ran.conclusion.confinement?.trackedFiles;
-  assert.equal(trackedFiles?.outcome, "not-taken");
-  assert.match(trackedFiles?.outcome === "not-taken" ? trackedFiles.reason : "", /window/u);
-});
-
-/**
- * A round that could not record what it spent posts nothing and reports the write,
- * and what the readings established is not lost with it.
- *
- * The reviewer ran and both readings were taken, so a conclusion carrying no
- * confinement here would say no reviewer ran. The mutation is the one thing about
- * this round nothing else can be asked for afterwards: the tree has moved on by
- * the time anybody reads it.
- */
-test("a cost that could not be recorded keeps what the readings established", async () => {
-  const ran = await runInFixture({
-    answers: POSTING,
-    reviewer: writesThenLocksTheState(),
+    reviewer: locksTheState(),
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
   assert.match(ran.conclusion.reason, /nothing the reviewer found was posted/u);
-  assert.deepEqual(
-    ran.conclusion.confinement?.trackedFiles,
-    { outcome: "changed", paths: [TRACKED] },
-    "the reviewer ran, and the file it wrote to is named whatever the state file did",
-  );
   assert.deepEqual(
     ran.kinds,
     ["prlist", "threads", "diff", "failure"],
@@ -3127,177 +2983,6 @@ function summaryBody(ran: Ran): string {
   assert.equal(posted.length, 1, "the comment is posted once, and nothing ever edits it");
   return sent(posted[0]?.body ?? "");
 }
-
-/**
- * The write an earlier round found reaches the comment the closing round posts.
- *
- * A round that blocks posts nothing, so the only comment the episode ever puts up
- * is the closing round's, and a comment composed from that round's own readings
- * reports the worktree of one round as the worktree of all of them. The closing
- * round here touched nothing and compared the tree successfully, which is the
- * answer that would overwrite the first round's.
- *
- * Two rounds, because one cannot reach the handover: whatever a fixture supplies
- * the composer is what the composer renders.
- */
-test("a file the first round changed is named in the comment the closing round posts", async () => {
-  const ran = await runInFixture({
-    answers: TWO_ROUNDS,
-    sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: writesThenReviews([finding("The flag is never read")]),
-    andThen: [{ reviewer: FIXES_IT }],
-  });
-
-  assert.ok(ran.conclusions[0]?.outcome === "block");
-  assert.deepEqual(
-    ran.conclusions[0].confinement?.trackedFiles,
-    { outcome: "changed", paths: [TRACKED] },
-    "the round that found the write posted no comment, so what it found is the episode's to carry",
-  );
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "nothing-open");
-  assert.deepEqual(
-    ran.conclusion.confinement?.trackedFiles,
-    { outcome: "unchanged" },
-    "the closing round compared the tree and found nothing, which the comment must not be composed from",
-  );
-  assert.deepEqual(ran.kinds, [
-    "prlist",
-    "threads",
-    "diff",
-    "create",
-    "lookup",
-    "prlist",
-    "threads",
-    "diff",
-    "resolve",
-    "summary",
-  ]);
-
-  assert.equal(
-    summaryBody(ran),
-    [
-      "**Squiz review — 2 rounds, 1 finding**",
-      "",
-      "Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0",
-      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
-      "",
-      "**Needs a person**",
-      "",
-      "Nothing needs a person.",
-      "",
-      "**Notes**",
-      "",
-      `- A file changed in the worktree while the reviewer ran: \`${TRACKED}\``,
-    ].join("\n"),
-  );
-});
-
-/** The move of `HEAD` the round read, as the round host reports it, or "" where it read none. */
-function movedIn(conclusion: RoundConclusion & { readonly outcome: "block" }): string {
-  return conclusion.confinement === undefined ? "" : (headMovedIn(conclusion.confinement) ?? "");
-}
-
-// The snapshot is a clone, which has none of the fixture repository's config,
-// so a commit in it names its author or fails wherever no global identity is set.
-const COMMITS_IN_THE_SNAPSHOT =
-  "git -c user.email=squiz@example.invalid -c user.name=Squiz -c commit.gpgsign=false commit --quiet --allow-empty --message moved";
-
-/** A reviewer that moved `HEAD` through its shell with `move`, and reviewed. */
-function movesHeadThenReviews(move: string, findings: readonly Finding[]): Reviewer {
-  return { command: "/bin/sh", args: ["-c", move], parse: reviews({ findings }).parse };
-}
-
-/**
- * A move of `HEAD` in the snapshot is read by the round, which the round host
- * reports, and leaves the coding agent's branch where it was, so the next round
- * finds the pull request again.
- */
-test("a reviewer that committed in its snapshot is read as a move of HEAD", async () => {
-  const ran = await runInFixture({
-    answers: TWO_ROUNDS,
-    sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: movesHeadThenReviews(COMMITS_IN_THE_SNAPSHOT, [
-      finding("The flag is never read"),
-    ]),
-    andThen: [{ reviewer: FIXES_IT }],
-  });
-
-  assert.deepEqual(
-    ran.conclusions.map((conclusion) => conclusion.outcome),
-    ["block", "close"],
-    "the coding agent's branch is untouched, so the next firing finds its pull request",
-  );
-  assert.ok(ran.conclusions[0]?.outcome === "block");
-  assert.match(
-    movedIn(ran.conclusions[0]),
-    new RegExp(`^from a detached HEAD at ${ran.head} to a detached HEAD at (?!${ran.head})[0-9a-f]{40}$`, "u"),
-  );
-});
-
-test("a reviewer that switched its snapshot to a branch is read as a move of HEAD", async () => {
-  const ran = await runInFixture({
-    answers: TWO_ROUNDS,
-    sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: movesHeadThenReviews("git checkout --quiet -b elsewhere", [
-      finding("The flag is never read"),
-    ]),
-    andThen: [{ reviewer: FIXES_IT }],
-  });
-
-  assert.deepEqual(
-    ran.conclusions.map((conclusion) => conclusion.outcome),
-    ["block", "close"],
-    "the coding agent's branch is untouched, so the next firing finds its pull request",
-  );
-  assert.ok(ran.conclusions[0]?.outcome === "block");
-  assert.equal(
-    movedIn(ran.conclusions[0]),
-    `from a detached HEAD at ${ran.head} to refs/heads/elsewhere at ${ran.head}`,
-  );
-});
-
-/**
- * A state file written before the episode kept what its rounds established still
- * reads, and the round that reads it closes normally.
- *
- * Read as unreadable, the file would end the round before the reviewer ran, and
- * every round of that episode after it.
- */
-test("a state file written before the worktree evidence existed is read as an episode with none", async () => {
-  const ran = await runInFixture({
-    config: { rounds: 2 },
-    stateSource: `{"rounds": [{"dollars": 0.04, "tokens": 1200, "messages": 3}]}\n`,
-    answers: {
-      prlist: PR_LIST,
-      diff: DIFF,
-      threads: listed([{ id: "PRRT_open", isResolved: false }]),
-      summary: SUMMARY_POSTED,
-    },
-    reviewer: writesThenReviews(),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "round-cap");
-  assert.equal(
-    summaryBody(ran),
-    [
-      "**Squiz review — 2 rounds, 1 finding**",
-      "",
-      "Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0",
-      "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
-      "",
-      "**Needs a person**",
-      "",
-      "- `src/ui/card.ts:88` — The name says nothing. (open)",
-      "",
-      "**Notes**",
-      "",
-      `- A file changed in the worktree while the reviewer ran: \`${TRACKED}\``,
-      "- The episode ended at its round cap rather than with nothing left open",
-    ].join("\n"),
-  );
-});
 
 /**
  * A killed reviewer and a finished one both end with their findings posted, so
@@ -3609,81 +3294,18 @@ test("a failed round whose posting time is spent attempts no failure comment, an
   assert.match(comment?.outcome === "failed" ? comment.reason : "", /ran out before this call was made/u);
 });
 
-test("a failure comment lists the file the killed reviewer changed", async () => {
-  const ran = await runInFixture({
-    config: { timeout: 1 },
-    answers: FAILING,
-    reviewer: writesThenHangs(ANSWER_COST),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.match(
-    failureBody(ran),
-    /\n\n- A file changed in the worktree while the reviewer ran: `src\/ui\/card\.ts`$/u,
-  );
-});
-
-/**
- * A reviewer that committed in its snapshot and then never finished, so the bound
- * kills it.
- *
- * The snapshot starts detached at the head commit, so a commit is what moves
- * `HEAD` there. A bare `git checkout --detach` would leave it where it was.
- */
-function commitsThenHangs(cost: RoundCost): Reviewer {
-  return {
-    command: "/bin/sh",
-    args: ["-c", `${COMMITS_IN_THE_SNAPSHOT}; sleep 30`],
-    parse: hangs(cost).parse,
-  };
-}
-
-test("a killed reviewer that moved HEAD names the move in the failure comment and on stderr (#273)", async () => {
-  const ran = await runInFixture({
-    config: { timeout: 1 },
-    answers: FAILING,
-    reviewer: commitsThenHangs(ANSWER_COST),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "timed-out", "the bound ended the round, and nothing before it");
-  const moved = new RegExp(
-    `^\`HEAD\` moved while the reviewer ran: from a detached HEAD at ${ran.head} to a detached HEAD at (?!${ran.head})[0-9a-f]{40}$`,
-    "u",
-  );
-  const items = failureBody(ran)
-    .split("\n")
-    .filter((line) => line.startsWith("- "))
-    .map((line) => line.slice(2));
-  assert.ok(
-    items.some((item) => moved.test(item)),
-    `the failure comment names no move of the snapshot's HEAD: ${JSON.stringify(items)}`,
-  );
-  const failed = {
-    outcome: "failed",
-    pullRequest: PULL_REQUEST,
-    reason: ran.conclusion.reason,
-    items: failureLinesOf(ran.conclusion),
-  } as const;
-  const stderr = composeReview(failed, "/unwritten").stderr.split("\n");
-  assert.ok(
-    stderr.some((line) => line.startsWith("squiz: ") && moved.test(line.slice("squiz: ".length))),
-    `squiz review's stderr names no move of the snapshot's HEAD: ${JSON.stringify(stderr)}`,
-  );
-});
-
 /**
  * The comment's first line and `squiz review`'s stderr carry one reason, word for
- * word, for every kind of failure that posts a comment. Each item the comment
- * lists is a stderr line too. The stderr is composed from what the round host
- * records for the failure, as `squiz review` reads it back.
+ * word, for every kind of failure that posts a comment. The stderr is composed
+ * from what the round host records for the failure, as `squiz review` reads it
+ * back.
  */
-test("each kind of failure says the same reason and items on the pull request and on stderr", async () => {
+test("each kind of failure says the same reason on the pull request and on stderr", async () => {
   const floor: RoundCost = { dollars: 0.02, tokens: 700, messages: 1 };
   const failures: readonly { readonly name: string; readonly setup: Setup }[] = [
     {
       name: "timed-out",
-      setup: { config: { timeout: 1 }, answers: FAILING, reviewer: writesThenHangs(floor) },
+      setup: { config: { timeout: 1 }, answers: FAILING, reviewer: hangs(floor) },
     },
     { name: "unavailable", setup: { answers: FAILING, reviewer: unreadable(floor) } },
     { name: "setup", setup: { answers: FAILING, reviewer: notInstalled } },
@@ -3696,7 +3318,7 @@ test("each kind of failure says the same reason and items on the pull request an
   for (const { name, setup } of failures) {
     const ran = await runInFixture(setup);
     assert.ok(ran.conclusion.outcome === "failed", `${name} did not fail`);
-    const [first, ...rest] = failureBody(ran).split("\n");
+    const [first] = failureBody(ran).split("\n");
     const failed = {
       outcome: "failed",
       pullRequest: PULL_REQUEST,
@@ -3706,11 +3328,6 @@ test("each kind of failure says the same reason and items on the pull request an
     const stderr = composeReview(failed, "/unwritten").stderr.split("\n");
     const reason = /^\*\*Squiz review failed — (.*)\*\*$/u.exec(first ?? "")?.[1];
     assert.equal(stderr[0], `squiz: review failed: ${reason}`, `${name} said two reasons`);
-    const items = rest.filter((line) => line.startsWith("- "));
-    if (name === "timed-out") assert.ok(items.length > 0, "the killed reviewer's write is listed");
-    for (const item of items) {
-      assert.ok(stderr.includes(`squiz: ${item.slice(2)}`), `${name} listed "${item}" and printed no such line`);
-    }
   }
 });
 
