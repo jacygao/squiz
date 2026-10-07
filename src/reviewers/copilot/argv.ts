@@ -1,5 +1,5 @@
 /**
- * Copilot's command line, and the tools it is granted at each depth.
+ * Copilot's command line, and the tools it is granted.
  *
  * The line is one `sh -c` script, the same in a pane and with no terminal. The
  * shell reads the prompt from its file, so no newline of it reaches a Herdr
@@ -13,9 +13,9 @@
  *
  * The grant and Copilot's own path check are the confinement. Copilot hides
  * from the model every tool `--available-tools` leaves out, so
- * `--available-tools` is on every line, and no shell tool is on it at either
- * depth. The path check keeps the reading tools inside the snapshot. The `deep` tools are the reporting
- * server's, which finds the round's values on the environment it inherits.
+ * `--available-tools` is on every line, and no shell tool is on it. The path
+ * check keeps the reading tools inside the snapshot. The history tools are the
+ * reporting server's, which runs them in the snapshot its MCP `env` names.
  *
  * Nothing here runs a process.
  */
@@ -23,11 +23,12 @@
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 
-import type { Depth, Thinking } from "../../config/config.ts";
+import type { Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
+import { historyTools } from "../git-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
-import { deepToolNames } from "../deep-tools.ts";
 import { reportingTools } from "../reporting.ts";
+import { SNAPSHOT_VARIABLE } from "./server.ts";
 
 /** The custom agent whose instructions are the charter, which `confine` writes. */
 export const AGENT_NAME = "squiz-reviewer";
@@ -39,22 +40,18 @@ const SERVER_NAME = "squiz";
 export const serverFile = fileURLToPath(new URL("server.ts", import.meta.url));
 
 /**
- * The tools Copilot is given at each depth.
+ * The tools Copilot is given: the reading tools, and the reporting calls and
+ * history tools under the reporting server's prefix.
  *
  * `skill` is left out, which is what keeps the tree's skills away from the
  * reviewer, since they load whether or not the folder is trusted.
  */
-const readGrant: readonly string[] = Object.freeze([
+export const grants: readonly string[] = Object.freeze([
   "view",
   "grep",
   "glob",
-  ...reportingTools.map((call) => `${SERVER_NAME}-${call}`),
+  ...[...reportingTools, ...historyTools.map((tool) => tool.name)].map((call) => `${SERVER_NAME}-${call}`),
 ]);
-
-export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze({
-  read: readGrant,
-  deep: Object.freeze([...readGrant, ...deepToolNames.map((name) => `${SERVER_NAME}-${name}`)]),
-});
 
 /** The file Copilot writes the run's usage into, in the session directory. */
 export function usageFile(invocation: Invocation): string {
@@ -72,7 +69,7 @@ export function argv(invocation: Invocation): CommandLine {
         type: "local",
         command: process.execPath,
         args: [serverFile],
-        env: { [REPORTS_VARIABLE]: reports },
+        env: { [REPORTS_VARIABLE]: reports, [SNAPSHOT_VARIABLE]: resolve(invocation.directory) },
         tools: ["*"],
       },
     },
@@ -84,7 +81,7 @@ export function argv(invocation: Invocation): CommandLine {
     `&& copilot -p "\${prompt%.}"`,
     `--agent ${AGENT_NAME}`,
     "--no-ask-user --allow-all-tools",
-    `--available-tools=${grants[invocation.depth].join(",")}`,
+    `--available-tools=${grants.join(",")}`,
     // Copilot refuses a path outside the snapshot, symlinks resolved, except
     // in the temporary directory, which is the round's scratch space.
     "--disallow-temp-dir",

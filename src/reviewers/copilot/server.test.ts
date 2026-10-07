@@ -16,12 +16,11 @@ import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ROUND_VARIABLE, roundVariable } from "../deep-tools.ts";
-import { gitBlame, gitLogSearch, gitShow } from "../git-tools.ts";
+import { historyTools } from "../git-tools.ts";
 import { reportCalls } from "../report-calls.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
-import { CHARTER_VARIABLE } from "./server.ts";
+import { CHARTER_VARIABLE, SNAPSHOT_VARIABLE } from "./server.ts";
 
 const serverPath = fileURLToPath(new URL("./server.ts", import.meta.url));
 
@@ -212,15 +211,15 @@ test("initialize is refused where the charter named cannot be read", async (t) =
   assert.match(String(error["message"]), /charter/);
 });
 
-test("the calls listed are the ones the grant carries, with the schemas the checks declare", async (t) => {
+test("the server lists the reporting calls and then the history tools, each with its own schema", async (t) => {
   const server = started(t, scratch(t));
   const result = resultOf(await server.request(1, "tools/list"));
   const tools = result["tools"] as readonly Message[];
-  const declared = reportCalls({ record: () => {} }).calls;
+  const declared = [...reportCalls({ record: () => {} }).calls, ...historyTools];
 
   assert.deepEqual(
     tools.map((tool) => tool["name"]),
-    reportingTools,
+    [...reportingTools, ...historyTools.map((tool) => tool.name)],
   );
   for (const [index, tool] of tools.entries()) {
     assert.deepEqual(tool["inputSchema"], declared[index]?.parameters);
@@ -363,9 +362,6 @@ for (const signal of ["SIGTERM", "SIGHUP"] as const) {
   });
 }
 
-/** The three tools a reviewer at `deep` is granted beside the reporting calls, in the grant's order. */
-const deepTools = [gitLogSearch, gitBlame, gitShow];
-
 /** Run git in `directory`, failing the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): string {
   const result = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
@@ -373,10 +369,10 @@ function git(directory: string, ...args: readonly string[]): string {
   return result.stdout;
 }
 
-type Deep = { readonly snapshot: string; readonly scratch: string; readonly commit: string };
+type Place = { readonly snapshot: string; readonly scratch: string; readonly commit: string };
 
 /** A snapshot of one commit, and a scratch space beside it. */
-function deepPlace(t: { after: (fn: () => void) => void }): Deep {
+function place(t: { after: (fn: () => void) => void }): Place {
   const root = realpathSync(scratch(t));
   const snapshot = join(root, "tree");
   const scratchSpace = join(root, "scratch");
@@ -402,43 +398,20 @@ function deepPlace(t: { after: (fn: () => void) => void }): Deep {
 }
 
 /**
- * The server as Copilot starts it at `deep`: in the reviewer's environment,
- * which carries the round's variable.
+ * The server as Copilot starts it: somewhere other than the snapshot, with the
+ * snapshot named in its MCP `env`.
  */
-function startedDeep(
-  t: { after: (fn: () => void) => void },
-  place: Deep,
-): Running {
-  return started(t, place.scratch, roundVariable({ snapshot: place.snapshot }));
+function startedIn(t: { after: (fn: () => void) => void }, at: Place): Running {
+  return started(t, at.scratch, { [SNAPSHOT_VARIABLE]: at.snapshot });
 }
 
-test("at deep the server lists the three deep tools after the reporting calls, with their own schemas", async (t) => {
-  const server = startedDeep(t, deepPlace(t));
-  const tools = resultOf(await server.request(1, "tools/list"))["tools"] as readonly Message[];
-  assert.deepEqual(
-    tools.map((tool) => tool["name"]),
-    [...reportingTools, ...deepTools.map((tool) => tool.name)],
-  );
-  for (const tool of deepTools) {
-    const listed = tools.find((each) => each["name"] === tool.name);
-    assert.deepEqual(listed?.["inputSchema"], tool.parameters);
-    assert.equal(listed?.["description"], tool.description);
-  }
-});
-
-test("at read the server serves no deep tool, though one is called", async (t) => {
-  const server = started(t, scratch(t));
-  const answer = await server.request(1, "tools/call", call("git_show", { commit: "HEAD" }));
-  assert.equal((answer["error"] as Message | undefined)?.["code"], -32602);
-});
-
-test("each history tool runs its git subcommand in the snapshot", async (t) => {
-  const place = deepPlace(t);
-  const server = startedDeep(t, place);
+test("each history tool runs its git subcommand in the snapshot the server's env names", async (t) => {
+  const at = place(t);
+  const server = startedIn(t, at);
 
   const searched = toolAnswer(await server.request(1, "tools/call", call("git_log_search", { term: "margin" })));
   assert.equal(searched.isError, false, searched.text);
-  assert.match(searched.text, new RegExp(place.commit));
+  assert.match(searched.text, new RegExp(at.commit));
 
   const blamed = toolAnswer(await server.request(2, "tools/call", call("git_blame", { file: "place.ts", line: 1 })));
   assert.equal(blamed.isError, false, blamed.text);
@@ -460,7 +433,7 @@ const malformed: readonly { readonly sent: string; readonly name: string; readon
 
 for (const { sent, name, args, reason } of malformed) {
   test(`a ${name} call with ${sent} is refused before it runs`, async (t) => {
-    const server = startedDeep(t, deepPlace(t));
+    const server = startedIn(t, place(t));
     const answer = toolAnswer(await server.request(1, "tools/call", call(name, args)));
     assert.equal(answer.isError, true, answer.text);
     assert.match(answer.text, reason);
@@ -468,10 +441,11 @@ for (const { sent, name, args, reason } of malformed) {
   });
 }
 
-test("a history tool handed a round it cannot read runs nothing", async (t) => {
-  const place = deepPlace(t);
-  const server = started(t, place.scratch, { [ROUND_VARIABLE]: "not json" });
+// Started in the snapshot itself, so a server that ran in its own directory would answer.
+test("a history tool with no snapshot named runs nothing, wherever the server was started", async (t) => {
+  const at = place(t);
+  const server = started(t, at.snapshot, { [SNAPSHOT_VARIABLE]: undefined });
   const answer = toolAnswer(await server.request(1, "tools/call", call("git_show", { commit: "HEAD" })));
   assert.equal(answer.isError, true, answer.text);
-  assert.match(answer.text, /could not run/);
+  assert.match(answer.text, new RegExp(`^git_show was not run: the round set no ${SNAPSHOT_VARIABLE}`));
 });

@@ -18,12 +18,13 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or starts filtering the environm
 
 ## Decisions
 
-- **Read the round's values from the server's own environment, and pass nothing
-  for them in the MCP configuration.** The server received Copilot's whole
-  environment with the configuration's `env` laid over it: a variable set only
-  on Copilot arrived, and so did one set empty. `SQUIZ_ROUND`, the record and
-  keeper, and the emptied GitHub tokens reach the server as they reach Copilot,
-  so the configuration is the same at both depths.
+- **Rely on the server inheriting Copilot's environment.** The server received
+  Copilot's whole environment with the configuration's `env` laid over it: a
+  variable set only on Copilot arrived, and so did one set empty. So the emptied
+  GitHub tokens reach the server as they reach Copilot. The snapshot is the one
+  round value the server needs, and it travels as `SQUIZ_SNAPSHOT` in the
+  configuration's `env`, which reaches the server whatever the round's own
+  environment holds.
 - **Treat the server as a member of the reviewer's group.** Its process group
   was the group of the shell that started Copilot, so the round's signal to that
   group reaches it, and only the test command `run_tests` starts needs the

@@ -9,7 +9,7 @@ import type { Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { AGENT_NAME, argv, grants, serverFile } from "./argv.ts";
-import { CHARTER_VARIABLE } from "./server.ts";
+import { CHARTER_VARIABLE, SNAPSHOT_VARIABLE } from "./server.ts";
 
 const invocation: Invocation = {
   directory: "/tmp/squiz/worktree",
@@ -20,7 +20,6 @@ const invocation: Invocation = {
   reportsFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/7/scratch",
   githubConfigDirectory: ".squiz/7/rounds/1/gh",
-  depth: "read",
   thinking: "medium",
   model: null,
   terminal: "none",
@@ -41,20 +40,14 @@ function configOf(line: CommandLine): Record<string, unknown> {
   return JSON.parse(config) as Record<string, unknown>;
 }
 
-test("the grant at read is the three reading tools and the three reporting calls under the server's name", () => {
-  assert.deepEqual(grants.read, [
+test("the grant is the three reading tools, and the reporting calls and history tools under the server's name", () => {
+  assert.deepEqual(grants, [
     "view",
     "grep",
     "glob",
     "squiz-report_finding",
     "squiz-report_verdict",
     "squiz-finish_review",
-  ]);
-});
-
-test("the grant at deep is the read grant and the three deep tools under the server's name", () => {
-  assert.deepEqual(grants.deep, [
-    ...grants.read,
     "squiz-git_log_search",
     "squiz-git_blame",
     "squiz-git_show",
@@ -63,23 +56,15 @@ test("the grant at deep is the read grant and the three deep tools under the ser
 
 // Copilot hides every tool `--available-tools` leaves out, so a grant naming only
 // these grants no shell, whatever Copilot calls its shell tools.
-test("no grant names a tool other than the three reading tools and the server's own", () => {
-  for (const [depth, granted] of Object.entries(grants)) {
-    for (const tool of granted) {
-      assert.ok(["view", "grep", "glob"].includes(tool) || tool.startsWith("squiz-"), `${depth} grants ${tool}`);
-    }
+test("the grant names no tool other than the three reading tools and the server's own", () => {
+  for (const tool of grants) {
+    assert.ok(["view", "grep", "glob"].includes(tool) || tool.startsWith("squiz-"), `the grant has ${tool}`);
   }
-});
-
-test("the line at deep carries the deep grant, and the same MCP configuration as at read", () => {
-  const deep = argv({ ...invocation, depth: "deep" });
-  assert.ok(scriptOf(deep).includes(` --available-tools=${grants.deep.join(",")} `), scriptOf(deep));
-  assert.deepEqual(configOf(deep), configOf(argv(invocation)));
 });
 
 test("the script carries the grant, the agent, and every flag that keeps the tree and the user out", () => {
   const script = scriptOf(argv(invocation));
-  assert.ok(script.includes(` --available-tools=${grants.read.join(",")} `), script);
+  assert.ok(script.includes(` --available-tools=${grants.join(",")} `), script);
   for (const flag of [
     `--agent ${AGENT_NAME}`,
     "--no-ask-user",
@@ -113,13 +98,11 @@ test("a configured model is passed with --model, as the script's $1, and changes
 // Copilot confines its reading tools to the working directory and the system's
 // temporary directory, which for the reviewer is the round's scratch space,
 // outside the snapshot.
-test("the reading tools reach the snapshot and nothing else, at both depths", () => {
-  for (const depth of ["read", "deep"] as const) {
-    const script = scriptOf(argv({ ...invocation, depth }));
-    assert.ok(script.includes(" --disallow-temp-dir "), `the ${depth} line leaves the temporary directory readable: ${script}`);
-    for (const widens of ["--allow-all-paths", "--allow-all ", "--yolo", "--add-dir"]) {
-      assert.ok(!script.includes(widens), `the ${depth} line passes ${widens}: ${script}`);
-    }
+test("the reading tools reach the snapshot and nothing else", () => {
+  const script = scriptOf(argv(invocation));
+  assert.ok(script.includes(" --disallow-temp-dir "), `the line leaves the temporary directory readable: ${script}`);
+  for (const widens of ["--allow-all-paths", "--allow-all ", "--yolo", "--add-dir"]) {
+    assert.ok(!script.includes(widens), `the line passes ${widens}: ${script}`);
   }
 });
 
@@ -149,7 +132,7 @@ test("the reasoning effort is the thinking level, with off spelled none", () => 
   }
 });
 
-test("the MCP configuration starts the shipped server with this Node, reporting into the round's file and handed no charter", () => {
+test("the MCP configuration starts the shipped server with this Node, naming the round's report file and snapshot and no charter", () => {
   const config = configOf(argv(invocation));
   assert.deepEqual(config, {
     mcpServers: {
@@ -157,7 +140,7 @@ test("the MCP configuration starts the shipped server with this Node, reporting 
         type: "local",
         command: process.execPath,
         args: [serverFile],
-        env: { [REPORTS_VARIABLE]: invocation.reportsFile },
+        env: { [REPORTS_VARIABLE]: invocation.reportsFile, [SNAPSHOT_VARIABLE]: invocation.directory },
         tools: ["*"],
       },
     },

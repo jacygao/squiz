@@ -1,6 +1,6 @@
 /**
  * What one measured review did: its cost, its time, its findings, how much of
- * its looking went outside the diff, and each `deep` tool it called with what
+ * its looking went outside the diff, and each history tool it called with what
  * that tool answered.
  *
  * The stream is either reviewer's own JSON output: `pi`'s `--mode json` events
@@ -19,7 +19,7 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, normalize, relative } from "node:path";
 
 import type { Finding } from "../findings/finding.ts";
-import { deepToolNames } from "../reviewers/deep-tools.ts";
+import { historyTools } from "../reviewers/git-tools.ts";
 import type { Round } from "../reviewers/round.ts";
 
 /** One run as `review-once.ts` records it. */
@@ -31,8 +31,8 @@ export type Run = {
   readonly round: Pick<Round, "outcome" | "cost" | "findings">;
 };
 
-/** A `deep` tool's call, and the end of what it answered. */
-export type DeepCall = {
+/** A history tool's call, and the end of what it answered. */
+export type HistoryCall = {
   readonly tool: string;
   readonly args: Record<string, unknown>;
   /** `undefined` where the run ended before the call answered. */
@@ -56,7 +56,7 @@ export type Summary = {
   readonly looks: number;
   /** Each look outside the diff, as its tool and its arguments. */
   readonly outside: readonly string[];
-  readonly deepCalls: readonly DeepCall[];
+  readonly historyCalls: readonly HistoryCall[];
   /** Each finding as its severity, where it is anchored, and its headline. */
   readonly findings: readonly string[];
 };
@@ -65,7 +65,7 @@ const ANSWER_KEPT = 2_000;
 
 const LOOKING_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "find", "ls", "view", "glob"]);
 const READING_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "view"]);
-const DEEP_TOOLS: ReadonlySet<string> = new Set(deepToolNames);
+const HISTORY_TOOLS: ReadonlySet<string> = new Set(historyTools.map((tool) => tool.name));
 const COPILOT_SERVER_PREFIX = "squiz-";
 
 /** The files a unified diff changes, each under the name it has after the change. */
@@ -99,8 +99,8 @@ export function summarise(run: Run, stream: string, diff: string): Summary {
     toolCalls: calls.length,
     looks: looks.length,
     outside: outside.map((call) => `${call.tool} ${JSON.stringify(call.args)}`),
-    deepCalls: calls
-      .filter((call) => DEEP_TOOLS.has(call.tool))
+    historyCalls: calls
+      .filter((call) => HISTORY_TOOLS.has(call.tool))
       .map((call) => ({
         tool: call.tool,
         args: call.args,

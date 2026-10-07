@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { Depth } from "../../config/config.ts";
 import type { Invocation } from "../adapter.ts";
 import { pi } from "./adapter.ts";
 
@@ -17,7 +16,6 @@ const invocation: Invocation = {
   reportsFile: ".squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/agent-7/scratch",
   githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
-  depth: "read",
   thinking: "medium",
   model: null,
   terminal: "none",
@@ -27,9 +25,9 @@ const invocation: Invocation = {
  * The four parts are one value, so that a second reviewer CLI is a second
  * value of this shape and no other change anywhere.
  */
-test("the adapter carries a command line, what it confines with, a reader and the grants", () => {
+test("the adapter carries a command line, what it confines with, a reader and the grant", () => {
   assert.equal(pi.argv(invocation).command, "pi");
-  assert.deepEqual(Object.keys(pi.grants).toSorted(), ["deep", "read"]);
+  assert.ok(pi.grants.length > 0);
   assert.equal(typeof pi.parse, "function");
   assert.deepEqual(pi.confine(invocation), { outcome: "prepared", environment: {} });
 });
@@ -41,10 +39,8 @@ test("the adapter checks a configured model before pi starts", () => {
 });
 
 test("the grant on the command line is the one the adapter names", () => {
-  for (const depth of ["read", "deep"] as readonly Depth[]) {
-    const { args } = pi.argv({ ...invocation, depth });
-    assert.equal(args[args.indexOf("--tools") + 1], pi.grants[depth].join(","));
-  }
+  const { args } = pi.argv(invocation);
+  assert.equal(args[args.indexOf("--tools") + 1], pi.grants.join(","));
 });
 
 test("the adapter reads the report file, not pi's output", async () => {

@@ -23,11 +23,10 @@ export const REPORT_VERDICT = "report_verdict";
 export const FINISH_REVIEW = "finish_review";
 
 /**
- * The reporting calls, which the grant carries at every depth.
+ * The reporting calls, which the grant always carries.
  *
- * Depth decides how much the reviewer may read and run. Reporting is not a
- * depth: a reviewer with no way to report is a round that cannot return
- * anything, whatever it was allowed to look at.
+ * A reviewer with no way to report is a round that cannot return anything,
+ * whatever it was allowed to look at.
  */
 export const reportingTools: readonly string[] = Object.freeze([
   REPORT_FINDING,

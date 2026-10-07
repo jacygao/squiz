@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { deepToolNames, deepTools, roundVariable } from "../deep-tools.ts";
+import { historyTools } from "../git-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
 import { grants } from "./argv.ts";
@@ -25,7 +25,7 @@ import reportAsYouGo, {
   type MessageEnd,
   type Registrar,
   reportInto,
-  serveDeepTools,
+  serveHistoryTools,
 } from "./extension.ts";
 import { GRANT_VARIABLE, type Refusal, type ToolCall } from "./refusals.ts";
 
@@ -59,10 +59,10 @@ function registrar(): { pi: Registrar; loaded: Loaded } {
   return { pi, loaded };
 }
 
-/** The extension loaded with its reports going to `reports`, or nowhere, under the `deep` grant. */
+/** The extension loaded with its reports going to `reports`, or nowhere, under the grant. */
 function loaded(reports?: string): Loaded {
   const { pi, loaded } = registrar();
-  reportInto(pi, reports, process.cwd(), grants.deep);
+  reportInto(pi, reports, process.cwd(), grants);
   return loaded;
 }
 
@@ -339,7 +339,7 @@ test("a read outside the working directory pi was started in is refused and reco
   const { pi, loaded: extension } = registrar();
   keepVariable(t);
   process.env[REPORTS_VARIABLE] = reports;
-  process.env[GRANT_VARIABLE] = grants.read.join(",");
+  process.env[GRANT_VARIABLE] = grants.join(",");
   reportAsYouGo(pi);
   const handler = onlyHandler(extension, "tool_call") as Handler;
 
@@ -629,24 +629,22 @@ function handlerUnder(grant: string | undefined): Handler {
 // those it would add, and a name nothing grants, has to be refused here.
 test("the extension pi loads refuses every call the grant it was handed leaves out", (t) => {
   keepVariable(t);
-  for (const [depth, grant] of Object.entries(grants)) {
-    const handler = handlerUnder(grant.join(","));
-    for (const tool of ["bash", "edit", "write", "delete_everything"]) {
-      assert.equal(
-        handler({ toolName: tool, input: { command: "touch x", path: "src/a.ts" } })?.reason,
-        `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
-        `${tool} at ${depth}`,
-      );
-    }
-    for (const tool of grant) {
-      assert.equal(handler({ toolName: tool, input: { path: "package.json" } }), undefined, `${tool} at ${depth}`);
-    }
+  const handler = handlerUnder(grants.join(","));
+  for (const tool of ["bash", "edit", "write", "delete_everything"]) {
+    assert.equal(
+      handler({ toolName: tool, input: { command: "touch x", path: "src/a.ts" } })?.reason,
+      `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
+      tool,
+    );
+  }
+  for (const tool of grants) {
+    assert.equal(handler({ toolName: tool, input: { path: "package.json" } }), undefined, tool);
   }
 });
 
-test("the extension pi loads refuses a history tool the read grant leaves out", (t) => {
+test("the extension pi loads refuses a history tool a grant leaves out", (t) => {
   keepVariable(t);
-  const handler = handlerUnder(grants.read.join(","));
+  const handler = handlerUnder("read,grep,find,ls");
   assert.equal(handler({ toolName: "git_show", input: { commit: "HEAD" } })?.block, true);
 });
 
@@ -655,7 +653,7 @@ test("the extension pi loads refuses a history tool the read grant leaves out", 
 test("the extension pi loads refuses every call where no grant was handed to it", (t) => {
   keepVariable(t);
   const handler = handlerUnder(undefined);
-  for (const tool of [...grants.deep, "bash"]) {
+  for (const tool of [...grants, "bash"]) {
     assert.equal(handler({ toolName: tool, input: { path: "package.json" } })?.block, true, tool);
   }
 });
@@ -694,34 +692,31 @@ test("with no file named, every call answers as it did", async (t) => {
   );
 });
 
-/** The deep tools served with `environment` as the reviewer's own. */
-function deepLoaded(environment: Readonly<Record<string, string | undefined>>): Loaded {
+/** The history tools served in `snapshot`, by default this repository, which has a history to read. */
+function historyLoaded(snapshot: string = process.cwd()): Loaded {
   const { pi, loaded: extension } = registrar();
-  serveDeepTools(pi, environment);
+  serveHistoryTools(pi, snapshot);
   return extension;
 }
-
-/** A round whose snapshot is this repository, which has a history to read. */
-const thisRound = roundVariable({ snapshot: process.cwd() });
 
 /** The tools `pi` brings itself, which the extension does not register. */
 const builtIn = new Set(["read", "grep", "find", "ls"]);
 
 // pi registers what the extension offers and grants what --tools names, so a
 // name in one list and not the other is a tool offered and never granted.
-test("the extension pi loads registers exactly what the deep grant names", (t) => {
+test("the extension pi loads registers exactly what the grant names", (t) => {
   keepVariable(t);
   const { pi, loaded: extension } = registrar();
   reportAsYouGo(pi);
   assert.deepEqual(
     [...extension.tools.keys()].sort(),
-    grants.deep.filter((name) => !builtIn.has(name)).sort(),
+    grants.filter((name) => !builtIn.has(name)).sort(),
   );
 });
 
-test("each deep tool is registered under its shared runner's name, schema and description", () => {
-  const extension = deepLoaded({});
-  for (const shared of deepTools({})) {
+test("each history tool is registered under its shared runner's name, schema and description", () => {
+  const extension = historyLoaded();
+  for (const shared of historyTools) {
     const tool = toolOf(extension, shared.name);
     assert.deepEqual(tool.parameters, shared.parameters);
     assert.equal(tool.description, shared.description);
@@ -730,20 +725,20 @@ test("each deep tool is registered under its shared runner's name, schema and de
 });
 
 // pi marks a call's answer as an error only where execute throws.
-test("a deep tool that failed is the call's error", async () => {
-  for (const name of deepToolNames) {
-    const refused = await refusalOf(toolOf(deepLoaded({}), name), {});
-    assert.match(refused, /could not run: /u, `${name} answered ${refused}`);
+test("a history tool that failed is the call's error", async () => {
+  for (const { name } of historyTools) {
+    const refused = await refusalOf(toolOf(historyLoaded(), name), {});
+    assert.notEqual(refused, "", `${name} failed with no reason`);
   }
 });
 
-test("a deep tool's result is the call's answer", async () => {
-  const answer = await toolOf(deepLoaded(thisRound), "git_show").execute("call_1", { commit: "HEAD" });
+test("a history tool's result is the call's answer", async () => {
+  const answer = await toolOf(historyLoaded(), "git_show").execute("call_1", { commit: "HEAD" });
   const [content] = answer.content;
   assert.ok(content !== undefined && content.text.startsWith("commit "), JSON.stringify(answer));
 });
 
 test("the signal pi hands a call reaches the runner", async () => {
-  const tool = toolOf(deepLoaded(thisRound), "git_show");
+  const tool = toolOf(historyLoaded(), "git_show");
   await assert.rejects(tool.execute("call_1", { commit: "HEAD" }, AbortSignal.abort()));
 });

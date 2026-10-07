@@ -58,7 +58,7 @@ const adapter: Adapter = {
       result: { kind: "reviewed", findings: current.findings, verdicts: current.verdicts },
     };
   },
-  grants: { read: ["read"], deep: ["read", "bash"] },
+  grants: ["read"],
 };
 
 await runHost({

@@ -1,5 +1,5 @@
 /**
- * `pi`'s command line, and the tools it is granted at each depth.
+ * `pi`'s command line, and the tools it is granted.
  *
  * The grant confines what the reviewer may call, and the extension where it may
  * read. `pi`'s own default set, used when no `--tools` reaches it, is `read`,
@@ -25,7 +25,7 @@
  * prefix the project configured is carried forward by `confine`, which resolves it
  * itself; nothing else of the project's applies.
  *
- * `--thinking` is on every command line, at both depths. Without it `pi` takes
+ * `--thinking` is on every command line. Without it `pi` takes
  * the level from the user's own settings, which the harness does not choose, and
  * the same change gets a different review on two machines. A level `pi` does
  * not recognise is warned about on stderr and otherwise ignored, so an
@@ -36,27 +36,27 @@
 
 import { fileURLToPath } from "node:url";
 
-import type { Depth } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
-import { deepToolNames } from "../deep-tools.ts";
+import { historyTools } from "../git-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
 import { GRANT_VARIABLE } from "./refusals.ts";
 
-const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
-
 /**
- * The tools `pi` is given at each depth. `edit`, `write` and `bash` are in
- * neither.
+ * The tools `pi` is given: the reading tools, the reporting calls and the
+ * history tools. `edit`, `write` and `bash` are not among them.
  *
- * Every name is spelled once, and `deep` is the `read` grant plus the tools the
- * extension serves for it. An unrecognised name is dropped with exit status 0
- * and empty stderr, so a misspelling costs the reviewer a tool and says nothing.
+ * An unrecognised name is dropped with exit status 0 and empty stderr, so a
+ * misspelling costs the reviewer a tool and says nothing.
  */
-export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze({
-  read: Object.freeze([...readGrant, ...reportingTools]),
-  deep: Object.freeze([...readGrant, ...reportingTools, ...deepToolNames]),
-});
+export const grants: readonly string[] = Object.freeze([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  ...reportingTools,
+  ...historyTools.map((tool) => tool.name),
+]);
 
 /**
  * The file `pi` loads the reporting calls from, which ships beside this.
@@ -68,8 +68,8 @@ export const grants: Readonly<Record<Depth, readonly string[]>> = Object.freeze(
 export const extensionFile = fileURLToPath(new URL("extension.ts", import.meta.url));
 
 /**
- * Build the command line for one round at the depth given, for a reviewer in a
- * pane or one with no terminal.
+ * Build the command line for one round, for a reviewer in a pane or one with no
+ * terminal.
  *
  * In a pane `pi` runs interactively, with the pane as its terminal. With no
  * terminal it runs in print mode, and its stdin must be `/dev/null`: with stdin
@@ -80,7 +80,7 @@ export function argv(invocation: Invocation): CommandLine {
   const detached = invocation.terminal === "none";
   // The extension refuses whatever this leaves out, so it is handed the very
   // list --tools is, and the two cannot name different tools.
-  const grant = grants[invocation.depth].join(",");
+  const grant = grants.join(",");
   return {
     command: "pi",
     directory: invocation.directory,

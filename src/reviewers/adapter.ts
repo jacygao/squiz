@@ -3,14 +3,14 @@
  * sides share.
  *
  * An adapter is the whole of what knowing a CLI costs: the command line it
- * takes, the tools it is granted at each depth, how what the reviewer reported reads back, and
+ * takes, the tools it is granted, how what the reviewer reported reads back, and
  * whatever that CLI has to be handed for reporting a finding to be a call it
  * validates. Everything around it — starting the process, confining it,
  * bounding its time, deciding what the round returned — is written once against
  * these types, so a second reviewer is a second adapter and no other change.
  */
 
-import type { Depth, Thinking } from "../config/config.ts";
+import type { Thinking } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { Verdict } from "../findings/status.ts";
 
@@ -51,11 +51,6 @@ export type Invocation = {
    * runs finds no login there.
    */
   readonly githubConfigDirectory: string;
-  /**
-   * How much the reviewer is allowed to do. The harness decides it; the adapter
-   * turns it into the grant and never chooses a value of its own.
-   */
-  readonly depth: Depth;
   /**
    * How hard the reviewer thinks. The harness decides it, and the adapter puts
    * it on every command line rather than leaving the CLI to its own setting.
@@ -250,13 +245,13 @@ export type Adapter = {
     soFar?: ProgressSoFar,
   ) => Promise<ParsedRun>;
   /**
-   * Which tools the CLI is given at each depth, the calls the reviewer reports
-   * through among them.
+   * The tools the CLI is given, as one list in its own names: the reading
+   * tools, the calls the reviewer reports through, and the history tools.
    *
    * It sits beside the command line rather than only inside it, so that what a
    * round was allowed to do is readable without parsing the arguments back.
    */
-  readonly grants: Readonly<Record<Depth, readonly string[]>>;
+  readonly grants: readonly string[];
   /**
    * The command that resumes the session the reviewer kept in
    * `sessionDirectory`, with that directory written as `spelled`. Undefined

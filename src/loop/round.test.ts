@@ -532,7 +532,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         };
       },
       parse: (stdout, progressSoFar) => current().parse(stdout, progressSoFar),
-      grants: { read: ["read"], deep: ["read", "bash"] },
+      grants: ["read"],
     };
 
     let held: HostLock | undefined;
@@ -1011,19 +1011,9 @@ test("the first round of a first episode posts its finding, is handed no thread,
   );
 });
 
-/**
- * The prompt tells the reviewer what the history tools are for only where it is
- * granted them.
- *
- * The configuration is built here rather than loaded, so a round at `deep` runs
- * before the loader accepts that depth.
- */
-test("the history section reaches a reviewer at `deep` and not one at `read`", async () => {
-  const deep = await runInFixture({ answers: POSTING, reviewer: reviews({}), config: { depth: "deep" } });
-  const read = await runInFixture({ answers: POSTING, reviewer: reviews({}), config: { depth: "read" } });
-
-  assert.match(deep.invocations[0]?.prompt ?? "", /^## History$/mu);
-  assert.equal(read.invocations[0]?.prompt.includes("## History"), false, "a reviewer at read was told of tools it is not granted");
+test("the prompt the round hands the reviewer tells it what the history tools are for", async () => {
+  const ran = await runInFixture({ answers: POSTING, reviewer: reviews({}) });
+  assert.match(ran.invocations[0]?.prompt ?? "", /^## History$/mu);
 });
 
 /**
@@ -2832,35 +2822,15 @@ function startsBroken(): Backends {
   };
 }
 
-test("the reviewer runs in a snapshot of the head commit, at either depth, with scratch space outside it", async () => {
-  for (const depth of ["read", "deep"] as const) {
-    const ran = await runInFixture({ config: { depth }, answers: POSTING, reviewer: reviews({}) });
+test("the reviewer runs in a snapshot of the head commit, with scratch space outside it", async () => {
+  const ran = await runInFixture({ answers: POSTING, reviewer: reviews({}) });
 
-    const directory = ran.invocations[0]?.directory ?? "";
-    assert.equal(directory, snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }), depth);
-    assert.deepEqual(ran.headsWhenStarted, [ran.head], `the snapshot holds the head commit at ${depth}`);
-    const scratch = ran.invocations[0]?.scratchDirectory ?? "";
-    assert.match(scratch, new RegExp(`/\\.squiz/${PULL_REQUEST}/scratch$`, "u"));
-    assert.equal(scratch.startsWith(directory), false, "scratch space is outside the snapshot");
-  }
-});
-
-// The deep tools read the snapshot out of SQUIZ_ROUND, so it has to name where
-// the round really put it.
-test("at deep the round hands the deep tools the snapshot the reviewer was given", async () => {
-  const kept = await mkdtemp(join(tmpdir(), "squiz-round-variable-"));
-  try {
-    const seen = join(kept, "round.json");
-    const ran = await runInFixture({
-      config: { depth: "deep" },
-      answers: POSTING,
-      reviewer: { command: "/bin/sh", args: ["-c", `printf '%s' "$SQUIZ_ROUND" > '${seen}'`], parse: reviews({}).parse },
-    });
-    const handed = JSON.parse(readFileSync(seen, "utf8")) as Record<string, unknown>;
-    assert.equal(handed["snapshot"], snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }));
-  } finally {
-    await rm(kept, { recursive: true, force: true });
-  }
+  const directory = ran.invocations[0]?.directory ?? "";
+  assert.equal(directory, snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }));
+  assert.deepEqual(ran.headsWhenStarted, [ran.head], "the snapshot holds the head commit");
+  const scratch = ran.invocations[0]?.scratchDirectory ?? "";
+  assert.match(scratch, new RegExp(`/\\.squiz/${PULL_REQUEST}/scratch$`, "u"));
+  assert.equal(scratch.startsWith(directory), false, "scratch space is outside the snapshot");
 });
 
 test("a change made in the reviewer's snapshot leaves the coding agent's worktree alone", async () => {

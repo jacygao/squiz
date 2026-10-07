@@ -19,10 +19,10 @@ test("a path holding shell syntax reaches the shim as it is", () => {
   writeFileSync(shim, shimScript({ real, flags: ["--mode", "json $x"], review: "--print", granted, stream }));
   chmodSync(shim, 0o755);
 
-  execFileSync(shim, ["--print", "a'b"], { env: { ...process.env, SQUIZ_ROUND: "{}" } });
+  execFileSync(shim, ["--print", "a'b"]);
 
   assert.equal(readFileSync(stream, "utf8"), "--mode\njson $x\n--print\na'b\n");
-  assert.equal(readFileSync(granted, "utf8"), "--print\na'b\nSQUIZ_ROUND={}\n");
+  assert.equal(readFileSync(granted, "utf8"), "--print\na'b\n");
 });
 
 // The adapter's own checks run the CLI too, as `pi --list-models` does, and read its output.

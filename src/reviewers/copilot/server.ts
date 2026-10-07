@@ -1,7 +1,7 @@
 /**
- * The MCP server Copilot starts to serve the three reporting calls, and at
- * `deep` the three `deep` tools, over standard input and output in
- * newline-delimited JSON-RPC 2.0.
+ * The MCP server Copilot starts to serve the three reporting calls and the
+ * three history tools, over standard input and output in newline-delimited
+ * JSON-RPC 2.0.
  *
  * Nothing in the harness runs this. Copilot starts it by path, with the Node
  * the harness runs on, and Node strips its types and those of the modules it
@@ -11,14 +11,11 @@
  *
  * Copilot validates no call against its schema, so the report checks see the
  * arguments exactly as the model sent them, and nothing here converts one. A
- * `deep` tool's arguments are checked against its schema here, before it runs.
+ * history tool's arguments are checked against its schema here, before it runs.
  *
- * **The `deep` tools run in Copilot's environment, which is the reviewer's.**
- * Copilot hands the server its own environment with the configuration's
- * variables laid over it, so the round's variable, its record and the emptied
- * GitHub credentials reach the server as they reach Copilot. The server serves
- * the `deep` tools where the round's variable is there, which it is only at
- * `deep`.
+ * **The history tools run in the snapshot `SQUIZ_SNAPSHOT` names**, never in
+ * the server's own working directory, which is wherever Copilot started it.
+ * Where none is named, each answers with its error and runs nothing.
  *
  * Standard output is the protocol, and a line on it that is not a message
  * breaks the session. Everything else goes to standard error.
@@ -30,13 +27,16 @@
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
-import { type DeepTool, deepTools, ROUND_VARIABLE } from "../deep-tools.ts";
+import { type HistoryTool, historyTools } from "../git-tools.ts";
 import { type ReportCalls, reportCalls } from "../report-calls.ts";
 import { reportFileAt, REPORTS_VARIABLE } from "../report-file.ts";
 import { mismatchOf } from "./arguments.ts";
 
 /** The variable naming the charter file, which the server hands Copilot as its instructions. */
 export const CHARTER_VARIABLE = "SQUIZ_CHARTER";
+
+/** The variable in the server's MCP `env` naming the snapshot, by absolute path. */
+export const SNAPSHOT_VARIABLE = "SQUIZ_SNAPSHOT";
 
 /** The protocol versions this server can speak, the latest first. */
 const PROTOCOL_VERSIONS: readonly string[] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -56,12 +56,11 @@ type Outcome =
   | { readonly result: unknown }
   | { readonly error: { readonly code: number; readonly message: string } };
 
-/** Where the server reads its charter and writes its reports, and the `deep` tools it serves. */
+/** Where the server reads its charter, writes its reports and runs the history tools. */
 type Setting = {
   readonly charter: string | undefined;
   readonly reports: string | undefined;
-  /** Empty at `read`. */
-  readonly deep: readonly DeepTool[];
+  readonly snapshot: string | undefined;
 };
 
 /** Calls still running, by request id, so that a cancel can stop one. */
@@ -105,7 +104,7 @@ function serve(setting: Setting): void {
       write({ jsonrpc: "2.0", id, ...outcome });
       return;
     }
-    // A `deep` tool answers when it ends, and the server goes on reading
+    // A history tool answers when it ends, and the server goes on reading
     // meanwhile. A call that was cancelled is not answered.
     void outcome.then((answered) => {
       const controller = running.get(id);
@@ -157,7 +156,7 @@ function outcomeOf(
       case "tools/list":
         return {
           result: {
-            tools: [...reporting.calls, ...setting.deep].map((call) => ({
+            tools: [...reporting.calls, ...historyTools].map((call) => ({
               name: call.name,
               description: call.description,
               inputSchema: call.parameters,
@@ -165,11 +164,11 @@ function outcomeOf(
           },
         };
       case "tools/call": {
-        const tool = setting.deep.find((each) => each.name === fieldOf(params, "name"));
+        const tool = historyTools.find((each) => each.name === fieldOf(params, "name"));
         if (tool === undefined) return called(params, reporting);
         const controller = new AbortController();
         running.set(id, controller);
-        return deepCalled(tool, fieldOf(params, "arguments"), controller.signal);
+        return historyCalled(tool, setting.snapshot, fieldOf(params, "arguments"), controller.signal);
       }
       default:
         return { error: { code: METHOD_NOT_FOUND, message: `no method ${method}` } };
@@ -239,19 +238,27 @@ function called(params: unknown, reporting: ReportCalls): Outcome {
 }
 
 /**
- * The answer to a `deep` tool's call: refused where its arguments do not match
- * its schema, and run where they do.
+ * The answer to a history tool's call: refused where no snapshot is named or
+ * its arguments do not match its schema, and run in the snapshot where they do.
  */
-async function deepCalled(tool: DeepTool, args: unknown, signal: AbortSignal): Promise<Outcome> {
-  const mismatch = mismatchOf(tool.parameters, args);
+async function historyCalled(
+  tool: HistoryTool,
+  snapshot: string | undefined,
+  args: unknown,
+  signal: AbortSignal,
+): Promise<Outcome> {
   let text: string;
   let isError: boolean;
-  if (mismatch !== undefined) {
+  const mismatch = mismatchOf(tool.parameters, args);
+  if (snapshot === undefined || snapshot === "") {
+    text = `${tool.name} was not run: the round set no ${SNAPSHOT_VARIABLE}, so there is no snapshot to run in.`;
+    isError = true;
+  } else if (mismatch !== undefined) {
     text = `${tool.name} was not run: ${mismatch}.`;
     isError = true;
   } else {
     try {
-      const result = await tool.call(args, signal);
+      const result = await tool.run(snapshot, args, signal);
       text = result.text;
       isError = result.failed;
     } catch (cause) {
@@ -262,12 +269,6 @@ async function deepCalled(tool: DeepTool, args: unknown, signal: AbortSignal): P
     }
   }
   return { result: { content: [{ type: "text", text }], ...(isError ? { isError } : {}) } };
-}
-
-/** The `deep` tools, where the round handed its variable over, or none. */
-function deepOf(environment: NodeJS.ProcessEnv): readonly DeepTool[] {
-  if ((environment[ROUND_VARIABLE] ?? "") === "") return [];
-  return deepTools(environment);
 }
 
 function fieldOf(value: unknown, field: string): unknown {
@@ -283,6 +284,6 @@ if (import.meta.main) {
   serve({
     charter: process.env[CHARTER_VARIABLE],
     reports: process.env[REPORTS_VARIABLE],
-    deep: deepOf(process.env),
+    snapshot: process.env[SNAPSHOT_VARIABLE],
   });
 }

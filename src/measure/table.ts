@@ -12,16 +12,16 @@ import { join } from "node:path";
 
 import type { Summary } from "./summary.ts";
 
-type Recorded = Summary & { readonly case: string; readonly reviewer: string; readonly depth: string };
+type Recorded = Summary & { readonly case: string; readonly reviewer: string };
 
 const rows = process.argv.slice(2).map((directory) => {
   const summary = JSON.parse(readFileSync(join(directory, "summary.json"), "utf8")) as Recorded;
   const cost = summary.credits === undefined ? `$${summary.dollars.toFixed(2)}` : `${summary.credits.toFixed(1)} credits`;
-  const deep = summary.deepCalls.length === 0 ? "none" : summary.deepCalls.map((call) => call.tool).join(", ");
+  const history = summary.historyCalls.length === 0 ? "none" : summary.historyCalls.map((call) => call.tool).join(", ");
   const findings = summary.findings.length === 0 ? "none" : summary.findings.join("<br>");
-  return `| ${summary.label} | ${summary.case} | ${summary.reviewer} | ${summary.depth} | ${summary.outcome} | ${summary.messages} | ${summary.tokens.toLocaleString("en")} | ${summary.seconds} | ${cost} | ${deep} | ${findings} |`;
+  return `| ${summary.label} | ${summary.case} | ${summary.reviewer} | ${summary.outcome} | ${summary.messages} | ${summary.tokens.toLocaleString("en")} | ${summary.seconds} | ${cost} | ${history} | ${findings} |`;
 });
 
-console.log("| Run | Case | Reviewer | Depth | Outcome | Messages | Tokens | Seconds | Cost | Deep calls | Findings |");
-console.log("|---|---|---|---|---|---|---|---|---|---|---|");
+console.log("| Run | Case | Reviewer | Outcome | Messages | Tokens | Seconds | Cost | History calls | Findings |");
+console.log("|---|---|---|---|---|---|---|---|---|---|");
 for (const row of rows) console.log(row);

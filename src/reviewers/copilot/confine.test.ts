@@ -30,7 +30,6 @@ function fixture(t: TestContext): Fixture {
     reportsFile: ".squiz/7/rounds/1/reports.jsonl",
     scratchDirectory: ".squiz/7/scratch",
     githubConfigDirectory: ".squiz/7/rounds/1/gh",
-    depth: "read",
     thinking: "medium",
     model: null,
     terminal: "none",
@@ -143,9 +142,3 @@ test("a session directory that cannot be made fails the confinement", (t) => {
   assert.equal(confinement.outcome, "failed", JSON.stringify(confinement));
 });
 
-test("deep is confined as read is, with the same environment and the same agent", (t) => {
-  const { invocation, home, session } = fixture(t);
-  const environment = environmentOf(confine({ ...invocation, depth: "deep" }, { HOME: home }));
-  assert.deepEqual(Object.keys(environment).toSorted(), ["COPILOT_ALLOW_ALL", "COPILOT_HOME"]);
-  assert.deepEqual(readdirSync(join(session, "agents")), [`${AGENT_NAME}.agent.md`]);
-});

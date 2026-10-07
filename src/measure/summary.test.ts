@@ -103,7 +103,7 @@ test("Copilot's looks count as pi's do, by their own tool names", () => {
   assert.deepEqual(summary.outside, ['grep {"pattern":"x"}', 'glob {"pattern":"**/*.ts"}']);
 });
 
-test("each deep call is kept with its arguments, whether it failed, and the end of what it answered", () => {
+test("each history call is kept with its arguments, whether it failed, and the end of what it answered", () => {
   const long = `${"x".repeat(5_000)}not ok 3 boundary`;
   const stream = [
     call("read", { path: "docs/notes/a.md" }),
@@ -119,8 +119,8 @@ test("each deep call is kept with its arguments, whether it failed, and the end 
     copilotEnd("b", false, "no such path"),
   ].join("\n");
   const summary = summarise(run, stream, diff);
-  assert.equal(summary.deepCalls.length, 2);
-  const [search, blame] = summary.deepCalls;
+  assert.equal(summary.historyCalls.length, 2);
+  const [search, blame] = summary.historyCalls;
   assert.equal(search?.tool, "git_log_search");
   assert.equal(search?.failed, false);
   assert.ok(search?.answered?.endsWith("not ok 3 boundary"));
@@ -128,7 +128,7 @@ test("each deep call is kept with its arguments, whether it failed, and the end 
   assert.deepEqual(blame, { tool: "git_blame", args: { file: "a.js", line: 3 }, failed: true, answered: "no such path" });
 });
 
-test("a Copilot deep call that failed keeps the error it answered with", () => {
+test("a Copilot history call that failed keeps the error it answered with", () => {
   const stream = [
     copilotStart("s", "squiz-git_show", { commit: "nope" }),
     JSON.stringify({
@@ -136,14 +136,14 @@ test("a Copilot deep call that failed keeps the error it answered with", () => {
       data: { toolCallId: "s", success: false, error: { message: "MCP server 'squiz': no such commit", code: "failure" } },
     }),
   ].join("\n");
-  assert.deepEqual(summarise(run, stream, diff).deepCalls, [
+  assert.deepEqual(summarise(run, stream, diff).historyCalls, [
     { tool: "git_show", args: { commit: "nope" }, failed: true, answered: "MCP server 'squiz': no such commit" },
   ]);
 });
 
-test("a deep call the run was stopped during is kept with nothing answered", () => {
+test("a history call the run was stopped during is kept with nothing answered", () => {
   const stream = JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "git_log_search", args: { term: "boundary" } });
-  assert.deepEqual(summarise(run, stream, diff).deepCalls, [
+  assert.deepEqual(summarise(run, stream, diff).historyCalls, [
     { tool: "git_log_search", args: { term: "boundary" }, failed: undefined, answered: undefined },
   ]);
 });

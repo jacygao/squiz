@@ -274,7 +274,7 @@ export const cases: Readonly<Record<string, Case>> = {
     source: { kind: "upstream", ...QS, patch: "qs-comma-limit.patch" },
     description: "qs-comma-limit.md",
     test: QS_TEST,
-    chosen: `${PLANTED_FOR_TESTS} Its \`history\` defect was not planted: the first \`deep\` run on it found it through \`git_log_search\`, and it was added then.`,
+    chosen: `${PLANTED_FOR_TESTS} Its \`history\` defect was not planted: the first run granted the history tools found it through \`git_log_search\`, and it was added then.`,
     known: [
       {
         file: "lib/parse.js",

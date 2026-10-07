@@ -10,7 +10,6 @@ import { test } from "node:test";
 
 import type { PullRequest } from "../github/pull-request.ts";
 import type { ReviewThread } from "../github/threads.ts";
-import type { Depth } from "../config/config.ts";
 import { composePrompt, type UnderReview } from "./prompt.ts";
 
 // The expected prompts are lines joined rather than template literals: they are
@@ -77,12 +76,8 @@ const settled: ReviewThread = {
   ],
 };
 
-function round(
-  threads: readonly ReviewThread[],
-  change: Partial<UnderReview> = {},
-  depth: Depth = "read",
-): string {
-  return composePrompt({ pullRequest, diff, threads, ...change }, depth);
+function round(threads: readonly ReviewThread[], change: Partial<UnderReview> = {}): string {
+  return composePrompt({ pullRequest, diff, threads, ...change });
 }
 
 /** The prompt down to the end of the diff, which every round carries. */
@@ -97,6 +92,10 @@ const preamble = [
   "Adds the placement pass.",
   "```",
   "",
+  "## History",
+  "",
+  "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
+  "",
   "## Diff",
   "",
   "```diff",
@@ -107,7 +106,7 @@ const preamble = [
   "```",
 ];
 
-test("a prompt carrying no thread carries the pull request and asks for no verdict", () => {
+test("a prompt carrying no thread carries the pull request and the history tools, and asks for no verdict", () => {
   assert.equal(round([]), prompt(...preamble));
 });
 
@@ -225,16 +224,7 @@ test("a fence inside the diff does not close the block it is carried in", () => 
   assert.equal(
     round([], { diff: fenced }),
     prompt(
-      "# Review pull request #42",
-      "",
-      "Head `cards/placement`, base `main`.",
-      "",
-      "## Description",
-      "",
-      "```",
-      "Adds the placement pass.",
-      "```",
-      "",
+      ...preamble.slice(0, preamble.indexOf("## Diff")),
       "## Diff",
       "",
       "````diff",
@@ -268,30 +258,5 @@ test("a thread on a line GitHub named no line for is not called the file", () =>
 test("a pull request nobody described is said to have no description", () => {
   const bare = { pullRequest: { ...pullRequest, description: "  \n" }, diff, threads: [] };
 
-  assert.match(composePrompt(bare, "read"), /^The pull request has no description\.$/mu);
-});
-
-/** The prompt down to the end of the description, which every round carries. */
-const throughDescription = preamble.slice(0, preamble.indexOf("## Diff"));
-
-/** The rest of a prompt carrying no thread. */
-const fromDiff = preamble.slice(preamble.indexOf("## Diff"));
-
-test("a reviewer at `deep` is told what the history tools are for, and nothing about tests", () => {
-  assert.equal(
-    round([], {}, "deep"),
-    prompt(
-      ...throughDescription,
-      "## History",
-      "",
-      "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
-      "",
-      ...fromDiff,
-    ),
-  );
-});
-
-// A tool the reviewer is not granted is one it can only report as missing.
-test("a reviewer at `read` is told of no history tool", () => {
-  assert.equal(round([], {}, "read"), prompt(...preamble));
+  assert.match(composePrompt(bare), /^The pull request has no description\.$/mu);
 });
