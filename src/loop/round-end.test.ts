@@ -160,6 +160,7 @@ test("the close of a clean last round hands the summary the cap and the state it
     rounds: [unspentRound, unspentRound, unspentRound],
     threads: [],
     findings: { outcomes: [] },
+    earlier: [],
     because: ended.because,
     confinement: nothingEstablished,
     leftNotReviewed: ended.leftNotReviewed,

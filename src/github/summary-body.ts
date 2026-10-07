@@ -39,6 +39,11 @@ export type ClosedEpisode = {
    */
   readonly findings: PostedFindings;
   /**
+   * The Notes lines of an earlier round's findings that no thread holds, which
+   * no round after it settled.
+   */
+  readonly earlier: readonly string[];
+  /**
    * Which bound closed the episode. `null` where none of them did, which is a
    * close Notes says nothing about.
    */
@@ -107,19 +112,15 @@ function tally(episode: ClosedEpisode): string {
 }
 
 /**
- * How many findings the review raised: every thread of the episode, and the
- * closing round's findings that no thread holds.
+ * How many findings the review raised: every thread of the episode, and every
+ * finding no thread holds that Notes names.
  *
  * Larger than the four status counts add to, because a finding no thread holds
  * is raised and carries no status. Every one of them is a line in Notes, so
  * nothing in the count is a finding the reader cannot see.
- *
- * A finding an earlier round raised and no thread holds is not counted, because
- * nothing carries one between rounds. Threads are unaffected: every thread of the
- * episode is on the pull request when it closes.
  */
 function countRaised(episode: ClosedEpisode): number {
-  return episode.threads.length + unthreaded(episode.findings).length;
+  return episode.threads.length + episode.earlier.length + unthreaded(episode.findings).length;
 }
 
 function howMany(threads: readonly ClassifiedThread[], status: string): number {
@@ -183,15 +184,19 @@ function oneLine(text: string): string {
 /**
  * Notes, or nothing at all.
  *
- * The findings come in the order they were posted, which runs `high` severity
- * first. What the episode established about the worktree follows them, then the
+ * An earlier round's findings come first, then the closing round's in the order
+ * they were posted, which runs `high` severity first. What the episode established about the worktree follows them, then the
  * rounds the time bound cut short, and the bound that closed the episode comes
  * last: the findings are each about one defect, the worktree and the cuts are
  * about the rounds, and the bound is about the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
   const lines = [
-    ...[...unthreadedNotes(episode.findings), ...worktreeNotes(episode.confinement)].map(
+    ...[
+      ...episode.earlier,
+      ...unthreadedNotes(episode.findings),
+      ...worktreeNotes(episode.confinement),
+    ].map(
       (note) => `- ${note}`,
     ),
     ...cutShort(episode.rounds),

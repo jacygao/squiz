@@ -63,6 +63,7 @@ const quiet: ClosedEpisode = {
   rounds: [round(0.0061, 20_100)],
   threads: [],
   findings: posted(),
+  earlier: [],
   because: "nothing-open",
   confinement: undisturbed,
   leftNotReviewed: null,
@@ -120,6 +121,7 @@ test("the episode renders as the specification shows", () => {
         ),
       ),
     ),
+    earlier: [],
     because: "nothing-open",
     confinement: { ...undisturbed, changed: ["packages/sync/src/queue.test.ts"] },
     leftNotReviewed: null,
@@ -235,6 +237,36 @@ test("a finding no thread could hold is given the location the reviewer gave it"
     `the unanchored findings were not given their locations: ${comment}`,
   );
   assert.ok(comment.includes("2 findings"), `the unanchored findings were not counted: ${comment}`);
+});
+
+/**
+ * An earlier round's findings reach the summary as the lines that round's own
+ * Notes would have carried, because nothing else of them was kept.
+ */
+test("an earlier round's findings no thread holds are counted and named in Notes", () => {
+  const comment = renderSummary({
+    ...quiet,
+    findings: posted(noted(onTheChange("The retry queue duplicates the scheduler"))),
+    earlier: ["`src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)"],
+  });
+  assert.equal(
+    comment,
+    [
+      "**Squiz review — 1 round, 2 findings**",
+      "",
+      "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
+      "20,100 tokens over 1 round: 20,100 · $0.0061",
+      "",
+      "**Needs a person**",
+      "",
+      "Nothing needs a person.",
+      "",
+      "**Notes**",
+      "",
+      "- `src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)",
+      "- About the change as a whole: The retry queue duplicates the scheduler",
+    ].join("\n"),
+  );
 });
 
 /**

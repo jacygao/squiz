@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.09 (draft)
+**Version:** 1.10 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -214,7 +214,7 @@ Each record is in one of five states:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. A round that left the episode open also records each of its findings that no thread holds, as the line § 5's Notes would give it. |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, or a later commit or reply superseded it before its round started, and why. |
 
@@ -1984,12 +1984,9 @@ Three blocks, in this order.
    many ended `fixed`, `withdrawn`, `open` and `disputed`, and the tokens each
    round spent with the episode's total, followed by the dollars where the
    reviewer's CLI priced the model, and the AI credits where it reported
-   those. Findings raised counts every thread of the
-   episode, and every finding of the closing round that no thread holds. The
-   findings that no thread holds carry no status. Every thread of the episode is
-   counted because the threads persist on the pull request. Only the closing
-   round's findings that no thread holds are counted, because nothing carries one
-   of those from one round to the next.
+   those. Findings raised counts every thread of the episode, and every finding
+   that no thread holds that Notes lists. The findings that no thread holds carry
+   no status.
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its headline and where it sits: `file:line` for a
    thread anchored to a line, and the file alone for one anchored to the file.
@@ -2002,9 +1999,19 @@ Three blocks, in this order.
    round's number and the bound; and a cap or bound that ended the episode
    early, with each queued state it left not reviewed.
 
-A failed round posts no summary, so the findings it salvaged that no thread
-holds are listed in its failure comment instead, as § 7 The failure comment sets
-out.
+**The findings that no thread holds are the closing round's, and those an
+earlier round left that no later round settled.** A round that leaves the
+episode open posts no summary, so its record keeps each of those findings as
+its Notes line (§ 3 The state file), and `squiz review` prints each on stderr
+for the coding agent working that round (§ 6). A later round whose reviewer
+finished its review settles them: the reviewer read the whole change again, and
+raised again each one it still found. The earlier findings are therefore listed
+only by a close that ran no reviewer, which lists those of the last round that
+reached a result. They come first in Notes, before the closing round's own.
+
+A failed round settles nothing and posts no summary. The findings it salvaged
+that no thread holds are listed in its failure comment instead, as § 7 The
+failure comment sets out.
 
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
@@ -2338,7 +2345,18 @@ squiz: the failure is posted on PR #41
 squiz: put these lines in your report rather than running squiz review again
 ```
 
-A round that could post none of its findings prints the same way:
+A round that left threads open and has findings that no thread holds keeps exit
+2, and prints each on stderr as § 5's Notes write it, after the line counting
+any it could not post:
+
+```
+squiz: round 1 could not post 1 of its 3 findings to PR #41
+squiz: round 1 raised this on no thread: About the change as a whole: The retry queue duplicates the scheduler
+squiz: round 1 raised this on no thread: `src/cache.ts:12` — The cache is never cleared (raised, and its comment could not be posted)
+```
+
+A round that could post none of its findings prints the same way as a failed
+round:
 
 ```
 squiz: review failed: round 2 found 3 findings and could not post them to PR #41
@@ -2591,7 +2609,7 @@ a path that is silent today.
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. A trigger whose listing fails queues nothing. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. Each is named with its thread and the reason: by `squiz review` and `squiz status` for the round, in the summary that closes the episode, and in the failure comment of a round that failed. | `squiz review` stderr (#605), `squiz status` (#605), summary's Notes (#605), failure comment (#605) |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. A round that closes the episode lists each in its summary's Notes, and a round that fails lists each in its failure comment. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
-| A round that leaves threads open has findings no thread holds | A finding about the change as a whole, one the harness could anchor to neither a line nor a file, and one whose comment could not be posted reach no thread, and a round that leaves threads open posts no summary. `squiz review` prints each, and the summary that closes the episode lists each that no later round settled. Until then, only how many comments could not be posted is kept, by the row above. | `squiz review` stderr (#606), summary's Notes (#606) |
+| A round that leaves threads open has findings no thread holds | A finding about the change as a whole, one the harness could anchor to neither a line nor a file, and one whose comment could not be posted reach no thread, and a round that leaves threads open posts no summary. The round's record keeps each. `squiz review` prints each on stderr, and the summary that closes the episode lists each that no later round settled (§ 5). | `squiz review` stderr, summary's Notes |
 | No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode. A new commit, a new reply or a run of `squiz review` retries it where a round remains, and closes the episode where none does, as The failure comment below says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. | `squiz review` stderr, `squiz status`, `host.log` |
 | The round's spend cannot be written | Exit 1, and nothing the reviewer found is posted. A round that posted its findings and recorded nothing is one the next round repeats comment for comment. The failure comment and stderr say nothing was posted, and give the underlying error. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |

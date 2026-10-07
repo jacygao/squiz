@@ -841,6 +841,36 @@ test("a reviewed round's record counts the threads its findings opened", async (
   assert.equal(record.newFindings, 1);
 });
 
+/** A finding about the change as a whole, which no thread can hold. */
+function aboutTheChange(headline: string): Finding {
+  return { scope: "change", severity: "medium", headline, reasoning: ["Two schedulers drift apart."], suggestedFix: "Use the one there is." };
+}
+
+test("#606: a round that leaves threads open records each finding no thread holds, as the summary would name it", async () => {
+  const ran = await host({
+    records: atHead,
+    findings: [[finding("The name says nothing."), aboutTheChange("The retry queue duplicates the scheduler")]],
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 2);
+  assert.deepEqual(record.unthreaded, ["About the change as a whole: The retry queue duplicates the scheduler"]);
+});
+
+test("#606: a round that closes the episode records no finding no thread holds, because its summary names them", async () => {
+  const ran = await host({
+    records: atHead,
+    config: { rounds: 1 },
+    findings: [[finding("The name says nothing."), aboutTheChange("The retry queue duplicates the scheduler")]],
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 3);
+  assert.equal(record.unthreaded, undefined);
+});
+
 test("a round that closes at the cap with a thread open records the cap as what closed it", async () => {
   const ran = await host({ records: atHead, config: { rounds: 1 }, findings: [[finding("The name says nothing.")]] });
 

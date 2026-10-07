@@ -69,6 +69,7 @@ import { postFailure } from "./failure-comment.ts";
 import {
   closedBeforeReview,
   lastReviewed,
+  lastReviewedRecord,
   type LeftNotReviewed,
   type QueuedRecord,
   type RoundEnd,
@@ -1204,6 +1205,9 @@ function closeAfterReview(
       handedOver,
       verdicts: account.verdicts,
       findings: account.findings,
+      // This round's reviewer read the whole change again, which settles every
+      // earlier round's findings: what it still found, it raised itself.
+      earlier: [],
       because,
       // What every round established, and not this round's own readings. A round
       // that blocked posted no comment, so a file it found changed is named here
@@ -1268,6 +1272,9 @@ function closeBeforeReview(
               handedOver: threads,
               verdicts: standing(threads),
               findings: account.findings,
+              // No reviewer ran, so nothing settled what the last round to reach
+              // its end left on no thread.
+              earlier: lastReviewedRecord(state.records ?? [])?.unthreaded ?? [],
               // The bound closed the episode either way, and the Notes name it
               // through the states it left not reviewed.
               because: openThreads.length === 0 ? "nothing-open" : bound,

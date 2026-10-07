@@ -189,6 +189,7 @@ const closing: ClosingRound = {
     unapplied: [],
   },
   findings,
+  earlier: [],
   because: "round-cap",
   confinement: undisturbed,
   leftNotReviewed: {
@@ -211,14 +212,20 @@ function margin(): GhCall {
 }
 
 test("the body posted is the body the composer wrote for the episode", async () => {
+  // An earlier round's line rides along, so that dropping it on the way to the
+  // composer is a body that differs here.
+  const carried = {
+    ...closing,
+    earlier: ["`src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)"],
+  };
   await withFakeGh({ stdout: CREATED }, (gh) => {
-    const posting = postEpisodeSummary(closing, margin());
+    const posting = postEpisodeSummary(carried, margin());
 
     assert.deepEqual(posting, { outcome: "posted" });
     assert.equal(
       sent(gh.stdin()),
       renderSummary({
-        rounds: closing.rounds,
+        rounds: carried.rounds,
         threads: [
           {
             status: "open",
@@ -227,6 +234,7 @@ test("the body posted is the body the composer wrote for the episode", async () 
           },
         ],
         findings,
+        earlier: carried.earlier,
         because: "round-cap",
         confinement: undisturbed,
         leftNotReviewed: closing.leftNotReviewed,
