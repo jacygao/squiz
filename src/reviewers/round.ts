@@ -260,7 +260,7 @@ export async function runRound(
       return { outcome: "timed-out", cost: spent, seconds, refusals: refused, ...held };
     }
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
-      return { outcome: "setup", cost: spent, reason: ran.reason, refusals: refused, ...held };
+      return { outcome: "setup", cost: spent, reason: withModel(ran.reason, invocation, spent), refusals: refused, ...held };
     }
     if (attempts > 1) {
       return { outcome: "unavailable", cost: spent, reason: ran.reason, refusals: refused, ...held };
@@ -275,6 +275,19 @@ export async function runRound(
       };
     }
   }
+}
+
+/**
+ * The reason a setup failure gives, naming the configured model where the run
+ * completed no message.
+ *
+ * A CLI that refuses a model it does not offer exits before its first request,
+ * and in a pane nothing it said reaches the round, so the model is named as one
+ * cause the person can check.
+ */
+function withModel(reason: string, invocation: Invocation, spent: Spend): string {
+  if (invocation.model === null || (spent?.messages ?? 0) > 0) return reason;
+  return `${reason}; "model" in .squiz.json is "${invocation.model}", which the reviewer's CLI may not offer`;
 }
 
 /** No findings and no verdicts: what an attempt the reviewer told nothing carries. */

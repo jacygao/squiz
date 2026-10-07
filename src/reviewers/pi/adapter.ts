@@ -9,13 +9,13 @@
 
 import type { Adapter } from "../adapter.ts";
 import { argv, grants } from "./argv.ts";
+import { confine } from "./confine.ts";
 import { readReports } from "./reports.ts";
 import { resumeLine } from "./session.ts";
 
 export const pi: Adapter = {
   argv,
-  // No depth grants `pi` a shell, so nothing outside its command line is handed to it.
-  confine: () => ({ outcome: "prepared", environment: {} }),
+  confine: (invocation) => confine(invocation),
   parse: readReports,
   grants,
   resume: (sessionDirectory, spelled) => {

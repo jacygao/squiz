@@ -1,5 +1,5 @@
 /**
- * The `.squiz.json` loader: the seven settings, their defaults and their ranges.
+ * The `.squiz.json` loader: the eight settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
  */
@@ -42,6 +42,11 @@ export type Config = {
   // Tokens one round may spend.
   tokens: number;
   thinking: Thinking;
+  /**
+   * The model the reviewer runs on, in its CLI's own spelling. `null` where the
+   * file names none, which leaves the CLI on its own default.
+   */
+  model: string | null;
 };
 
 // Every setting has a default, so a project that writes no file still runs.
@@ -55,6 +60,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   // so a reviewer that reads widely does not reach it.
   tokens: 10_000_000,
   thinking: "medium",
+  model: null,
 });
 
 /**
@@ -71,9 +77,9 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking"] as const;
+const settingNames = ["reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking", "model"] as const;
 
-const settingList = `"reviewer", "rounds", "depth", "test", "timeout", "tokens" and "thinking"`;
+const settingList = `"reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking" and "model"`;
 
 const reviewers = ["pi", "copilot"] as const;
 
@@ -172,6 +178,7 @@ function parse(source: string, path: string): Config {
     thinking: has(raw, "thinking")
       ? thinkingOf(path, raw["thinking"])
       : defaultConfig.thinking,
+    model: has(raw, "model") ? modelOf(path, raw["model"]) : defaultConfig.model,
   };
 }
 
@@ -242,6 +249,33 @@ function testCommandOf(path: string, value: unknown): string {
         "test",
         value,
         `a command to run; leave "test" out for no test command`,
+      ),
+    );
+  }
+  return value;
+}
+
+/**
+ * A model name as the reviewer CLIs spell them: `gpt-5-mini`, `openai/gpt-5-mini`,
+ * `openrouter/qwen/qwen3-coder:free`. It reaches the CLI as one argument, inside
+ * a pane's shell line, so nothing a shell or an option parser reads is allowed:
+ * no space, quote, `$`, backtick or operator, and no leading `-`.
+ */
+const modelName = /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,199}$/u;
+
+function modelOf(path: string, value: unknown): string {
+  if (typeof value === "string" && value === "") {
+    throw new ConfigError(
+      reject(path, "model", value, `a model name; leave "model" out for the reviewer's own default`),
+    );
+  }
+  if (typeof value !== "string" || !modelName.test(value)) {
+    throw new ConfigError(
+      reject(
+        path,
+        "model",
+        value,
+        "a model name of up to 200 letters, digits and . _ : / @ + -, not starting with -",
       ),
     );
   }

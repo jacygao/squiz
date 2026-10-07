@@ -68,6 +68,11 @@ export type Invocation = {
    */
   readonly thinking: Thinking;
   /**
+   * The model the project configured, in the CLI's own spelling. `null` leaves
+   * the CLI on its own default, with the command line it has without one.
+   */
+  readonly model: string | null;
+  /**
    * The round's own space: where each run of the test command records the
    * group it leads.
    *

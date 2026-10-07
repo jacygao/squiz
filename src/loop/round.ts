@@ -590,6 +590,7 @@ async function reviewOn(
         scratchDirectory: episode.scratchDirectory,
         githubConfigDirectory: join(ownDirectory, "gh"),
         thinking: config.thinking,
+        model: config.model,
         depth: config.depth,
         test: config.test,
         roundSpace,

@@ -368,6 +368,23 @@ test("a process that ran and said nothing and a spawn that failed are both setup
   });
 });
 
+// Copilot refuses a model it does not offer by exiting before any request, and
+// in a pane nothing of what it said reaches the round.
+test("a run that completed no message on a configured model names the setting and the model", async () => {
+  await inATree(async (tree) => {
+    const configured = await runRound(reviewer(sayingNothing).adapter, { ...at(tree), model: "gpt-5-mini" }, 10);
+    assert.equal(configured.outcome, "setup");
+    assert.match(configured.outcome === "setup" ? configured.reason : "", /"model" in \.squiz\.json is "gpt-5-mini"/u);
+
+    const unset = await runRound(reviewer(sayingNothing).adapter, at(tree), 10);
+    assert.doesNotMatch(unset.outcome === "setup" ? unset.reason : "", /"model"/u);
+
+    // A run that completed a message reached its model, whatever it then said.
+    const reached = await runRound(reviewer(refusing).adapter, { ...at(tree), model: "gpt-5-mini" }, 10);
+    assert.equal(reached.outcome === "setup" ? reached.reason : "", "no credential for the provider");
+  });
+});
+
 // The round has no terminal to give. A line built for a pane would get
 // `/dev/null` instead, and an interactive CLI there is a run nobody can see.
 test("a command line that needs a terminal is not started without one", async () => {
@@ -1393,6 +1410,7 @@ function at(tree: string): Invocation {
     depth: "read",
     test: null,
     thinking: "medium",
+    model: null,
     roundSpace: undefined,
     terminal: "none",
   };

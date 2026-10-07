@@ -33,6 +33,7 @@ function fixture(t: TestContext): Fixture {
     depth: "read",
     test: null,
     thinking: "medium",
+    model: null,
     roundSpace: undefined,
     terminal: "none",
   };
@@ -76,6 +77,18 @@ test("the user's default model is read from their own settings and handed over a
   const environment = environmentOf(confine(invocation, { HOME: home }));
   assert.equal(environment["COPILOT_MODEL"], "gpt-6-astra");
   assert.deepEqual(Object.keys(environment).toSorted(), ["COPILOT_ALLOW_ALL", "COPILOT_HOME", "COPILOT_MODEL"]);
+});
+
+// The configured model is on the command line, and `--model` wins over the
+// variable. Nothing of the user's model is read, so settings that would fail the
+// read do not fail a round that has no use for them.
+test("a configured model hands over no COPILOT_MODEL, and reads none of the user's settings", (t) => {
+  const { invocation, home } = fixture(t);
+  settingsIn(join(home, ".copilot"), "{ not json");
+  const environment = environmentOf(
+    confine({ ...invocation, model: "gpt-5-mini" }, { HOME: home, COPILOT_MODEL: "gpt-6-astra" }),
+  );
+  assert.deepEqual(Object.keys(environment).toSorted(), ["COPILOT_ALLOW_ALL", "COPILOT_HOME"]);
 });
 
 test("the user's settings are read under the COPILOT_HOME the user set", (t) => {

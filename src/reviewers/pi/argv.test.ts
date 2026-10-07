@@ -26,6 +26,7 @@ const invocation: Invocation = {
   depth: "read",
   test: null,
   thinking: "medium",
+  model: null,
   roundSpace: undefined,
   terminal: "none",
 };
@@ -94,6 +95,20 @@ test("the command line is the one the specification gives", () => {
       "@/tmp/squiz/worktree/.squiz/7/rounds/1/prompt.md",
     ],
   });
+});
+
+test("a configured model is passed with --model, and changes nothing else", () => {
+  for (const depth of depths) {
+    const unset = argv({ ...invocation, depth });
+    const set = argv({ ...invocation, depth, model: "openai/gpt-5-mini" });
+    const flag = set.args.indexOf("--model");
+    assert.notEqual(flag, -1, `depth ${depth} leaves the configured model off the line`);
+    assert.equal(set.args[flag + 1], "openai/gpt-5-mini");
+    assert.equal(set.args.lastIndexOf("--model"), flag);
+    assert.deepEqual([...set.args.slice(0, flag), ...set.args.slice(flag + 2)], unset.args);
+    assert.deepEqual({ ...set, args: [] }, { ...unset, args: [] });
+    assert.ok(!unset.args.includes("--model"), `depth ${depth} passes --model with none configured`);
+  }
 });
 
 /**

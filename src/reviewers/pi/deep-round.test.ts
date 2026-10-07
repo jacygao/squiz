@@ -80,6 +80,7 @@ function invocationIn(tree: string, command: string): Invocation {
     depth: "deep",
     test: command,
     thinking: "medium",
+    model: null,
     roundSpace: undefined,
     terminal: "none",
   };
