@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.33 (draft)
+**Version:** 0.34 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -22,8 +22,8 @@ something that can be run or seen, never in a module written.
 | 9 | M10 — The subagent-era workarounds removed | Done |
 | 10 | M12 — Copilot as the reviewer | Done |
 | 11 | M13 — Copilot as a coding agent | Done |
-| 12 | M11 — One review level | |
-| 13 | M8 — Episode boundaries | |
+| 12 | M11 — One review level | Done |
+| 13 | M8 — Episode boundaries | Done |
 | 14 | M9 — Install and dogfood | |
 
 **A milestone's number names it, and the table places it.** M10, M12, M13 and
@@ -44,7 +44,7 @@ starts, rules for acknowledging a note and retrying one, and messages in both
 directions. GitHub Copilot is the one coding agent besides Claude Code that the
 first version supports, experimentally, in M13.
 
-M9 is the last of them. The P1 and P2 entries of the specification's What ships
+M9 is the last of the fourteen. The P1 and P2 entries of the specification's What ships
 that no milestone here delivers are a second version, and its milestones are
 planned once M9 closes. M12 was the exception: it brought forward "a second
 reviewer adapter", for GitHub Copilot, because the owner reviews with Copilot
@@ -180,7 +180,7 @@ where it is exact, in tokens and AI credits. A long pane line runs from a file,
 so Copilot starts in a Herdr pane. A live run worked a planted defect to exit 0.
 
 It left these for M9: choosing the reviewer's model in `.squiz.json` (#483),
-and the setup check following `reviewer` (#512). Its open questions about
+and the setup check following `reviewer` (#512). M11 then delivered #483. Its open questions about
 Copilot are held with `milestone:M9`, and granting `deep` to Copilot is #526,
 with M11. M11 then replaced `deep` with one review level, which grants Copilot
 the history tools as it does `pi`.
@@ -209,51 +209,53 @@ is unsupported: its reviews still run, and it learns the result only from a
 
 ## M11 — One review level
 
-Every reviewer gets one level: the reading tools, the reporting calls, and three
-history tools that read the repository's git history. There are no depths, and
-the reviewer runs nothing of the project's. Everything that existed only to run
-the project's tests is removed.
+**Done.** Its criteria are in #536.
 
-M11 began as depth `deep`, a reviewer that also ran the project's tests. #590
-measured both depths over 204 reviews of changes with known defects: `deep`
-found no more of them than `read`, and reading caught every defect the tests
-would have. The one clear gain came from the history tools. The owner decided on
-2026-10-07 to keep a single level that runs no code, and to improve reviews
-through the charter, the prompt and the process, measured with #590's rig.
+Gave every reviewer one level. Both `pi` and Copilot get the reading tools, the
+three reporting calls, and three history tools, `git_log_search`, `git_blame`
+and `git_show`, at every review, and no setting changes the grant. It removed
+the `depth` and `test` settings, `run_tests`, the process-group record, the
+tracked-file and shared-config comparisons, and the scratch `TMPDIR`. `pi`'s
+refusal became an allow-list of the grant. The reviewer's reads are confined to
+the snapshot, its environment carries no GitHub credentials, and the snapshot is
+a clone with its own git directory, outside the repository. M11 also added the
+`model` setting (#483), and removed the review skill and the `AGENTS.md` section
+`squiz init` wrote (#600).
 
-### Acceptance criteria
+It began as depth `deep`, a reviewer that also ran the project's tests, and
+became one level because #590 measured, over 204 reviews of changes with known
+defects, that `deep` found no more of them than `read`.
 
-- [ ] Both reviewers are granted the reading tools, the three reporting calls,
-      and `git_log_search`, `git_blame` and `git_show`, at every review. No
-      setting changes the grant.
-- [ ] The `depth` and `test` settings, `run_tests`, the process-group record,
-      and the tracked-file and shared-config comparisons are gone from the code,
-      the tests and the specification.
-- [ ] `pi`'s refusal refuses every tool call outside the grant.
-- [ ] The harness specification's § 4 says what confines the reviewer: no tool
-      writes, no shell, reads confined to the snapshot, and the history tools
-      are read-only and hardened.
-- [ ] `npm run typecheck` and `npm test` pass after each removal.
+It left the operating-system sandbox held (#529), needed only if a level that
+runs code returns.
 
 ## M8 — Episode boundaries
 
-The token bound, and an audit that every failure reaches somewhere a person
-reads.
+**Done.** Its criteria are in #603.
 
-The token bound is 10,000,000 tokens a round. It is read before a round starts
-and again when a round records what it spent. A running round is never killed
-for its tokens: the bound stops the next round, and the time bound is what caps
-a round that runs away.
+Bounded an episode by the tokens it spends, at 10,000,000 a round, and gave
+every failure a place where a person reads it. An episode that reaches the bound
+closes with the findings it has, and its summary says the bound was reached,
+including when the close comes before a round (#508, #626). A reviewer that ran
+before its start failed, and an attempt the harness throws out of, count against
+the bound (#450), and that reviewer is stopped before its spend is read (#625).
+A failed last round's comment and owner note no longer promise a retry the
+closed episode will not run (#544, #622).
 
-### Acceptance criteria
+The § 7 audit (#604) gave every failure path in the harness specification the
+surface a person reads it on: the failure comment, `squiz status`,
+`.squiz/<number>/host.log`, or `squiz review`'s stderr. These closed the silent
+paths it found: #357, #406, #414, #425, #511, #605, #606, #607, #608, #609 and
+#632.
 
-- [ ] An episode whose round reached the token bound closes with the findings it
-      has, and the summary says the bound was reached.
-- [ ] The tokens an attempt that was no round spent count against the bound.
-- [ ] No failure path is silent. *Changed by detached sessions: the round host
-      has no caller's stderr. The audit names, for each failure path, which of
-      the failure comment, `squiz status`, `.squiz/<number>/host.log` and
-      `squiz review`'s stderr carries it.*
+It left these held, with `milestone:M9`:
+
+- **Removing a round's snapshot before its result is recorded** (#640), which
+  delays every waiting `squiz review`.
+- **How a close before any review counts a resolved thread** (#627), since
+  nothing records whether fixed or withdrawn closed it.
+- **Whether the summary counts a ruling GitHub refused** as ruled, or as it
+  stands on GitHub (#650).
 
 ## M9 — Install and dogfood
 
@@ -263,15 +265,25 @@ The marketplace manifest, a README carrying the getting-started steps,
 ### Acceptance criteria
 
 - [ ] `/plugin marketplace add` followed by `/plugin install` works into a fresh
-      host project.
+      host project. *Changed by Copilot as a coding agent: so does the plugin
+      loaded into Copilot, with `copilot plugin install` or `--plugin-dir`, with
+      Copilot's experimental features on as the harness specification's § 9
+      says (#602).*
 - [ ] `/squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
       Code, and the Node version, naming whatever is missing. *Changed by
       detached sessions: it also reports whether tmux or Herdr is present.
       Neither is required.* It reports whether `squiz init`'s link puts this
-      squiz on `PATH`.
+      squiz on `PATH`. *Changed by Copilot as the reviewer and as a coding
+      agent: in place of `pi`, it reports the reviewer `.squiz.json` names, and
+      that reviewer's model (#512). It reports the Copilot CLI wherever Copilot
+      is the reviewer or a coding agent, and, for a Copilot coding agent,
+      whether Copilot's experimental features are on.*
 - [ ] A subagent there produces a reviewed pull request end to end. *Changed by
-      detached sessions: a main session does too, woken by a note.*
-- [ ] Squiz reviews its own pull requests in this repository.
+      detached sessions: a main session does too, woken by a note. Changed by
+      Copilot as a coding agent: so does a Copilot session, woken through the
+      plugin's extension.*
+- [ ] Squiz reviews its own pull requests in this repository. *This has held
+      all through M11 and M8.*
 
 ### Issues
 
@@ -280,6 +292,3 @@ The marketplace manifest, a README carrying the getting-started steps,
 - #271, name the reviewer and its model in the summary comment
 - #274, look once at whether an interactive session shows a hook's stderr when
   it exits 0
-- #276, find out what it would take to show the reviewer as a session a person
-  can watch. M7's reviewer sessions are expected to answer it.
-- #285, check stale docs and missing tests as pipeline steps of their own
