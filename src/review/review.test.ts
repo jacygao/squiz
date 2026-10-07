@@ -313,6 +313,75 @@ test("a state left not reviewed by the cap is handed the close, with the line sa
   });
 });
 
+const BEFORE_A_ROUND = "the episode closed at the round cap before a round took this state";
+
+test("a state the cap stopped before a round took it is handed the close, naming the cap, with the threads it left open", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      {
+        ...OWN,
+        status: "not reviewed",
+        reason: BEFORE_A_ROUND,
+        closed: { exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap" },
+      },
+    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+
+    const printed = await runReview(
+      request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }),
+    );
+
+    assert.equal(printed.exit, 3, printed.stdout + printed.stderr);
+    assert.equal(printed.stderr, "");
+    assert.deepEqual(printed.stdout.split("\n").slice(1, 6), [
+      `Squiz did not review PR #41 at 3f9c2e0: ${BEFORE_A_ROUND}.`,
+      "",
+      "The round cap is reached. The review is closed with 1 thread open, and its summary",
+      "is on the pull request. A person takes it from here, so do not run",
+      "`squiz review 41` again.",
+    ]);
+    assert.match(printed.stdout, /^PRRT_kwDOL7tYbc5abcd1 packages\/sync\/src\/queue\.ts:134 high — Retry backoff resets on every enqueue$/mu);
+  });
+});
+
+test("a state queued behind the one the cap stopped is handed the same close, named after it", async () => {
+  await withWorktree(async (fixture) => {
+    const taken: StateKey = { head: OWN.head, activity: "PRRC_older" };
+    records(fixture, [
+      { ...taken, status: "not reviewed", reason: BEFORE_A_ROUND, closed: { exitStatus: 0, openThreads: [], closedAt: "round cap" } },
+      { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
+    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
+
+    assert.equal(printed.exit, 0, printed.stdout + printed.stderr);
+    assert.deepEqual(printed.stdout.split("\n").slice(1, 4), [
+      `Squiz did not review PR #41 at 3f9c2e0 with different replies: ${BEFORE_A_ROUND}.`,
+      "",
+      "Nothing is open. The review is closed, and its summary is on the pull request.",
+    ]);
+  });
+});
+
+test("a close before any round ran, with nothing to summarise, exits 0 and says on stderr why there is no summary", async () => {
+  await withWorktree(async (fixture) => {
+    const problem = "the review of PR #41 closed without its summary: the episode closed before any round ran";
+    records(fixture, [
+      {
+        ...OWN,
+        status: "not reviewed",
+        reason: "the episode closed at the token bound before a round took this state",
+        closed: { exitStatus: 0, openThreads: [], closedAt: "token bound", problems: [problem] },
+      },
+    ], { closeReported: true });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
+
+    assert.equal(printed.exit, 0);
+    assert.equal(printed.stderr, `squiz: ${problem}\n`);
+    assert.equal(printed.stdout.split("\n").at(-2), "Nothing is open, and the review is closed.");
+  });
+});
+
 test("a state superseded before its round started follows to the state that superseded it, and returns its result", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

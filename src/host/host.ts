@@ -30,9 +30,12 @@ import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
 import {
+  closedBeforeReview,
   decideRoundEnd,
+  lastReviewed,
   namedStates,
   type EndedRound,
+  type NotReviewedRecord,
   type QueuedRecord,
   type RoundEnd,
 } from "../loop/round-end.ts";
@@ -40,6 +43,7 @@ import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.t
 import {
   putRecord,
   sameState,
+  type ClosedBeforeReview,
   type ClosingBound,
   type ReviewerPlace,
   type RoundReport,
@@ -260,10 +264,8 @@ type Recorded = { readonly record: StateRecord; readonly name: string };
  *
  * `after` is the state reviewed before them, where one was.
  */
-function inOrder(records: readonly StateRecord[], after?: StateKey): Recorded[] {
-  const [first, ...rest] = records;
-  if (first === undefined) return [];
-  const names = after === undefined ? [first.head.slice(0, 7), ...namedStates(first, rest)] : namedStates(after, records);
+function inOrder(records: readonly StateRecord[], after: StateKey | null = null): Recorded[] {
+  const names = namedStates(after, records);
   return records.map((record, index) => ({ record, name: names[index] ?? record.head.slice(0, 7) }));
 }
 
@@ -300,8 +302,8 @@ type Result = { readonly records: (state: EpisodeState) => readonly Recorded[]; 
  * The records a round's conclusion leaves, for its own state and for the states
  * queued behind it.
  *
- * `ended` is what the round decided where it reviewed. A round that closed with
- * none decided closed before its review ran, and its state was never reviewed.
+ * `ended` is what the round decided where it reviewed. A close before the review
+ * decides none, and its state was never reviewed.
  */
 function resultOf(
   conclusion: RoundConclusion,
@@ -315,13 +317,13 @@ function resultOf(
     case "block":
     case "clean, episode open":
     case "close": {
+      if (conclusion.outcome === "close" && conclusion.beforeReview !== undefined) {
+        return closedUnreviewed(conclusion, conclusion.beforeReview.openThreads, taken);
+      }
       if (ended === undefined) {
-        const at = conclusion.outcome === "close" && conclusion.because === "token-bound" ? "the token bound" : "the round cap";
-        const reason = `the episode closed at ${at} before a round took this state`;
-        return {
-          records: (state) => inOrder([key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, reason))),
-          line: `${named(taken)} not reviewed: ${reason}`,
-        };
+        // A round that reviewed always asks for its end, so only a defect reaches this.
+        const reason = "the round reviewed and reached no end";
+        return { records: () => inOrder([{ ...failedRecord(key, reason), round: timing }]), line: `${named(taken)} failed: ${reason}` };
       }
       const round = { ...timing, reviewer: reviewer ?? UNREPORTED };
       const reviewed: Recorded = {
@@ -358,17 +360,47 @@ function resultOf(
   }
 }
 
+/**
+ * The records of a close reached before the review: the state the round took,
+ * carrying the close, and every state queued behind it, each not reviewed.
+ */
+function closedUnreviewed(
+  conclusion: Extract<RoundConclusion, { readonly outcome: "close" }>,
+  openThreads: readonly string[],
+  taken: QueuedRecord,
+): Result {
+  const bound = conclusion.because === "token-bound" ? "token-bound" : "round-cap";
+  const reason = closedBeforeReview(bound);
+  const problems = summaryProblems(conclusion);
+  const closed: ClosedBeforeReview = {
+    exitStatus: openThreads.length === 0 ? 0 : 3,
+    openThreads,
+    closedAt: bound === "token-bound" ? "token bound" : "round cap",
+    ...(problems.length === 0 ? {} : { problems }),
+  };
+  return {
+    records: (state) => {
+      const behind = queuedIn(state).map((record) => notReviewed(keyOf(record), reason));
+      return inOrder([{ ...notReviewed(keyOf(taken), reason), closed }, ...behind], lastReviewed(state.records ?? []));
+    },
+    line: `${named(taken)} not reviewed: ${reason}`,
+  };
+}
+
+/** The line `squiz review` prints on stderr for a close with no summary on the pull request, or none. */
+function summaryProblems(conclusion: Extract<RoundConclusion, { readonly outcome: "close" }>): readonly string[] {
+  const { summary } = conclusion;
+  if (summary.outcome === "posted") return [];
+  return [`the review of PR #${conclusion.pullRequest} closed without its summary: ${summary.reason}`];
+}
+
 /** What a round that reviewed did beside its result, as `squiz review` prints it. */
 function reportOf(
   conclusion: Extract<RoundConclusion, { readonly outcome: "block" | "clean, episode open" | "close" }>,
   ended: RoundEnd,
 ): RoundReport & { readonly closedAt?: ClosingBound } {
   const moved = conclusion.confinement === undefined ? undefined : headMovedIn(conclusion.confinement);
-  const summary = conclusion.outcome === "close" ? conclusion.summary : undefined;
-  const problems =
-    summary === undefined || summary.outcome === "posted"
-      ? []
-      : [`the review of PR #${conclusion.pullRequest} closed without its summary: ${summary.reason}`];
+  const problems = conclusion.outcome === "close" ? summaryProblems(conclusion) : [];
   // Only a close that left threads open is printed with its bound.
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
   const outcomes = conclusion.findings.outcomes;
@@ -460,7 +492,7 @@ function keyOf(record: QueuedRecord): Omit<QueuedRecord, "status"> {
   return key;
 }
 
-function notReviewed(key: Omit<QueuedRecord, "status">, reason: string): StateRecord {
+function notReviewed(key: Omit<QueuedRecord, "status">, reason: string): NotReviewedRecord {
   return { ...key, status: "not reviewed", reason };
 }
 

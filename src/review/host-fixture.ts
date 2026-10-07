@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
-import { defaultConfig } from "../config/config.ts";
+import { defaultConfig, type Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import { runHost } from "../host/host.ts";
 import type { Adapter, ParsedRun, ThreadVerdict } from "../reviewers/adapter.ts";
@@ -22,7 +22,15 @@ export type PlannedStart = {
   readonly holdSeconds?: number;
 };
 
-export type Plan = { readonly charterFile: string; readonly starts: readonly PlannedStart[] };
+export type Plan = {
+  readonly charterFile: string;
+  readonly starts: readonly PlannedStart[];
+  /**
+   * The round cap and token bound, where a test sets them. Every host reads the
+   * plan afresh, so a test can lower one between runs.
+   */
+  readonly config?: Partial<Pick<Config, "rounds" | "tokens">>;
+};
 
 const [number = "", planFile = ""] = process.argv.slice(2);
 const plan = JSON.parse(readFileSync(planFile, "utf8")) as Plan;
@@ -56,5 +64,5 @@ const adapter: Adapter = {
 await runHost({
   worktree: process.cwd(),
   pullRequest: Number(number),
-  round: { config: { ...defaultConfig, timeout: 60 }, adapter, charterFile: plan.charterFile },
+  round: { config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
 });

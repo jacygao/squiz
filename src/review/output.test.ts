@@ -369,6 +369,116 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
   assert.match(two.stdout, /closed after 3 rounds, with 2 threads open\./u);
 });
 
+test("a close before a round took the run's state, with a thread open, names the bound and prints the thread, exit 3", () => {
+  const printed = composeReview(
+    {
+      outcome: "closed unreviewed",
+      pullRequest: 41,
+      exit: 3,
+      state: "8d21a4f",
+      reason: "the episode closed at the token bound before a round took this state",
+      closedAt: "token bound",
+      threads: [skewThread],
+      summarised: true,
+    },
+    PATH,
+  );
+
+  assert.equal(printed.exit, 3);
+  assert.equal(printed.stderr, "");
+  assert.ok(
+    printed.stdout.startsWith(`Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz did not review PR #41 at 8d21a4f: the episode closed at the token bound before a round took this state.
+
+The token bound is reached. The review is closed with 1 thread open, and its summary
+is on the pull request. A person takes it from here, so do not run
+\`squiz review 41\` again.
+
+PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
+`),
+    printed.stdout,
+  );
+});
+
+test("a close before a round took the run's state, with a thread open and its summary lost, claims no summary on stdout", () => {
+  const printed = composeReview(
+    {
+      outcome: "closed unreviewed",
+      pullRequest: 41,
+      exit: 3,
+      state: "8d21a4f",
+      reason: "the episode closed at the round cap before a round took this state",
+      closedAt: "round cap",
+      threads: [skewThread],
+      summarised: false,
+      problems: ["the review of PR #41 closed without its summary: GitHub answered 502"],
+    },
+    PATH,
+  );
+
+  assert.equal(printed.exit, 3);
+  assert.deepEqual(printed.stdout.split("\n").slice(3, 6), [
+    "The round cap is reached. The review is closed with 1 thread open. A person takes",
+    "it from here, so do not run `squiz review 41` again.",
+    "",
+  ]);
+  assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: GitHub answered 502\n");
+});
+
+test("a close before a round took the run's state, with nothing open, exits 0", () => {
+  const printed = composeReview(
+    {
+      outcome: "closed unreviewed",
+      pullRequest: 41,
+      exit: 0,
+      state: "8d21a4f",
+      reason: "the episode closed at the round cap before a round took this state",
+      closedAt: "round cap",
+      threads: [],
+      summarised: true,
+    },
+    PATH,
+  );
+
+  assert.equal(printed.exit, 0);
+  assert.equal(
+    printed.stdout,
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap before a round took this state.
+
+Nothing is open. The review is closed, and its summary is on the pull request.
+`,
+  );
+});
+
+test("a close before any round ran, with no summary, says so on stderr and claims no summary on stdout", () => {
+  const printed = composeReview(
+    {
+      outcome: "closed unreviewed",
+      pullRequest: 41,
+      exit: 0,
+      state: "3f9c2e0",
+      reason: "the episode closed at the token bound before a round took this state",
+      closedAt: "token bound",
+      threads: [],
+      summarised: false,
+      problems: ["the review of PR #41 closed without its summary: the episode closed before any round ran"],
+    },
+    PATH,
+  );
+
+  assert.equal(printed.exit, 0);
+  assert.equal(
+    printed.stdout,
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz did not review PR #41 at 3f9c2e0: the episode closed at the token bound before a round took this state.
+
+Nothing is open, and the review is closed.
+`,
+  );
+  assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: the episode closed before any round ran\n");
+});
+
 test("a state the close left unreviewed adds the line saying why", () => {
   const atCap = composeReview(
     reviewed({ exit: 3, commit: "3f9c2e0", round: 3, threads: [skewThread], notReviewed: { state: "8d21a4f" } }),

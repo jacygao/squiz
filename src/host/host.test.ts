@@ -22,6 +22,7 @@ import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { defaultConfig, type Config } from "../config/config.ts";
+import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import { type Adapter, type ParsedRun, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -691,6 +692,98 @@ test("the host runs no round for an episode whose close is recorded, and records
   const [record] = recordsOf(ran.state);
   assert.equal(record?.status, "not reviewed", `recorded as ${JSON.stringify(record)}`);
 });
+
+/** The threads listing with one open thread the reviewer opened. */
+const ONE_OPEN_THREAD = included(
+  "200 OK",
+  JSON.stringify({
+    data: {
+      node: {
+        reviewThreads: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            {
+              id: "PRRT_open",
+              isResolved: false,
+              isOutdated: false,
+              path: TRACKED,
+              line: 88,
+              originalLine: 88,
+              subjectType: "LINE",
+              comments: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    id: "PRRC_open",
+                    databaseId: 51,
+                    author: { login: "squiz" },
+                    body: renderComment(finding("The name says nothing.")),
+                    createdAt: "2026-10-05T07:13:05Z",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    },
+  }),
+);
+
+test("a host that finds the cap spent posts the summary, and records the close on the state it took and the rest not reviewed", async () => {
+  let head = "";
+  const ran = await host({
+    rounds: [COST],
+    config: { rounds: 1 },
+    records: (fixture) => {
+      head = fixture.head();
+      return [queued(head, null, MAIN), queued(head, "PRRC_reply", PARENT)];
+    },
+    before: (fixture) => writeFileSync(join(fixture.binaries, "answer-threads"), ONE_OPEN_THREAD, "utf8"),
+  });
+
+  assert.equal(ran.started, 0, "a cap already spent starts no reviewer");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
+  const reason = "the episode closed at the round cap before a round took this state";
+  const [taken, behind] = recordsOf(ran.state);
+  assert.deepEqual(taken, {
+    head,
+    activity: null,
+    owner: MAIN,
+    status: "not reviewed",
+    reason,
+    closed: { exitStatus: 3, openThreads: ["PRRT_open"], closedAt: "round cap" },
+  });
+  assert.deepEqual(behind, { head, activity: "PRRC_reply", owner: PARENT, status: "not reviewed", reason });
+  assert.equal(
+    onlyNote(ran, PARENT).text,
+    `Squiz did not review PR #${PULL_REQUEST} at ${head.slice(0, 7)} with different replies, the work of subagent ${PARENT.subagent}: ${reason}.`,
+  );
+});
+
+test("a host that finds the bound spent before any round ran, with no thread of the reviewer's, records the close's missing summary", async () => {
+  const ran = await host({ records: atHead, config: { tokens: 1000 }, before: (fixture) => spendOutsideRounds(fixture.episode, 1000) });
+
+  assert.deepEqual(ran.kinds, ["prlist", "threads"]);
+  const [taken] = recordsOf(ran.state);
+  assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
+  assert.deepEqual(taken.closed, {
+    exitStatus: 0,
+    openThreads: [],
+    closedAt: "token bound",
+    problems: [`the review of PR #${PULL_REQUEST} closed without its summary: the episode closed before any round ran`],
+  });
+});
+
+/** Record `tokens` spent by attempts that were no round, as a setup problem records them. */
+function spendOutsideRounds(episode: Episode, tokens: number): void {
+  const written = updateState(
+    episode,
+    (state) => ({ ...state, spentOutsideRounds: { dollars: 0, tokens, messages: 1 } }),
+    { until: deadlineIn(5_000) },
+  );
+  assert.equal(written.outcome, "written", `the fixture could not record the spend: ${JSON.stringify(written)}`);
+}
 
 test("a reviewed round's record counts the threads its findings opened", async () => {
   const ran = await host({ records: atHead, findings: [[finding("The name says nothing.")]] });

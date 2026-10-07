@@ -35,10 +35,40 @@ export type StoppingBound = Exclude<ClosingReason, "nothing-open">;
  */
 export type LeftNotReviewed = {
   readonly bound: StoppingBound;
-  /** The state the closing round reviewed, which `namedStates` names the others after. */
-  readonly after: StateKey;
+  /**
+   * The state reviewed before them, which `namedStates` names the others after.
+   * `null` where the episode reviewed no state at all.
+   */
+  readonly after: StateKey | null;
   readonly states: readonly NotReviewedRecord[];
 };
+
+/**
+ * The last state the episode reviewed, which a close before the review names the
+ * states it left not reviewed after, or `null` where it reviewed none.
+ *
+ * Read off the round's number rather than the record's place. A state that
+ * `squiz review` retried keeps its place, so the last record reviewed need not
+ * be the last state reviewed. A record with no number, written before records
+ * kept one, ranks below every numbered one, and the later of two such wins.
+ */
+export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
+  let reviewed: StateRecord | undefined;
+  let highest = -1;
+  for (const record of records) {
+    if (record.status !== "reviewed") continue;
+    const number = record.round?.number ?? 0;
+    if (number < highest) continue;
+    reviewed = record;
+    highest = number;
+  }
+  return reviewed === undefined ? null : { head: reviewed.head, activity: reviewed.activity };
+}
+
+/** Why a state was not reviewed, where the episode's bound was spent before a round took it. */
+export function closedBeforeReview(bound: StoppingBound): string {
+  return `the episode closed at ${bound === "round-cap" ? "the round cap" : "the token bound"} before a round took this state`;
+}
 
 /** The round that has just finished, as its own state's record needs it. */
 export type EndedRound = {
@@ -154,7 +184,8 @@ function notReviewed(
  * differ from theirs.
  *
  * `after` is the state reviewed before them, and counts as before every one of
- * them. A state sharing a head with one before it differs from it only in its
+ * them. Where it is `null`, the first of `states` is named by its commit alone. A
+ * state sharing a head with one before it differs from it only in its
  * replies, because no two records are for the same state. A reply added and a
  * reply deleted both do that, and nothing here can tell which, so the name says
  * only that they differ. Counting the states before it, rather than marking it
@@ -165,10 +196,10 @@ function notReviewed(
  * - `8d21a4f with different replies`, where one does
  * - `8d21a4f with different replies a second time`, where two do
  */
-export function namedStates(after: StateKey, states: readonly StateKey[]): string[] {
-  const line = [after, ...states];
+export function namedStates(after: StateKey | null, states: readonly StateKey[]): string[] {
+  const earlier = after === null ? [] : [after];
   return states.map((state, index) => {
-    const before = line.slice(0, index + 1).filter((earlier) => earlier.head === state.head).length;
+    const before = [...earlier, ...states.slice(0, index)].filter((held) => held.head === state.head).length;
     const commit = state.head.slice(0, 7);
     if (before === 0) return commit;
     if (before === 1) return `${commit} with different replies`;
