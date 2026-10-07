@@ -262,8 +262,17 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
 
 const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";
 
-/** What a close at a bound with threads open tells the coding agent to do. */
-function boundReached(closedAt: Bound, open: number, pullRequest: number): string {
+/**
+ * What a close at a bound with threads open tells the coding agent to do.
+ * `summarised` is false where the close has no summary on the pull request.
+ */
+function boundReached(closedAt: Bound, open: number, pullRequest: number, summarised = true): string {
+  if (!summarised) {
+    return [
+      `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open. A person takes`,
+      `it from here, so do not run \`squiz review ${pullRequest}\` again.`,
+    ].join("\n");
+  }
   return [
     `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
     "is on the pull request. A person takes it from here, so do not run",
@@ -277,7 +286,11 @@ function unreviewedBlocks(result: ClosedUnreviewed): readonly string[] {
   if (result.exit === 0) {
     return [heading, result.summarised ? NOTHING_OPEN : "Nothing is open, and the review is closed."];
   }
-  return [heading, boundReached(result.closedAt, open.length, result.pullRequest), ...open.map(printedThread)];
+  return [
+    heading,
+    boundReached(result.closedAt, open.length, result.pullRequest, result.summarised),
+    ...open.map(printedThread),
+  ];
 }
 
 /** `heading`, followed where the close left the run's own state unreviewed by the line saying why. */

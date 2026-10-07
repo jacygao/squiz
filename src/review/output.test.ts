@@ -400,6 +400,31 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
   );
 });
 
+test("a close before a round took the run's state, with a thread open and its summary lost, claims no summary on stdout", () => {
+  const printed = composeReview(
+    {
+      outcome: "closed unreviewed",
+      pullRequest: 41,
+      exit: 3,
+      state: "8d21a4f",
+      reason: "the episode closed at the round cap before a round took this state",
+      closedAt: "round cap",
+      threads: [skewThread],
+      summarised: false,
+      problems: ["the review of PR #41 closed without its summary: GitHub answered 502"],
+    },
+    PATH,
+  );
+
+  assert.equal(printed.exit, 3);
+  assert.deepEqual(printed.stdout.split("\n").slice(3, 6), [
+    "The round cap is reached. The review is closed with 1 thread open. A person takes",
+    "it from here, so do not run `squiz review 41` again.",
+    "",
+  ]);
+  assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: GitHub answered 502\n");
+});
+
 test("a close before a round took the run's state, with nothing open, exits 0", () => {
   const printed = composeReview(
     {
