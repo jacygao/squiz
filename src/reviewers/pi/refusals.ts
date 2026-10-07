@@ -1,5 +1,6 @@
 /**
- * The reviewer's tools that write, refused inside `pi` by name before they run.
+ * Every tool call outside the review's grant, refused inside `pi` by name
+ * before it runs.
  *
  * `pi` offers every tool call to a handler before it executes it, and executes
  * nothing the handler blocks. The reviewer reads the refusal as that call's own
@@ -7,8 +8,9 @@
  * refuses the call too: the throw comes back as the call's error result, and the
  * run carries on.
  *
- * The grant already withholds every tool refused here, so while it is passed no
- * refusal fires. This is what holds if a grant ever stops being passed.
+ * While `--tools` carries the grant, `pi` offers the model nothing else and no
+ * refusal fires. This is what holds if the grant ever stops being passed, when
+ * `pi` falls back to its own default tools, a shell and two writers among them.
  *
  * `pi` is not a dependency of this package and nothing here may make it one, so
  * the call and the answer are described structurally, as the extension's own
@@ -28,8 +30,21 @@ export type Refusal = {
   readonly reason: string;
 };
 
-/** A review reports through the calls and writes nothing, so it has no use for these. */
-export const refusedTools: readonly string[] = Object.freeze(["edit", "write"]);
+/**
+ * The variable the adapter hands the grant to the extension in, as the names
+ * `--tools` carries, joined the same way.
+ */
+export const GRANT_VARIABLE = "SQUIZ_GRANT";
+
+/**
+ * The grant as the variable carries it.
+ *
+ * A variable that is unset or empty is no grant at all, so every call is
+ * refused: a command line that lost it is as wrong as one that lost `--tools`.
+ */
+export function grantIn(value: string | undefined): readonly string[] {
+  return value === undefined || value === "" ? [] : Object.freeze(value.split(","));
+}
 
 /**
  * What every refusal opens with, so the reviewer can tell a call refused here
@@ -38,17 +53,16 @@ export const refusedTools: readonly string[] = Object.freeze(["edit", "write"]);
 const REFUSED = "squiz refused this call: ";
 
 /**
- * Refuse the call, or let it through.
+ * Refuse a call to any tool `grant` does not name, or let it through.
  *
  * `undefined` is a call nothing here objects to, which is what `pi` needs to run
- * it. Never throws; a throw would refuse the call as well, but it would refuse a
- * call this was going to allow.
+ * it. Only the name is read, never what the call was given. Never throws; a
+ * throw would refuse the call as well, but it would refuse a call this was going
+ * to allow.
  */
-export function refuse(call: ToolCall): Refusal | undefined {
-  if (!refusedTools.includes(call.toolName)) return undefined;
-  return refusal(
-    `a review has no use for \`${call.toolName}\`, and it changes the code you are reviewing. Report what is wrong with the change instead.`,
-  );
+export function refuse(call: ToolCall, grant: readonly string[]): Refusal | undefined {
+  if (grant.includes(call.toolName)) return undefined;
+  return refusal(`\`${call.toolName}\` is not a tool this review grants.`);
 }
 
 /** One refusal, opened with the marker. */

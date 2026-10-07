@@ -4,8 +4,9 @@
  * The grant confines what the reviewer may call, and the extension where it may
  * read. `pi`'s own default set, used when no `--tools` reaches it, is `read`,
  * `bash`, `edit` and `write`, so a grant that goes missing does not fall back
- * to something safe: it hands the reviewer two writers and a shell over the
- * code it is reviewing. `--tools` is enforced by
+ * to something safe: it offers the reviewer two writers and a shell over the
+ * code it is reviewing, and only the extension's refusal of every tool outside
+ * the grant it was handed stops them. `--tools` is enforced by
  * filtering the registered tools, so a name outside the grant has no definition
  * and no implementation.
  *
@@ -40,6 +41,7 @@ import type { CommandLine, Invocation } from "../adapter.ts";
 import { deepToolNames } from "../deep-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
+import { GRANT_VARIABLE } from "./refusals.ts";
 
 const readGrant = Object.freeze(["read", "grep", "find", "ls"] as const);
 
@@ -76,11 +78,14 @@ export const extensionFile = fileURLToPath(new URL("extension.ts", import.meta.u
  */
 export function argv(invocation: Invocation): CommandLine {
   const detached = invocation.terminal === "none";
+  // The extension refuses whatever this leaves out, so it is handed the very
+  // list --tools is, and the two cannot name different tools.
+  const grant = grants[invocation.depth].join(",");
   return {
     command: "pi",
     directory: invocation.directory,
     stdin: detached ? "/dev/null" : "terminal",
-    environment: { [REPORTS_VARIABLE]: invocation.reportsFile },
+    environment: { [REPORTS_VARIABLE]: invocation.reportsFile, [GRANT_VARIABLE]: grant },
     args: [
       // Nothing reads pi's output, so print mode needs no event stream.
       ...(detached ? ["--print"] : []),
@@ -101,7 +106,7 @@ export function argv(invocation: Invocation): CommandLine {
       "--extension",
       extensionFile,
       "--tools",
-      grants[invocation.depth].join(","),
+      grant,
       "--thinking",
       invocation.thinking,
       // Always `provider/id` as `pi --list-models` lists it, which `confine`

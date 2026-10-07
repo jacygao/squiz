@@ -1,8 +1,8 @@
 /**
  * The extension `pi` loads: the calls the reviewer reports each finding
  * through and the `deep` tools, registered through `pi`'s API, the handler that
- * refuses the calls which would change what the coding agent commits or read
- * outside the snapshot, and the end of the review.
+ * refuses a call to any tool outside the grant and a read outside the snapshot,
+ * and the end of the review.
  *
  * Nothing in the harness imports this. `pi` loads it from the path on the
  * command line, compiles it and the modules it imports, and runs the default
@@ -31,7 +31,7 @@ import { reportCalls } from "../report-calls.ts";
 import { reportFileAt, REPORTS_VARIABLE, type UsageLine } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 import { refuseRead } from "./reads.ts";
-import { type Refusal, refuse, type ToolCall } from "./refusals.ts";
+import { GRANT_VARIABLE, grantIn, type Refusal, refuse, type ToolCall } from "./refusals.ts";
 
 /** One block of what a call answers with. Only text is ever returned here. */
 type TextContent = { readonly type: "text"; readonly text: string };
@@ -131,13 +131,14 @@ const deepLabels: Readonly<Record<string, string>> = {
 
 /**
  * The extension as `pi` loads it, reporting to the file the adapter named and
- * serving the `deep` tools in the round the round named.
+ * serving the `deep` tools in the round the round named, under the grant the
+ * adapter handed over.
  *
  * Both are registered at every depth. `--tools` drops whatever the depth does
- * not grant.
+ * not grant, and the handler refuses it where `--tools` did not.
  */
 export default function reportAsYouGo(pi: Registrar): void {
-  reportInto(pi, process.env[REPORTS_VARIABLE], process.cwd());
+  reportInto(pi, process.env[REPORTS_VARIABLE], process.cwd(), grantIn(process.env[GRANT_VARIABLE]));
   serveDeepTools(pi, process.env);
 }
 
@@ -168,16 +169,22 @@ export function serveDeepTools(pi: Registrar, environment: Readonly<Record<strin
 
 /**
  * Register the three calls and subscribe the handlers, recording into the
- * file at `reports`, or nowhere where it is not given, and refusing a read
- * outside `snapshot`, which is where `pi` runs.
+ * file at `reports`, or nowhere where it is not given, and refusing a call to
+ * any tool `grant` does not name and a read outside `snapshot`, which is where
+ * `pi` runs.
  */
-export function reportInto(pi: Registrar, reports: string | undefined, snapshot: string): void {
+export function reportInto(
+  pi: Registrar,
+  reports: string | undefined,
+  snapshot: string,
+  grant: readonly string[],
+): void {
   const reporting = reportCalls(reportFileAt(reports));
 
   // `pi` runs a tool the moment no handler objects, so a subscription that goes
   // missing takes the whole refusal with it and says nothing.
   pi.on("tool_call", (call) => {
-    const refusal = refuse(call) ?? refuseRead(call, snapshot);
+    const refusal = refuse(call, grant) ?? refuseRead(call, snapshot);
     if (refusal === undefined) return undefined;
     return { ...refusal, reason: reporting.stopped(call.toolName, refusal.reason) };
   });

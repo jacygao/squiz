@@ -27,7 +27,7 @@ import reportAsYouGo, {
   reportInto,
   serveDeepTools,
 } from "./extension.ts";
-import type { Refusal, ToolCall } from "./refusals.ts";
+import { GRANT_VARIABLE, type Refusal, type ToolCall } from "./refusals.ts";
 
 type Tool = Parameters<Registrar["registerTool"]>[0];
 type Handler = (call: ToolCall) => Refusal | undefined;
@@ -59,10 +59,10 @@ function registrar(): { pi: Registrar; loaded: Loaded } {
   return { pi, loaded };
 }
 
-/** The extension loaded with its reports going to `reports`, or nowhere. */
+/** The extension loaded with its reports going to `reports`, or nowhere, under the `deep` grant. */
 function loaded(reports?: string): Loaded {
   const { pi, loaded } = registrar();
-  reportInto(pi, reports, process.cwd());
+  reportInto(pi, reports, process.cwd(), grants.deep);
   return loaded;
 }
 
@@ -260,7 +260,7 @@ test("finishing the review is answered, and asks for nothing of its own", async 
 test("the extension subscribes a handler that refuses a write", () => {
   const refused = subscribedHandler()({ toolName: "write", input: { path: "src/a.ts", content: "x" } });
   assert.equal(refused?.block, true, "the subscribed handler let a write through");
-  assert.match(refused?.reason ?? "", /changes the code you are reviewing/u);
+  assert.equal(refused?.reason, "squiz refused this call: `write` is not a tool this review grants.");
 });
 
 test("the subscribed handler lets a call nothing objects to through", () => {
@@ -339,6 +339,7 @@ test("a read outside the working directory pi was started in is refused and reco
   const { pi, loaded: extension } = registrar();
   keepVariable(t);
   process.env[REPORTS_VARIABLE] = reports;
+  process.env[GRANT_VARIABLE] = grants.read.join(",");
   reportAsYouGo(pi);
   const handler = onlyHandler(extension, "tool_call") as Handler;
 
@@ -603,14 +604,61 @@ test("an unfinished end that cannot be recorded still shuts pi down, and throws 
   assert.equal(shutdowns, 1, "pi was left waiting for input");
 });
 
-/** Restore the variable, whatever the test set it to. */
+/** Restore the variables the extension reads, whatever the test set them to. */
 function keepVariable(t: { after: (fn: () => void) => void }): void {
-  const before = process.env[REPORTS_VARIABLE];
-  t.after(() => {
-    if (before === undefined) delete process.env[REPORTS_VARIABLE];
-    else process.env[REPORTS_VARIABLE] = before;
-  });
+  for (const name of [REPORTS_VARIABLE, GRANT_VARIABLE]) {
+    const before = process.env[name];
+    t.after(() => {
+      if (before === undefined) delete process.env[name];
+      else process.env[name] = before;
+    });
+  }
 }
+
+/** The handler of the extension `pi` loads, with the grant variable set to `grant`, or unset. */
+function handlerUnder(grant: string | undefined): Handler {
+  delete process.env[REPORTS_VARIABLE];
+  if (grant === undefined) delete process.env[GRANT_VARIABLE];
+  else process.env[GRANT_VARIABLE] = grant;
+  const { pi, loaded: extension } = registrar();
+  reportAsYouGo(pi);
+  return onlyHandler(extension, "tool_call") as Handler;
+}
+
+// pi falls back to read, bash, edit and write where --tools is lost, so each of
+// those it would add, and a name nothing grants, has to be refused here.
+test("the extension pi loads refuses every call the grant it was handed leaves out", (t) => {
+  keepVariable(t);
+  for (const [depth, grant] of Object.entries(grants)) {
+    const handler = handlerUnder(grant.join(","));
+    for (const tool of ["bash", "edit", "write", "delete_everything"]) {
+      assert.equal(
+        handler({ toolName: tool, input: { command: "touch x", path: "src/a.ts" } })?.reason,
+        `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
+        `${tool} at ${depth}`,
+      );
+    }
+    for (const tool of grant) {
+      assert.equal(handler({ toolName: tool, input: { path: "package.json" } }), undefined, `${tool} at ${depth}`);
+    }
+  }
+});
+
+test("the extension pi loads refuses a history tool the read grant leaves out", (t) => {
+  keepVariable(t);
+  const handler = handlerUnder(grants.read.join(","));
+  assert.equal(handler({ toolName: "git_show", input: { commit: "HEAD" } })?.block, true);
+});
+
+// A command line that lost the variable is the same mistake as one that lost
+// --tools, so it allows nothing rather than everything.
+test("the extension pi loads refuses every call where no grant was handed to it", (t) => {
+  keepVariable(t);
+  const handler = handlerUnder(undefined);
+  for (const tool of [...grants.deep, "bash"]) {
+    assert.equal(handler({ toolName: tool, input: { path: "package.json" } })?.block, true, tool);
+  }
+});
 
 test("the extension pi loads writes to the file the variable names", async (t) => {
   keepVariable(t);
