@@ -443,6 +443,40 @@ test("a round some of whose findings failed to post keeps its status, and says h
   });
 });
 
+test("#606: a round that left threads open prints each of its findings no thread holds on stderr, and keeps its status", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      {
+        ...OWN,
+        status: "reviewed",
+        result: "exited",
+        exitStatus: 2,
+        openThreads: [OPEN_THREAD.id],
+        newFindings: 1,
+        unposted: { failed: 1, of: 3 },
+        unthreaded: [
+          "About the change as a whole: The retry queue duplicates the scheduler",
+          "`src/cache.ts:12` — The cache is never cleared (raised, and its comment could not be posted)",
+        ],
+        round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+      },
+    ], { rounds: [NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
+
+    assert.equal(printed.exit, 2);
+    assert.equal(
+      printed.stderr,
+      [
+        "squiz: round 1 could not post 1 of its 3 findings to PR #41",
+        "squiz: round 1 raised this on no thread: About the change as a whole: The retry queue duplicates the scheduler",
+        "squiz: round 1 raised this on no thread: `src/cache.ts:12` — The cache is never cleared (raised, and its comment could not be posted)",
+        "",
+      ].join("\n"),
+    );
+  });
+});
+
 test("a run on a closed episode prints the close, exiting as it did", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

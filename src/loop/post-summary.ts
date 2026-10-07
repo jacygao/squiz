@@ -66,6 +66,14 @@ export type ClosingRound = {
   /** What became of every finding this round raised. */
   readonly findings: PostedFindings;
   /**
+   * The Notes lines of the findings no thread holds that the last round to reach
+   * its end raised, where that round is an earlier one than this.
+   *
+   * Empty where this round reviewed. Its reviewer read the whole change again, so
+   * whatever of an earlier round's findings it still found it raised itself.
+   */
+  readonly earlier: readonly string[];
+  /**
    * Which of the three reasons closed the episode.
    *
    * Always one of them. A round the reviewer failed reached no decision and posts
@@ -102,6 +110,7 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Comment
     rounds: closing.rounds,
     threads: classifyAtClose(closing),
     findings: closing.findings,
+    earlier: closing.earlier,
     because: closing.because,
     confinement: closing.confinement,
     leftNotReviewed: closing.leftNotReviewed,

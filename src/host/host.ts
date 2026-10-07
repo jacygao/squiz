@@ -26,6 +26,7 @@ import { join } from "node:path";
 
 import { headMovedIn } from "../loop/confinement.ts";
 import { failureReport } from "../loop/failure-comment.ts";
+import { unthreadedNotes } from "../github/summary-body.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
@@ -433,11 +434,15 @@ function reportOf(
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
   const outcomes = conclusion.findings.outcomes;
   const failed = outcomes.filter((outcome) => outcome.outcome === "failed").length;
+  // A close names them in its summary. A round that left the episode open posts
+  // none, so this record is where they are kept until the close reads them.
+  const unthreaded = conclusion.outcome === "close" ? [] : unthreadedNotes(conclusion.findings);
   return {
     newFindings: conclusion.posted.length,
     ...(failed === 0 ? {} : { unposted: { failed, of: outcomes.length } }),
     ...(moved === undefined ? {} : { moved }),
     ...(problems.length === 0 ? {} : { problems }),
+    ...(unthreaded.length === 0 ? {} : { unthreaded }),
     ...(bound === "round-cap" ? { closedAt: "round cap" } : bound === "token-bound" ? { closedAt: "token bound" } : {}),
   };
 }

@@ -2220,6 +2220,80 @@ test("a cap lowered after a round blocked lists the threads and posts the summar
 });
 
 /**
+ * The last round to reach its end left the episode open with a finding no thread
+ * holds, and the round after it failed. Nothing has settled that finding, and
+ * the close before the review is the episode's only comment.
+ */
+test("#606: a close before the review names the findings no thread holds that the last round reaching its end left", async () => {
+  const left = "About the change as a whole: The retry queue duplicates the scheduler";
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    stateSource: JSON.stringify({
+      rounds: [ANSWER_COST, ANSWER_COST],
+      spentOutsideRounds: unspent,
+      records: [
+        {
+          head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+          activity: null,
+          status: "reviewed",
+          result: "exited",
+          exitStatus: 2,
+          openThreads: ["PRRT_new"],
+          round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+          unthreaded: [left],
+        },
+        {
+          head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6",
+          activity: null,
+          status: "failed",
+          reason: "the reviewer was stopped at the time bound",
+          ownerNoted: false,
+          round: { number: 2, startedAt: 3, endedAt: 4 },
+        },
+      ],
+    }),
+    answers: { ...POSTING, threads: listed([{ id: "PRRT_new", isResolved: false }]) },
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
+  const body = summaryBody(ran);
+  assert.match(body, /^\*\*Squiz review — 2 rounds, 2 findings\*\*/u);
+  assert.ok(body.includes(`**Notes**\n\n- ${left}\n`), `the summary did not name the earlier finding: ${body}`);
+});
+
+/**
+ * A round that reviews read the whole change again, so the finding an earlier
+ * round left on no thread is either raised again by it or no longer found.
+ */
+test("#606: a round that reviews and closes settles an earlier round's findings no thread holds", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    stateSource: JSON.stringify({
+      rounds: [ANSWER_COST],
+      spentOutsideRounds: unspent,
+      records: [
+        {
+          head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+          activity: null,
+          status: "reviewed",
+          result: "exited",
+          exitStatus: 2,
+          openThreads: [],
+          round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+          unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
+        },
+      ],
+    }),
+    answers: POSTING,
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
+  assert.doesNotMatch(summaryBody(ran), /retry queue/u);
+});
+
+/**
  * A close before the review has no verdict to read a resolved thread by, and
  * counts it fixed. An unresolved one is open, or disputed where the coding agent
  * replied, as at any close.

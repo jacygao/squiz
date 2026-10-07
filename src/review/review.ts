@@ -365,7 +365,10 @@ function roundResult(
     unposted === undefined
       ? []
       : [`round ${round} could not post ${unposted.failed} of its ${unposted.of} findings to PR #${waiting.pullRequest}`];
-  const problems = [...lost, ...(record.problems ?? [])];
+  // A round that left the episode open posted no summary, so stderr is where the
+  // coding agent working it reads what no thread holds.
+  const unthreaded = (record.unthreaded ?? []).map((note) => `round ${round} raised this on no thread: ${note}`);
+  const problems = [...lost, ...unthreaded, ...(record.problems ?? [])];
   const base = {
     outcome: "reviewed" as const,
     pullRequest: waiting.pullRequest,

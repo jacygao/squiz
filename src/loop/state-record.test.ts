@@ -112,6 +112,17 @@ const everyState: readonly StateRecord[] = [
   },
   { head, activity: reply, status: "reviewed", result: "clean, episode open", newFindings: 0 },
   { head, activity: reply, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1, unposted: { failed: 1, of: 2 } },
+  // A round that left the episode open, with the findings no thread holds.
+  {
+    head,
+    activity: reply,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["PRRT_kwDOL7tYbc5abcd1"],
+    newFindings: 1,
+    unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
+  },
   {
     head,
     activity: reply,
@@ -262,6 +273,7 @@ const malformed: readonly [string, unknown][] = [
   ["unposted findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: "1", of: 1 } }],
   // More failed than the round posted is a writer that counted something else.
   ["more unposted findings than the round had", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: 2, of: 1 } }],
+  ["findings no thread holds that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], unthreaded: [1] }],
   ["problems that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
   ["failure lines that are not strings", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, lines: "posted" }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],

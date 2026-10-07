@@ -53,7 +53,15 @@ export type LeftNotReviewed = {
  * kept one, ranks below every numbered one, and the later of two such wins.
  */
 export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
-  let reviewed: StateRecord | undefined;
+  const reviewed = lastReviewedRecord(records);
+  return reviewed === undefined ? null : { head: reviewed.head, activity: reviewed.activity };
+}
+
+/** The record of the last state the episode reviewed, ranked as `lastReviewed` ranks it. */
+export function lastReviewedRecord(
+  records: readonly StateRecord[],
+): Extract<StateRecord, { readonly status: "reviewed" }> | undefined {
+  let reviewed: Extract<StateRecord, { readonly status: "reviewed" }> | undefined;
   let highest = -1;
   for (const record of records) {
     if (record.status !== "reviewed") continue;
@@ -62,7 +70,7 @@ export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
     reviewed = record;
     highest = number;
   }
-  return reviewed === undefined ? null : { head: reviewed.head, activity: reviewed.activity };
+  return reviewed;
 }
 
 /** Why a state was not reviewed, where the episode's bound was spent before a round took it. */

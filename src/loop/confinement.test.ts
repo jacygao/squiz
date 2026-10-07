@@ -351,6 +351,7 @@ function commentOn(found: ConfinementEvidence | undefined): string {
     rounds: [unspent],
     threads: [],
     findings: { outcomes: [] },
+    earlier: [],
     because: "nothing-open",
     confinement: found ?? nothingEstablished,
     leftNotReviewed: null,
