@@ -29,6 +29,7 @@ import { failureReport } from "../loop/failure-comment.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
+import type { ClosedBy } from "../github/failure-body.ts";
 import {
   closedBeforeReview,
   decideRoundEnd,
@@ -255,8 +256,13 @@ export function endsOnFor(
     decideRoundEnd({ ...tally, state }, { rounds: config.rounds, tokens: config.tokens }, queued);
 }
 
-/** A record the host wrote, and how a note to its owner names its state. */
-type Recorded = { readonly record: StateRecord; readonly name: string };
+/**
+ * A record the host wrote, and how a note to its owner names its state.
+ *
+ * `closed` is the bound a failed round left spent. It goes to the note and not
+ * to the record, because the next run reads the bounds from the state anyway.
+ */
+type Recorded = { readonly record: StateRecord; readonly name: string; readonly closed?: ClosedBy };
 
 /**
  * `records` with the name each is told apart by, in order: its short commit,
@@ -272,8 +278,8 @@ function inOrder(records: readonly StateRecord[], after: StateKey | null = null)
 /** Write a note for the owner of each of `recorded` that gets one, and wake each owner that has a socket. */
 async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log): Promise<void> {
   const notes = join(episode.directory, "notes");
-  for (const { record, name } of recorded) {
-    const note = ownerNote(Number(episode.id), record, name);
+  for (const { record, name, closed } of recorded) {
+    const note = ownerNote(Number(episode.id), record, name, closed);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);
     if (written.outcome === "failed") {
@@ -355,7 +361,11 @@ function resultOf(
       const round = reviewer === undefined ? timing : { ...timing, reviewer };
       const lines = conclusion.outcome === "failed" ? failureLinesOf(conclusion) : [];
       const failed = { ...failedRecord(key, reason), round, ...(lines.length === 0 ? {} : { lines }) };
-      return { records: () => inOrder([failed]), line: `${named(taken)} failed: ${reason}` };
+      const closed = conclusion.outcome === "failed" ? conclusion.closed : undefined;
+      return {
+        records: () => inOrder([failed]).map((written) => (closed === undefined ? written : { ...written, closed })),
+        line: `${named(taken)} failed: ${reason}`,
+      };
     }
   }
 }

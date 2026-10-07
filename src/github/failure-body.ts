@@ -54,7 +54,7 @@ export function renderFailure(report: FailureReport): string {
   const next =
     report.closed === undefined
       ? ["The review is still open.", "A new commit or reply, or running `squiz review` again, retries it."]
-      : closedLines(report.closed);
+      : closedLines(report.closed, "A new commit or reply, or running `squiz review`, posts its summary.");
   const blocks = [`${marker}${report.reason}**`, [...counted, ...next].join(" ")];
   // The findings come first and the worktree after, the order the summary's
   // Notes keep.
@@ -64,20 +64,19 @@ export function renderFailure(report: FailureReport): string {
 }
 
 /**
- * What a closed episode's comment says in place of the retry.
+ * What a closed episode's report says in place of the retry, as sentences.
+ * `summary` says what posts the summary, in the words its reader acts on.
  *
  * The next firing finds the bound spent and closes the episode without a
  * reviewer, posting the summary. An episode that ran no round may have no thread
  * for a summary to count, so it is promised none.
  */
-function closedLines(closed: ClosedBy): string[] {
+export function closedLines(closed: ClosedBy, summary: string): string[] {
   const why =
     closed.bound === "round-cap"
       ? `it has run ${closed.roundsRun} ${closed.roundsRun === 1 ? "round" : "rounds"}, and the round cap allows ${closed.cap}`
       : `it reached the token bound of ${grouped(closed.tokens)} tokens`;
-  const summary =
-    closed.roundsRun === 0 ? [] : ["A new commit or reply, or running `squiz review`, posts its summary."];
-  return [`The review is closed: ${why}.`, "No round runs again.", ...summary];
+  return [`The review is closed: ${why}.`, "No round runs again.", ...(closed.roundsRun === 0 ? [] : [summary])];
 }
 
 /** How many of the salvaged findings are threads on the pull request, as a sentence. */
