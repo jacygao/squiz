@@ -9,7 +9,7 @@
 
 import type { Adapter } from "../adapter.ts";
 import { argv, grants } from "./argv.ts";
-import { confine } from "./confine.ts";
+import { confine, userModel } from "./confine.ts";
 import { readReports } from "./reports.ts";
 import { resumeLine } from "./session.ts";
 
@@ -20,4 +20,8 @@ export const copilot: Adapter = {
   grants,
   resume: resumeLine,
   costAtExit: true,
+  userModel: (environment) => {
+    const model = userModel(environment);
+    return typeof model === "object" ? { problem: model.problem, failsTheRound: true } : model;
+  },
 };

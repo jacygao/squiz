@@ -216,6 +216,13 @@ export type Confinement =
   | { readonly outcome: "prepared"; readonly environment: Readonly<Record<string, string>> }
   | { readonly outcome: "failed"; readonly reason: string };
 
+/**
+ * The model a CLI runs on when the round names none, as the user's own
+ * settings give it: its name, `undefined` where they name none, or why they
+ * could not be read. `failsTheRound` is true where `confine` fails on that.
+ */
+export type UserModel = string | undefined | { readonly problem: string; readonly failsTheRound: boolean };
+
 /** The parts of driving one reviewer CLI. */
 export type Adapter = {
   /** Build the command line for one round, from what the harness set for it. */
@@ -269,4 +276,6 @@ export type Adapter = {
    * the message in flight.
    */
   readonly costAtExit?: true;
+  /** The user's default model, read from `environment`'s home and variables. It reads and never writes. */
+  readonly userModel?: (environment: NodeJS.ProcessEnv) => UserModel;
 };

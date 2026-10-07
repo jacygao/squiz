@@ -6,12 +6,15 @@
  * more check appended there. Only a check that fails changes the exit status.
  * A warning is printed and leaves it alone.
  *
- * It starts each tool once to ask its version, and `gh` a second time for its
- * sign-in. It writes nothing anywhere.
+ * It starts each tool once to ask its version, `gh` a second time for its
+ * sign-in, and `git` a second time for the repository whose `.squiz.json`
+ * names the reviewer. It reads settings files and writes nothing anywhere.
  */
 
 import { spawnSync } from "node:child_process";
 
+import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
+import { adapterFor } from "../reviewers/adapters.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
 /**
@@ -28,6 +31,8 @@ export type Row = { readonly level: Level; readonly line: string };
 export type DoctorContext = {
   /** The environment every probe runs in. Its `PATH` decides which tools are found. */
   readonly environment: NodeJS.ProcessEnv;
+  /** Where it was run. Every probe starts there, and the reviewer is the one its repository configures. */
+  readonly directory: string;
   /** The version of the Node running squiz, without the leading `v`. */
   readonly nodeVersion: string;
   /** How long one probe may run before it is killed and reported as not answering. */
@@ -63,6 +68,7 @@ export function probe(command: string, args: readonly string[], context: DoctorC
   const result = spawnSync(command, args, {
     encoding: "utf8",
     env: context.environment,
+    cwd: context.directory,
     timeout: context.boundMs,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -230,6 +236,73 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
   };
 }
 
+/**
+ * The reviewer `.squiz.json` names, whether it is installed, and the model it
+ * runs on.
+ *
+ * Outside a repository, or in one without the file, the reviewer is the
+ * default. A file the configuration refuses fails the row, because no round
+ * starts under it, and so does a git that cannot name the repository.
+ */
+const reviewer: Check = (context) => {
+  const root = repositoryRoot(context);
+  if (root.outcome === "failed") return { level: "failed", line: `Reviewer: the repository could not be found: ${root.reason}` };
+  let config: Config;
+  try {
+    config = root.outcome === "outside" ? { ...defaultConfig } : loadConfig(root.path);
+  } catch (cause) {
+    return { level: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
+  }
+
+  const label = `Reviewer ${config.reviewer}`;
+  const found = versionOf(config.reviewer, ["--version"], context);
+  if (found.outcome === "absent") return { level: "failed", line: `${label}: not found` };
+  if (found.outcome === "failed") return { level: "failed", line: `${label}: could not be run: ${found.reason}` };
+  const installed = `${label} ${found.version}`;
+  // No Copilot command reports its login without starting a session.
+  const signIn = config.reviewer === "copilot" ? ". Its sign-in is not checked" : "";
+
+  if (config.model !== null) {
+    return { level: "present", line: `${installed}, model ${config.model}, from ${configFileName}${signIn}` };
+  }
+  const cli = config.reviewer === "pi" ? "pi" : "Copilot";
+  const user = adapterFor(config.reviewer).userModel?.(context.environment);
+  if (typeof user === "string") return { level: "present", line: `${installed}, model ${user}, ${cli}'s default${signIn}` };
+  if (user === undefined) {
+    return { level: "present", line: `${installed}, model unknown: neither ${configFileName} nor ${cli}'s settings name one${signIn}` };
+  }
+  if (user.failsTheRound) return { level: "failed", line: `${installed}: model unknown: ${user.problem}` };
+  return { level: "warning", line: `${installed}: warning: model unknown: ${user.problem}` };
+};
+
+type Root =
+  | { readonly outcome: "found"; readonly path: string }
+  | { readonly outcome: "outside" }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+// Git's message is matched as text, so it is asked for untranslated.
+const NOT_A_REPOSITORY = /fatal: not a git repository/u;
+
+/**
+ * The root of the repository the check runs in. Only git saying this is no
+ * repository is `outside`; any other refusal is `failed`, because a round run
+ * here would stop on it too.
+ */
+function repositoryRoot(context: DoctorContext): Root {
+  const untranslated = { ...context, environment: { ...context.environment, LC_ALL: "C" } };
+  const asked = probe("git", ["rev-parse", "--show-toplevel"], untranslated);
+  if (asked.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
+  if (asked.outcome === "failed") {
+    return NOT_A_REPOSITORY.test(asked.reason) ? { outcome: "outside" } : { outcome: "failed", reason: asked.reason };
+  }
+  const root = asked.stdout.trim();
+  return root === "" ? { outcome: "failed", reason: "git named no worktree for this directory" } : { outcome: "found", path: root };
+}
+
+function reasonFor(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /** Every dependency a project needs, in the order they print. */
 export const CHECKS: readonly Check[] = [
   required("git", "git", ["--version"]),
@@ -239,6 +312,7 @@ export const CHECKS: readonly Check[] = [
   optional("tmux", "tmux", ["-V"], MULTIPLEXER_OPTIONAL),
   optional("Herdr", "herdr", ["--version"], MULTIPLEXER_OPTIONAL),
   pathLink(),
+  reviewer,
 ];
 
 function firstLine(output: string): string {
