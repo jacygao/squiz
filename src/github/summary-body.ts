@@ -23,6 +23,7 @@ import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import { namedStates, type LeftNotReviewed, type StoppingBound } from "../loop/round-end.ts";
 import { mutated, type AppliedVerdicts } from "../loop/verdicts.ts";
+import { renderReviewerLine } from "./reviewer-line.ts";
 import { renderSpendLine } from "./spend-line.ts";
 import type { ReviewThread } from "./threads.ts";
 
@@ -103,7 +104,7 @@ export function renderSummary(episode: ClosedEpisode): string {
   return [tally(episode), needsAPerson(episode.threads), ...notes(episode)].join("\n\n");
 }
 
-/** What the review counted and what it spent, under the marker. */
+/** What the review counted, what it spent, and who reviewed it, under the marker. */
 function tally(episode: ClosedEpisode): string {
   const rounds = counted(episode.rounds.length, "round");
   const findings = counted(countRaised(episode), "finding");
@@ -113,7 +114,9 @@ function tally(episode: ClosedEpisode): string {
     .map(({ word, count }) => `${word} ${count}`)
     .join(" · ");
   const spend = renderSpendLine(episode.rounds.map(costOf));
-  return `${marker}${rounds}, ${findings}**\n\n${statuses}${spend === null ? "" : `\n${spend}`}`;
+  const reviewedBy = renderReviewerLine(episode.rounds);
+  const below = [statuses, spend, reviewedBy].filter((line) => line !== null).join("\n");
+  return `${marker}${rounds}, ${findings}**\n\n${below}`;
 }
 
 /**

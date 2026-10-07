@@ -43,6 +43,8 @@ type Tally = {
   dollars: number;
   tokens: number;
   messages: number;
+  /** Every model a message named, as `provider/id`, in the order first named. */
+  models: string[];
   /** Whether the last line that counts toward the cost left a message's usage owed. */
   owed: boolean;
   /** Whether a line that could not be read may have carried spend the sum is missing. */
@@ -75,6 +77,7 @@ export async function readReports(
     dollars: 0,
     tokens: 0,
     messages: 0,
+    models: [],
     owed: false,
     lost: false,
     stopped: false,
@@ -165,14 +168,21 @@ function take(tally: Tally, text: string, number: number): void {
       return;
     }
     case "usage": {
-      const stopReason = line["stopReason"];
-      const errorMessage = line["errorMessage"];
+      const { stopReason, errorMessage, provider, model } = line;
       if (
         (stopReason !== undefined && typeof stopReason !== "string") ||
-        (errorMessage !== undefined && typeof errorMessage !== "string")
+        (errorMessage !== undefined && typeof errorMessage !== "string") ||
+        (provider !== undefined && typeof provider !== "string") ||
+        (model !== undefined && typeof model !== "string")
       ) {
-        unreadable("a message carries a stop reason or an error that is not text");
+        unreadable("a message carries a stop reason, an error, a provider or a model that is not text");
         return;
+      }
+      // A blank model is named as none: the state file would refuse it.
+      if (model !== undefined && model.trim() !== "") {
+        // Spelled as `pi --list-models` lists it, which is how `model` is configured.
+        const named = provider === undefined ? model : `${provider}/${model}`;
+        if (!tally.models.includes(named)) tally.models.push(named);
       }
       // A message carrying no spend is left out of what the sum covers rather
       // than counted as zero.
@@ -233,7 +243,12 @@ function resultOf(tally: Tally): RunResult {
 }
 
 function costOf(tally: Tally): RoundCost {
-  const cost = { dollars: tally.dollars, tokens: tally.tokens, messages: tally.messages };
+  const cost = {
+    dollars: tally.dollars,
+    tokens: tally.tokens,
+    messages: tally.messages,
+    ...(tally.models.length === 0 ? {} : { models: [...tally.models] }),
+  };
   return tally.owed || tally.lost ? { ...cost, floor: true } : cost;
 }
 

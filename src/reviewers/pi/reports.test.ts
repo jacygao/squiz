@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ParsedRun, RoundProgress } from "../adapter.ts";
-import type { Line } from "../report-file.ts";
+import type { Line, UsageLine } from "../report-file.ts";
 import { REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 import { readReports } from "./reports.ts";
 
@@ -24,7 +24,6 @@ function usage(stopReason: string, dollars: number, errorMessage?: string): Line
     type: "usage",
     stopReason,
     ...(errorMessage === undefined ? {} : { errorMessage }),
-    model: "stand-in",
     usage: {
       input: dollars === 0 ? 0 : 100,
       output: 0,
@@ -249,4 +248,44 @@ test("a file ending on a report with no message after it is a cost that is a flo
 test("an unfinished end after the last message's usage does not make the cost a floor", async () => {
   const { run } = await read(fileOf(usage("toolUse", 0.002), findingLine, usage("stop", 0.001), { type: "unfinished" }));
   assert.equal(run.cost?.floor, undefined);
+});
+
+/** `usage("toolUse", 0.002)` as a message `provider` served on `model`. */
+function servedBy(provider: string | undefined, model: string): Line {
+  const line = usage("toolUse", 0.002) as UsageLine;
+  return { ...line, ...(provider === undefined ? {} : { provider }), model };
+}
+
+test("the models a run's messages name come back with its cost, as pi lists them (#271)", async () => {
+  const { run } = await read(
+    fileOf(
+      servedBy("deepseek", "deepseek-v4-pro"),
+      servedBy("openai", "gpt-5-mini"),
+      servedBy("deepseek", "deepseek-v4-pro"),
+      finish,
+      usage("stop", 0.001),
+    ),
+  );
+  assert.deepEqual(run.cost?.models, ["deepseek/deepseek-v4-pro", "openai/gpt-5-mini"]);
+});
+
+test("a message naming a model and no provider names the model alone (#271)", async () => {
+  const { run } = await read(fileOf(servedBy(undefined, "deepseek-v4-pro"), finish, usage("stop", 0.001)));
+  assert.deepEqual(run.cost?.models, ["deepseek-v4-pro"]);
+});
+
+test("a progress carries the models named by then (#271)", async () => {
+  const { told } = await read(fileOf(servedBy("deepseek", "deepseek-v4-pro"), findingLine));
+  assert.deepEqual(told.at(-1)?.cost?.models, ["deepseek/deepseek-v4-pro"]);
+});
+
+test("a model that is not text fails the review rather than naming nothing (#271)", async () => {
+  const { run } = await read(fileOf({ ...usage("stop", 0.001), model: 7 } as unknown as Line, finish));
+  assert.equal(run.result.kind, "unparsed");
+});
+
+// The state file refuses a blank model, so a run that named one names none.
+test("a blank model names no model (#271)", async () => {
+  const { run } = await read(fileOf(servedBy(undefined, ""), servedBy("deepseek", " "), finish, usage("stop", 0.001)));
+  assert.equal(run.cost?.models, undefined);
 });

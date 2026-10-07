@@ -11,13 +11,15 @@ import { renderComment } from "../findings/comment.ts";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
+import type { RoundRecord, Timings } from "../loop/episode-state.ts";
 import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSummary, unappliedNotes, type ClosedEpisode } from "./summary-body.ts";
 import type { ReviewThread } from "./threads.ts";
 
-function round(dollars: number, tokens: number): RoundCost {
-  return { dollars, tokens, messages: 4 };
+/** A round of `pi` on one model, which is what most tests here need and none is about. */
+function round(dollars: number, tokens: number): RoundCost & Timings {
+  return { dollars, tokens, messages: 4, models: ["openai/gpt-5-mini"], reviewer: "pi" };
 }
 
 function thread(
@@ -79,6 +81,7 @@ const quietOpens = [
   "",
   "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
   "20,100 tokens over 1 round: 20,100 · $0.0061",
+  "Reviewed by `pi` on `openai/gpt-5-mini`",
   "",
   "**Needs a person**",
   "",
@@ -127,6 +130,7 @@ test("the episode renders as the specification shows", () => {
       "",
       "Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1",
       "48,200 tokens over 3 rounds: 20,100, 16,400, 11,700 · $0.0134",
+      "Reviewed by `pi` on `openai/gpt-5-mini`",
       "",
       "**Needs a person**",
       "",
@@ -157,6 +161,7 @@ test("an episode with nothing to report carries no Notes heading", () => {
       "",
       "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
       "20,100 tokens over 1 round: 20,100 · $0.0061",
+      "Reviewed by `pi` on `openai/gpt-5-mini`",
       "",
       "**Needs a person**",
       "",
@@ -193,6 +198,7 @@ test("a finding about the change as a whole counts and carries no status", () =>
       "",
       "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
       "20,100 tokens over 1 round: 20,100 · $0.0061",
+      "Reviewed by `pi` on `openai/gpt-5-mini`",
       "",
       "**Needs a person**",
       "",
@@ -248,6 +254,7 @@ test("an earlier round's findings no thread holds are counted and named in Notes
       "",
       "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
       "20,100 tokens over 1 round: 20,100 · $0.0061",
+      "Reviewed by `pi` on `openai/gpt-5-mini`",
       "",
       "**Needs a person**",
       "",
@@ -551,6 +558,7 @@ test("a finding whose comment could not be posted is counted and named in Notes"
       "",
       "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
       "20,100 tokens over 1 round: 20,100 · $0.0061",
+      "Reviewed by `pi` on `openai/gpt-5-mini`",
       "",
       "**Needs a person**",
       "",
@@ -689,17 +697,91 @@ test("an episode that ran no round reports no spend", () => {
 // A round the state file recorded with no figures, as a Copilot round the
 // bound stopped is.
 test("an episode no round of which has a cost carries no spend line", () => {
-  const comment = renderSummary({ ...quiet, rounds: [{ elapsedSeconds: 900.4, cutShortAtSeconds: 900 }] });
+  const comment = renderSummary({
+    ...quiet,
+    rounds: [{ elapsedSeconds: 900.4, cutShortAtSeconds: 900, reviewer: "copilot" }],
+  });
   assert.ok(
     comment.startsWith(
       [
         "**Squiz review — 1 round, 0 findings**",
         "",
         "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
+        "Reviewed by `copilot` on an unknown model",
         "",
         "**Needs a person**",
       ].join("\n"),
     ),
     `an episode with no cost carried a spend line: ${comment}`,
   );
+});
+
+/** The line of a summary of `rounds` that names the reviewer, where there is one. */
+function reviewerLine(rounds: readonly RoundRecord[]): string | undefined {
+  return renderSummary({ ...quiet, rounds })
+    .split("\n")
+    .find((line) => line.startsWith("Reviewed by"));
+}
+
+test("every round on one model names the reviewer and the model once (#271)", () => {
+  assert.equal(
+    reviewerLine([round(0.0061, 20_100), round(0.0044, 16_400)]),
+    "Reviewed by `pi` on `openai/gpt-5-mini`",
+  );
+});
+
+// The configured model never reaches the composer, so a round whose run reported
+// none has nothing to name but that it is unknown.
+test("a round whose run reported no model reads as an unknown model (#271)", () => {
+  assert.equal(
+    reviewerLine([{ dollars: 0.0061, tokens: 20_100, messages: 4, reviewer: "pi" }]),
+    "Reviewed by `pi` on an unknown model",
+  );
+});
+
+test("rounds that ran different models name each model with its rounds (#271)", () => {
+  const on = (model: string): RoundRecord => ({ ...round(0.0061, 20_100), models: [model] });
+  assert.equal(
+    reviewerLine([on("openai/gpt-5-mini"), on("deepseek/deepseek-v4-pro"), on("openai/gpt-5-mini")]),
+    "Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 3, and on `deepseek/deepseek-v4-pro` in round 2",
+  );
+});
+
+test("a round that reported no model is named among the rounds that did (#271)", () => {
+  const unreported: RoundRecord = { dollars: 0, tokens: 0, messages: 0, reviewer: "pi" };
+  assert.equal(
+    reviewerLine([round(0.0061, 20_100), unreported, round(0.0044, 16_400), round(0.0044, 16_400)]),
+    "Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1, 3 and 4, and on an unknown model in round 2",
+  );
+});
+
+test("a round that ran two models names both, where every round ran both (#271)", () => {
+  const both: RoundRecord = { ...round(0, 18_200), models: ["gpt-5-mini", "claude-haiku-4.5"], reviewer: "copilot" };
+  assert.equal(reviewerLine([both, both]), "Reviewed by `copilot` on `gpt-5-mini` and `claude-haiku-4.5`");
+});
+
+test("rounds run by different reviewers name each reviewer with its rounds (#271)", () => {
+  const copilot: RoundRecord = { ...round(0, 18_200), models: ["gpt-5-mini"], reviewer: "copilot" };
+  assert.equal(
+    reviewerLine([round(0.0061, 20_100), round(0.0044, 16_400), copilot]),
+    "Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3",
+  );
+});
+
+// A state file written before the reviewer was recorded holds rounds with no name.
+test("a round recorded with no reviewer reads as an unknown reviewer (#271)", () => {
+  assert.equal(
+    reviewerLine([{ dollars: 0.0061, tokens: 20_100, messages: 4 }]),
+    "Reviewed by an unknown reviewer on an unknown model",
+  );
+});
+
+test("an episode that ran no round names no reviewer (#271)", () => {
+  assert.equal(reviewerLine([]), undefined);
+});
+
+// A model's name is the CLI's own text, and a newline in it would end the line.
+test("a model named with a newline or a backtick stays one line and one code span (#271)", () => {
+  const odd: RoundRecord = { ...round(0.0061, 20_100), models: ["gpt-5\n# mini", "a`b"] };
+  assert.equal(reviewerLine([odd]), "Reviewed by `pi` on `gpt-5 # mini` and ``a`b``");
 });

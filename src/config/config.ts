@@ -186,10 +186,12 @@ function wholeNumber(
   return value;
 }
 
+export function isReviewer(value: unknown): value is Reviewer {
+  return reviewers.some((reviewer) => value === reviewer);
+}
+
 function reviewerOf(path: string, value: unknown): Reviewer {
-  for (const reviewer of reviewers) {
-    if (value === reviewer) return reviewer;
-  }
+  if (isReviewer(value)) return value;
   throw new ConfigError(reject(path, "reviewer", value, `"pi" or "copilot"`));
 }
 

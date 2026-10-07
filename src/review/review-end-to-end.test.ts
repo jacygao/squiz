@@ -489,6 +489,7 @@ test("a cap lowered after a round blocked closes the episode at the next run, wh
         "",
         "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 1",
         "1,200 tokens over 1 round: 1,200 · $0.0100",
+        "Reviewed by `pi` on an unknown model",
         "",
         "**Needs a person**",
         "",

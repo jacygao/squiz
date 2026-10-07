@@ -1050,7 +1050,7 @@ test("a Copilot round whose usage line was read before the stop keeps that cost"
 setInterval(() => {}, 1000);`;
     const round = await runRound(asCopilot(reviewer(finishedThenHanging).adapter), at(tree), BOUND);
     assert.equal(round.outcome, "reviewed", accountOf(round));
-    assert.deepEqual(round.cost, { dollars: 0, tokens: 18_200, messages: 5, credits: 0.36 });
+    assert.deepEqual(round.cost, { dollars: 0, tokens: 18_200, messages: 5, credits: 0.36, models: ["gpt-5-mini"] });
   });
 });
 
@@ -1158,7 +1158,7 @@ test("a Copilot reviewer that ran to its end before its start failed is charged 
       backends: failingAfterItRan(),
     });
     assert.equal(round.outcome, "setup", accountOf(round));
-    assert.deepEqual(round.cost, { dollars: 0, tokens: 18_200, messages: 5, credits: 0.36 });
+    assert.deepEqual(round.cost, { dollars: 0, tokens: 18_200, messages: 5, credits: 0.36, models: ["gpt-5-mini"] });
   });
 });
 
@@ -1529,7 +1529,6 @@ function said(text: string, stopReason: string, spend: number, errorMessage?: st
     type: "usage",
     stopReason,
     ...(errorMessage === undefined ? {} : { errorMessage }),
-    model: "stand-in",
     usage: {
       input: spend === 0 ? 0 : 100,
       output: 0,

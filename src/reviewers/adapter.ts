@@ -90,6 +90,12 @@ export type RoundCost = {
   /** AI credits, where the CLI prices a run in them rather than in dollars. */
   readonly credits?: number;
   /**
+   * The models the run reported its spend against, in the order it first named
+   * each, in the CLI's own spelling. Absent where it named none, which is a
+   * model nobody knows rather than the one the project configured.
+   */
+  readonly models?: readonly string[];
+  /**
    * The figures are at least what was spent and may be less than it, because
    * the run's end could not confirm that every message's spend was counted.
    * Absent where it could.

@@ -819,7 +819,8 @@ function atLeast(cost: Spend): Spend {
  * Two attempts' costs added: a retry spends a second process on the same round.
  *
  * A floor added to anything is a floor. No cost adds nothing, so a round has no
- * cost only where none of its attempts had one.
+ * cost only where none of its attempts had one. The round ran on every model
+ * either attempt named.
  */
 function plus(total: Spend, more: Spend): Spend {
   if (total === undefined) return more;
@@ -831,6 +832,9 @@ function plus(total: Spend, more: Spend): Spend {
     ...(total.credits === undefined && more.credits === undefined
       ? {}
       : { credits: (total.credits ?? 0) + (more.credits ?? 0) }),
+    ...(total.models === undefined && more.models === undefined
+      ? {}
+      : { models: [...new Set([...(total.models ?? []), ...(more.models ?? [])])] }),
   };
   return total.floor === true || more.floor === true ? { ...sum, floor: true } : sum;
 }

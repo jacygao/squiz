@@ -90,6 +90,21 @@ test("AI credits come back as written, in a round and outside the rounds", (t) =
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
+test("the reviewer and the models a round ran come back as written (#271)", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [
+      { ...firstRound, reviewer: "pi", models: ["deepseek/deepseek-v4-pro"] },
+      { dollars: 0, tokens: 18_200, messages: 5, models: ["gpt-5-mini", "claude-haiku-4.5"], reviewer: "copilot" },
+      { elapsedSeconds: 900.4, reviewer: "copilot" },
+    ],
+    spentOutsideRounds: unspent,
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
 /**
  * A round with no cost is written with no figures. Zeros would be read back as
  * a round that spent nothing, and summed into the spend line as one.
@@ -219,6 +234,16 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": true}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": "4"}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": -1}]}`,
+  // A reviewer or a model that is there and cannot be read would be named in
+  // the summary as one nobody recorded.
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "reviewer": "claude"}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": "gpt-5-mini"}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": []}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [""]}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [" "]}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [7]}]}`,
+  // A model is named only by the spend it was reported against.
+  `{"rounds": [{"models": ["gpt-5-mini"]}]}`,
   // A record dropped on reading is a state with no record, which a trigger queues
   // again, or a queued state that no round host ever takes.
   `{"rounds": [], "records": {}}`,

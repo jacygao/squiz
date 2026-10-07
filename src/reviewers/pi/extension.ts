@@ -227,11 +227,12 @@ function usageOf(message: unknown): UsageLine | undefined {
   if (typeof message !== "object" || message === null) return undefined;
   const fields = message as Readonly<Record<string, unknown>>;
   if (fields["role"] !== "assistant") return undefined;
-  const { stopReason, errorMessage, model, usage } = fields;
+  const { stopReason, errorMessage, provider, model, usage } = fields;
   return {
     type: "usage",
     ...(typeof stopReason === "string" ? { stopReason } : {}),
     ...(typeof errorMessage === "string" ? { errorMessage } : {}),
+    ...(typeof provider === "string" ? { provider } : {}),
     ...(typeof model === "string" ? { model } : {}),
     ...(typeof usage === "object" && usage !== null ? { usage } : {}),
   };
