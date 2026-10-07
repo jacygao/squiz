@@ -360,13 +360,14 @@ test("a read outside the working directory pi was started in is refused and reco
   ]);
 });
 
-test("an assistant message is recorded with its usage and why it stopped", (t) => {
+test("an assistant message is recorded with its usage, its model and why it stopped (#271)", (t) => {
   const reports = reportsFile(t);
   messageHandler(reports)({ type: "message_end", message: assistantMessage });
   assert.deepEqual(linesIn(reports), [
     {
       type: "usage",
       stopReason: "toolUse",
+      provider: "deepseek",
       model: "deepseek-v4-pro",
       usage: assistantMessage.usage,
     },
@@ -390,6 +391,7 @@ test("an errored assistant message is recorded with its error", (t) => {
       type: "usage",
       stopReason: "error",
       errorMessage: "429 Too Many Requests",
+      provider: "deepseek",
       model: "deepseek-v4-pro",
       usage: errored.usage,
     },

@@ -18,26 +18,33 @@
 
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
+import { isReviewer, type Reviewer } from "../config/config.ts";
 import type { Verdict } from "../findings/status.ts";
 import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
 import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 
 /**
- * One round as the state file keeps it: what it spent, how long its reviewer ran,
- * the time bound that ended the reviewer where one did, and how long its posting
- * took.
+ * One round as the state file keeps it: which reviewer ran it, what it spent and
+ * on which models, how long its reviewer ran, the time bound that ended the
+ * reviewer where one did, and how long its posting took.
  *
  * A round with no cost carries no figure of any kind, rather than zeros that
- * would read back as a round that spent nothing.
+ * would read back as a round that spent nothing. It names no model either,
+ * because a run names its models only where it reports its spend.
  *
- * A file written before the timings were recorded carries none of them, so a
- * reader takes none as given.
+ * A file written before the timings or the reviewer were recorded carries none
+ * of them, so a reader takes none as given.
  */
 export type RoundRecord = (RoundCost | NoCost) & Timings;
 
-/** How long a round's reviewer ran and its posting took, and the bound that cut it short. */
+/**
+ * Which reviewer ran a round, how long it and the round's posting took, and the
+ * bound that cut it short.
+ */
 export type Timings = {
+  /** The reviewer CLI the round ran, as `.squiz.json` names it. */
+  readonly reviewer?: Reviewer;
   /** Wall-clock seconds from starting the reviewer to having it stopped, to a tenth. */
   readonly elapsedSeconds?: number;
   /**
@@ -65,12 +72,13 @@ export function roundRecord(cost: Spend, timings: Timings): RoundRecord {
 /** The cost a round's entry records, or `undefined` where it records none. */
 export function costOf(round: RoundRecord): Spend {
   if (round.tokens === undefined) return undefined;
-  const { dollars, tokens, messages, credits, floor } = round;
+  const { dollars, tokens, messages, credits, models, floor } = round;
   return {
     dollars,
     tokens,
     messages,
     ...(credits === undefined ? {} : { credits }),
+    ...(models === undefined ? {} : { models }),
     ...(floor === undefined ? {} : { floor }),
   };
 }
@@ -400,9 +408,14 @@ function roundFrom(entry: unknown): ReadRound {
   if (posting !== undefined && !isAmount(posting)) {
     return { problem: `has "postingSeconds" as ${render(posting)}` };
   }
+  const reviewer = entry["reviewer"];
+  if (reviewer !== undefined && !isReviewer(reviewer)) {
+    return { problem: `has "reviewer" as ${render(reviewer)}` };
+  }
 
   return {
     round: roundRecord(read.cost, {
+      ...(reviewer === undefined ? {} : { reviewer }),
       ...(elapsed === undefined ? {} : { elapsedSeconds: elapsed }),
       ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
       ...(posting === undefined ? {} : { postingSeconds: posting }),
@@ -412,7 +425,7 @@ function roundFrom(entry: unknown): ReadRound {
 
 /** Whether a round's entry carries no figure at all, which is a round with no cost. */
 function costless(entry: Record<string, unknown>): boolean {
-  const figures: readonly (keyof RoundCost)[] = ["dollars", "tokens", "messages", "credits", "floor"];
+  const figures: readonly (keyof RoundCost)[] = ["dollars", "tokens", "messages", "credits", "models", "floor"];
   return figures.every((figure) => entry[figure] === undefined);
 }
 
@@ -434,6 +447,9 @@ function costFrom(entry: unknown): ReadCost {
   const credits = entry["credits"];
   if (credits !== undefined && !isAmount(credits)) return { problem: `has "credits" as ${render(credits)}` };
 
+  const models = entry["models"];
+  if (models !== undefined && !isModelList(models)) return { problem: `has "models" as ${render(models)}` };
+
   const floor = entry["floor"];
   if (floor !== undefined && floor !== true) return { problem: `has "floor" as ${render(floor)}` };
   return {
@@ -442,6 +458,7 @@ function costFrom(entry: unknown): ReadCost {
       tokens,
       messages,
       ...(credits === undefined ? {} : { credits }),
+      ...(models === undefined ? {} : { models }),
       ...(floor === undefined ? {} : { floor }),
     },
   };
@@ -458,6 +475,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** A time bound is whole seconds and at least one, so 0 is a bound nothing has. */
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+function isModelList(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((model) => typeof model === "string" && model.trim() !== "");
 }
 
 function isTally(value: unknown): value is number {

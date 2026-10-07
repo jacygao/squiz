@@ -174,20 +174,25 @@ function take(tally: Tally, text: string, number: number): void {
  * What Copilot's usage file says: the requests, and the cost where every model
  * carries token counts. `null` where there is no usage object at all.
  *
+ * The cost names each model `modelMetrics` holds a request count above zero for,
+ * in the file's order. A blank name is no model: the state file would refuse it.
+ *
  * `inputTokens` already holds cache reads and writes, so tokens are input and
  * output alone.
  */
 function usageOf(value: unknown): Usage | null {
   const usage = recordOf(value);
   if (usage === null) return null;
-  const models = Object.values(recordOf(usage["modelMetrics"]) ?? {});
+  const models = Object.entries(recordOf(usage["modelMetrics"]) ?? {});
   let requests = 0;
   let tokens = 0;
   let counted = models.length > 0;
-  for (const model of models) {
+  const ran: string[] = [];
+  for (const [name, model] of models) {
     const metrics = recordOf(model);
     const count = recordOf(metrics?.["requests"])?.["count"];
     if (isAmount(count)) requests += count;
+    if (isAmount(count) && count > 0 && name.trim() !== "") ran.push(name);
     const used = recordOf(metrics?.["usage"]);
     const input = used?.["inputTokens"];
     const output = used?.["outputTokens"];
@@ -201,6 +206,7 @@ function usageOf(value: unknown): Usage | null {
     tokens,
     messages: requests,
     ...(isAmount(nano) ? { credits: nano / NANO_AIU_PER_CREDIT } : {}),
+    ...(ran.length === 0 ? {} : { models: ran }),
   };
   return { requests, cost };
 }

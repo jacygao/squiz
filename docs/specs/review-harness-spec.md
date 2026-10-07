@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.23 (draft)
+**Version:** 1.24 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -1208,7 +1208,7 @@ nothing else. An adapter implements four things:
 |---|---|
 | `argv(opts)` | Build the command line from a working directory, a charter file, a prompt, a session directory, the thinking level and the model. |
 | `confine(opts)` | Put in place whatever the CLI is handed outside its command line, check what the CLI cannot be trusted to refuse, and return what to add to its environment. A CLI handed nothing returns an empty environment and writes no file. |
-| `read(reports)` | Report each finding and each verdict as the run makes it, from the file the reviewer reports into, and return the run's cost where the CLI reports one. A run the CLI reports as failed is told apart from one that reported no findings. |
+| `read(reports)` | Report each finding and each verdict as the run makes it, from the file the reviewer reports into, and return the run's cost where the CLI reports one, with the models the CLI reported that cost against. A run the CLI reports as failed is told apart from one that reported no findings. |
 | `grants` | The tools the CLI is given, as one list in the CLI's own names: the reading tools, the reporting calls and the history tools, as Tools sets out. |
 
 **A configured model runs the round, or the round fails at setup.** The adapter
@@ -1349,8 +1349,8 @@ each of these, in the order they happen:
 
 - every report a call accepted, as the extension accepted it;
 - every call it refused, with the refusal;
-- every assistant message's usage and `stopReason`, with its `errorMessage` where
-  it has one;
+- every assistant message's usage, `stopReason`, `provider` and `model`, with its
+  `errorMessage` where it has one;
 - the finish, when `finish_review` is called;
 - an unfinished end, when the agent settles with no finish recorded.
 
@@ -1368,6 +1368,14 @@ once per message rather than once per run. `pi` prices the run itself from a
 local catalogue, so a model the catalogue does not cover reports a zero cost
 against a non-zero token count. The adapter returns the token count alongside the
 cost, which is what tells that case apart from a round that cost nothing.
+
+**A round's models are the ones its messages name.** Each assistant message
+names its `provider` and its `model`, and the adapter writes each pair as
+`provider/model`, which is how `pi --list-models` lists a model and how `model` in
+Configuration names one. A message naming a model and no provider is named by
+the model alone, and a blank model names none. The cost carries every model the
+run named, in the order it first named each, and a run that named none carries
+none. A provider or a model that is not text is a line that cannot be read.
 
 **A round's cost is marked a floor wherever the run's end cannot confirm it as
 a total.** A floor is at least what the round spent, and may be less. Three
@@ -1695,13 +1703,14 @@ the usage file Copilot wrote to the report file, whole, as one usage line:
 {"type":"usage","usage":{"totalNanoAiu":535970000,"modelMetrics":{"gpt-5-mini":{"requests":{"count":5,"cost":0},"usage":{"inputTokens":60586,"outputTokens":521,"cacheReadTokens":48128,"cacheWriteTokens":0,"reasoningTokens":64}}}, …}}
 ```
 
-The adapter's read takes three figures from that line:
+The adapter's read takes four things from that line:
 
 | Figure | Read as |
 |---|---|
 | Tokens | The sum, over every model in `modelMetrics`, of `inputTokens` and `outputTokens`. `inputTokens` already holds cache reads and cache writes. |
 | AI credits | `totalNanoAiu`, at 10⁹ to a credit. |
 | Messages | The sum, over every model, of `requests.count`. |
+| Models | Each model in `modelMetrics` whose name is not blank and whose `requests.count` is a number above zero, in the order the file lists them. |
 
 A Copilot round has no dollar figure. AI credits are shown where `totalNanoAiu`
 is there. A usage line with no model in `modelMetrics`, or with a model that
@@ -1728,7 +1737,8 @@ whose configured model Copilot refused.
 usage line carried token counts.** That cost is Copilot's own total, and is never
 marked a floor. A round with no usage line, one whose line carried no token
 counts, and one the round stopped all record no cost: not a floor, and not a
-figure.
+figure. Such a round names no model either, because the usage line is the only
+place a Copilot run names one.
 
 #### Stopping
 
@@ -2069,14 +2079,16 @@ someone closed the thread.
 
 Three blocks, in this order.
 
-1. **The counts and what the review spent.** Rounds run, findings raised, how
-   many ended `fixed`, `withdrawn`, `open` and `disputed`, and the tokens each
-   round spent with the episode's total, followed by the dollars where the
-   reviewer's CLI priced the model, and the AI credits where it reported
-   those. Findings raised counts every thread of the episode, and every finding
-   that no thread holds that Notes lists. The findings that no thread holds carry
-   no status. A close that ran no reviewer adds a count of the threads it found
-   resolved with no ruling to count them by, and only where there are any:
+1. **The counts, what the review spent, and who reviewed it.** Rounds run,
+   findings raised, how many ended `fixed`, `withdrawn`, `open` and `disputed`,
+   and the tokens each round spent with the episode's total, followed by the
+   dollars where the reviewer's CLI priced the model, and the AI credits where it
+   reported those. Then the reviewer CLI and the model each round ran on, as the
+   run reported them. Findings raised counts every thread of the episode, and
+   every finding that no thread holds that Notes lists. The findings that no
+   thread holds carry no status. A close that ran no reviewer adds a count of
+   the threads it found resolved with no ruling to count them by, and only where
+   there are any:
 
    ```markdown
    Fixed 1 · Withdrawn 0 · Open 1 · Disputed 0 · Resolved, ruling unknown 2
@@ -2158,6 +2170,7 @@ that the bound left no round for.
 
 Fixed 2 · Withdrawn 1 · Open 2 · Disputed 1
 48,200 tokens over 3 rounds: 20,100, 16,400, 11,700 · $0.0134
+Reviewed by `pi` on `openai/gpt-5-mini`
 
 **Needs a person**
 
@@ -2178,8 +2191,11 @@ Each round is written to the episode's local state file as the review finishes,
 before anything is posted, and its posting time is added once posting ends:
 
 ```json
-{ "dollars": 0.0134, "tokens": 20100, "messages": 9, "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3 }
+{ "reviewer": "pi", "dollars": 0.0134, "tokens": 20100, "messages": 9, "models": ["openai/gpt-5-mini"], "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3 }
 ```
+
+- `reviewer` is the reviewer CLI the round ran, as `reviewer` in Configuration
+  names it.
 
 - `dollars` and `tokens` are what the round spent, the dollars being zero where
   the reviewer's CLI did not price the model. `messages` is how many assistant
@@ -2187,6 +2203,10 @@ before anything is posted, and its posting time is added once posting ends:
   cost, which only a Copilot round can be, carries none of the three.
 - `credits` is the AI credits the round spent, where the reviewer's CLI
   reported them, as Copilot does. It is absent for a `pi` round.
+- `models` is every model the round's runs reported their spend against, in the
+  order they first named each, spelled as the adapter reads them (§ 4). A round
+  that ran the reviewer twice names the models of both runs. It is absent where
+  no run named a model, and a round with no cost carries none.
 - `elapsedSeconds` is the wall clock from starting the reviewer to having it
   stopped, to a tenth of a second. A round that ran the reviewer twice counts
   both runs.
@@ -2199,8 +2219,9 @@ before anything is posted, and its posting time is added once posting ends:
   and absent where it is a total. A Copilot round never carries it.
 
 A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
-`postingSeconds`, `floor` and `credits` existed has none of them, and reads back
-as rounds with no timing, no cut, no credits, and costs that are totals. A field that is there and
+`postingSeconds`, `floor`, `credits`, `reviewer` and `models` existed has none of
+them, and reads back as rounds with no timing, no cut, no credits, no reviewer
+and no model, and costs that are totals. A field that is there and
 does not hold a value of the right kind makes the file unreadable, like any
 other.
 
@@ -2247,6 +2268,35 @@ flight when the reviewer was killed was spent and never reported. A Copilot
 round the bound stopped has no cost, and so no figure. A floor round
 that completed no assistant message is given as unknown, and the totals beside it
 are still marked, because what it spent is in none of them.
+
+**The reviewer line names the reviewer CLI each round ran and the model the run
+reported.** The model comes from the run: from each assistant message for `pi`,
+and from the usage line for Copilot, as § 4 sets out for each adapter. The
+`model` that `.squiz.json` configures never stands in for it, because a CLI can
+run a model other than the one it was handed. A round whose run reported no
+model reads "an unknown model". A Copilot round with no cost is one, and so is a
+`pi` round killed before its first message completed.
+
+Where every round ran the same reviewer on the same models, the line names them
+once:
+
+```markdown
+Reviewed by `pi` on `openai/gpt-5-mini`
+Reviewed by `copilot` on `gpt-5-mini` and `claude-haiku-4.5`
+```
+
+Where the rounds differ, each model is named with the rounds that ran on it,
+under the reviewer that ran them, in the order the rounds first named each. A
+round that ran two models is listed under both:
+
+```markdown
+Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 3, and on an unknown model in round 2
+Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3
+```
+
+Each model is one code span on one line, with every run of whitespace in its
+name collapsed to a space. A round recorded with no reviewer reads "an unknown
+reviewer". An episode that ran no round has no reviewer line.
 
 ## 6. Commands
 

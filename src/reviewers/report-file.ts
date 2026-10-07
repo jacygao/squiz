@@ -49,6 +49,8 @@ export type UsageLine = {
   readonly type: "usage";
   readonly stopReason?: string;
   readonly errorMessage?: string;
+  /** Who served the message, where the CLI names one, as `pi` does. */
+  readonly provider?: string;
   readonly model?: string;
   /** The CLI's usage as it carried it. `pi`'s holds the token counts, and the dollars under `cost`. */
   readonly usage?: unknown;

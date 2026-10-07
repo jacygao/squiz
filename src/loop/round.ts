@@ -58,6 +58,7 @@ import {
   recordSpendOutsideRounds,
   type EpisodeState,
   type Rulings,
+  type Timings,
 } from "./episode-state.ts";
 import { episodeAt, roundDirectory, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
@@ -603,7 +604,7 @@ async function reviewOn(
     review.outcome === "reviewed" ? handedOver : ruledOn(handedOver, review.verdicts),
     review.verdicts,
   );
-  const recording = keepCost(episode, state, review, elapsedSeconds, rulings);
+  const recording = keepCost(episode, state, review, { reviewer: config.reviewer, elapsedSeconds }, rulings);
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
   if (isRound(review)) stopwatch.round = recorded.rounds.length;
@@ -952,19 +953,19 @@ function keepCost(
   episode: Episode,
   state: EpisodeState,
   review: Review,
-  elapsedSeconds: number,
+  ran: Timings,
   rulings: Rulings,
 ): Step<EpisodeState> {
   const ruled = Object.keys(rulings).length > 0;
   // Nothing was spent, no round ran and nothing was ruled, so there is nothing
   // to keep. Writing anyway would put a write that could fail in front of the
   // reason the reviewer gave, and report the wrong failure.
-  if (withSpend(state, review, elapsedSeconds) === null && !ruled) return { step: state };
+  if (withSpend(state, review, ran) === null && !ruled) return { step: state };
 
   const written = updateState(
     episode,
     (current) => {
-      const spent = withSpend(current, review, elapsedSeconds) ?? current;
+      const spent = withSpend(current, review, ran) ?? current;
       return ruled ? recordRulings(spent, rulings) : spent;
     },
     // Its own wait rather than what the reserve has left. A reserve the stop has
@@ -1002,8 +1003,8 @@ function lockWait(until: Deadline): Deadline {
  * was no round.
  *
  * Two ledgers, and an attempt goes in exactly one of them. A round appends its
- * cost, how long its reviewer ran, and the bound where the bound is what ended the
- * reviewer; the entry count is what the cap spends. A setup problem spends no
+ * cost, which reviewer ran it and for how long, and the bound where the bound is
+ * what ended the reviewer; the entry count is what the cap spends. A setup problem spends no
  * round, and what it spent is added to the episode's spend all the same: an
  * attempt can complete a paid response and still end as a setup problem, and an
  * episode that forgot those tokens would hand another reviewer a bound it had
@@ -1017,13 +1018,13 @@ function lockWait(until: Deadline): Deadline {
 function withSpend(
   state: EpisodeState,
   review: Review,
-  elapsedSeconds: number,
+  ran: Timings,
 ): EpisodeState | null {
   if (isRound(review)) {
     return recordRound(
       state,
       roundRecord(review.cost, {
-        elapsedSeconds,
+        ...ran,
         ...(review.outcome === "timed-out" ? { cutShortAtSeconds: review.seconds } : {}),
       }),
     );

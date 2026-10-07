@@ -1249,7 +1249,7 @@ test("a closing round posts one comment carrying the summary it composed", async
   const ran = await runInFixture({
     config: { rounds: 2 },
     // One round recorded, so this round is the second and the last the cap allows.
-    rounds: [ANSWER_COST],
+    rounds: [{ ...ANSWER_COST, reviewer: "pi" }],
     answers: {
       prlist: PR_LIST,
       diff: DIFF,
@@ -1279,6 +1279,7 @@ test("a closing round posts one comment carrying the summary it composed", async
       "",
       "Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0",
       "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
+      "Reviewed by `pi` on an unknown model",
       "",
       "**Needs a person**",
       "",
@@ -1289,6 +1290,57 @@ test("a closing round posts one comment carrying the summary it composed", async
       "- The episode ended at its round cap rather than with nothing left open",
     ].join("\n"),
   );
+});
+
+/**
+ * The configured model is what the round asked for, and a CLI can run another
+ * without saying so. Naming it where the run named none would read exactly like
+ * a summary that named the model the run reported.
+ */
+test("a run that reported no model is summarised on an unknown model, whatever is configured (#271)", async () => {
+  const ran = await runInFixture({
+    config: { model: "openai/gpt-5-mini" },
+    answers: POSTING,
+    reviewer: reviews({ cost: ANSWER_COST }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const body = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
+  assert.ok(body.includes("\nReviewed by `pi` on an unknown model\n"), `the summary did not say the model is unknown: ${body}`);
+  assert.ok(!body.includes("gpt-5-mini"), `the summary named the configured model the run never reported: ${body}`);
+  assert.deepEqual(ran.state?.rounds.map((round) => [round.reviewer, round.models]), [["pi", undefined]]);
+});
+
+test("the round records the reviewer and the models its run reported, and the summary names them (#271)", async () => {
+  const ran = await runInFixture({
+    config: { reviewer: "copilot", model: "gpt-5-mini" },
+    answers: POSTING,
+    reviewer: reviews({ cost: { ...ANSWER_COST, models: ["claude-sonnet-5"] } }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  const body = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
+  assert.ok(body.includes("\nReviewed by `copilot` on `claude-sonnet-5`\n"), `the summary named another model: ${body}`);
+  assert.deepEqual(ran.state?.rounds.map((round) => [round.reviewer, round.models]), [["copilot", ["claude-sonnet-5"]]]);
+});
+
+test("a round that ran the reviewer twice records the models of both runs (#271)", async () => {
+  const ran = await runInFixture({
+    answers: POSTING,
+    reviewer: attempts(
+      {
+        cost: { ...ANSWER_COST, models: ["openai/gpt-5-mini"] },
+        result: { kind: "unparsed", reason: "the last message was not a review" },
+      },
+      {
+        cost: { ...ANSWER_COST, models: ["openai/gpt-5-mini", "deepseek/deepseek-v4-pro"] },
+        result: { kind: "reviewed", findings: [], verdicts: [] },
+      },
+    ),
+  });
+
+  assert.equal(ran.invocations.length, 2, "the fixture is a round that retried");
+  assert.deepEqual(ran.state?.rounds.map((round) => round.models), [["openai/gpt-5-mini", "deepseek/deepseek-v4-pro"]]);
 });
 
 test("a round that blocks posts no summary", async () => {
@@ -1485,7 +1537,7 @@ test("a round with no cost is recorded with no figures, and counts nothing again
   assert.ok(ran.conclusion.outcome === "block", `the round concluded ${ran.conclusion.outcome}`);
   assert.deepEqual(
     Object.keys(ran.state?.rounds[0] ?? { missing: true }).sort(),
-    ["elapsedSeconds", "postingSeconds"],
+    ["elapsedSeconds", "postingSeconds", "reviewer"],
     "a round with no cost was written with figures",
   );
 });

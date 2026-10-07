@@ -55,14 +55,51 @@ function read(...lines: readonly string[]): Promise<ParsedRun> {
   return readReports(chunks(lines.map((line) => `${line}\n`).join("")));
 }
 
-test("a finish is a review, and its cost is the usage line's tokens, requests and AI credits", async () => {
+test("a finish is a review, and its cost is the usage line's tokens, requests, AI credits and models (#271)", async () => {
   const run = await read(reported, ruled, finished, usage);
   assert.deepEqual(run.result, {
     kind: "reviewed",
     findings: [finding],
     verdicts: [{ thread: "PRRT_1", verdict: "fixed" }],
   });
-  assert.deepEqual(run.cost, { dollars: 0, tokens: 60_586 + 521 + 1_000 + 200, messages: 7, credits: 0.53597 });
+  assert.deepEqual(run.cost, {
+    dollars: 0,
+    tokens: 60_586 + 521 + 1_000 + 200,
+    messages: 7,
+    credits: 0.53597,
+    models: ["gpt-5-mini", "claude-haiku-4.5"],
+  });
+});
+
+// A model named with no request against it served none of the run.
+test("a model the usage line counts no request for is not one the run ran on (#271)", async () => {
+  const idle = JSON.stringify({
+    type: "usage",
+    usage: {
+      totalNanoAiu: 87_275_000,
+      modelMetrics: {
+        "claude-sonnet-5": { requests: { count: 0, cost: 0 }, usage: { inputTokens: 0, outputTokens: 0 } },
+        "gpt-5-mini": { requests: { count: 1, cost: 0 }, usage: { inputTokens: 2_243, outputTokens: 156 } },
+      },
+    },
+  });
+  const run = await read(finished, idle);
+  assert.deepEqual(run.cost?.models, ["gpt-5-mini"]);
+});
+
+test("a model whose request count cannot be read is not one the run ran on (#271)", async () => {
+  const unread = JSON.stringify({
+    type: "usage",
+    usage: {
+      modelMetrics: {
+        "claude-sonnet-5": { requests: { count: "1" }, usage: { inputTokens: 0, outputTokens: 0 } },
+        "gpt-5-mini": { usage: { inputTokens: 0, outputTokens: 0 } },
+        "gpt-6-astra": { requests: { count: 1 }, usage: { inputTokens: 2_243, outputTokens: 156 } },
+      },
+    },
+  });
+  const run = await read(finished, unread);
+  assert.deepEqual(run.cost?.models, ["gpt-6-astra"]);
 });
 
 test("a finish with no usage line is still a review, with no cost", async () => {
@@ -153,4 +190,14 @@ test("the caller is told after each line, the cost arriving with the usage line"
 test("a last line with no newline fails the run", async () => {
   const run = await readReports(chunks(`${reported}\n${finished}`));
   assert.equal(run.result.kind, "unparsed");
+});
+
+// The state file refuses a blank model, so a run that named one names none.
+test("a blank model key names no model (#271)", async () => {
+  const blank = JSON.stringify({
+    type: "usage",
+    usage: { modelMetrics: { " ": { requests: { count: 1 }, usage: { inputTokens: 10, outputTokens: 1 } } } },
+  });
+  const run = await read(finished, blank);
+  assert.equal(run.cost?.models, undefined);
 });

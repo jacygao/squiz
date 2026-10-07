@@ -178,7 +178,7 @@ const findings: PostedFindings = {
  */
 const closing: ClosingRound = {
   pullRequest: PULL_REQUEST,
-  rounds: [COST, COST],
+  rounds: [{ ...COST, reviewer: "pi" }, { ...COST, reviewer: "pi" }],
   handedOver: [handedOver("PRRT_one", "The name says nothing")],
   verdicts: {
     threads: [{ thread: "PRRT_one", ruled: "open", outcome: "left-open" }],
@@ -252,6 +252,7 @@ test("the composed body carries the counts, the spend, what needs a person and t
         "",
         "Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0",
         "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
+        "Reviewed by `pi` on an unknown model",
         "",
         "**Needs a person**",
         "",

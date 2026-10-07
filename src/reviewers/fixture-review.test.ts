@@ -200,8 +200,8 @@ const expectedFinding: LineFinding = {
 /** The earlier finding's defect is gone, so the ruling on its thread is `fixed`. */
 const expectedVerdicts: readonly ThreadVerdict[] = [{ thread: thread.id, verdict: "fixed" }];
 
-/** What the stand-in's three assistant messages report between them. */
-const expectedCost: RoundCost = { dollars: 0.003, tokens: 3_600, messages: 3 };
+/** What the stand-in's three assistant messages report between them, and the model they name. */
+const expectedCost: RoundCost = { dollars: 0.003, tokens: 3_600, messages: 3, models: ["openai/gpt-5-mini"] };
 
 /**
  * Long enough that nothing here rests on how fast the machine is, and short
@@ -414,7 +414,8 @@ function message(stopReason: string): unknown {
   return {
     type: "usage",
     stopReason,
-    model: "stand-in",
+    provider: "openai",
+    model: "gpt-5-mini",
     usage: {
       input: 1_000,
       output: 200,
