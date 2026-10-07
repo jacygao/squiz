@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.24 (draft)
+**Version:** 1.25 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -168,9 +168,10 @@ long ago anything happened.
 
 **An episode is keyed by the number of its pull request.** Its state lives in
 `.squiz/<number>/` inside the worktree. The state file holds the round count, the
-cost of each round, what the episode spent on attempts that were no round,
-whether the episode has reported its close and what was open at that close, and
-the reviewer's last ruling on each thread. The directory also holds:
+cost of each round and what it reviewed and ruled (§ 5 The format), what the
+episode spent on attempts that were no round, whether the episode has reported
+its close and what was open at that close, and the reviewer's last ruling on each
+thread. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
   handed, the report file the reviewer reports into, the reviewer's session,
@@ -443,8 +444,9 @@ flowchart TD
 4. **Post the findings, and act on the verdicts.** Each new finding opens a new
    review comment thread, anchored to a file and a line or to a file as a whole.
    Each verdict the reviewer returned is applied to the thread it names: `fixed`
-   and `withdrawn` close the thread, and `open` re-opens it or leaves it open,
-   then posts the reviewer's reason as a reply on it.
+   and `withdrawn` reply on an open thread and then close it, and `open`
+   re-opens the thread or leaves it open, then posts the reviewer's reason as a
+   reply on it. § 4 Findings gives each reply.
 5. **Record the open threads, or close.** If threads of this review are still
    open and the round cap has not been reached, the round records the result. A
    run of `squiz review` waiting on it prints the open threads and exits 2, and the
@@ -1804,6 +1806,8 @@ The standing rules:
 - A thread you keep open carries your reason, which is posted as your reply on
   it. The coding agent acts on it, and a person settling the dispute reads it.
   Say what is still wrong, and what change or argument would settle it.
+- A finding you withdraw carries your reason too, which is posted as your reply
+  before the thread is closed. Say why there was no defect.
 - The suggested fix is one way to address a finding. Rule on whether the defect
   is gone, not on whether the suggestion was taken.
 - Scope a finding to `line` where a single line owns the defect, and anchor it to
@@ -1825,7 +1829,7 @@ nothing any other way. A last message is not read.
 | Call | |
 |---|---|
 | Report a finding | One finding, carrying the fields below. Made as soon as the finding is confirmed. |
-| Report a verdict | One ruling on one thread, naming the thread by the identifier it was handed under, and for `open`, the reason. One ruling per thread: a second on the same thread is refused. |
+| Report a verdict | One ruling on one thread, naming the thread by the identifier it was handed under, and for `open` and `withdrawn`, the reason. One ruling per thread: a second on the same thread is refused. |
 | Finish the review | The review is complete. Made once, after the last finding and the last verdict, and made even where there was nothing to report. |
 
 **A call whose arguments are not the shape a finding takes is refused where it
@@ -1894,12 +1898,12 @@ A verdict carries three fields:
 
 - `thread` — the identifier the thread was handed over under, copied back.
 - `verdict` — `fixed`, `withdrawn` or `open`.
-- `reason` — on `open` only, and required there. The reviewer's feedback to the
-  coding agent: what is still wrong in the code as it now stands, and what
-  change or argument would settle it. A verdict of `open` with no reason, or
-  with one that is blank, is refused, and so is a `fixed` or `withdrawn` verdict
-  carrying one. The shared report checks hold this rule, so both reviewers'
-  calls refuse alike.
+- `reason` — required on `open` and `withdrawn`, and refused on `fixed`. On
+  `open` it is the reviewer's feedback to the coding agent: what is still wrong
+  in the code as it now stands, and what change or argument would settle it. On
+  `withdrawn` it says why there was no defect. A verdict of `open` or
+  `withdrawn` with no reason, or with one that is blank, is refused. The shared
+  report checks hold this rule, so both reviewers' calls refuse alike.
 
 ```json
 {
@@ -1911,15 +1915,15 @@ A verdict carries three fields:
 
 | Verdict | What it means | The harness |
 |---|---|---|
-| `fixed` | The defect is gone. | Closes the thread |
-| `withdrawn` | There was no defect. The coding agent's argument was accepted. | Closes the thread |
+| `fixed` | The defect is gone. | Replies on the thread naming the round and the commit, then closes it |
+| `withdrawn` | There was no defect. The coding agent's argument was accepted. | Replies on the thread with the reason, then closes it |
 | `open` | The defect is still there. | Re-opens the thread, or leaves it open, and replies on it with the reason |
 
-**A thread the reviewer keeps open gets its reason as a reply, every round it
-keeps it open.** The round posts the reply in the posting reserve, after the
-thread is put in its state and before the round ends. The reply opens with the
-reviewer's marker, so it is read as the reviewer's own and is never activity
-that starts another round:
+**Every ruling a round gives on a thread is a reply on that thread.** The round
+posts the replies in the posting reserve, before the round ends. Each opens with
+the reviewer's marker and the verdict, so it is read as the reviewer's own and is
+never activity that starts another round. A thread the reviewer keeps open gets
+its reason every round it keeps it open, after the thread is put in its state:
 
 ```markdown
 **Squiz reviewer · still open**
@@ -1927,15 +1931,46 @@ that starts another round:
 `isExpired()` still compares against the local clock with no margin: `clock.ts:12` allows for skew in `now()`, which this path does not call. Call `now()` here, or show where the margin is applied.
 ```
 
-The next `squiz review` prints the reply with the thread's other comments
-(§ 6), which is how the coding agent receives it. `fixed` and `withdrawn` post
-nothing.
+A thread the round closes gets its reply before it is resolved. The reply names
+the round and the short commit the round reviewed, and a withdrawal carries the
+reviewer's reason beneath:
 
-**A reason that cannot be posted leaves the verdict standing.** The thread is in
-the state the reviewer ruled either way. The round names the thread and what
-GitHub answered on `squiz review`'s stderr, and in `squiz status` where the
-round reviewed. A round that closes the episode also names the thread in its
-summary's Notes (§ 5).
+```markdown
+**Squiz reviewer · fixed**
+
+Confirmed in round 2 at 1b86987.
+```
+
+```markdown
+**Squiz reviewer · withdrawn**
+
+Withdrawn in round 2 at 1b86987.
+
+The retry count is bounded by the caller: `schedule()` in `queue.ts:40` stops at five attempts.
+```
+
+A thread that was already resolved when it was handed over gets no reply from a
+`fixed` or `withdrawn` verdict. The round still sends the resolve, because the
+mutation's report is its only evidence the thread is closed, but it posts
+nothing: the thread is handed over and ruled on again every round, and a reply
+each time would repeat itself. An attempt that spends no round, such as a setup
+problem that salvaged a verdict, names the commit and no round, as
+`Confirmed at 1b86987.`, because the next round takes the number it would have
+named.
+
+The next `squiz review` prints the replies with the thread's other comments
+(§ 6), which is how the coding agent receives a reason.
+
+**A reply that cannot be posted leaves the verdict standing.** The thread is put
+in the state the reviewer ruled either way, and a closing reply that fails does
+not stop the resolve after it. The round names the thread and what GitHub
+answered on `squiz review`'s stderr, and in `squiz status` where the round
+reviewed. Where the reply was a reason on a thread kept open, the summary's
+Notes name the thread only where the round closes the episode, because the next
+round that keeps it open posts a reason of its own. Where the reply was on a
+thread the round closed, nothing posts it later: the round's entry in the state
+file keeps the line, the summary that closes the episode names it in Notes
+(§ 5), and a round that fails lists it in its failure comment instead.
 
 A thread the reviewer returns no verdict for is treated as `open`, where the
 reviewer finished its review, and nothing is posted on it, because the reviewer
@@ -2028,7 +2063,7 @@ fixed, and no later round rules on it.
 ## 5. The summary
 
 One comment is posted on the pull request when an episode closes. It carries the
-status of every finding and the cost of the review.
+status of every finding, what each round did, and the cost of the review.
 
 The comment is never edited or replaced. A second episode on the same pull
 request posts a second comment, and the comments accumulate as a history of the
@@ -2077,7 +2112,7 @@ someone closed the thread.
 
 ### What the comment carries
 
-Three blocks, in this order.
+Four blocks, in this order.
 
 1. **The counts, what the review spent, and who reviewed it.** Rounds run,
    findings raised, how many ended `fixed`, `withdrawn`, `open` and `disputed`,
@@ -2097,16 +2132,35 @@ Three blocks, in this order.
    `disputed` one, each with its headline and where it sits: `file:line` for a
    thread anchored to a line, and the file alone for one anchored to the file.
    When there are none, the comment says so in one line.
-3. **Notes.** Anything else a person reviewing the pull request should know:
+3. **Rounds.** Each round in the order it ran, with the short commit it
+   reviewed, how many findings it raised, and the rulings it replied with: each
+   thread it closed while the thread was open, and each it kept open. A round
+   that raised nothing and ruled on nothing says so in one line, as
+   `- Round 4 at 9a0b1c2: found nothing new and ruled on nothing`. The list is
+   read from the episode's state file and never from the pull request, so a
+   round whose replies GitHub refused is listed all the same. A round whose entry
+   holds none of this, which only a state file an earlier version wrote has, is
+   listed as not recorded, and an episode none of whose rounds holds it carries
+   no Rounds block.
+4. **Notes.** Anything else a person reviewing the pull request should know:
    findings about the change as a whole, each with its headline; a finding the
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
    finding carries; a thread the closing round kept open whose reason could
-   not be posted, with its location and headline; a ruling of the closing round
-   that could not be applied, with what the reviewer ruled; a round whose review
-   the time bound cut short, with the round's number and the bound; and a cap or
-   bound that ended the episode early, with each queued state it left not
-   reviewed.
+   not be posted, with its location and headline; a thread any round closed
+   whose reply could not be posted, with its location, headline and ruling; a
+   ruling of the closing round that could not be applied, with what the
+   reviewer ruled; a round whose review the time bound cut short, with the
+   round's number and the bound; and a cap or bound that ended the episode
+   early, with each queued state it left not reviewed.
+
+**A closing reply that could not be posted is a line naming the ruling.** The
+thread is closed with nothing on it saying so, and the round recorded the line
+in its entry of the state file, so the close lists it whichever round it was:
+
+```markdown
+- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)
+```
 
 **A ruling that could not be applied is a line saying what the reviewer ruled.**
 Its thread stays as GitHub had it, and the line is what a person reads to apply
@@ -2178,6 +2232,12 @@ Reviewed by `pi` on `openai/gpt-5-mini`
 - `packages/sync/src/session.ts:57` — Clock skew is read as token expiry (disputed)
 - `packages/sync/src/retry.ts` — Every path here is dead once the queue lands (open)
 
+**Rounds**
+
+- Round 1 at 3f9c2e0: raised 6 findings
+- Round 2 at 1b86987: raised nothing, and ruled 2 fixed, 1 withdrawn and 3 open
+- Round 3 at 8d21a4f: raised 1 finding, and ruled 3 open
+
 **Notes**
 
 - About the change as a whole: the retry queue duplicates the scheduler already
@@ -2188,10 +2248,11 @@ Reviewed by `pi` on `openai/gpt-5-mini`
 Notes is omitted when there is nothing to report.
 
 Each round is written to the episode's local state file as the review finishes,
-before anything is posted, and its posting time is added once posting ends:
+before anything is posted. The closing replies it could not post are added when
+it records its end, and its posting time once posting ends:
 
 ```json
-{ "reviewer": "pi", "dollars": 0.0134, "tokens": 20100, "messages": 9, "models": ["openai/gpt-5-mini"], "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3 }
+{ "reviewer": "pi", "dollars": 0.0134, "tokens": 20100, "messages": 9, "models": ["openai/gpt-5-mini"], "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3, "head": "1b86987c4f0e2d6a9b3c5e7f8a1d2c3b4e5f6a7b", "raised": 0, "ruled": { "fixed": 2, "withdrawn": 1, "open": 3 }, "unpostedReplies": ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)"] }
 ```
 
 - `reviewer` is the reviewer CLI the round ran, as `reviewer` in Configuration
@@ -2217,11 +2278,23 @@ before anything is posted, and its posting time is added once posting ends:
   and where the round was stopped before posting ended.
 - `floor` is `true` where the round's cost is a floor (§ 4, The `pi` adapter),
   and absent where it is a total. A Copilot round never carries it.
+- `head` is the full head commit of the state the round reviewed.
+- `raised` is how many findings the reviewer reported, whether or not their
+  comments were posted.
+- `ruled` counts the rulings the round set out to reply with, by verdict: a
+  `fixed` or `withdrawn` verdict on a thread that was open when it was handed
+  over, and every `open` verdict the reviewer gave. A verdict naming a thread
+  that was not handed over, and a second verdict on one thread, are not counted.
+  The counts are taken before anything is posted.
+- `unpostedReplies` is the Notes line of each reply on a thread the round
+  closed that GitHub refused, and is absent where none was refused. A round
+  that fails records none, and lists them in its failure comment.
 
 A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
-`postingSeconds`, `floor`, `credits`, `reviewer` and `models` existed has none of
-them, and reads back as rounds with no timing, no cut, no credits, no reviewer
-and no model, and costs that are totals. A field that is there and
+`postingSeconds`, `floor`, `credits`, `reviewer`, `models`, `head`, `raised`,
+`ruled` and `unpostedReplies` existed has none of them, and reads back as rounds
+with no timing, no cut, no credits, no reviewer and no model, costs that are
+totals, and no record of what they reviewed or ruled. A field that is there and
 does not hold a value of the right kind makes the file unreadable, like any
 other.
 
@@ -3029,6 +3102,7 @@ a path that is silent today.
 | A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. stderr names each with its thread, what the reviewer ruled, and why it was not applied, which for a refused mutation is what GitHub answered. `squiz status` does the same for a round that reviewed. The summary that closes the episode, and the failure comment of a round that failed, name each as § 5 What the comment carries shows, without GitHub's answer. Nothing is retried. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. A round that closes the episode lists each in its summary's Notes, and a round that fails lists each in its failure comment. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | The reviewer's reason cannot be posted | The verdict stands, and the thread stays in the state the reviewer ruled. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. A round that closes the episode names the thread in its summary's Notes, without GitHub's answer. Nothing is retried: the next round that keeps the thread open posts a reason of its own. | `squiz review` stderr, `squiz status`, summary's Notes |
+| The reply on a thread the round closes cannot be posted | The thread is resolved all the same, and the verdict stands. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. The round records the line in its entry of the state file, and the summary that closes the episode names it in Notes, without GitHub's answer, whichever round it was. A round that fails names it in its failure comment instead. Nothing is retried, because no later round closes the thread again. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | A round that leaves threads open has findings no thread holds | A finding about the change as a whole, one the harness could anchor to neither a line nor a file, and one whose comment could not be posted reach no thread, and a round that leaves threads open posts no summary. The round's record keeps each. `squiz review` prints each on stderr, and the summary that closes the episode lists each that no later round settled (§ 5). | `squiz review` stderr, summary's Notes |
 | No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode. A new commit, a new reply or a run of `squiz review` retries it where a round remains, and closes the episode where none does, as The failure comment below says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. | `squiz review` stderr, `squiz status`, `host.log` |

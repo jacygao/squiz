@@ -27,11 +27,12 @@ import { join, relative } from "node:path";
 
 import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
+import type { RuledAt } from "../findings/comment.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import type { ClosedBy } from "../github/failure-body.ts";
 import type { CommentPosting } from "../github/summary.ts";
-import { unappliedNotes } from "../github/summary-body.ts";
+import { unappliedNotes, unpostedReplyNotes } from "../github/summary-body.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
@@ -56,9 +57,11 @@ import {
   recordRulings,
   roundRecord,
   recordSpendOutsideRounds,
+  recordUnpostedReplies,
   type EpisodeState,
   type Rulings,
   type Timings,
+  type RulingCounts,
 } from "./episode-state.ts";
 import { episodeAt, roundDirectory, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
@@ -76,7 +79,7 @@ import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } fr
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { closedBeforeAnyRound, postEpisodeSummary, type EpisodeSummary } from "./post-summary.ts";
 import { tokenBoundIsReached, type ClosingReason, type EpisodeBounds } from "./round-decision.ts";
-import { applyVerdicts, rulingsOn, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
+import { applyVerdicts, rulingsOn, rulingsReplied, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 
 // Each `ps` run that tells whether a lock's holder is still running. Its own
 // bound rather than the round's, because a round that cannot tell runs nothing.
@@ -216,6 +219,11 @@ export type RoundAccount = {
    * round's comment lists them, and it is composed after the hand-over is gone.
    */
   readonly unappliedNotes: readonly string[];
+  /**
+   * The Notes lines of the replies on threads the round closed that could not
+   * be posted, written here for the reason `unappliedNotes` is.
+   */
+  readonly unpostedReplyNotes: readonly string[];
 };
 
 /** What one round concluded. */
@@ -604,7 +612,17 @@ async function reviewOn(
     review.outcome === "reviewed" ? handedOver : ruledOn(handedOver, review.verdicts),
     review.verdicts,
   );
-  const recording = keepCost(episode, state, review, { reviewer: config.reviewer, elapsedSeconds }, rulings);
+  const ruledAt: RuledAt = {
+    round: isRound(review) ? ordinal : null,
+    commit: setup.state?.head ?? pullRequest.headSha,
+  };
+  const recording = keepCost(
+    episode,
+    state,
+    review,
+    { ran: { reviewer: config.reviewer, elapsedSeconds }, ruledAt, handedOver },
+    rulings,
+  );
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
   if (isRound(review)) stopwatch.round = recorded.rounds.length;
@@ -615,6 +633,7 @@ async function reviewOn(
     directory,
     reserve,
     stopwatch,
+    ruledAt,
   };
 
   // A failed round closes nothing, but where it spent the last round the cap
@@ -654,7 +673,10 @@ async function reviewOn(
     // A round with no cost counts nothing against the token bound.
     tokens: review.cost?.tokens ?? 0,
   };
-  const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve);
+  const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve, {
+    round: recorded.rounds.length,
+    lines: account.unpostedReplyNotes,
+  });
   if ("reason" in ended) {
     return {
       outcome: "failed",
@@ -672,7 +694,7 @@ async function reviewOn(
   return closeAfterReview(
     ends.because,
     account,
-    recorded,
+    ended.state,
     handedOver,
     posting,
     ends.leftNotReviewed,
@@ -835,6 +857,7 @@ function nothingDone(pullRequest: number): RoundAccount {
     findings: { outcomes: [] },
     verdicts: { threads: [], unapplied: [] },
     unappliedNotes: [],
+    unpostedReplyNotes: [],
   };
 }
 
@@ -953,19 +976,19 @@ function keepCost(
   episode: Episode,
   state: EpisodeState,
   review: Review,
-  ran: Timings,
+  measured: Measured,
   rulings: Rulings,
 ): Step<EpisodeState> {
   const ruled = Object.keys(rulings).length > 0;
   // Nothing was spent, no round ran and nothing was ruled, so there is nothing
   // to keep. Writing anyway would put a write that could fail in front of the
   // reason the reviewer gave, and report the wrong failure.
-  if (withSpend(state, review, ran) === null && !ruled) return { step: state };
+  if (withSpend(state, review, measured) === null && !ruled) return { step: state };
 
   const written = updateState(
     episode,
     (current) => {
-      const spent = withSpend(current, review, ran) ?? current;
+      const spent = withSpend(current, review, measured) ?? current;
       return ruled ? recordRulings(spent, rulings) : spent;
     },
     // Its own wait rather than what the reserve has left. A reserve the stop has
@@ -1015,23 +1038,36 @@ function lockWait(until: Deadline): Deadline {
  * not known to be nothing: it is a reviewer that ran and reported no spend, and
  * it is written so the episode's spend reads as a floor.
  */
-function withSpend(
-  state: EpisodeState,
-  review: Review,
-  ran: Timings,
-): EpisodeState | null {
+function withSpend(state: EpisodeState, review: Review, measured: Measured): EpisodeState | null {
   if (isRound(review)) {
     return recordRound(
       state,
       roundRecord(review.cost, {
-        ...ran,
+        ...measured.ran,
         ...(review.outcome === "timed-out" ? { cutShortAtSeconds: review.seconds } : {}),
+        head: measured.ruledAt.commit,
+        raised: review.findings.length,
+        ruled: countRulings(rulingsReplied(measured.handedOver, review.verdicts)),
       }),
     );
   }
   // An attempt with no cost has no figure to add to the episode's spend.
   if (review.cost === undefined || (nothingSpent(review.cost) && review.cost.floor !== true)) return null;
   return recordSpendOutsideRounds(state, review.cost);
+}
+
+/** What a round's entry is written from besides its cost. */
+type Measured = {
+  /** Which reviewer ran the round, and for how long. */
+  readonly ran: Timings;
+  readonly ruledAt: RuledAt;
+  readonly handedOver: readonly ReviewThread[];
+};
+
+function countRulings(rulings: readonly ThreadVerdict[]): RulingCounts {
+  const of = (verdict: ThreadVerdict["verdict"]): number =>
+    rulings.filter((ruling) => ruling.verdict === verdict).length;
+  return { fixed: of("fixed"), withdrawn: of("withdrawn"), open: of("open") };
 }
 
 function nothingSpent(cost: RoundCost): boolean {
@@ -1073,6 +1109,8 @@ type Posting = {
    */
   readonly reserve: Deadline;
   readonly stopwatch: Stopwatch;
+  /** The round and commit the verdicts are ruled at, which a closing reply names. */
+  readonly ruledAt: RuledAt;
 };
 
 /**
@@ -1090,15 +1128,15 @@ type Posting = {
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
   const call = { directory: on.directory, until: on.reserve };
-  // A thread takes a second call where the reviewer kept it open, for the reply.
-  const replies = output.verdicts.filter((verdict) => verdict.verdict === "open").length;
+  // A thread takes a second call where the round replies on it.
+  const replies = rulingsReplied(ruleOn, output.verdicts).length;
   const calls = ruleOn.length + replies + 2 * output.findings.length;
   // Nothing to put up makes no call, and a round that made none posted nothing.
   const post = <T>(posting: () => T): T =>
     calls === 0 ? posting() : timed(on.stopwatch, on.reserve, posting);
 
   const verdicts = post(() =>
-    applyVerdicts(ruleOn, output.verdicts, { ...call, boundMs: share(on.reserve, calls) }),
+    applyVerdicts(ruleOn, output.verdicts, on.ruledAt, { ...call, boundMs: share(on.reserve, calls) }),
   );
 
   const findings = post(() =>
@@ -1119,6 +1157,7 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
     findings,
     verdicts,
     unappliedNotes: unappliedNotes(ruleOn, verdicts),
+    unpostedReplyNotes: unpostedReplyNotes(ruleOn, verdicts),
   };
 }
 
@@ -1129,13 +1168,17 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
  * A trigger queues nothing once the close is written, so a state is either in
  * the queue this reads, and is ruled on here, or refused because the episode
  * has closed. Fails where the update does.
+ *
+ * The same update puts the round's refused closing replies on its entry, so the
+ * summary that closes the episode, in this round or a later one, names them.
  */
 function endUnderLock(
   episode: Episode,
   endsOn: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd,
   tally: RoundTally,
   until: Deadline,
-): { readonly ends: RoundEnd } | { readonly reason: string } {
+  unposted: { readonly round: number; readonly lines: readonly string[] },
+): { readonly ends: RoundEnd; readonly state: EpisodeState } | { readonly reason: string } {
   let ends: RoundEnd | undefined;
   const written = updateState(
     episode,
@@ -1144,12 +1187,13 @@ function endUnderLock(
         (record): record is QueuedRecord => record.status === "queued",
       );
       ends = endsOn(tally, queued);
-      return ends.outcome === "closed" ? { ...current, closeReported: true } : current;
+      const kept = recordUnpostedReplies(current, unposted.round, unposted.lines);
+      return ends.outcome === "closed" ? { ...kept, closeReported: true } : kept;
     },
     { until: lockWait(until) },
   );
   if (written.outcome === "failed") return { reason: written.reason };
-  return ends === undefined ? { reason: "the state lock was never taken" } : { ends };
+  return ends === undefined ? { reason: "the state lock was never taken" } : { ends, state: written.state };
 }
 
 /**

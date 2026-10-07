@@ -14,7 +14,7 @@ import type { ClassifiedThread } from "../loop/classify.ts";
 import type { RoundRecord, Timings } from "../loop/episode-state.ts";
 import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
-import { renderSummary, unappliedNotes, type ClosedEpisode } from "./summary-body.ts";
+import { renderSummary, unappliedNotes, unpostedReplyNotes, type ClosedEpisode } from "./summary-body.ts";
 import type { ReviewThread } from "./threads.ts";
 
 /** A round of `pi` on one model, which is what most tests here need and none is about. */
@@ -784,4 +784,99 @@ test("an episode that ran no round names no reviewer (#271)", () => {
 test("a model named with a newline or a backtick stays one line and one code span (#271)", () => {
   const odd: RoundRecord = { ...round(0.0061, 20_100), models: ["gpt-5\n# mini", "a`b"] };
   assert.equal(reviewerLine([odd]), "Reviewed by `pi` on `gpt-5 # mini` and ``a`b``");
+});
+
+/** A round entry with the work it recorded. */
+function ruledRound(
+  head: string,
+  raised: number,
+  ruled: { fixed: number; withdrawn: number; open: number },
+): RoundRecord {
+  return { ...round(0.001, 1_000), head, raised, ruled };
+}
+
+const nothingRuled = { fixed: 0, withdrawn: 0, open: 0 };
+
+test("the summary lists each round with its commit, what it raised and what it ruled (#586)", () => {
+  const comment = renderSummary({
+    ...quiet,
+    rounds: [
+      ruledRound("3f9c2e0aa11", 3, nothingRuled),
+      ruledRound("1b86987bb22", 1, { fixed: 2, withdrawn: 1, open: 1 }),
+      ruledRound("8d21a4fcc33", 0, { fixed: 1, withdrawn: 0, open: 0 }),
+      ruledRound("9a0b1c2dd44", 0, nothingRuled),
+    ],
+  });
+  assert.equal(
+    comment,
+    [
+      "**Squiz review — 4 rounds, 0 findings**",
+      "",
+      "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
+      "4,000 tokens over 4 rounds: 1,000, 1,000, 1,000, 1,000 · $0.0040",
+      "Reviewed by `pi` on `openai/gpt-5-mini`",
+      "",
+      "**Needs a person**",
+      "",
+      "Nothing needs a person.",
+      "",
+      "**Rounds**",
+      "",
+      "- Round 1 at 3f9c2e0: raised 3 findings",
+      "- Round 2 at 1b86987: raised 1 finding, and ruled 2 fixed, 1 withdrawn and 1 open",
+      "- Round 3 at 8d21a4f: raised nothing, and ruled 1 fixed",
+      "- Round 4 at 9a0b1c2: found nothing new and ruled on nothing",
+    ].join("\n"),
+  );
+});
+
+test("a round whose work the state file does not hold is listed as not recorded (#586)", () => {
+  const comment = renderSummary({
+    ...quiet,
+    rounds: [round(0.001, 1_000), ruledRound("1b86987bb22", 1, nothingRuled)],
+  });
+  assert.ok(
+    comment.endsWith("**Rounds**\n\n- Round 1: not recorded\n- Round 2 at 1b86987: raised 1 finding"),
+    `the rounds were not listed: ${comment}`,
+  );
+});
+
+test("a reply on a thread a round closed that could not be posted is named in Notes, from the round's record (#586)", () => {
+  const line =
+    "`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)";
+  const comment = renderSummary({
+    ...quiet,
+    rounds: [{ ...ruledRound("3f9c2e0aa11", 0, { fixed: 1, withdrawn: 0, open: 0 }), unpostedReplies: [line] }],
+  });
+  assert.ok(comment.includes(`**Notes**\n\n- ${line}`), `the reply was not named in Notes: ${comment}`);
+  assert.ok(
+    comment.includes("- Round 1 at 3f9c2e0: raised nothing, and ruled 1 fixed"),
+    `the round the reply failed in was dropped from the list: ${comment}`,
+  );
+});
+
+test("each closing reply that could not be posted is a Notes line naming the thread and the ruling (#586)", () => {
+  const failedReply = { outcome: "failed", reason: "GitHub answered 502" } as const;
+  const notes = unpostedReplyNotes(
+    [
+      handedOver("PRRT_fixed", "src/queue.ts", 134, "Retry backoff resets"),
+      handedOver("PRRT_withdrawn", "src/queue.ts", 140, "The cap is never read"),
+      handedOver("PRRT_open", "src/cache.ts", 12, "The cache is never cleared"),
+      handedOver("PRRT_posted", "src/cache.ts", 30, "The key ignores the locale"),
+    ],
+    {
+      threads: [
+        { thread: "PRRT_fixed", ruled: "fixed", outcome: "closed", reply: failedReply },
+        { thread: "PRRT_withdrawn", ruled: "withdrawn", outcome: "failed", reason: "GitHub answered 502", reply: failedReply },
+        { thread: "PRRT_open", ruled: "open", outcome: "left-open", reply: failedReply },
+        { thread: "PRRT_posted", ruled: "fixed", outcome: "closed", reply: { outcome: "acted" } },
+      ],
+      unapplied: [],
+    },
+  );
+
+  assert.deepEqual(notes, [
+    "`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)",
+    "`src/queue.ts:140` — The cap is never read (ruled withdrawn, and the reviewer's reply could not be posted on its thread)",
+  ]);
 });

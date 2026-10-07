@@ -1051,7 +1051,7 @@ test("a second episode's first round is handed the threads already on the pull r
     }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve", "reply"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "unresolve", "reply"]);
   const prompt = ran.invocations[0]?.prompt ?? "";
   assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
   assert.match(prompt, /### PRRT_two\n\nResolved\./u);
@@ -1206,7 +1206,7 @@ test("a later round hands over the reviewer's threads with their state and appli
     }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve", "reply"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "unresolve", "reply"]);
   const prompt = ran.invocations[0]?.prompt ?? "";
   assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
   assert.match(prompt, /### PRRT_two\n\nResolved\./u);
@@ -1284,6 +1284,12 @@ test("a closing round posts one comment carrying the summary it composed", async
       "**Needs a person**",
       "",
       "- `src/ui/card.ts:88` — The name says nothing. (open)",
+      "",
+      "**Rounds**",
+      "",
+      // The fixture's state names no work for the round it seeded.
+      "- Round 1: not recorded",
+      `- Round 2 at ${(ran.state?.rounds[1]?.head ?? "").slice(0, 7)}: raised nothing, and ruled 1 open`,
       "",
       "**Notes**",
       "",
@@ -1391,7 +1397,8 @@ test("a summary gh refused does not turn the close into a failed round", async (
     /gh exited 1/u,
     "the reason GitHub gave is what the failure pointer has to carry",
   );
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "summary"]);
+  // No reply answer either, and a reply that failed still resolves its thread.
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "summary"]);
   assert.deepEqual(
     ran.conclusion.verdicts.threads.map((applied) => applied.outcome),
     ["closed"],
@@ -1537,7 +1544,7 @@ test("a round with no cost is recorded with no figures, and counts nothing again
   assert.ok(ran.conclusion.outcome === "block", `the round concluded ${ran.conclusion.outcome}`);
   assert.deepEqual(
     Object.keys(ran.state?.rounds[0] ?? { missing: true }).sort(),
-    ["elapsedSeconds", "postingSeconds", "reviewer"],
+    ["elapsedSeconds", "head", "postingSeconds", "raised", "reviewer", "ruled"],
     "a round with no cost was written with figures",
   );
 });
@@ -1751,7 +1758,7 @@ test("the verdicts a failed round reported are applied, and no other thread is t
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "diff", "resolve", "failure"],
+    ["prlist", "threads", "diff", "reply", "resolve", "failure"],
     "the closed thread the reviewer never ruled on was re-opened, which reads a review that stopped early as a ruling that it is still wrong",
   );
   assert.deepEqual(
@@ -2298,11 +2305,12 @@ test("#627: a close before the review counts a thread an earlier round withdrew 
         { id: "PRRT_mended", isResolved: false },
       ]),
       resolve: RESOLVED,
+      reply: REPLIED,
     },
     reviewer: reviews({
       findings: [finding("The flag is never read")],
       verdicts: [
-        { thread: "PRRT_argued", verdict: "withdrawn" },
+        { thread: "PRRT_argued", verdict: "withdrawn", reason: "The argument holds." },
         { thread: "PRRT_mended", verdict: "fixed" },
       ],
     }),
@@ -2342,7 +2350,7 @@ test("#627: a round's rulings are on record before its verdicts reach the pull r
     lockStateAfter: "resolve",
     reviewer: reviews({
       findings: [finding("The flag is never read")],
-      verdicts: [{ thread: "PRRT_argued", verdict: "withdrawn" }],
+      verdicts: [{ thread: "PRRT_argued", verdict: "withdrawn", reason: "The argument holds." }],
     }),
   });
 
@@ -3480,19 +3488,20 @@ test("a failed round names each ruling it could not apply in its failure comment
       prlist: PR_LIST,
       diff: DIFF,
       threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      reply: REPLIED,
       resolve: MUTATION_REFUSED,
       failure: FAILURE_POSTED,
     },
     reviewer: hangs(ANSWER_COST, {
       verdicts: [
         { thread: "PRRT_one", verdict: "fixed" },
-        { thread: "PRRT_invented", verdict: "withdrawn" },
+        { thread: "PRRT_invented", verdict: "withdrawn", reason: "There was no defect." },
       ],
     }),
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "failure"]);
   assert.match(
     failureBody(ran),
     /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the thread could not be resolved\)\n- A ruling of withdrawn on thread `PRRT_invented`, which was not handed to the reviewer, was not applied$/u,
@@ -3511,3 +3520,147 @@ test("a failed round names each ruling it could not apply in its failure comment
   );
 });
 
+/** The body of a reply the round posted inside a thread, read out of its GraphQL request. */
+function replyBody(call: Call | undefined): string {
+  const request = JSON.parse(call?.body ?? "{}") as { variables?: { body?: unknown } };
+  const body = request.variables?.body;
+  return typeof body === "string" ? body : assert.fail(`no reply body was sent: ${call?.body ?? "no call"}`);
+}
+
+test("a round replies on each thread it closes before resolving it, and records what it ruled (#586)", async () => {
+  const ran = await runInFixture({
+    rounds: [ANSWER_COST],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([
+        { id: "PRRT_fixed", isResolved: false },
+        { id: "PRRT_withdrawn", isResolved: false },
+      ]),
+      reply: REPLIED,
+      resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({
+      verdicts: [
+        { thread: "PRRT_fixed", verdict: "fixed" },
+        { thread: "PRRT_withdrawn", verdict: "withdrawn", reason: "The caller clamps the height." },
+      ],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "reply", "resolve", "summary"]);
+  const recorded = ran.state?.rounds[1];
+  // The fixture's own commit, which the pull request's head was rewritten to.
+  const short = (recorded?.head ?? "").slice(0, 7);
+  assert.match(recorded?.head ?? "", /^[0-9a-f]{40}$/u, "the round recorded no head it reviewed");
+  const replies = ran.calls.filter((call) => call.kind === "reply");
+  assert.equal(replyBody(replies[0]), `**Squiz reviewer · fixed**\n\nConfirmed in round 2 at ${short}.`);
+  assert.equal(
+    replyBody(replies[1]),
+    `**Squiz reviewer · withdrawn**\n\nWithdrawn in round 2 at ${short}.\n\nThe caller clamps the height.`,
+  );
+  assert.equal(recorded?.raised, 0);
+  assert.deepEqual(recorded?.ruled, { fixed: 1, withdrawn: 1, open: 0 });
+
+  const summary = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
+  assert.match(
+    summary,
+    new RegExp(
+      `\\*\\*Rounds\\*\\*\\n\\n- Round 1: not recorded\\n- Round 2 at ${short}: raised nothing, and ruled 1 fixed and 1 withdrawn$`,
+      "u",
+    ),
+  );
+});
+
+test("a closing reply GitHub refuses still resolves the thread, and the summary names it in Notes (#586)", async () => {
+  const ran = await runInFixture({
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_fixed", isResolved: false }]),
+      reply: MUTATION_REFUSED,
+      resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_fixed", verdict: "fixed" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
+  assert.equal(ran.conclusion.because, "nothing-open", "the refused reply undid the verdict");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "summary"]);
+  const summary = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
+  assert.match(summary, /^Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0$/mu);
+  assert.match(
+    summary,
+    /\*\*Notes\*\*\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the reviewer's reply could not be posted on its thread\)$/u,
+  );
+  assert.match(summary, /- Round 1 at [0-9a-f]{7}: raised nothing, and ruled 1 fixed\n/u);
+  assert.ok(!summary.includes("Resource not accessible"), `GitHub's own words reached the summary: ${summary}`);
+});
+
+test("a round that leaves threads open records its refused closing replies for the summary that closes later (#586)", async () => {
+  const ran = await runInFixture({
+    answers: {
+      ...POSTING,
+      threads: listed([{ id: "PRRT_fixed", isResolved: false }]),
+      reply: MUTATION_REFUSED,
+      resolve: RESOLVED,
+    },
+    reviewer: reviews({
+      findings: [finding("The flag is never read")],
+      verdicts: [{ thread: "PRRT_fixed", verdict: "fixed" }],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block", `the round did not block: ${JSON.stringify(ran.conclusion)}`);
+  assert.deepEqual(ran.state?.rounds[0]?.unpostedReplies, [
+    "`src/ui/card.ts:88` — The name says nothing. (ruled fixed, and the reviewer's reply could not be posted on its thread)",
+  ]);
+  assert.equal(ran.state?.rounds[0]?.raised, 1);
+});
+
+test("a close lists an earlier round's refused closing replies from the state file (#586)", async () => {
+  const lost =
+    "`src/ui/card.ts:40` — The cap is never read (ruled fixed, and the reviewer's reply could not be posted on its thread)";
+  const ran = await runInFixture({
+    rounds: [{ ...ANSWER_COST, head: HEAD_SHA, raised: 1, ruled: { fixed: 1, withdrawn: 0, open: 0 }, unpostedReplies: [lost] }],
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_open", isResolved: false }]),
+      reply: REPLIED,
+      resolve: RESOLVED,
+      summary: SUMMARY_POSTED,
+    },
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_open", verdict: "fixed" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
+  const summary = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
+  assert.match(summary, new RegExp(`\\*\\*Notes\\*\\*\\n\\n- ${lost.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u"));
+});
+
+
+test("a failed round names in its failure comment each closing reply it could not post (#586)", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: {
+      prlist: PR_LIST,
+      diff: DIFF,
+      threads: listed([{ id: "PRRT_one", isResolved: false }]),
+      reply: MUTATION_REFUSED,
+      resolve: RESOLVED,
+      failure: FAILURE_POSTED,
+    },
+    reviewer: hangs(ANSWER_COST, { verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "resolve", "failure"]);
+  assert.match(
+    failureBody(ran),
+    /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the reviewer's reply could not be posted on its thread\)$/u,
+  );
+});

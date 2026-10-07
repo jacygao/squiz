@@ -12,7 +12,6 @@
 
 import type { Thinking } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
-import type { Verdict } from "../findings/status.ts";
 
 /** What the harness hands the reviewer for one round. */
 export type Invocation = {
@@ -124,15 +123,16 @@ export type Spend = RoundCost | undefined;
  * The reviewer's ruling on one thread it was handed.
  *
  * An `open` ruling carries the reason the thread stays open, written to the
- * coding agent, and the round posts it as a reply on the thread. `fixed` and
- * `withdrawn` carry none, because the thread is closed and nobody is waiting on
- * an answer.
+ * coding agent, and a `withdrawn` one the reason there was no defect. The round
+ * posts either as a reply on the thread. `fixed` carries none: the reply that
+ * closes the thread says only when the fix was confirmed.
  */
 export type ThreadVerdict = {
   /** The identifier the thread was handed over under, copied back. */
   readonly thread: string;
 } & (
-  | { readonly verdict: Exclude<Verdict, "open"> }
+  | { readonly verdict: "fixed" }
+  | { readonly verdict: "withdrawn"; readonly reason: string }
   | { readonly verdict: "open"; readonly reason: string }
 );
 

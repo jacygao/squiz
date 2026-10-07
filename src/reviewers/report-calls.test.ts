@@ -66,6 +66,19 @@ test("an open verdict with no reason is refused, and the thread can be ruled on 
   assert.deepEqual(lines.at(-1), { type: "report", call: REPORT_VERDICT, value: ruling });
 });
 
+test("a withdrawn verdict with no reason is refused, and the thread can be ruled on again (#586)", () => {
+  const { file, lines } = kept();
+  const verdict = reportCalls(file).calls.find((each) => each.name === REPORT_VERDICT);
+  assert.throws(
+    () => verdict?.answer({ thread: "PRRT_one", verdict: "withdrawn" }),
+    /the verdict withdraws the finding on thread PRRT_one and gives no reason/u,
+  );
+
+  const ruling = { thread: "PRRT_one", verdict: "withdrawn", reason: "The bound is set by the caller." };
+  assert.deepEqual(verdict?.answer(ruling).details, ruling);
+  assert.deepEqual(lines.at(-1), { type: "report", call: REPORT_VERDICT, value: ruling });
+});
+
 test("the verdict's schema offers the reason the reviewer must give for open", () => {
   const verdict = reportCalls(kept().file).calls.find((each) => each.name === REPORT_VERDICT);
   const properties = (verdict?.parameters as { properties: Record<string, { type: string }> }).properties;

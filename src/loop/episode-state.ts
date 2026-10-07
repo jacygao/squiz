@@ -27,16 +27,43 @@ import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 /**
  * One round as the state file keeps it: which reviewer ran it, what it spent and
  * on which models, how long its reviewer ran, the time bound that ended the
- * reviewer where one did, and how long its posting took.
+ * reviewer where one did, how long its posting took, and what it reviewed and
+ * ruled.
  *
  * A round with no cost carries no figure of any kind, rather than zeros that
  * would read back as a round that spent nothing. It names no model either,
  * because a run names its models only where it reports its spend.
  *
- * A file written before the timings or the reviewer were recorded carries none
- * of them, so a reader takes none as given.
+ * A file written before the timings, the reviewer or the work were recorded
+ * carries none of them, so a reader takes none as given.
  */
-export type RoundRecord = (RoundCost | NoCost) & Timings;
+export type RoundRecord = (RoundCost | NoCost) & Timings & RoundWork;
+
+/** How many of each ruling a round replied with. */
+export type RulingCounts = { readonly fixed: number; readonly withdrawn: number; readonly open: number };
+
+/**
+ * What a round reviewed and ruled, as the summary lists it.
+ *
+ * Kept here rather than read back off the pull request, so a reply GitHub
+ * refused still leaves its round on the list.
+ */
+export type RoundWork = {
+  /** The full head commit of the state the round reviewed. */
+  readonly head?: string;
+  /** How many findings the reviewer reported, posted or not. */
+  readonly raised?: number;
+  /**
+   * The rulings the round set out to reply with: each thread it closed while
+   * open, and each it kept open with a reason.
+   */
+  readonly ruled?: RulingCounts;
+  /**
+   * The Notes lines of the replies on threads the round closed that could not
+   * be posted. Absent where none failed.
+   */
+  readonly unpostedReplies?: readonly string[];
+};
 
 /**
  * Which reviewer ran a round, how long it and the round's posting took, and the
@@ -64,9 +91,9 @@ export type Timings = {
 /** The figures of a round with no cost, every one of them absent. */
 type NoCost = { readonly [figure in keyof RoundCost]?: never };
 
-/** A round's entry, from its cost and its timings. */
-export function roundRecord(cost: Spend, timings: Timings): RoundRecord {
-  return cost === undefined ? { ...timings } : { ...cost, ...timings };
+/** A round's entry, from its cost, its timings and its work. */
+export function roundRecord(cost: Spend, details: Timings & RoundWork): RoundRecord {
+  return cost === undefined ? { ...details } : { ...cost, ...details };
 }
 
 /** The cost a round's entry records, or `undefined` where it records none. */
@@ -245,6 +272,25 @@ export function recordRulings(state: EpisodeState, rulings: Rulings): EpisodeSta
 }
 
 /**
+ * The state with `lines` as the unposted replies of round `ordinal`, counted
+ * from 1.
+ *
+ * Unchanged where the episode has no such round, or where `lines` is empty.
+ */
+export function recordUnpostedReplies(
+  state: EpisodeState,
+  ordinal: number,
+  lines: readonly string[],
+): EpisodeState {
+  const round = state.rounds[ordinal - 1];
+  if (round === undefined || lines.length === 0) return state;
+  const rounds = state.rounds.map((entry, at) =>
+    at === ordinal - 1 ? { ...round, unpostedReplies: lines } : entry,
+  );
+  return { ...state, rounds };
+}
+
+/**
  * The state with `cost` added to what the episode spent outside its rounds.
  *
  * The round count does not move. This is where an attempt that was not a round
@@ -413,14 +459,62 @@ function roundFrom(entry: unknown): ReadRound {
     return { problem: `has "reviewer" as ${render(reviewer)}` };
   }
 
+  const work = workFrom(entry);
+  if ("problem" in work) return work;
+
   return {
     round: roundRecord(read.cost, {
       ...(reviewer === undefined ? {} : { reviewer }),
       ...(elapsed === undefined ? {} : { elapsedSeconds: elapsed }),
       ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
       ...(posting === undefined ? {} : { postingSeconds: posting }),
+      ...work.work,
     }),
   };
+}
+
+/**
+ * What a round's entry says it reviewed and ruled.
+ *
+ * A field that is absent is a file written before it was recorded. One that is
+ * there and cannot be read is a failure, because the summary would list the
+ * round by a figure nobody wrote.
+ */
+function workFrom(entry: Record<string, unknown>): { readonly work: RoundWork } | { readonly problem: string } {
+  const head = entry["head"];
+  if (head !== undefined && (typeof head !== "string" || head === "")) {
+    return { problem: `has "head" as ${render(head)}` };
+  }
+  const raised = entry["raised"];
+  if (raised !== undefined && !isTally(raised)) return { problem: `has "raised" as ${render(raised)}` };
+
+  const ruled = entry["ruled"];
+  const counts = ruled === undefined ? undefined : rulingCountsFrom(ruled);
+  if (counts === null) return { problem: `has "ruled" as ${render(ruled)}` };
+
+  const unposted = entry["unpostedReplies"];
+  if (
+    unposted !== undefined &&
+    !(Array.isArray(unposted) && unposted.every((line: unknown) => typeof line === "string"))
+  ) {
+    return { problem: `has "unpostedReplies" as ${render(unposted)}` };
+  }
+  return {
+    work: {
+      ...(head === undefined ? {} : { head }),
+      ...(raised === undefined ? {} : { raised }),
+      ...(counts === undefined ? {} : { ruled: counts }),
+      ...(unposted === undefined ? {} : { unpostedReplies: unposted as readonly string[] }),
+    },
+  };
+}
+
+/** The three ruling counts, or `null` where any of them is missing or not a count. */
+function rulingCountsFrom(value: unknown): RulingCounts | null {
+  if (!isRecord(value)) return null;
+  const { fixed, withdrawn, open } = value;
+  if (!isTally(fixed) || !isTally(withdrawn) || !isTally(open)) return null;
+  return { fixed, withdrawn, open };
 }
 
 /** Whether a round's entry carries no figure at all, which is a round with no cost. */
