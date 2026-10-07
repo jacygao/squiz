@@ -29,11 +29,10 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Adapter } from "../reviewers/adapter.ts";
-import { copilot } from "../reviewers/copilot/adapter.ts";
+import type { Reviewer } from "../config/config.ts";
+import { adapterFor } from "../reviewers/adapters.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
-import { pi } from "../reviewers/pi/adapter.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound } from "../reviewers/round.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
@@ -63,11 +62,11 @@ if (caseName === "prepare") {
 }
 
 const measured = caseName === undefined ? undefined : cases[caseName];
-const adapters: Readonly<Record<string, { adapter: Adapter; cli: string; jsonFlags: readonly string[]; review: string }>> = {
-  pi: { adapter: pi, cli: "pi", jsonFlags: ["--mode", "json"], review: "--print" },
-  copilot: { adapter: copilot, cli: "copilot", jsonFlags: ["--output-format", "json"], review: "-p" },
+const clis: Readonly<Record<Reviewer, { cli: string; jsonFlags: readonly string[]; review: string }>> = {
+  pi: { cli: "pi", jsonFlags: ["--mode", "json"], review: "--print" },
+  copilot: { cli: "copilot", jsonFlags: ["--output-format", "json"], review: "-p" },
 };
-const reviewer = reviewerName === undefined ? undefined : adapters[reviewerName];
+const reviewer = reviewerName === "pi" || reviewerName === "copilot" ? clis[reviewerName] : undefined;
 const depth = depthName === "read" || depthName === "deep" ? depthName : undefined;
 if (
   measured === undefined ||
@@ -141,7 +140,7 @@ const pullRequest = {
 
 const started = Date.now();
 const round = await runRound(
-  reviewer.adapter,
+  adapterFor(reviewerName as Reviewer),
   {
     directory: tree,
     charterFile,
