@@ -30,11 +30,7 @@ recheck-when: minimatch changes what `**` matches by default, or mocha passes `d
 
 ## Needs your input
 
-- **The reviewer's scratch space is still at `.squiz/<number>/scratch/`**, and
-  at `deep` it is `TMPDIR` for the test command. A suite that makes fixtures in
-  `os.tmpdir()` and matches them with `**` misses them for the same reason.
-  This was not observed in any real suite. Recommend moving scratch space beside
-  the snapshot, under `squiz-<uid>/`, once § 4 Confinement has been rewritten.
+Nothing.
 
 ## Reference
 

@@ -50,7 +50,6 @@ function fixture(t: TestContext, listing: string, status = 0): Fixture {
     sessionDirectory: ".squiz/7/rounds/1/session",
     promptFile: ".squiz/7/rounds/1/prompt.md",
     reportsFile: ".squiz/7/rounds/1/reports.jsonl",
-    scratchDirectory: ".squiz/7/scratch",
     githubConfigDirectory: ".squiz/7/rounds/1/gh",
     thinking: "medium",
     model: null,

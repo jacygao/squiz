@@ -18,7 +18,6 @@ const invocation: Invocation = {
   sessionDirectory: ".squiz/7/rounds/1/session",
   promptFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/prompt.md",
   reportsFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
-  scratchDirectory: ".squiz/7/scratch",
   githubConfigDirectory: ".squiz/7/rounds/1/gh",
   thinking: "medium",
   model: null,
@@ -96,8 +95,7 @@ test("a configured model is passed with --model, as the script's $1, and changes
 });
 
 // Copilot confines its reading tools to the working directory and the system's
-// temporary directory, which for the reviewer is the round's scratch space,
-// outside the snapshot.
+// temporary directory, which holds every other round's snapshot too.
 test("the reading tools reach the snapshot and nothing else", () => {
   const script = scriptOf(argv(invocation));
   assert.ok(script.includes(" --disallow-temp-dir "), `the line leaves the temporary directory readable: ${script}`);

@@ -40,12 +40,6 @@ export type Invocation = {
    */
   readonly reportsFile: string;
   /**
-   * Where the reviewer's temporary files go, so that a probe script or a
-   * scratch file cannot land in the tree under review. `TMPDIR` points at it,
-   * and it exists before the process starts.
-   */
-  readonly scratchDirectory: string;
-  /**
    * The round's own `gh` configuration directory, which `GH_CONFIG_DIR` names.
    * The round empties it before the reviewer starts, so a `gh` the reviewer
    * runs finds no login there.

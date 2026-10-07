@@ -14,7 +14,6 @@ const invocation: Invocation = {
   sessionDirectory: ".squiz/agent-7/session",
   promptFile: ".squiz/7/rounds/1/prompt.md",
   reportsFile: ".squiz/7/rounds/1/reports.jsonl",
-  scratchDirectory: ".squiz/agent-7/scratch",
   githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
   thinking: "medium",
   model: null,

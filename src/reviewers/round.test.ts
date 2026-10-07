@@ -17,9 +17,6 @@ import { REPORTS_VARIABLE } from "./report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
 import { type Round, runRound } from "./round.ts";
 
-/** The scratch space, named relative to the work tree as the harness names it. */
-const scratchDirectory = ".squiz/agent-1/scratch";
-
 /** The round's own `gh` configuration, named relative to the work tree as the harness names it. */
 const githubConfigDirectory = ".squiz/1/rounds/1/gh";
 
@@ -41,11 +38,13 @@ test("the reviewer runs in the work tree holding the change", async () => {
   });
 });
 
-test("TMPDIR is the scratch space, and it is there before the reviewer starts", async () => {
+// Copilot's --disallow-temp-dir closes the system's temporary directory, so the
+// reviewer's TMPDIR must be the one every snapshot is made in.
+test("the reviewer's TMPDIR is the harness's own", async () => {
   await inATree(async (tree) => {
-    const seen = reporting('process.env.TMPDIR + " exists:" + fs.existsSync(process.env.TMPDIR)');
+    const seen = reporting("String(process.env.TMPDIR)");
     const round = await runRound(reviewer(seen).adapter, at(tree), 10);
-    assert.equal(headlineOf(round), `${join(tree, scratchDirectory)} exists:true`);
+    assert.equal(headlineOf(round), tmpdir());
   });
 });
 
@@ -500,17 +499,6 @@ test("a reviewer that is not installed is a setup problem, named as one", async 
     const round = await runRound(missing, at(tree), 10);
     assert.equal(round.outcome, "setup");
     assert.match(round.outcome === "setup" ? round.reason : "", /could not be started/u);
-  });
-});
-
-test("a scratch space that cannot be made is a setup problem, and nothing is run", async () => {
-  await inATree(async (tree) => {
-    const running = reviewer(reviewing);
-    // A file where the directory has to go, which cannot be turned into one.
-    writeFileSync(join(tree, "not-a-directory"), "");
-    const round = await runRound(running.adapter, { ...at(tree), scratchDirectory: blocked }, 10);
-    assert.equal(round.outcome, "setup");
-    assert.equal(running.starts(), 0);
   });
 });
 
@@ -1438,9 +1426,6 @@ const complainingAtLength = [
 /** What one attempt spent in the scripts that report one message. */
 const spentOnce = { dollars: 0.002, tokens: 100, messages: 1 };
 
-/** A path under the work tree that a directory cannot be made at. */
-const blocked = "not-a-directory/scratch";
-
 const finding = {
   scope: "line",
   file: "src/github/gh.ts",
@@ -1498,7 +1483,6 @@ function at(tree: string): Invocation {
     sessionDirectory: ".squiz/agent-1/session",
     promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile,
-    scratchDirectory,
     githubConfigDirectory,
     thinking: "medium",
     model: null,

@@ -7,9 +7,9 @@
  * obtain a path under the episode's directory, and nothing but a positive whole
  * number reaches the filesystem as a key.
  *
- * Each round's directory and the reviewer's scratch space hang off the episode's
- * own directory and are derived here too. A second place that computed them
- * would be a second place for them to drift from the state file's.
+ * Each round's directory hangs off the episode's own directory and is derived
+ * here too. A second place that computed it would be a second place for it to
+ * drift from the state file's.
  *
  * Nothing here touches the filesystem. These are paths, not directories.
  */
@@ -35,11 +35,6 @@ export type Episode = {
   readonly directory: string;
   /** The pull request, what each round spent, and what was spent outside them. */
   readonly stateFile: string;
-  /**
-   * What `TMPDIR` points at while the reviewer runs, so that a probe script or
-   * a temporary file cannot land in the tree under review.
-   */
-  readonly scratchDirectory: string;
 };
 
 /**
@@ -76,7 +71,6 @@ export function episodeAt(worktree: string, pullRequest: number): Episode {
     id,
     directory,
     stateFile: join(directory, stateFileName),
-    scratchDirectory: join(directory, "scratch"),
   };
 }
 

@@ -519,10 +519,8 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       argv: (invocation) => {
         invocations.push(invocation);
         // Read here rather than after the round: the reviewer is told to write
-        // into both, and both have to be there before its process starts.
-        directoriesReady.push(
-          existsSync(invocation.sessionDirectory) && existsSync(invocation.scratchDirectory),
-        );
+        // into it, and it has to be there before its process starts.
+        directoriesReady.push(existsSync(invocation.sessionDirectory));
         headsWhenStarted.push(headIn(invocation.directory));
         return {
           command: current().command ?? "/bin/sh",
@@ -1177,17 +1175,13 @@ test("the round's cost is recorded in the episode state with its token count", a
   assert.match(ran.stateSource ?? "", /"tokens": 1200/u);
 });
 
-test("the reviewer's session directory and scratch space exist before it starts", async () => {
+test("the reviewer's session directory exists before it starts", async () => {
   const ran = await runInFixture({
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
-  assert.deepEqual(
-    ran.directoriesReady,
-    [true],
-    "a scratch space that does not exist yet leaves the reviewer's temporary files in the tree under review",
-  );
+  assert.deepEqual(ran.directoriesReady, [true], "the reviewer's CLI does not make its session directory");
 });
 
 test("a later round hands over the reviewer's threads with their state and applies the verdicts", async () => {
@@ -2838,15 +2832,12 @@ function startsBroken(): Backends {
   };
 }
 
-test("the reviewer runs in a snapshot of the head commit, with scratch space outside it", async () => {
+test("the reviewer runs in a snapshot of the head commit", async () => {
   const ran = await runInFixture({ answers: POSTING, reviewer: reviews({}) });
 
   const directory = ran.invocations[0]?.directory ?? "";
   assert.equal(directory, snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }));
   assert.deepEqual(ran.headsWhenStarted, [ran.head], "the snapshot holds the head commit");
-  const scratch = ran.invocations[0]?.scratchDirectory ?? "";
-  assert.match(scratch, new RegExp(`/\\.squiz/${PULL_REQUEST}/scratch$`, "u"));
-  assert.equal(scratch.startsWith(directory), false, "scratch space is outside the snapshot");
 });
 
 test("a change made in the reviewer's snapshot leaves the coding agent's worktree alone", async () => {

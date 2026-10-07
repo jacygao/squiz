@@ -4,8 +4,8 @@
  *
  * Nothing here knows which CLI is running. The adapter builds the command line
  * and reads the report file back, and everything else — the current directory,
- * the scratch space, stdin, following the report file, the time bound and the
- * one retry — is the same whatever reviewer a project configured.
+ * stdin, following the report file, the time bound and the one retry — is the
+ * same whatever reviewer a project configured.
  *
  * Nothing throws. Every outcome is a value the caller reads, because the round
  * host has to record a result for every round it takes.
@@ -15,6 +15,7 @@
 
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -160,13 +161,6 @@ export async function runRound(
   if (unwritten !== null) {
     return { outcome: "setup", cost: unspent, reason: unwritten, refusals: 0, ...nothingReported };
   }
-  // Absolute, so that TMPDIR still names the scratch space for a reviewer that
-  // changes directory, and so the directory is made wherever the harness runs.
-  const scratch = resolve(invocation.directory, invocation.scratchDirectory);
-  const unmade = makeScratch(scratch);
-  if (unmade !== null) {
-    return { outcome: "setup", cost: unspent, reason: unmade, refusals: 0, ...nothingReported };
-  }
   const github = resolve(invocation.directory, invocation.githubConfigDirectory);
   const unemptied = emptyDirectory(github);
   if (unemptied !== null) {
@@ -187,7 +181,7 @@ export async function runRound(
     };
   }
 
-  const variables = variablesOf(invocation, scratch, github, confinement.environment);
+  const variables = variablesOf(github, confinement.environment);
 
   let spent: Spend = undefined;
   // Added up rather than replaced, unlike the reports below: each refusal is a
@@ -278,8 +272,9 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
 /**
  * What the round adds to the reviewer's environment, on every backend.
  *
- * `TMPDIR` is the scratch space, so a probe script cannot land in the tree under
- * review.
+ * `TMPDIR` is the harness's own temporary directory, where the snapshot is made.
+ * A pane server may carry another, and Copilot's `--disallow-temp-dir` closes
+ * whichever the reviewer has.
  *
  * **No GitHub credential reaches the reviewer through a variable or `gh`'s
  * configuration.** The token variables are set empty rather than left out,
@@ -289,13 +284,11 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * the confinement's, so no adapter puts a token back.
  */
 function variablesOf(
-  invocation: Invocation,
-  scratch: string,
   github: string,
   confinement: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
   return {
-    TMPDIR: scratch,
+    TMPDIR: tmpdir(),
     ...confinement,
     ...Object.fromEntries(GITHUB_TOKENS.map((name) => [name, ""])),
     GH_CONFIG_DIR: github,
@@ -341,11 +334,10 @@ const FOLLOW_MS = 50;
  * bound.
  *
  * It runs in a pane where `sessions` offers one, and as a child with no terminal
- * otherwise. Three things confine it, and none is conditional. It runs in the
- * work tree holding the change. `TMPDIR` is the scratch space, which exists
- * before it starts. A child's stdin is `/dev/null`: with stdin inherited the
- * reviewer blocks forever and emits nothing, and a silent hang looks exactly
- * like a reviewer thinking.
+ * otherwise. Two things confine it, and neither is conditional. It runs in the
+ * work tree holding the change. A child's stdin is `/dev/null`: with stdin
+ * inherited the reviewer blocks forever and emits nothing, and a silent hang
+ * looks exactly like a reviewer thinking.
  *
  * Its output is not read. What it reported is in the report file, which is
  * emptied before it starts and read as it grows until the reviewer is gone. A
@@ -804,16 +796,6 @@ function writePrompt(file: string, prompt: string): string | null {
     return null;
   } catch (cause) {
     return `the reviewer's prompt could not be written to ${file}: ${reasonFor(cause)}`;
-  }
-}
-
-/** The scratch space, made before the reviewer starts, or why it could not be. */
-function makeScratch(directory: string): string | null {
-  try {
-    mkdirSync(directory, { recursive: true });
-    return null;
-  } catch (cause) {
-    return `the reviewer's scratch space ${directory} could not be made: ${reasonFor(cause)}`;
   }
 }
 
