@@ -1,0 +1,27 @@
+diff --git a/lib/parse.js b/lib/parse.js
+index 07a0804..6e33a74 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -38,18 +38,11 @@ var interpretNumericEntities = function (str) {
+ 
+ var parseArrayValue = function (val, options, currentArrayLength) {
+     if (val && typeof val === 'string' && options.comma && val.indexOf(',') > -1) {
+-        if (options.throwOnLimitExceeded) {
+-            var commaCount = 0;
+-            var commaIndex = val.indexOf(',');
+-            while (commaIndex > -1) {
+-                commaCount += 1;
+-                if (commaCount >= options.arrayLimit) {
+-                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+-                }
+-                commaIndex = val.indexOf(',', commaIndex + 1);
+-            }
++        var elements = val.split(',');
++        if (options.throwOnLimitExceeded && elements.length >= options.arrayLimit) {
++            throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+         }
+-        return val.split(',');
++        return elements;
+     }
+ 
+     if (options.throwOnLimitExceeded && currentArrayLength >= options.arrayLimit) {

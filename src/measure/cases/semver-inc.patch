@@ -1,0 +1,24 @@
+diff --git a/classes/semver.js b/classes/semver.js
+index 5438127..d86f036 100644
+--- a/classes/semver.js
++++ b/classes/semver.js
+@@ -303,14 +303,11 @@ class SemVer {
+         if (this.prerelease.length === 0) {
+           this.prerelease = [base]
+         } else {
+-          let i = this.prerelease.length
+-          while (--i >= 0) {
+-            if (typeof this.prerelease[i] === 'number') {
+-              this.prerelease[i]++
+-              i = -2
+-            }
+-          }
+-          if (i === -1) {
++          // The last numeric identifier is the one that counts up.
++          const last = this.prerelease.findLastIndex((id) => typeof id === 'number')
++          if (last > 0) {
++            this.prerelease[last]++
++          } else {
+             // didn't increment anything
+             if (identifier === this.prerelease.join('.') && identifierBase === false) {
+               throw new Error('invalid increment argument: identifier already exists')

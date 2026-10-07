@@ -1,0 +1,118 @@
+diff --git a/lib/parse.js b/lib/parse.js
+index 07a0804..4720085 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -44,7 +44,7 @@ var parseArrayValue = function (val, options, currentArrayLength) {
+             while (commaIndex > -1) {
+                 commaCount += 1;
+                 if (commaCount >= options.arrayLimit) {
+-                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++                    throw utils.arrayLimitError(options.arrayLimit);
+                 }
+                 commaIndex = val.indexOf(',', commaIndex + 1);
+             }
+@@ -53,7 +53,7 @@ var parseArrayValue = function (val, options, currentArrayLength) {
+     }
+ 
+     if (options.throwOnLimitExceeded && currentArrayLength >= options.arrayLimit) {
+-        throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++        throw utils.arrayLimitError(options.arrayLimit);
+     }
+ 
+     return val;
+@@ -212,7 +212,7 @@ var parseObject = function (chain, val, options, valuesParsed) {
+                 obj = [];
+                 obj[index] = leaf;
+             } else if (isValidArrayIndex && options.throwOnLimitExceeded) {
+-                throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++                throw utils.arrayLimitError(options.arrayLimit);
+             } else if (isValidArrayIndex) {
+                 obj[index] = leaf;
+                 utils.markOverflow(obj, index);
+diff --git a/lib/utils.js b/lib/utils.js
+index adde8c0..9e41c79 100644
+--- a/lib/utils.js
++++ b/lib/utils.js
+@@ -45,6 +45,11 @@ var getConflictIndex = function getConflictIndex(obj) {
+     return conflictChannel.get(obj);
+ };
+ 
++// The error every array limit throws, so the wording is the same wherever the limit is hit.
++var arrayLimitError = function arrayLimitError(arrayLimit) {
++    return new RangeError('Array limit exceeded. Only ' + arrayLimit + ' element' + (arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++};
++
+ var hexTable = (function () {
+     var array = [];
+     for (var i = 0; i < 256; ++i) {
+@@ -114,7 +119,7 @@ var limitedPair = function limitedPair(first, second, options) {
+     var pair = [first, second];
+     if (options && typeof options.arrayLimit === 'number' && pair.length > options.arrayLimit) {
+         if (options.throwOnLimitExceeded) {
+-            throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++            throw arrayLimitError(options.arrayLimit);
+         }
+         return markOverflow(arrayToObject(pair, options), 1);
+     }
+@@ -132,7 +137,7 @@ var merge = function merge(target, source, options) {
+             var nextIndex = target.length;
+             if (options && typeof options.arrayLimit === 'number' && nextIndex >= options.arrayLimit) {
+                 if (options.throwOnLimitExceeded) {
+-                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++                    throw arrayLimitError(options.arrayLimit);
+                 }
+                 return markOverflow(arrayToObject(target.concat(source), options), nextIndex);
+             }
+@@ -150,7 +155,7 @@ var merge = function merge(target, source, options) {
+                     && typeof options.arrayLimit === 'number'
+                     && nextConflict >= options.arrayLimit
+                 ) {
+-                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++                    throw arrayLimitError(options.arrayLimit);
+                 }
+                 target[nextConflict] = source;
+                 markConflict(target, nextConflict);
+@@ -186,7 +191,7 @@ var merge = function merge(target, source, options) {
+         var combined = [target].concat(source);
+         if (options && typeof options.arrayLimit === 'number' && combined.length > options.arrayLimit) {
+             if (options.throwOnLimitExceeded) {
+-                throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++                throw arrayLimitError(options.arrayLimit);
+             }
+             return markOverflow(arrayToObject(combined, options), combined.length - 1);
+         }
+@@ -217,7 +222,7 @@ var merge = function merge(target, source, options) {
+         });
+         if (options && typeof options.arrayLimit === 'number' && target.length > options.arrayLimit) {
+             if (options.throwOnLimitExceeded) {
+-                throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++                throw arrayLimitError(options.arrayLimit);
+             }
+             return markOverflow(arrayToObject(target, options), target.length - 1);
+         }
+@@ -399,7 +404,7 @@ var combine = function combine(a, b, arrayLimit, plainObjects, throwOnLimitExcee
+     // If 'a' is already an overflow object, add to it
+     if (isOverflow(a)) {
+         if (throwOnLimitExceeded) {
+-            throw new RangeError('Array limit exceeded. Only ' + arrayLimit + ' element' + (arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++            throw arrayLimitError(arrayLimit);
+         }
+         // spread `b` one level, matching the `[].concat(a, b)` used below, so a
+         // collection appended to an already-overflowed object is flattened
+@@ -417,7 +422,7 @@ var combine = function combine(a, b, arrayLimit, plainObjects, throwOnLimitExcee
+     var result = [].concat(a, b);
+     if (result.length > arrayLimit) {
+         if (throwOnLimitExceeded) {
+-            throw new RangeError('Array limit exceeded. Only ' + arrayLimit + ' element' + (arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
++            throw arrayLimitError(arrayLimit);
+         }
+         return markOverflow(arrayToObject(result, { plainObjects: plainObjects }), result.length - 1);
+     }
+@@ -436,6 +441,7 @@ var maybeMap = function maybeMap(val, fn) {
+ };
+ 
+ module.exports = {
++    arrayLimitError: arrayLimitError,
+     arrayToObject: arrayToObject,
+     assign: assign,
+     combine: combine,

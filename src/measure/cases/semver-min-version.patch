@@ -1,0 +1,18 @@
+diff --git a/ranges/min-version.js b/ranges/min-version.js
+index 09a65aa..eb1b237 100644
+--- a/ranges/min-version.js
++++ b/ranges/min-version.js
+@@ -27,11 +27,8 @@ const minVersion = (range, loose) => {
+       const compver = new SemVer(comparator.semver.version)
+       switch (comparator.operator) {
+         case '>':
+-          if (compver.prerelease.length === 0) {
+-            compver.patch++
+-          } else {
+-            compver.prerelease.push(0)
+-          }
++          // The smallest version above the bound is the next patch.
++          compver.inc('patch')
+           compver.raw = compver.format()
+           /* fallthrough */
+         case '':

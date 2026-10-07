@@ -1,0 +1,81 @@
+diff --git a/README.md b/README.md
+index 9b5ce1a..afe1feb 100644
+--- a/README.md
++++ b/README.md
+@@ -137,7 +137,14 @@ var limited = qs.parse('a=b&c=d', { parameterLimit: 1 });
+ assert.deepEqual(limited, { a: 'b' });
+ ```
+ 
+-If you want an error to be thrown whenever a limit is exceeded (eg, `parameterLimit`, `arrayLimit`), set the `throwOnLimitExceeded` option to `true`. This option will generate a descriptive error if the query string exceeds a configured limit.
++By default **qs** also ignores any parameter whose key is longer than 1000 characters, measured before the key is percent-decoded. This can be overridden by passing a `maxKeyLength` option:
++
++```javascript
++var shortKeys = qs.parse('a=b&abcd=e', { maxKeyLength: 3 });
++assert.deepEqual(shortKeys, { a: 'b' });
++```
++
++If you want an error to be thrown whenever a limit is exceeded (eg, `parameterLimit`, `arrayLimit`, `maxKeyLength`), set the `throwOnLimitExceeded` option to `true`. This option will generate a descriptive error if the query string exceeds a configured limit.
+ ```javascript
+ try {
+     qs.parse('a=1&b=2&c=3&d=4', { parameterLimit: 3, throwOnLimitExceeded: true });
+diff --git a/lib/parse.js b/lib/parse.js
+index 07a0804..27f154d 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -21,6 +21,7 @@ var defaults = {
+     duplicates: 'combine',
+     ignoreQueryPrefix: false,
+     interpretNumericEntities: false,
++    maxKeyLength: 1000,
+     parameterLimit: 1000,
+     parseArrays: true,
+     plainObjects: false,
+@@ -137,6 +138,13 @@ var parseValues = function parseQueryStringValues(str, options) {
+             }
+         }
+ 
++        if (typeof key === 'string' && key.length > options.maxKeyLength) {
++            if (options.throwOnLimitExceeded) {
++                throw new RangeError('Key length exceeded. Only ' + options.maxKeyLength + ' character' + (options.maxKeyLength === 1 ? '' : 's') + ' allowed in a key.');
++            }
++            continue;
++        }
++
+         if (val && options.interpretNumericEntities && charset === 'iso-8859-1') {
+             val = interpretNumericEntities(String(val));
+         }
+@@ -379,6 +387,7 @@ var normalizeParseOptions = function normalizeParseOptions(opts) {
+         duplicates: duplicates,
+         ignoreQueryPrefix: opts.ignoreQueryPrefix === true,
+         interpretNumericEntities: typeof opts.interpretNumericEntities === 'boolean' ? opts.interpretNumericEntities : defaults.interpretNumericEntities,
++        maxKeyLength: opts.maxKeyLength,
+         parameterLimit: typeof opts.parameterLimit === 'number' ? opts.parameterLimit : defaults.parameterLimit,
+         parseArrays: opts.parseArrays !== false,
+         plainObjects: typeof opts.plainObjects === 'boolean' ? opts.plainObjects : defaults.plainObjects,
+diff --git a/test/parse.js b/test/parse.js
+index 596fa56..18c30b0 100644
+--- a/test/parse.js
++++ b/test/parse.js
+@@ -592,6 +592,22 @@ test('parse()', function (t) {
+         st.end();
+     });
+ 
++    t.test('ignores a key longer than maxKeyLength', function (st) {
++        st.deepEqual(qs.parse('a=b&abcd=e', { maxKeyLength: 3 }), { a: 'b' });
++        st.deepEqual(qs.parse('abc=d', { maxKeyLength: 3 }), { abc: 'd' });
++        st.end();
++    });
++
++    t.test('throws on a key longer than maxKeyLength with throwOnLimitExceeded', function (st) {
++        st['throws'](
++            function () {
++                qs.parse('a=b&abcd=e', { maxKeyLength: 3, throwOnLimitExceeded: true });
++            },
++            new RangeError('Key length exceeded. Only 3 characters allowed in a key.')
++        );
++        st.end();
++    });
++
+     t.test('allows setting the parameter limit to Infinity', function (st) {
+         st.deepEqual(qs.parse('a=b&c=d', { parameterLimit: Infinity }), { a: 'b', c: 'd' });
+         st.end();

@@ -1,0 +1,21 @@
+diff --git a/lib/stringify.js b/lib/stringify.js
+index b55858a..9c4de46 100644
+--- a/lib/stringify.js
++++ b/lib/stringify.js
+@@ -147,13 +147,14 @@ var stringify = function stringify(
+ 
+     var objKeys;
+     if (generateArrayPrefix === 'comma' && isArray(obj)) {
+-        // we need to join elements in
++        // the elements are joined into one value, under the array's own key
+         if (encodeValuesOnly && encoder) {
+             obj = utils.maybeMap(obj, function (v) {
+                 return v == null ? v : encoder(v);
+             });
+         }
+-        objKeys = [{ value: obj.length > 0 ? obj.join(',') || null : void undefined }];
++        // a join of nothing but empty or nullish elements is the empty string, which is sent as null
++        objKeys = [{ value: obj.join(',') || null }];
+     } else if (isArray(filter)) {
+         objKeys = filter;
+     } else {

@@ -1,0 +1,15 @@
+diff --git a/src/helpers.ts b/src/helpers.ts
+index edfeaa69..ca0937ad 100644
+--- a/src/helpers.ts
++++ b/src/helpers.ts
+@@ -62,9 +62,7 @@ export function splitCells(tableRow: string, count?: number) {
+   // ensure that every cell-delimiting pipe has a space
+   // before it to distinguish it from an escaped pipe
+   const row = tableRow.replace(other.findPipe, (match, offset, str) => {
+-      let escaped = false;
+-      let curr = offset;
+-      while (--curr >= 0 && str[curr] === '\\') escaped = !escaped;
++      const escaped = offset > 0 && str[offset - 1] === '\\';
+       if (escaped) {
+         // odd number of slashes means | is escaped
+         // so we leave it alone
