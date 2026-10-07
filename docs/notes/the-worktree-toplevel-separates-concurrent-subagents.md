@@ -20,17 +20,14 @@ directory is where its dispatcher stood, which
 
 ## Decisions
 
-- **An episode is located by `git rev-parse --show-toplevel`, resolved from the
-  hook's own working directory.** It is the only one of the three available
+- **Locate an episode's worktree with `git rev-parse --show-toplevel`, run from
+  the payload's `cwd`.** The toplevel is the only one of the three available
   answers that is stable, normalised and different per subagent, and it is what
-  every other per-episode thing hangs off. § 3's shared-tree detection compared
-  this value too, until M10 removed it: each reviewer now reads a snapshot that
-  only it writes. 2026-10-06: the toplevel is now resolved from the payload's
-  `cwd`, because Copilot runs a plugin's hook in the plugin root. It is still
-  resolved through git, never used as it stands.
-- **The harness must not use `cwd` from the payload, nor the hook process's own
-  working directory, as the episode's directory or as a key.** Both are the
-  subagent's directory. They equal the worktree root only when the subagent was
+  every other per-episode thing hangs off. `cwd` is where it is run from because
+  Copilot runs a plugin's hook in the plugin root, and under Claude Code the
+  hook's own directory is the same as `cwd`.
+- **Never use `cwd`, nor the hook process's own working directory, as it stands,
+  as the episode's directory or as a key.** Both are the subagent's directory. They equal the worktree root only when the subagent was
   dispatched from the worktree root, which is the dispatcher's habit rather than
   a guarantee. Two sessions started in two subdirectories of one shared worktree
   would carry two different `cwd` values and one toplevel, so keying on `cwd`
@@ -38,10 +35,6 @@ directory is where its dispatcher stood, which
 - **§ 3 holds as written.** Nothing here contradicts it. The refinement is that
   "each hook resolves its own working directory" has to mean resolving that
   directory through git, not reading it.
-- **The spike's per-run state is separated by toplevel, opt-in.** Setting
-  `SQUIZ_SPIKE_SPLIT_BY_TOPLEVEL` to a non-empty value gives each worktree its
-  own subdirectory under `SQUIZ_SPIKE_DIR`. The default layout is unchanged, so
-  the other M0 subtasks that extend the same script are unaffected.
 
 ## Needs your input
 
@@ -71,16 +64,11 @@ in the payload.
 ### Shared state between two concurrent hooks
 
 Two hooks pointed at one state directory really do corrupt it. Twelve hook
-processes run concurrently against one `SQUIZ_SPIKE_DIR` left the invocation
-counter at 6 and wrote 12 records carrying only 6 distinct invocation numbers:
-the read-modify-write on the counter file loses increments, and both worktrees'
-records land in one log. With `SQUIZ_SPIKE_SPLIT_BY_TOPLEVEL` set, the same
-twelve produced two directories, each holding only its own worktree's records.
-
-The split removes contention *between* worktrees. It does not make the counter
-atomic, so several hooks firing at once within one worktree still lose counts.
-In the concurrent run each worktree had at most one hook in flight, and the two
-counters ended exact.
+processes run concurrently against one directory, each reading a counter file,
+adding one and writing it back, left the counter at 6 and wrote 12 records
+carrying only 6 distinct numbers. Separating the state by toplevel removed the
+contention between worktrees and none within one. Every change to an
+episode's state file is now made under `state.lock` (§ 3 The state file).
 
 ### Resuming a subagent fires the hook again
 
@@ -88,8 +76,7 @@ One of the two dispatching agents sent a follow-up to its subagent with
 `SendMessage`, addressed to the subagent's `agent_id`. That resumed the same
 subagent, and when it stopped again `SubagentStop` fired once more with the same
 `agent_id` and with `stop_hook_active` back to `false`. So a firing with
-`stop_hook_active: false` is not reliably the first firing of an episode, and an
-episode can outlive the block budget being spent.
+`stop_hook_active: false` is not reliably a subagent's first.
 
 ## Limits
 

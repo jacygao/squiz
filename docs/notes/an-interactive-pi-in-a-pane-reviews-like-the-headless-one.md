@@ -31,9 +31,9 @@ after `finish_review`.
 - **Host the reviewer as interactive `pi`, on the command line `argv.ts` builds
   today minus `--print`, `--mode json` and `--no-session`.** Everything the
   round depends on behaved as it does headless: `ctx.mode` was `"tui"`, the
-  active tools were exactly the grant, `git commit --amend` was refused with
-  squiz's reason, and a malformed finding was refused with the extension's own
-  error. Dropping `--no-session` keeps `--session-dir`, so `pi` writes the
+  active tools were exactly the grant, a call the extension's `tool_call`
+  handler refuses was refused with squiz's reason, and a malformed finding was
+  refused with the extension's own error. Dropping `--no-session` keeps `--session-dir`, so `pi` writes the
   round's session file there, as `<timestamp>_<uuid>.jsonl`. The runs here
   pointed it at a scratch directory; the round host would point it at
   `.squiz/<number>/`. With `--no-session` kept there is no session to resume.
@@ -103,9 +103,8 @@ widened.
   `lastChangelogVersion` in `settings.json` and refreshed `models-store.json`.
   On the first start after an upgrade it fills the pane with the changelog, and
   it shows an "Update Available" banner. Whether headless runs write the same
-  files was not checked. A round
-  host either accepts those writes in the user's `~/.pi/agent`, or points
-  `PI_CODING_AGENT_DIR` at a copy, which carries `auth.json` with it.
+  files was not checked. The round leaves `PI_CODING_AGENT_DIR` as the user has
+  it, so these writes land in the user's own `~/.pi/agent`.
 - **The pane's stdin is the terminal.** The headless rule that stdin must be
   `/dev/null` does not apply, and a person can type into the review.
 - **A positional prompt is shown whole in the pane**, diff included, as the
@@ -122,8 +121,9 @@ widened.
   On 1.0.0 only the cheap probe ran: the refusals, one rejected finding and one
   accepted, and `finish_review`. A pane round that reports findings on a real
   change was not run.
-- The refusals were exercised through `bash` alone, at the `deep` grant. `edit`
-  and `write` are outside the grant, so the model could not call them.
+- The refusals were exercised through `bash`, under a grant that then carried
+  it. No grant carries it now, and `edit` and `write` were outside the grant, so
+  the model could not call them.
 - Nobody typed into a running pane, and what a person's input does to a round
   is not measured.
 - Herdr was not tried. Neither was what `kill-window`, a pane close or SIGTERM

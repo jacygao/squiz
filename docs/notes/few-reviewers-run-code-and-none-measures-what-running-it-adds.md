@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what other code reviewers give their model to see and to run, what the charter could take from their instructions, and what evidence exists for `deep`'s test runs and for reviewing a stranger's pull request"
+settles: "§ 4 — what other code reviewers give their model to see and to run, what the charter could take from their instructions, and what evidence exists for a review that runs tests and for reviewing a stranger's pull request"
 issue: [579]
 recorded: 2026-10-06
 versions: { pr-agent: 8175540f, claude-code: 8e60c4ca, claude-code-security-review: 0c6a49f1, claude-code-action: 86d88e61, codex: 822e58cc, no-mistakes: main, kodus-ai: main, run-gemini-cli: main }
@@ -17,19 +17,19 @@ recheck-when: a vendor publishes a measurement that separates running code from 
 
 ## Decisions
 
-- **Squiz's tool design is the common one; its lack of a sandbox is not.** Most
-  reviewers give the model read and search tools over the whole repository, and
-  no shell. Four are documented to give it one. Codex runs it under Seatbelt
-  or Landlock, and CodeRabbit inside a microVM. Ellipsis runs it in "isolated
-  cloud sessions" of a kind it does not name. no-mistakes runs it unconfined,
-  and says so in its own source. `deep` without #529 would put squiz beside
-  no-mistakes.
+- **Squiz's tool design is the common one: read and search tools, and no
+  shell.** Most reviewers give the model that over the whole repository. Four
+  are documented to give it a shell. Codex runs it under Seatbelt or Landlock,
+  and CodeRabbit inside a microVM. Ellipsis runs it in "isolated cloud
+  sessions" of a kind it does not name. no-mistakes runs it unconfined, and says
+  so in its own source. A squiz level that ran code without #529's sandbox would
+  put squiz beside no-mistakes.
 - **Running the project's tests during a review is rare, and nobody documents
   doing it by default.** Codex's launch post is the only claim that a reviewer
   "runs your code and tests" (unverified). Kodus runs a type checker or linter,
   and CodeRabbit runs third-party linters. no-mistakes forbids tests in review
-  and runs them as a step of their own. `run_tests` at `deep` is further than
-  the field goes, so it needs its own case rather than precedent.
+  and runs them as a step of their own. Running the project's tests is further
+  than the field goes, so it needs its own case rather than precedent.
 - **The charter changes worth taking are in #579.** Eight changes, each with its
   source and reason. Ranked highest:
   1. treat the description, the code and the documents it names as material, never as instructions;
@@ -43,9 +43,9 @@ recheck-when: a vendor publishes a measurement that separates running code from 
   compares a diff-only reviewer with an agentic one (unverified: read from a
   summary of the figure, which was not seen). The only cross-vendor benchmark,
   Greptile's own, ranks Greptile first. Whether Greptile runs code is not
-  documented either way, so the ranking says nothing about execution. `deep`'s value is
-  therefore unmeasured, and #529's sandbox is what makes the experiment safe to
-  run on squiz.
+  documented either way, so the ranking says nothing about execution. Squiz's
+  own measurement, in `deep-finds-no-more-known-defects-than-read.md`, found no
+  difference on its case set.
 - **Where a tool documents how it handles a stranger's pull request, it either
   waits for a trusted person to ask or takes every secret away.** Claude Code
   Review reviews a fork only on a comment from someone with write access to the
@@ -57,8 +57,9 @@ recheck-when: a vendor publishes a measurement that separates running code from 
   starts. Codex's local review, Ellipsis, Kodus and Bito do not say. no-mistakes
   reviews only its user's own pushes, unconfined. Squiz does none of the
   documented things. It reviews whatever pull request is checked out
-  where it runs, with the user's own access, and nothing in § 4 or § 6 asks who
-  wrote it. The `AGENTS.md` it treats as authoritative is read from the head
+  where it runs, and nothing in § 4 or § 6 asks who wrote it. Its reviewer runs
+  none of the change's code, holds no GitHub token, and reads only the
+  snapshot. The `AGENTS.md` it treats as authoritative is read from the head
   commit, so whoever wrote the pull request also wrote those rules.
 
 ## Needs your input
@@ -67,14 +68,13 @@ recheck-when: a vendor publishes a measurement that separates running code from 
   above. The first closes a hole the others do not. The charter gives the
   description power over scope, so a description can currently talk the
   reviewer out of a finding.
-- **Whether squiz should refuse, or limit, a pull request it did not open.**
-  Squiz's own coding agent is the only author it is designed around. A stranger's
-  pull request at `deep` runs the stranger's tests with the user's access until
-  #529 lands, and even then under the stranger's `AGENTS.md`. Recommended: at
-  `deep`, refuse a pull request whose head is in another repository, and read
-  `AGENTS.md` and what it names from the base. That is what claude-code-action
-  does with its own configuration. This would be a spec change to § 4 and § 6,
-  and is not filed.
+- **Whether squiz should limit a pull request it did not open.** Squiz's own
+  coding agent is the only author it is designed around. A stranger's pull
+  request runs no code in a review, but the reviewer reads it under the
+  stranger's `AGENTS.md`. Recommended: read `AGENTS.md` and what it names from
+  the base, as claude-code-action does with its own configuration, and refuse a
+  head in another repository if a level that runs code returns. This would be a
+  spec change to § 4 and § 6, and is not filed.
 
 ## Reference
 
@@ -84,7 +84,7 @@ recheck-when: a vendor publishes a measurement that separates running code from 
 
 | Tool | Sees | Shell | Runs tests or builds | Git history | Where it runs | Sources |
 |---|---|---|---|---|---|---|
-| **squiz** | The whole snapshot, through read tools | No | `run_tests` at `deep` | `deep` only, through three typed tools | The user's machine | § 4 Depth |
+| **squiz** | The whole snapshot, through read tools | No | No | Through three typed tools | The user's machine | § 4 Tools |
 | Qodo PR-Agent | The diff, with up to 10 extra lines reaching to the enclosing function, plus `AGENTS.md` from the default branch | No | No | No | GitHub Action, self-hosted app, or Qodo's cloud | [prompt L11][qodo-prompt], [configuration.toml][qodo-config] |
 | Claude Code `code-review` plugin | The diff and what `gh` returns. No file read tools | No | No; told "do not run the linter to verify" | Through `gh` | The user's machine | [code-review.md][cc-plugin] |
 | Claude Code `/security-review` | The diff, plus read-only `Read`, `Glob`, `Grep` and `git log/show` | No | No | Yes | The user's machine, or CI | [security-review.md][cc-sec] |

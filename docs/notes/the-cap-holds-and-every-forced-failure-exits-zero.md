@@ -33,7 +33,8 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   of 1 reviewed once, posted two threads, left them open and exited 0 on its
   only firing. A cap of 2 exited 2 on round 1 and 0 on round 2 with a thread
   still open. Read from the exit code the hook returned, not from what the round
-  said about itself.
+  said about itself. The round host now runs the rounds, and `squiz review`
+  returns the same exits.
 
 - **Every failure forced exited 0, and the two stderr channels stayed apart.**
   Eight firings failed in seven different ways and every one of them exited 0
@@ -41,9 +42,10 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   carried the blocking reason and no pointer beside it. No firing carried both,
   and no firing that failed was silent.
 
-  2026-10-05: since M7 no hook blocks or runs a round. The round host runs it,
-  `squiz review` exits 2 where threads are open and 1 where the round failed,
-  and a failed round posts a failure comment (§ 6, § 7).
+  2026-10-05: since M7 no hook blocks or runs a round, and the hook still exits
+  0 on every path. The round host runs the round, `squiz review` exits 2 where
+  threads are open and 1 where the round failed, and a failed round posts a
+  failure comment (§ 6, § 7).
 
 - **A verdict of `open` re-opens a thread the loop had closed.** A thread the
   previous episode's round 2 had resolved was handed to a later round with the
@@ -286,17 +288,11 @@ reported no cost.
 
 ### The rows a live run could not reach
 
-| § 7 row | Why not | What covers it |
-|---|---|---|
-| The local state file cannot be written | The write happens after the review, where the round records what it spent and reports that nothing was posted. Replacing `.squiz` with a file stops the episode at the read instead, before a reviewer starts | `src/loop/episode-state.test.ts`, "a write that cannot happen carries the error the filesystem gave" |
-| The reviewer has no API key | `pi` reads its credential from `~/.pi/agent/auth.json` and ignores `DEEPSEEK_API_KEY`, so forcing this means editing a real credential file or moving `HOME`, and the session driving the run needs its own `HOME` as much as `pi` does. Its twin, a reviewer that is not installed, was forced instead | `src/reviewers/round.test.ts` on a command that cannot be started, and `docs/notes/a-startup-failure-never-reaches-the-stream.md` on where the reason is |
-| The reviewer stops without finishing its review, and no retry recovers it | It needs a run whose message stops for an answer and whose output still cannot be read — a reviewer that writes prose instead of calling `finish_review`. No configuration produces that, and it is the only path to the pointer that says the review did not run, whether a retry failed too or the round had no time for one | `src/reviewers/round.test.ts` on the retry and the second failure |
-| The reviewer exceeds the ceiling | Deliberately not run. It is measured, and exercising it records the subagent as failed and tells the coding agent nothing ran | `docs/notes/the-runtime-kills-the-reviewer-too-but-only-sigterm-is-certain.md` |
-| The calls before the review run out of time | The 60-second share is not configurable, and reaching it needs a GitHub slower than that. A proxy that hangs rather than refuses reaches it, and hangs the driving session with it | `src/github/gh.test.ts`, which holds a `gh` for 30 seconds against the call ceiling, and `src/loop/round.test.ts` on the share |
-| The threads on the pull request cannot all be listed | Not reached by these runs, which refused GitHub before the lookup rather than between its calls. A round lists the threads before it reviews, so a GitHub that answers the lookup and refuses the listing would reach it on the first firing | `src/loop/round.test.ts` and `src/github/threads.test.ts` |
-| Some comments post and others fail | It needs one create to fail while another lands, which no environment produces on demand | `src/loop/post-findings.test.ts`, on the threads that landed staying where another fails |
-| The window is gone before the findings are posted | The window and the posting margin are lowered only through `RoundSetup`'s `windowMs` and `marginMs`, which exist for tests and have no path from `.squiz.json` | `src/loop/round.test.ts` |
-| The harness itself throws | A throw is a defect, and forcing one means editing production code | `src/hook/trap.test.ts` |
+The state file's write, a reviewer with no API key, a reviewer that stops
+without finishing and no retry recovers it, the calls before the review running
+out of time, a threads listing that fails part way, and some comments posting
+while others fail. None of them was reached by a configuration or an
+environment, and each is covered by the harness's own tests.
 
 ### Where a run contradicted the specification
 
@@ -309,8 +305,8 @@ that followed the first reported the same two defects again, so the pull request
 now carries five pairs of threads on the same two lines. The same shortcut
 decides the close: a round 1 counts only
 the threads its own findings opened, so one that found nothing would close the
-episode as though nothing were open. Issue #211 carries it, and nothing in
-`docs/specs/` was edited.
+episode as though nothing were open. #211 fixed it: every round now hands the
+reviewer the threads it opened on the pull request.
 
 ### The pull request the runs were built on
 

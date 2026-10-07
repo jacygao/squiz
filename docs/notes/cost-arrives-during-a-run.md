@@ -10,9 +10,9 @@ recheck-when: pi upgrades, or an unmeasured API path is configured
 
 ## Intent
 
-- **§ 8 assumed cost arrives at the end of a run**, and rested the cost bound on
-  it. If cost instead arrives during a run, a killed round yields a figure
-  rather than nothing, and the bound's design has to be checked against that.
+- **Whether cost arrives at the end of a run or during it.** If during, a killed
+  round yields a figure rather than nothing, and the bound on what a round
+  spends has to be checked against that.
 - **Nothing said which field carries the cost, or how many carry it.** An
   adapter that reads the wrong one, or sums two that overlap, reports a number
   no one can tell is wrong.
@@ -143,8 +143,8 @@ write, with rates from its own catalog at `~/.pi/agent/models-store.json`.
 **The catalog refreshes itself, so a rate read from it is a current value rather
 than a fixed one.** `deepseek-v4-pro` was recorded at 0.435 input and 0.87
 output per million tokens on 2026-09-06; on 2026-09-12 the catalog held 1.32 and
-3.96. The cost bound is enforced against whatever the catalog holds when the
-round runs, which need not be what a person read when they chose the bound.
+3.96. A dollar figure is whatever the catalog holds when the round runs, which
+is one reason the bound counts tokens and the dollars bound nothing.
 
 A model's rate is also not always a single number. Several carry a `tiers` array
 that raises every rate above a threshold — 272,000 input tokens, roughly
@@ -180,7 +180,9 @@ billed, and never reported.
 
 Nothing on disk fills the gap: with `--no-session`, `pi` wrote no file under
 `--session-dir` and none appeared under `~/.pi`; stderr was empty in every run.
-**The stdout stream is the only record of what a round cost.**
+**What a run reports as it goes is the only record of what it cost.** That was
+the stdout stream when this was measured, and is now the usage line the
+extension writes to the report file for each assistant message.
 
 ## Limits
 

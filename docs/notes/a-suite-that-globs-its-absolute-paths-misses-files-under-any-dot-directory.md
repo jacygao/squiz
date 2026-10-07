@@ -3,10 +3,15 @@ settles: "§ 4 — where the snapshot is made, and why no component of its path 
 issue: 541
 recorded: 2026-10-06
 versions: { mocha: a9fc5296, minimatch: 10.2.5, glob: 13.0.6, node: 24.15.0, git: 2.54.0 (Apple Git-157), macos: 26.6.2 }
-recheck-when: minimatch changes what `**` matches by default, or mocha passes `dot: true` to its `--ignore` match
+recheck-when: minimatch changes what `**` matches by default, mocha passes `dot: true` to its `--ignore` match, or a review level that runs the project's code is proposed
 ---
 
 # A suite that globs its absolute paths misses files under any dot-directory
+
+This was found when a review level ran the project's tests in the snapshot. No
+level does now, so nothing a round runs globs the snapshot's path. The snapshot
+still goes where no component of its path begins with a dot, so that a level
+that runs code, if one returns, reads the same tree a fresh checkout would.
 
 ## Intent
 
@@ -50,8 +55,6 @@ Nothing.
   minimatch("/a/.squiz/41/rounds/2/tree/x/fail.fixture.js", "**/fail.fixture.js", { dot: true })  true
   ```
 
-- Git removes a worktree with `git worktree remove --force <path>` run from
-  inside that worktree, after the worktree it was added from has been deleted.
 
 ## Limits
 

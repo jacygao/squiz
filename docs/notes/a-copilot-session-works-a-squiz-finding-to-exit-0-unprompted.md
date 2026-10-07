@@ -3,14 +3,14 @@ settles: "§ 3 — whether a Copilot coding agent, never told about squiz, runs 
 issue: 573
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, models: "gpt-6-astra (medium and low effort), gpt-5-mini, claude-haiku-4.5", reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, macos: 26.6.2, squiz-plugin: 21ed14b }
-recheck-when: Copilot CLI upgrades past 1.0.92, the default Copilot model changes, the skill's description or text changes, or `squiz reply` or the round host's handling of a superseded state changes
+recheck-when: Copilot CLI upgrades past 1.0.92, the default Copilot model changes, the text of the owner's note or of `squiz review`'s output changes, or `squiz reply` or the round host's handling of a superseded state changes
 ---
 
 # A Copilot session works a squiz finding to exit 0, unprompted, on gpt-6-astra
 
 An interactive Copilot session in a Herdr pane was given a task that never named
-squiz. It opened pull request #20 on the scratch repository, loaded the plugin's
-skill, and ran `squiz review 20`, which exited 2 with one thread. It fixed the
+squiz. It opened pull request #20 on the scratch repository, loaded a skill the
+plugin then shipped and has since removed, and ran `squiz review 20`, which exited 2 with one thread. It fixed the
 code, replied with `squiz reply`, pushed, and ran the command again until it
 exited 0. Six earlier runs on the same task are recorded too, because each
 showed something the successful one did not.
@@ -30,8 +30,8 @@ showed something the successful one did not.
 ## Decisions
 
 - **Count M13's live-run criterion as met, by run 7.** The session ran on
-  `gpt-6-astra` at reasoning effort `low`. It loaded `squiz-review` five seconds
-  after `gh pr create` returned. Round 1 posted a `low` thread on
+  `gpt-6-astra` at reasoning effort `low`. It loaded the `squiz-review` skill five
+  seconds after `gh pr create` returned. Round 1 posted a `low` thread on
   `test/cli.test.js`, saying a test helper passed a percent-encoded file URL
   path to Node. The session changed the helper to `fileURLToPath`, ran the
   tests, replied, committed and pushed. Round 2 ruled the thread fixed, and the
@@ -49,8 +49,10 @@ showed something the successful one did not.
   - Where it did not (runs 5 and 6), the firing queued the session's pull
     request, #18 and #19, with `owner` `{"sessionId": "<the session's id>"}`
     and no socket. The round host reviewed it and wrote a note for that session.
-    Nothing woke the session, as § 3 The report says of a round the session did
-    not start.
+    Nothing woke the session: the plugin then shipped no extension, so there
+    was no socket to record. The extension that now wakes such a session is
+    recorded in
+    `the-round-hosts-own-post-wakes-an-idle-copilot-session-through-the-plugins-extension.md`.
   - Where no pull request existed (run 3), the hook wrote `squiz: no review ran:
     no open pull request has "add-paging" as its head` to its stderr.
 - **Do not expect a planted defect to reach the reviewer when the coding model
@@ -143,10 +145,11 @@ are `totalNanoAiu` over 10⁹, in the `session.shutdown` event of its
 - **`squiz` on `PATH`**: `squiz init` run by path from that checkout, with
   `HOME` set to a scratch directory whose `.local/bin` was first on `PATH`.
   It printed `squiz: linked <scratch>/home/.local/bin/squiz to <plugin
-  checkout>/bin/squiz`. It ran in a throwaway repository, so the `AGENTS.md`
-  section it writes never reached the scratch repository, and the skill was the
-  only route to the instruction. The pane's `PATH` held that directory and not
-  the plugin's `bin/`, and `command -v squiz` in it printed the link.
+  checkout>/bin/squiz`. `squiz init` then also wrote an `AGENTS.md` section,
+  since removed. It ran in a throwaway repository, so that section never
+  reached the scratch repository, and the skill was the only route to the
+  instruction. The pane's `PATH` held that directory and not the plugin's
+  `bin/`, and `command -v squiz` in it printed the link.
 - **`.squiz.json`**: `{"reviewer": "copilot"}`, listed in `.git/info/exclude`.
   The reviewer ran on `gpt-6-astra`, the model in the scratch `COPILOT_HOME`'s
   `settings.json`, in a Herdr tab of its own.

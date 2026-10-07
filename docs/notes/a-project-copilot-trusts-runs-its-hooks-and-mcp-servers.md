@@ -19,14 +19,19 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes how folder trust is d
 - **Run Copilot with a `COPILOT_HOME` the adapter owns, holding no trusted
   folders.** Copilot runs a project's hooks and starts its MCP servers only in a
   folder it trusts. It trusts a folder that is listed in `trustedFolders`, or
-  that sits below one that is. The round's snapshot sits inside the project, at
-  `.squiz/<number>/rounds/<k>/tree`, so a user who has trusted the project has
-  trusted every snapshot. That was measured: below this user's trusted checkout,
-  both planted hooks ran and the planted MCP server started. With `COPILOT_HOME`
+  that sits below one that is, so a user who trusted any folder above the
+  snapshots has trusted every one of them. When this was measured the snapshot
+  sat inside the project, at `.squiz/<number>/rounds/<k>/tree`, and below this
+  user's trusted checkout both planted hooks ran and the planted MCP server
+  started. The snapshot is now in the temporary directory, and the rule holds
+  for whatever folder above it a user trusts. With `COPILOT_HOME`
   pointing at an empty directory, neither happened, and the run still
   authenticated, because the credential lives in the system's credential store.
-- **Remove `COPILOT_ALLOW_ALL` from the reviewer's environment.** Set to exactly
-  `true`, it trusts the working directory whatever `COPILOT_HOME` holds. That
+- **Set `COPILOT_ALLOW_ALL` to the empty string in the reviewer's environment.**
+  Set to exactly `true`, it trusts the working directory whatever `COPILOT_HOME`
+  holds. Empty, it trusts nothing, and it replaces a `true` a pane's server
+  environment carries, as
+  `copilot-under-sh-takes-the-adapters-model-trust-and-group.md` records. That
   was measured with an empty `COPILOT_HOME`: the project's MCP server was
   listed again.
 - **Pass `--no-custom-instructions`.** It is what keeps out `AGENTS.md`,
@@ -50,6 +55,10 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes how folder trust is d
   `--no-approve`. The harness sets the model and the reasoning effort on the
   command line every round anyway, and a user's MCP server is code that runs
   with the round's environment.
+
+  2026-10-07: settled as recommended, except the model. The adapter reads the
+  user's default model from the user's own `settings.json` and passes it as
+  `COPILOT_MODEL` where the project configures none (§ 4 The Copilot adapter).
 
 ## Reference
 

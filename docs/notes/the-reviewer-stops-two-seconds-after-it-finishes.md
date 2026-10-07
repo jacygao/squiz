@@ -20,7 +20,9 @@ the answer did not vary.
   reviewer stops on its own in about two seconds for about $0.0025, against a
   round costing $0.09 to $0.20 and running 70 to 370 seconds. Ending it on the
   declaration is what the outstanding-call tracking, the two-second answering
-  bound, and the wait for in-flight results all exist for, and all three can go.
+  bound, and the wait for in-flight results all existed for, and all three went.
+  The extension now calls `ctx.shutdown()` after `finish_review`, which `pi`
+  defers until it is idle, so the closing message is written.
 
 - **Keep the round's own time bound as the only thing that ends a run the
   reviewer does not.** Waiting is bounded by the bound that was already there. A
@@ -32,8 +34,9 @@ the answer did not vary.
   into a timed-out round whenever the closing message crosses the deadline: the
   run races the whole parse against expiry and returns a killed attempt without
   consulting the declaration it is already holding, and the loop reads a killed
-  attempt as a round the reviewer failed, which does not block the coding agent.
-  The findings survive that; the block does not.
+  attempt as a round the reviewer failed. The findings survive that, and the
+  review is lost: the round hands no threads back and posts a failure comment
+  instead.
 
 ## Needs your input
 

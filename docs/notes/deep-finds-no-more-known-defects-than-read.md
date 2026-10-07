@@ -1,12 +1,16 @@
 ---
-settles: "§ 4 — whether depth `deep` reviews measurably better than `read`, and so whether configuration accepts it"
+settles: "§ 4 — why every reviewer gets one level, with no level that runs the project's code, and why the history tools are in that level"
 issue: 590
 recorded: 2026-10-07
 versions: { pi: 0.85.1, pi-model: deepseek/deepseek-v4-pro, copilot: 1.0.92, copilot-model: gpt-6-astra, thinking: medium, node: 24.15.0, qs: 07b1d4d8, node-semver: 6e05b763, marked: 7e8754d6 }
-recheck-when: the reviewer's model or the charter changes, a case set of unfamiliar code with defects reading misses exists, or `deep` gains a tool
+recheck-when: the reviewer's model or the charter changes, a case set of unfamiliar code with defects reading misses exists, or a level that runs code is proposed
 ---
 
 # Deep finds no more of a change's known defects than read
+
+`deep` was a review level that also ran the project's tests through
+`run_tests`, and granted the history tools, which `read` did not. M11 replaced
+both with one level on this measurement.
 
 ## Intent
 
@@ -18,29 +22,33 @@ recheck-when: the reviewer's model or the charter changes, a case set of unfamil
 
 ## Decisions
 
-- **Do not accept `deep` in configuration on this evidence.** It found 107 of
-  138 chances at a known defect against `read`'s 103, and every defect the tests
-  catch at both depths, which is too small a difference to tell from run-to-run
-  variation. The owner's bar for #113 was a measurable improvement.
+- **Give every reviewer one level, and none that runs the project's code.**
+  `deep` found 107 of 138 chances at a known defect against `read`'s 103, and
+  every defect the tests catch at both depths, which is too small a difference
+  to tell from run-to-run variation. The owner's bar was a measurable
+  improvement, and running code also needs the operating-system sandbox first.
 - **Expect `deep` to cost a little more and nothing in false findings.** It took
   5 to 22% more time and 7 to 17% more money a run, and one false finding in 102
   runs against none.
-- **Count the `deep` tools as working.** Every `deep` run called `run_tests`, and
-  every first call ended as its case says, so no run went without the tools.
-  One defect was found from a tool's answer and not by reading: the history
-  defect, which Copilot found through `git_log_search`.
+- **Keep the history tools in the one level.** One defect was found from a
+  tool's answer and not by reading: the history defect, which Copilot found
+  through `git_log_search` at `deep` and never at `read`. Every `deep` run also
+  called `run_tests`, so the tools worked and the null result is not a run that
+  went without them.
 - **Keep the rig and the cases for the next measurement.** Reading found every
   defect a test catches, so this set cannot show what running tests adds. The
   rig takes a new case as a patch and a description.
 
 ## Needs your input
 
-- **Whether #113 closes, or waits for a harder case set.** Recommended: leave
-  `deep` refused, keep #113 open under a later milestone, and measure again on
-  changes the reviewer has not seen in training, whose defects sit outside the
-  diff. Every defect here was on, or one step from, a changed line in a widely
-  used library, which a reader can check against what it already knows of that
-  library.
+- **Whether to measure again on a harder case set.** Every defect here was on,
+  or one step from, a changed line in a widely used library, which a reader can
+  check against what it already knows of that library. Recommended: measure a
+  level that runs code again only on changes the reviewer has not seen in
+  training, whose defects sit outside the diff, and only once the sandbox
+  exists.
+
+  2026-10-07: M11 closed #113 and removed `deep`. The sandbox is held as #529.
 
 ## Reference
 

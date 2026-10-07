@@ -27,11 +27,10 @@ recheck-when: Claude Code changes how it sets a hook's working directory, or how
   dispatcher's shell stood in at the moment of the Agent call, usually the
   primary tree on `main`. Telling the subagent to work in another tree, and the
   subagent `cd`ing there, change nothing.
-- **Resolve the worktree from the hook's own working directory, as the code
-  already does.** The payload's `cwd` equals it in every firing, so reading
-  `cwd` adds nothing. 2026-10-06: the hook now resolves the worktree from the
-  payload's `cwd`, because Copilot runs a plugin's hook in the plugin root.
-  Under Claude Code the two are still the same directory.
+- **Resolve the worktree from the payload's `cwd`.** Under Claude Code it
+  equalled the hook's own working directory in every firing. Copilot runs a
+  plugin's hook in the plugin root, so only `cwd` names the session's
+  directory under both.
 - **Do not depend on `agent-<id>.meta.json`.** It is undocumented, and nothing
   else says whether a subagent was isolated.
 - **Write the gate's pass to stderr, and do not count on a person seeing it.**
@@ -64,7 +63,7 @@ plugin whose `SubagentStop` hook logged `pwd`, the toplevel, the branch,
 | `isolation: "worktree"`, then `git switch -c area/probe-e origin/main` | `repo/.claude/worktrees/agent-ac35bf69e15948fdd` | `area/probe-e` |
 
 `CLAUDE_PROJECT_DIR` was `repo` in all five. The payload had the same fourteen
-fields that `an-episode-keys-on-agent-id.md` records, with `agent_type`
+fields that `agent-id-names-one-subagent-and-prompt-id-does-not.md` records, with `agent_type`
 `general-purpose`. No field says whether the subagent was isolated.
 
 ### What isolation leaves behind

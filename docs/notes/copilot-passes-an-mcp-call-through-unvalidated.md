@@ -27,9 +27,9 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or starts validating MCP tool ar
   | no `title` | no `title` |
   | `"line": "12"` | `"line": "12"`, a string |
 
-  This contradicts § 4 Adapters, which describes a reporting call "the CLI
-  validates". Under Copilot the server is the only check, and a string of digits
-  is not converted to a number for it, as `pi` converts one.
+  Under Copilot the server's own checks are the only validation a call gets, as
+  § 4 Adapters now says, and a string of digits is not converted to a number for
+  it, as `pi` converts one.
 - **Treat the schema the model sees as advice to the model, not a guard.** Given
   the same schema, the same model sent `"critical"` in one run and, in the next,
   replaced it with `"high"` on its own and said so. A report the reviewer
@@ -66,8 +66,7 @@ prefixed with the server's name, and the stream marks it failed:
  "toolTelemetry":{"properties":{"failure_category":"server_error","failure_stage":"invoke"}}}
 ```
 
-That is `tool.execution_complete`. A refusal by `--deny-tool` carries `"code":
-"denied"` instead, so the two can be counted apart.
+That is `tool.execution_complete`.
 
 The server's `env` reached it. Its stdout is the protocol, so it logs to a file.
 

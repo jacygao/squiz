@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — which of the repository's settings reach the deep history tools, and what closes each"
+settles: "§ 4 — which of the repository's settings reach the history tools, and what closes each"
 issue: 546
 recorded: 2026-10-06
 versions: { git: "2.54.0 (Apple Git-157)", node: 24.15.0, macos: 26.6.2 }

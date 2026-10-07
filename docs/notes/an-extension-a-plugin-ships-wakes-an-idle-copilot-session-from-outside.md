@@ -65,8 +65,9 @@ hook, MCP notification or ACP call reaches a session another process owns.
   - a hook that records where that socket is;
   - a round host that writes the note to it.
 
-  Each is under Needs your input, since § 3 lists this wake under Not in the
-  first version.
+  All four are built, as
+  `the-round-hosts-own-post-wakes-an-idle-copilot-session-through-the-plugins-extension.md`
+  records.
 
 ## Needs your input
 
@@ -78,6 +79,9 @@ hook, MCP notification or ACP call reaches a session another process owns.
   socket sits in a directory only the user can open, unlike the `--ui-server`
   port, and the extension is a few dozen lines. Until it lands, keep the wake
   that M13 settled: the session runs `squiz review` in the background.
+
+  2026-10-07: built in M13. § 9 has a Copilot user turn experimental features
+  on, and squiz's Copilot support is experimental as a whole.
 - **Whether to file a request upstream to take extensions out of experimental.**
   Recommendation: file it only once squiz depends on the route. Link #1705,
   #2065 and #3856 from it, since each touches an extension or a coordinator
@@ -140,7 +144,10 @@ typed prompt.
 - The hook already has the session id, as `session_id` in the `Stop` payload,
   and `COPILOT_HOME` in its environment. Those two give
   `<COPILOT_HOME>/session-state/<session_id>`, the directory the extension
-  listens in. Where `COPILOT_HOME` is unset, Copilot uses `~/.copilot`.
+  listens in. Where `COPILOT_HOME` is unset, Copilot uses `~/.copilot`. The hook
+  as built takes the directory from the payload's `transcript_path` instead,
+  because a hook's environment carries `COPILOT_HOME` only where the user set
+  it.
 - `MessageOptions.mode` takes `"enqueue"`, the default, or `"immediate"`.
   `"immediate"` interjects in a running turn (unverified: only the default was
   sent).

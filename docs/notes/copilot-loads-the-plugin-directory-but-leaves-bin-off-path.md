@@ -1,17 +1,16 @@
 ---
-settles: "§ 6 — how the `squiz` binary reaches a Copilot session's shell; § 9 — whether Copilot loads squiz's plugin directory as it is"
+settles: "§ 6 — how the `squiz` binary reaches a Copilot session's shell; § 9 — whether Copilot loads squiz's plugin directory and its hooks as they are"
 issue: [534, 553]
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-5-mini, node: 24.15.0, macos: 26.6.2 }
-recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin's manifest, skills, hooks or bin/
+recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin's manifest, hooks or bin/
 ---
 
 # Copilot loads the plugin directory, but leaves `bin/` off `PATH`
 
 ## Intent
 
-- Whether `copilot --plugin-dir` pointed at a squiz checkout lists the
-  `squiz-review` skill, and loads it when asked.
+- Whether `copilot --plugin-dir` pointed at a squiz checkout loads the plugin.
 - Whether a shell call in that session runs `squiz` by name.
 - Where the directory does not load as it is, what Copilot expects instead.
 
@@ -19,16 +18,9 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin
 
 - **Load squiz into Copilot with `--plugin-dir <checkout>`, as the directory
   is.** Copilot reads `.claude-plugin/plugin.json`, lists the plugin as
-  `squiz (v0.1.0)`, and lists `squiz-review` among its `Plugin skills`. A
-  session asked for the skill called its `skill` tool, got `Skill "squiz-review"
-  loaded successfully`, and quoted the skill's `Exit 3:` bullet word for word.
-  Without `--plugin-dir` the same call failed with `Skill not found:
-  squiz-review`, and nothing was listed.
-
-  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
-  wrote are removed (#600). The stop hook starts every review on Claude Code and
-  Copilot, and the wake delivers the result, so nothing relies on an
-  instruction to run `squiz review`.
+  `squiz (v0.1.0)`, and loads its `hooks/hooks.json`. It also listed and loaded
+  the `squiz-review` skill the plugin then shipped, since removed, which is how
+  the load was first seen. Without `--plugin-dir` nothing was listed.
 - **Something other than the plugin has to put `squiz` on the shell's `PATH`.**
   Copilot does not add a plugin's `bin/` to it. The shell saw exactly the `PATH`
   Copilot was started with, and `squiz` was `command not found`, exit 127, with
@@ -37,12 +29,10 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin
   one, so there is nothing to put in its place.
 - **`squiz init` links `bin/squiz` into a directory already on `PATH`
   (decided 2026-10-06).** The owner chose the link over naming the binary by
-  path in the skill, on the condition that it never makes two coding agents on
-  one machine run different squizzes. It keeps one skill text for both
-  runtimes, and `squiz review` and `squiz reply` keep the same names under
-  both. § 6 `squiz init` says which directory and which conflicts.
-
-  2026-10-07: with the skill removed (#600), the link is all `squiz init` does.
+  path, on the condition that it never makes two coding agents on one machine
+  run different squizzes, so `squiz review` and `squiz reply` keep the same names
+  under both runtimes. § 6 `squiz init` says which directory and which
+  conflicts.
 
 ## Needs your input
 
@@ -57,28 +47,17 @@ From a scratch directory outside any squiz checkout, with a `PATH` holding no
 
 ```
 copilot --plugin-dir <checkout> plugin list
-copilot --plugin-dir <checkout> skill list --json
 COPILOT_MODEL=gpt-5-mini copilot --plugin-dir <checkout> -p "<prompt>" --allow-all-tools --no-ask-user
 ```
 
-The first two make no model call. The prompt asked for one shell call,
+The first makes no model call. The prompt asked for one shell call,
 `command -v squiz; echo "exit=$?"; echo "PATH=$PATH"; squiz --help; echo
-"squiz-exit=$?"`, and for the skill's `Exit 3:` bullet quoted verbatim, or `NO
-SKILL`. The control is the same three commands without `--plugin-dir`.
-
-`skill list --json` gives the skill's source:
-
-```json
-{ "name": "squiz-review", "source": "plugin", "path": "<checkout>/skills/squiz-review", "enabled": true }
-```
+"squiz-exit=$?"`. The control is the same commands without `--plugin-dir`.
 
 ### Where the load shows
 
-The session's `events.jsonl`, under `~/.copilot/session-state/<session id>/`,
-records the load as a `skill.invoked` event whose `path` is
-`<checkout>/skills/squiz-review/SKILL.md`, then a `skill.invoked_ref` carrying
-`"source":"plugin","pluginName":"squiz","trigger":"agent-invoked"`. The debug
-log (`--log-dir <dir> --log-level debug`) records `Plugins loaded: ["squiz"]`.
+The debug log (`--log-dir <dir> --log-level debug`) records
+`Plugins loaded: ["squiz"]`.
 
 ### The hooks load too
 
@@ -109,12 +88,11 @@ plugin checkout's own directory.
 - **One machine, one model, `-p` only.** An interactive session was not tried,
   and neither was a plugin installed with `copilot plugin install` rather than
   mounted with `--plugin-dir`.
-- **The skill was loaded because the prompt named it.** Whether Copilot loads it
-  unprompted, from its description alone, was not tested here.
-- **Whether `squiz hook` did anything under Copilot was not established.** The
-  run left no `.squiz/` in the plugin checkout. What the hook should do there,
-  and whether `asyncRewake` and `timeout` mean anything to Copilot, belong to
-  the hooks question rather than to this one.
+- **Whether `squiz hook` did anything under Copilot was not established here.**
+  The run left no `.squiz/` in the plugin checkout, because the hook then read
+  the plugin root as its worktree. It now takes the worktree from the payload's
+  `cwd`, as `copilots-stop-hooks-fire-and-a-ui-server-session-can-be-woken.md`
+  records.
 - **The hook's environment also held `CLAUDE_CODE_MESSAGING_SOCKET` and other
   `CLAUDE_CODE_*` variables**, because the Copilot run was started from inside a
   Claude Code session and inherited them. A Copilot session started from a plain

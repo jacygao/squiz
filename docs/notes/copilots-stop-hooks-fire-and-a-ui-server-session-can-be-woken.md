@@ -39,24 +39,23 @@ blocks continues the turn instead, and the session is busy while it waits.
   same two ids as `sessionId` and `agentId`.
 - **Resolve the pull request from the payload's `cwd`, not the hook's working
   directory.** Under Copilot the plugin's hook runs in the plugin root, while
-  the payload's `cwd` is the session's directory. `squiz hook` resolves the
-  branch from `process.cwd()`, so under Copilot it would read the plugin
-  checkout's branch. Claude Code's payload carries `cwd` too.
+  the payload's `cwd` is the session's directory, so a hook that resolved the
+  branch from its own working directory would read the plugin checkout's.
+  Claude Code's payload carries `cwd` too.
 - **Ignore a `Stop` firing whose `session_id` is not the session named in its
   `transcript_path`.** Copilot fires `Stop` for a subagent's turn too, just
   before that subagent's `SubagentStop`. That firing carries the subagent's id
   as `session_id` and the parent's `events.jsonl` as `transcript_path`. Queued
   as it stands, it would record a subagent as the owner, and nothing is left
   alive to wake when it ends. Claude Code's `Stop` never fires for a subagent,
-  so § 3 has no rule for this case.
-- **Under Copilot, record no messaging socket, even where the environment holds
-  one.** Copilot puts no socket, port or token in a hook's environment. A
-  Copilot started from inside a Claude Code session passes that session's
-  `CLAUDE_CODE_MESSAGING_SOCKET` down to its hooks, and a hook that recorded it
-  would wake the Claude Code session with the Copilot session's result. The
-  hook can tell it runs under Copilot by `COPILOT_CLI=1`. The wake has to come
-  from one of the routes under Needs your input, or the coding agent runs
-  `squiz review` itself and waits for it.
+  so the rule reads only a Copilot transcript path.
+- **Under Copilot, never record the `CLAUDE_CODE_MESSAGING_SOCKET` the
+  environment holds.** Copilot puts no socket, port or token in a hook's
+  environment. A Copilot started from inside a Claude Code session passes that
+  session's `CLAUDE_CODE_MESSAGING_SOCKET` down to its hooks, and a hook that
+  recorded it would wake the Claude Code session with the Copilot session's
+  result. The hook can tell it runs under Copilot by `COPILOT_CLI=1`. The socket
+  it records under Copilot is the plugin's extension's.
 
 ## Needs your input
 
@@ -85,6 +84,10 @@ blocks continues the turn instead, and the session is busy while it waits.
   as a gap in § 3. Revisit `--ui-server` if starting the session with that flag
   turns out to be acceptable. An unauthenticated local port that drives the
   session is a cost to weigh first.
+
+  2026-10-07: settled another way. The owner ruled out `--ui-server` and typing
+  into a pane, and M13 built the wake on an extension the plugin ships, which
+  takes the round host's own post.
 
 ## Reference
 

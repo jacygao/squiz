@@ -1,47 +1,39 @@
 ---
-settles: "§ 3 — whether the hook payload carries a subagent id stable enough to key an episode on, and to name the subagent that did the work"
+settles: "§ 3 — which `SubagentStop` payload field names the subagent that did the work, in the owner the hook records"
 issue: 13
 recorded: 2026-09-06
 versions: { claude-code: 2.1.261, node: 24.15.0 }
 recheck-when: Claude Code changes the SubagentStop payload
 ---
 
-# An episode keys on `agent_id`
+# `agent_id` names one subagent, and `prompt_id` does not
 
 `agent_id` holds. It was the same on all six stops of one subagent that was
-blocked, resumed, worked and stopped again five times over, and it differed
+stopped, resumed, worked and stopped again five times over, and it differed
 between every subagent seen. Five subagents across four sessions — two of them
 concurrent in one session, two more in two sessions running at the same time,
 and one on its own — produced five distinct ids, none of which repeated the id
-recorded by the earlier run in
-`subagent-stop-blocks-and-the-subagent-resumes.md`. § 3 is right as written, and
-nothing in `docs/specs/` needs amending.
+an earlier run recorded.
 
 The obvious-looking second choice is wrong. `prompt_id` is shared by every
-subagent in a session and it changed while one subagent's episode was still
-running, so it would have both merged two episodes and split one.
+subagent in a session and it changed while one subagent was still at work, so
+it would both merge two subagents and split one.
 
 ## Decisions
 
-- **The episode key is `agent_id`, exactly as § 3 says.** No fallback is needed,
-  so the worktree toplevel, the branch and the pull request number stay
-  unused for this purpose. 2026-10-05: M7 keys the episode on the pull
-  request's number instead (§ 3 The state file). `agent_id` now names the
-  subagent that did the work, in the owner the `SubagentStop` hook records.
-- **Never key on `prompt_id`.** It is per user turn in the parent session, not
-  per subagent. In the two-subagent run it was the same string for both agents,
-  and it changed between one agent's second and third stop.
-- **The id is sanitised before it becomes a path component, in M5.** § 3 puts
-  episode state in `.squiz/<episode>/`, which makes a payload field into a
-  directory name, and M5 is the milestone that builds that directory. The guard
-  belongs with the path it guards, so that no code path can reach the filesystem
-  with an unsanitised id. Every id observed matched `^a[0-9a-f]{16}$`, but the
-  harness reads the id from a payload rather than generating it, so it strips
-  the string down to that character set rather than trusting it.
-- **Cross-session uniqueness is not required by the design, whatever the
-  runtime guarantees.** § 3 gives each episode its own worktree and puts the
-  state file inside it, so two ids only collide destructively if two episodes
-  share a worktree. § 3 already treats a shared tree as its own case.
+- **Name the subagent that did the work by `agent_id`.** The `SubagentStop` hook
+  records it in the owner, beside the parent's `session_id`, and the note to the
+  parent names it. The episode itself is keyed on the pull request's number,
+  so nothing here decides where state lives.
+- **Never use `prompt_id` for a subagent.** It is per user turn in the parent
+  session, not per subagent. In the two-subagent run it was the same string for
+  both agents, and it changed between one agent's second and third stop.
+- **Do not rely on the id's shape.** Every id observed matched
+  `^a[0-9a-f]{16}$`, and Copilot's `agent_id` is a session UUID, so the hook
+  reads it as a string and never as a path component.
+- **Cross-session uniqueness is not required, whatever the runtime
+  guarantees.** The id names a subagent within its parent's session, which the
+  owner already names.
 
 ## Needs your input
 
@@ -59,9 +51,9 @@ sixteen invocations recorded.
 | `session_id` | string | UUID of the session that dispatched the subagent. Shared by every subagent in that session |
 | `transcript_path` | string | `…/<session_id>.jsonl` — the parent session's transcript |
 | `cwd` | string | The subagent's working directory, which is where the dispatcher's shell stood when it dispatched the subagent, and where the hook runs. `a-subagents-hook-runs-where-it-was-dispatched.md` records the measurement |
-| `prompt_id` | string | UUID of the user turn in the parent session. Not per subagent, and not stable across an episode |
+| `prompt_id` | string | UUID of the user turn in the parent session. Not per subagent, and not stable across one subagent's stops |
 | `permission_mode` | string | `acceptEdits` in every run here |
-| `agent_id` | string | The subagent's id. The episode key |
+| `agent_id` | string | The subagent's id |
 | `agent_type` | string | `general-purpose` in every run here. What a `matcher` in the registration would narrow on |
 | `effort` | object | `{"level": "xhigh"}`. One key, `level`, a string |
 | `hook_event_name` | string | `SubagentStop` |
@@ -101,8 +93,8 @@ One record verbatim, from the first stop of two concurrent subagents:
 
 Seventeen characters, matching `^a[0-9a-f]{16}$` in all sixteen invocations:
 `a1e3196c5ad0f2410`, `ad5b06227fb235983`, `a1c126da8a6a782f2`,
-`a52d5fd4b5ef193bc`, `a342aeb88c6a6a49c`, and `a6f2258998dc7a2dd` from the
-earlier run recorded in `subagent-stop-blocks-and-the-subagent-resumes.md`.
+`a52d5fd4b5ef193bc`, `a342aeb88c6a6a49c`, and `a6f2258998dc7a2dd` from an
+earlier run.
 
 **What generates the id could not be determined**, and neither could whether the
 runtime guarantees it is unique beyond one session. Two things bear on it and
@@ -117,11 +109,10 @@ unique within one session.
 
 In the concurrent run both subagents reported the same `session_id`, the same
 `prompt_id`, and the same `cwd`, because both were dispatched from one directory.
-Only `agent_id` and `agent_transcript_path` told them apart. Anything separating two live episodes has to come from one of
-those two fields.
+Only `agent_id` and `agent_transcript_path` told them apart.
 
 `background_tasks` carries the ids of the other live subagents in the session,
-which is a second route to noticing that more than one episode is in flight. It
+which is a second route to noticing that more than one is at work. It
 listed both ids while both were running and dropped the finished one once it
 had stopped for the last time.
 
@@ -137,15 +128,15 @@ the mapping from that line to `agent_id` was one-to-one across all six stops.
 
 ## Limits
 
-- **Six rounds, and § 3 lets the round cap go to 8.** One subagent was blocked
-  five times and stopped six, all with one id. Rounds 7 and 8 were not run.
+- **Six stops of one subagent.** It was sent back to work five times by a
+  `SubagentStop` hook that blocked it, a design squiz no longer has, and
+  stopped six times with one id.
 - **Only `-p`, only `general-purpose`, only `claude-sonnet-5`.** No interactive
   session, no other subagent type, and no other model.
 - **A subagent that is resumed rather than dispatched afresh.** Every subagent
   here was dispatched once and ran to the end. Whether a follow-up message to an
-  existing subagent keeps its id was not tested; § 3 starts a new episode for
-  work that arrives later, so nothing currently depends on the answer.
-- **Context compaction mid-episode.** No subagent here ran long enough to
+  existing subagent keeps its id was not tested here.
+- **Context compaction.** No subagent here ran long enough to
   compact, so whether the id survives one is unknown.
 - **`session_crons`** was `[]` in every invocation, and `background_tasks` only
   ever showed `status` as `running`. The other statuses a background task can

@@ -18,10 +18,12 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads COPILOT_
 
 ## Decisions
 
-- **Set the model with `COPILOT_MODEL`, and pass no `--model`.** With
+- **Carry the user's default model to the reviewer with `COPILOT_MODEL`.** With
   `COPILOT_MODEL=gpt-5-mini` and an empty `COPILOT_HOME`, every run's
   `session.start` event carried `"selectedModel":"gpt-5-mini"`, and its usage
-  file `"currentModel": "gpt-5-mini"`.
+  file `"currentModel": "gpt-5-mini"`. A model the project configures goes on
+  `--model` instead, because a `COPILOT_MODEL` naming a model the user does not
+  have runs the round on another one and exits 0 (§ 4 The Copilot adapter).
 - **Set `COPILOT_ALLOW_ALL` to the empty string.** Empty, it trusted nothing: a
   tree's `.mcp.json` server was not listed and not started. Set to `true` under
   the same empty `COPILOT_HOME`, the same server was listed. The empty value
