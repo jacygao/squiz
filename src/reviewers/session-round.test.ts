@@ -339,6 +339,27 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     assertNoGitHub(tree, invocation);
   });
 
+  test("a reviewer in a window has the harness's TMPDIR, not the server's", async (t) => {
+    const server = privateTmux(t);
+    const tree = treeFor(t);
+    server.tmux("set-environment", "-g", "TMPDIR", join(tree, "their-temporary"));
+    const file = join(tree, "temporary.json");
+    const round = await runRound(
+      adapterOf({
+        inPane: [
+          `require("node:fs").writeFileSync(${JSON.stringify(file)}, JSON.stringify(process.env.TMPDIR ?? null));`,
+          finishingInAPane(join(tree, "note.json")),
+        ].join("\n"),
+        detached: "process.exit(3)",
+      }),
+      invocationIn(tree),
+      30,
+      { environment: server.environment, name: "squiz-142-r1" },
+    );
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(JSON.parse(readFileSync(file, "utf8")), tmpdir());
+  });
+
   test("at the bound the round stops the reviewer's own group, not just its window, and the window is gone", async (t) => {
     const server = privateTmux(t);
     const tree = treeFor(t);

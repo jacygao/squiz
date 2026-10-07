@@ -44,7 +44,7 @@ test("the reviewer's TMPDIR is the harness's own", async () => {
   await inATree(async (tree) => {
     const seen = reporting("String(process.env.TMPDIR)");
     const round = await runRound(reviewer(seen).adapter, at(tree), 10);
-    assert.equal(headlineOf(round), String(process.env["TMPDIR"]));
+    assert.equal(headlineOf(round), tmpdir());
   });
 });
 

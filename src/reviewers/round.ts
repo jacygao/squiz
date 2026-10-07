@@ -15,6 +15,7 @@
 
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -271,6 +272,10 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
 /**
  * What the round adds to the reviewer's environment, on every backend.
  *
+ * `TMPDIR` is the harness's own temporary directory, where the snapshot is made.
+ * A pane server may carry another, and Copilot's `--disallow-temp-dir` closes
+ * whichever the reviewer has.
+ *
  * **No GitHub credential reaches the reviewer through a variable or `gh`'s
  * configuration.** The token variables are set empty rather than left out,
  * because a pane starts with its server's environment and only a variable set
@@ -283,6 +288,7 @@ function variablesOf(
   confinement: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
   return {
+    TMPDIR: tmpdir(),
     ...confinement,
     ...Object.fromEntries(GITHUB_TOKENS.map((name) => [name, ""])),
     GH_CONFIG_DIR: github,
