@@ -76,8 +76,9 @@ says the same, as Reviewed by `copilot` on `claude-sonnet-5`.
 A woken session shows, in this order, `hook.end agentStop` in its `events.jsonl`,
 `woke its owner through <COPILOT_HOME>/session-state/<id>/squiz.sock` in
 `host.log`, and a `user.message` with `"source":"system"` holding the note.
-A record whose owner has no `messagingSocket` in `state.json` is a session
-whose extension did not load, and its note waits to be pulled.
+A record whose owner has no `messagingSocket` in `state.json` means the hook
+reached no extension, either because it never loaded or because it had died,
+and the note waits to be pulled.
 
 ### Running it from an agent without touching the owner's link
 
