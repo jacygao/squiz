@@ -1002,6 +1002,15 @@ queued state once it is done. Nothing in the repository refers to the snapshot,
 so removing it needs nothing from the repository, and works the same where the
 coding agent's worktree has gone.
 
+**A snapshot that cannot be removed stays on disk, and the round's result
+stands.** The round host writes a line in `host.log` giving the snapshot's path
+and why it could not be deleted. Deleting that directory is how a person gets the
+disk back:
+
+```
+2026-10-07T04:10:09.623Z round 1: the snapshot at /tmp/squiz-501/44df482132d16163-142/rounds/1/tree could not be removed: EACCES: permission denied, unlink '/tmp/squiz-501/44df482132d16163-142/rounds/1/tree/stuck/left'; it stays on disk until it is deleted
+```
+
 **A snapshot a killed round left behind is removed by the recovery that finds
 it**, once its reviewer is confirmed gone. The reviewing record names it once the
 reviewer has started. Before then, the record's round number gives the same path.
@@ -1014,9 +1023,10 @@ reviewer has started. Before then, the record's round number gives the same path
   once is the checkout's size times the reviews running at once, and it is held
   on the temporary directory's filesystem. Where that filesystem is in memory, as
   `/tmp` is on some Linux systems, so is the snapshot.
-- **A snapshot nothing recovers stays until the system clears its temporary
-  directory.** That is a snapshot whose round host was killed and which no later
-  trigger or round host for the same episode finds.
+- **A snapshot nothing removes stays until the system clears its temporary
+  directory, or a person deletes it.** That is a snapshot whose round host was
+  killed and which no later trigger or round host for the same episode finds, or
+  one its round could not remove.
 - **A snapshot that loses its objects if the repository's are pruned.** The
   clone reads the repository's objects in place. A `git gc`, automatic or not,
   keeps an object no ref reaches for two weeks by default, so a head commit the
@@ -2574,7 +2584,7 @@ a path that is silent today.
 | The reviewer exceeds the review budget | Exit 1, unless the round holds the reviewer's declaration, as the end of this row says. The reviewer process is killed, what it reported before the kill is posted, and the failure comment and stderr say how many findings arrived. The round is recorded as a failed round rather than a clean one, whatever it posted, and the summary that closes the episode notes that the bound cut it short. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. That round posts no failure comment, and exits 0, 2 or 3 as its outcome says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, summary's Notes |
 | The reviewer changes its snapshot | The readings taken around the reviewer find a tracked file changed or `HEAD` moved, or could not compare the snapshot at all. The round's outcome stands, and nothing is acted on (§ 4 Confinement). The summary that closes the episode names what every round found, and a failed round's failure comment names what it found. `squiz review` prints a move of `HEAD` with the round's result. | Summary's Notes, failure comment |
 | A reviewer's pane cannot be closed | The reviewer is already stopped, and its pane stays open on the person's screen. | `host.log` |
-| A round's snapshot cannot be removed | The snapshot stays on disk, and the round's result stands. | `host.log` (#406) |
+| A round's snapshot cannot be removed | The snapshot stays on disk, and the round's result stands. `host.log` names its path and why it could not be deleted (§ 4 The snapshot). | `host.log` |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. A later round reads the same code and makes the same comments, so nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. A trigger whose calls cannot reach GitHub queues nothing. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. A `gh` that is missing fails this way every round until someone installs it. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
