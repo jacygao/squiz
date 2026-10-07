@@ -3,7 +3,7 @@ settles: "§ 4 — whether a finding can arrive as a call the reviewer's CLI val
 issue: [11, 165]
 recorded: 2026-09-25
 versions: { pi: "0.84.2, 0.85.1", model: deepseek-v4-pro, node: 24.15.0 }
-recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi changes what tool_execution_end carries
+recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi changes what a tool call's execute receives
 ---
 
 # `pi` validates a reporting call, and the grant must name it
@@ -144,10 +144,10 @@ The order the calls of one message are answered in: whatever order they complete
 Every `tool_execution_start` of a message is emitted before any of its prepared
 calls is answered, so a run with nothing outstanding has answered all of them.
 
-What the harness reads a report out of:
-`tool_execution_end.result.details`. The event also carries `toolCallId`,
-`toolName` and `isError`. It is emitted before the `message_end` of the
-matching `toolResult` message, which carries the same `details`.
+Where a report is read from: the report file the extension writes, one line for
+each value a call accepted. When this was measured the harness read it from the
+stream instead, as `tool_execution_end.result.details`, which carries the same
+value.
 
 What validation does and does not refuse, measured against the shipped schema:
 
