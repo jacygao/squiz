@@ -27,6 +27,7 @@ import { join, relative } from "node:path";
 
 import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
+import { defaultVerdict } from "../findings/status.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import type { ClosedBy } from "../github/failure-body.ts";
@@ -53,9 +54,11 @@ import {
   readState,
   recordPostingSeconds,
   recordRound,
+  recordRulings,
   roundRecord,
   recordSpendOutsideRounds,
   type EpisodeState,
+  type Rulings,
 } from "./episode-state.ts";
 import { episodeAt, roundDirectory, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
@@ -164,6 +167,12 @@ export type RoundSetup = {
   readonly snapshotLeft?: (reason: string) => void;
   /** Told why the round's posting time could not be written. The round's result stands. */
   readonly postingTimeUnwritten?: (reason: string) => void;
+  /**
+   * Told why the reviewer's rulings could not be written. The round's result
+   * stands, and a later close that runs no reviewer counts those threads as
+   * having no ruling on record.
+   */
+  readonly rulingsUnwritten?: (reason: string) => void;
   /** Told why the round's resume command could not be written. The round's result stands. */
   readonly resumeUnwritten?: (reason: string) => void;
 };
@@ -422,6 +431,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
             ),
           },
         };
+  keepRulings(episode, concluded, setup.rulingsUnwritten);
   keepPostingTime(episode, stopwatch, setup.postingTimeUnwritten);
   return reported;
 }
@@ -484,6 +494,38 @@ function keepPostingTime(episode: Episode, stopwatch: Stopwatch, unwritten?: (re
     until: deadlineIn(STATE_LOCK_WAIT_MS),
   });
   if (kept.outcome === "failed") unwritten?.(kept.reason);
+}
+
+/**
+ * Write the reviewer's ruling on each thread the round applied one to, a failed
+ * round's salvaged rulings included.
+ *
+ * Written whether or not GitHub took the ruling. The thread's resolved state
+ * still says whether it is closed, and the ruling says which verdict the
+ * reviewer gave. A write that fails is told to `unwritten` and fails nothing.
+ */
+function keepRulings(episode: Episode, concluded: RoundConclusion, unwritten?: (reason: string) => void): void {
+  const applied = appliedIn(concluded);
+  if (applied.length === 0) return;
+  const rulings = Object.fromEntries(applied.map((one) => [one.thread, one.ruled ?? defaultVerdict]));
+  const kept = updateState(episode, (current) => recordRulings(current, rulings), {
+    until: deadlineIn(STATE_LOCK_WAIT_MS),
+  });
+  if (kept.outcome === "failed") unwritten?.(kept.reason);
+}
+
+/** The verdicts a round applied to its threads, whatever it concluded. */
+function appliedIn(concluded: RoundConclusion): readonly AppliedVerdict[] {
+  switch (concluded.outcome) {
+    case "block":
+    case "clean, episode open":
+    case "close":
+      return concluded.verdicts.threads;
+    case "failed":
+      return concluded.salvaged?.verdicts.threads ?? [];
+    default:
+      return [];
+  }
 }
 
 /** The calls before the review, under the one deadline the snapshot's add runs under too. */
@@ -1229,7 +1271,7 @@ function closeBeforeReview(
               pullRequest: pullRequest.number,
               rounds: state.rounds,
               handedOver: threads,
-              verdicts: standing(threads),
+              verdicts: standing(threads, state.rulings),
               findings: account.findings,
               // No reviewer ran, so nothing settled what the last round to reach
               // its end left on no thread.
@@ -1270,17 +1312,19 @@ function leftBeforeReview(
 
 /**
  * The rulings a close before the review counts its threads by, where no reviewer
- * ruled.
+ * ruled: each resolved thread whose last ruling on record is `fixed` or
+ * `withdrawn`.
  *
- * A resolved thread is counted fixed: nothing records whether `fixed` or
- * `withdrawn` closed it. An unresolved one is given no ruling, and reads as open
- * or disputed as it does at any close.
+ * Every other thread is left out. A resolved one then has no ruling to count it
+ * by, and an unresolved one reads as open or disputed as it does at any close.
  */
-function standing(threads: readonly ReviewThread[]): AppliedVerdicts {
+function standing(threads: readonly ReviewThread[], rulings: Rulings | undefined): AppliedVerdicts {
   return {
-    threads: threads
-      .filter((thread) => thread.isResolved)
-      .map((thread) => ({ thread: thread.id, ruled: "fixed", outcome: "closed" })),
+    threads: threads.flatMap((thread) => {
+      const ruled = rulings?.[thread.id];
+      if (!thread.isResolved || ruled === undefined || ruled === "open") return [];
+      return [{ thread: thread.id, ruled, outcome: "closed" as const }];
+    }),
     unapplied: [],
   };
 }

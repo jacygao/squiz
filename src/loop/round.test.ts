@@ -1706,6 +1706,11 @@ test("the verdicts a failed round reported are applied, and no other thread is t
     ran.conclusion.salvaged?.verdicts.threads.map((applied) => applied.thread),
     ["PRRT_one"],
   );
+  assert.deepEqual(
+    ran.state?.rulings,
+    { PRRT_one: "fixed" },
+    "the failed round's ruling was not kept, or a thread it never reached was given one",
+  );
 });
 
 test("a round that reported nothing before it failed posts only its failure comment", async () => {
@@ -2227,18 +2232,65 @@ test("#606: a round that reviews and closes settles an earlier round's findings 
 });
 
 /**
- * A close before the review has no verdict to read a resolved thread by, and
- * counts it fixed. An unresolved one is open, or disputed where the coding agent
- * replied, as at any close.
+ * The round that rules a thread withdrawn records the ruling, and a later close
+ * that runs no reviewer counts the thread by it. Every resolved thread once
+ * counted fixed, so a fixed thread alone passes against that code.
  */
-test("a close before the review counts a resolved thread fixed and an unresolved one open", async () => {
+test("#627: a close before the review counts a thread an earlier round withdrew as withdrawn", async () => {
+  const ruled = await runInFixture({
+    config: { rounds: 3 },
+    answers: {
+      ...POSTING,
+      threads: listed([
+        { id: "PRRT_argued", isResolved: false },
+        { id: "PRRT_mended", isResolved: false },
+      ]),
+      resolve: RESOLVED,
+    },
+    reviewer: reviews({
+      findings: [finding("The flag is never read")],
+      verdicts: [
+        { thread: "PRRT_argued", verdict: "withdrawn" },
+        { thread: "PRRT_mended", verdict: "fixed" },
+      ],
+    }),
+  });
+  assert.ok(ruled.conclusion.outcome === "block", `concluded ${JSON.stringify(ruled.conclusion)}`);
+  assert.deepEqual(ruled.state?.rulings, { PRRT_argued: "withdrawn", PRRT_mended: "fixed" });
+
+  const closed = await runInFixture({
+    config: { rounds: 1 },
+    stateSource: ruled.stateSource ?? "",
+    answers: {
+      ...POSTING,
+      threads: listed([
+        { id: "PRRT_argued", isResolved: true },
+        { id: "PRRT_mended", isResolved: true },
+        { id: "PRRT_new", isResolved: false },
+      ]),
+    },
+    reviewer: reviews({}),
+  });
+
+  assert.ok(closed.conclusion.outcome === "close", `concluded ${JSON.stringify(closed.conclusion)}`);
+  assert.equal(closed.invocations.length, 0, "a cap already spent starts no reviewer");
+  assert.match(summaryBody(closed), /Fixed 1 · Withdrawn 1 · Open 1 · Disputed 0\n/u);
+});
+
+/**
+ * A resolved thread the state holds no ruling for was resolved by a person, or
+ * in an episode whose state this worktree does not have. Neither says it was
+ * fixed. A thread last ruled open and resolved since is the same.
+ */
+test("#627: a close before the review counts a resolved thread with no fixed or withdrawn ruling on record apart", async () => {
   const ran = await runInFixture({
     config: { rounds: 1 },
-    rounds: [ANSWER_COST],
+    stateSource: JSON.stringify({ rounds: [ANSWER_COST], spentOutsideRounds: unspent, rulings: { PRRT_kept: "open" } }),
     answers: {
       ...POSTING,
       threads: listed([
         { id: "PRRT_done", isResolved: true },
+        { id: "PRRT_kept", isResolved: true },
         { id: "PRRT_left", isResolved: false },
         { id: "PRRT_person", isResolved: false, opening: PERSON_WROTE },
       ]),
@@ -2248,7 +2300,10 @@ test("a close before the review counts a resolved thread fixed and an unresolved
 
   assert.ok(ran.conclusion.outcome === "close");
   assert.deepEqual(ran.conclusion.beforeReview?.openThreads, ["PRRT_left"], "a person's thread is no finding of the review");
-  assert.match(summaryBody(ran), /Fixed 1 · Withdrawn 0 · Open 1 · Disputed 0/u);
+  const body = summaryBody(ran);
+  assert.match(body, /^\*\*Squiz review — 1 round, 3 findings\*\*/u);
+  assert.match(body, /Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0 · Resolved, ruling unknown 2\n/u);
+  assert.doesNotMatch(body, /src\/ui\/card\.ts:88` — .*\(resolved/u, "a resolved thread needs no person");
 });
 
 /**

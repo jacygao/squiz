@@ -17,7 +17,7 @@
 import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import { readThread } from "../findings/thread.ts";
-import { locationOf, type ClassifiedThread } from "../loop/classify.ts";
+import { locationOf, type ClassifiedThread, type CountedStatus } from "../loop/classify.ts";
 import { costOf, type RoundRecord } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
@@ -70,18 +70,25 @@ export type ClosedEpisode = {
 const marker = "**Squiz review — ";
 
 /**
- * The four statuses in the order the counts line names them, each under the word
- * it is printed with.
+ * What the counts line names each thread as, in the order it names them, each
+ * under the word it is printed with.
  *
  * A record of every status, so that one added to the union has to be given a
  * place here for this to compile. The record's order is the line's order.
  */
-const countedAs: Readonly<Record<ThreadStatus, string>> = {
+const countedAs: Readonly<Record<CountedStatus, string>> = {
   fixed: "Fixed",
   withdrawn: "Withdrawn",
   open: "Open",
   disputed: "Disputed",
+  resolved: "Resolved, ruling unknown",
 };
+
+/**
+ * The four statuses every thread can end in, which the line prints even at
+ * zero. The rest are printed only where some thread has them.
+ */
+const alwaysCounted: ReadonlySet<CountedStatus> = new Set<ThreadStatus>(["fixed", "withdrawn", "open", "disputed"]);
 
 /**
  * The comment's body for `episode`, with no trailing newline.
@@ -100,8 +107,10 @@ export function renderSummary(episode: ClosedEpisode): string {
 function tally(episode: ClosedEpisode): string {
   const rounds = counted(episode.rounds.length, "round");
   const findings = counted(countRaised(episode), "finding");
-  const statuses = Object.entries(countedAs)
-    .map(([status, word]) => `${word} ${howMany(episode.threads, status)}`)
+  const statuses = (Object.entries(countedAs) as [CountedStatus, string][])
+    .map(([status, word]) => ({ status, word, count: howMany(episode.threads, status) }))
+    .filter(({ status, count }) => count > 0 || alwaysCounted.has(status))
+    .map(({ word, count }) => `${word} ${count}`)
     .join(" · ");
   const spend = renderSpendLine(episode.rounds.map(costOf));
   return `${marker}${rounds}, ${findings}**\n\n${statuses}${spend === null ? "" : `\n${spend}`}`;
@@ -111,7 +120,7 @@ function tally(episode: ClosedEpisode): string {
  * How many findings the review raised: every thread of the episode, and every
  * finding no thread holds that Notes names.
  *
- * Larger than the four status counts add to, because a finding no thread holds
+ * Larger than the status counts add to, because a finding no thread holds
  * is raised and carries no status. Every one of them is a line in Notes, so
  * nothing in the count is a finding the reader cannot see.
  */
