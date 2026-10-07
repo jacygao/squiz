@@ -15,10 +15,10 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type { Confinement, Invocation } from "../adapter.ts";
+import { userSettings } from "../../sessions/copilot-settings.ts";
 import { AGENT_NAME } from "./argv.ts";
 
 /**
@@ -75,36 +75,11 @@ export function userModel(environment: NodeJS.ProcessEnv): string | undefined | 
   const set = environment["COPILOT_MODEL"];
   if (set !== undefined && set.trim() !== "") return set;
 
-  const theirs = environment["COPILOT_HOME"];
-  const directory =
-    theirs !== undefined && theirs.trim() !== ""
-      ? resolve(theirs)
-      : join(environment["HOME"] ?? homedir(), ".copilot");
-  const file = join(directory, "settings.json");
-
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (cause) {
-    if (codeOf(cause) === "ENOENT") return undefined;
-    return { problem: `the user's Copilot settings ${file} could not be read: ${reasonFor(cause)}` };
-  }
-  let settings: unknown;
-  try {
-    // Copilot heads the files it manages with `//` lines, which JSON does not allow.
-    settings = JSON.parse(text.replace(/^\s*\/\/.*$/gmu, ""));
-  } catch (cause) {
-    return { problem: `the user's Copilot settings ${file} are not JSON: ${reasonFor(cause)}` };
-  }
-  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    return { problem: `the user's Copilot settings ${file} are not an object` };
-  }
-  const model = (settings as Record<string, unknown>)["model"];
+  const read = userSettings(environment);
+  if (read.outcome === "absent") return undefined;
+  if (read.outcome === "unreadable") return { problem: read.problem };
+  const model = read.settings["model"];
   return typeof model === "string" && model.trim() !== "" ? model : undefined;
-}
-
-function codeOf(cause: unknown): unknown {
-  return typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
 }
 
 function reasonFor(cause: unknown): string {

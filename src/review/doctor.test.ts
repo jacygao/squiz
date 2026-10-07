@@ -60,7 +60,14 @@ function context(fakes: Fakes, overrides: Partial<DoctorContext> = {}): DoctorCo
   const outside = join(scratch, `outside-${made}`);
   for (const directory of [bin, home, outside]) mkdirSync(directory);
   for (const [name, script] of Object.entries(fakes)) standIn(bin, name, script);
-  return { environment: { PATH: bin, HOME: home }, directory: outside, nodeVersion: "24.6.0", boundMs: 10_000, ...overrides };
+  return {
+    environment: { PATH: bin, HOME: home },
+    directory: outside,
+    nodeVersion: "24.6.0",
+    boundMs: 10_000,
+    platform: "darwin",
+    ...overrides,
+  };
 }
 
 test("every dependency present prints a line each and exits 0", () => {
@@ -203,6 +210,161 @@ test("a row a later check adds prints after the others, and only a failed one ch
   assert.equal(warning.exit, 0, "a warning never changes the exit status");
   assert.match(failure.stdout, /\npi: not found\n$/u);
   assert.equal(failure.exit, 1);
+});
+
+// Copilot as a coding agent.
+
+const COPILOT_1_2 = 'echo "GitHub Copilot CLI 1.2.0."';
+
+const FEATURES_OFF =
+  "warning: copilot 1.2.0 has experimental features off. If Copilot writes your code, it is never woken when a review finishes. Run /experimental on in Copilot, or start it once with copilot --experimental";
+
+/** Every line that is about Copilot as a coding agent: those naming copilot, but not the reviewer's. */
+function copilotLines(stdout: string): string[] {
+  return stdout.split("\n").filter((line) => /copilot/iu.test(line) && !line.startsWith("Reviewer"));
+}
+
+/** A context with `copilot` on PATH, a `COPILOT_HOME` of `copilotHome`, and its settings.json, where given, holding `settings`. */
+function withCopilot(settings: string | undefined, overrides: Partial<DoctorContext> = {}, copilotHome?: string): DoctorContext {
+  const base = context({ ...EVERY_FAKE, copilot: COPILOT_1_2 }, overrides);
+  const environment = copilotHome === undefined ? base.environment : { ...base.environment, COPILOT_HOME: copilotHome };
+  const home = copilotHome ?? join(String(base.environment.HOME), ".copilot");
+  if (settings !== undefined) settingsAt(home, "settings.json", settings);
+  return { ...base, environment };
+}
+
+test("copilot with experimental features on in the user's settings is an ordinary line after Claude Code's", () => {
+  const printed = squizDoctor(withCopilot('// Managed by Copilot\n{"experimental": true}'));
+
+  const lines = printed.stdout.split("\n");
+  assert.equal(lines[lines.indexOf("Claude Code 2.4.1") + 1], "copilot 1.2.0, experimental features on");
+  assert.equal(printed.exit, 0);
+});
+
+test("copilot with no experimental setting is a warning, and the check still exits 0", () => {
+  const printed = squizDoctor(withCopilot(undefined));
+
+  assert.ok(copilotLines(printed.stdout).includes(FEATURES_OFF), printed.stdout);
+  assert.equal(printed.exit, 0, "features off is a warning, never a failure");
+});
+
+test("copilot --no-experimental's false is off", () => {
+  const printed = squizDoctor(withCopilot('{"experimental": false, "model": "gpt-6-astra"}'));
+
+  assert.ok(copilotLines(printed.stdout).includes(FEATURES_OFF), printed.stdout);
+});
+
+test("the setting is read from COPILOT_HOME where it is set, and not from ~/.copilot", () => {
+  const elsewhere = join(scratch, "copilot-home-elsewhere");
+  const base = withCopilot('{"experimental": true}', {}, elsewhere);
+  settingsAt(String(base.environment.HOME), ".copilot/settings.json", '{"experimental": false}');
+
+  const printed = squizDoctor(base);
+
+  assert.ok(copilotLines(printed.stdout).includes("copilot 1.2.0, experimental features on"), printed.stdout);
+});
+
+test("a repository's .github/copilot/settings.json does not turn the features on", () => {
+  const project = repository();
+  settingsAt(project, ".github/copilot/settings.json", '{"experimental": true}');
+
+  const printed = squizDoctor({ ...withCopilot(undefined), directory: project });
+
+  assert.ok(copilotLines(printed.stdout).includes(FEATURES_OFF), printed.stdout);
+  assert.ok(!copilotLines(printed.stdout).includes("copilot 1.2.0, experimental features on"));
+});
+
+test("Copilot settings that are not JSON leave the features unknown with the reason, not read as off", () => {
+  const base = withCopilot("{ experimental: true");
+  const file = join(String(base.environment.HOME), ".copilot", "settings.json");
+
+  const printed = squizDoctor(base);
+
+  const lines = copilotLines(printed.stdout);
+  assert.ok(!lines.includes(FEATURES_OFF), "settings that could not be read must not read as off");
+  assert.ok(
+    lines.some((line) =>
+      line.startsWith(`warning: copilot 1.2.0: whether experimental features are on is unknown: the user's Copilot settings ${file} are not JSON: `),
+    ),
+    printed.stdout,
+  );
+  assert.equal(printed.exit, 0);
+});
+
+test("an experimental setting that is neither true nor false is named, not read as off", () => {
+  const printed = squizDoctor(withCopilot('{"experimental": "yes"}'));
+
+  assert.ok(
+    copilotLines(printed.stdout).some((line) =>
+      line.startsWith('warning: copilot 1.2.0: whether experimental features are on is unknown: "experimental" is "yes" in '),
+    ),
+    printed.stdout,
+  );
+});
+
+test("a copilot that is installed and fails to run is a warning", () => {
+  const printed = squizDoctor(context({ ...EVERY_FAKE, copilot: 'echo "segfault" >&2\nexit 139' }));
+
+  assert.deepEqual(copilotLines(printed.stdout), ["copilot: warning: could not be run: copilot exited 139: segfault"]);
+  assert.equal(printed.exit, 0);
+});
+
+/** A COPILOT_HOME, which need not exist, that puts the socket path at exactly `bytes` bytes. */
+function copilotHomeFor(bytes: number): string {
+  // `/session-state/`, a 36-character session id, and `/squiz.sock`.
+  const below = 15 + 36 + 11;
+  return `/h${"o".repeat(bytes - below - 2)}`;
+}
+
+test("a socket path of 104 bytes fits on macOS, and of 105 is a warning that the extension cannot listen", () => {
+  const fits = squizDoctor(withCopilot(undefined, {}, copilotHomeFor(104)));
+  const over = squizDoctor(withCopilot(undefined, {}, copilotHomeFor(105)));
+
+  assert.doesNotMatch(fits.stdout, /cannot listen/u);
+  assert.ok(
+    copilotLines(over.stdout).includes(
+      `warning: copilot's extension cannot listen: its socket ${copilotHomeFor(105)}/session-state/<session id>/squiz.sock is 105 bytes, over the 104 macOS allows. Set COPILOT_HOME to a shorter directory`,
+    ),
+    over.stdout,
+  );
+  assert.equal(over.exit, 0);
+});
+
+test("a socket path of 108 bytes fits on Linux, and of 109 is a warning", () => {
+  const fits = squizDoctor(withCopilot(undefined, { platform: "linux" }, copilotHomeFor(108)));
+  const over = squizDoctor(withCopilot(undefined, { platform: "linux" }, copilotHomeFor(109)));
+
+  assert.doesNotMatch(fits.stdout, /cannot listen/u);
+  assert.match(over.stdout, /^warning: copilot's extension cannot listen: .+ is 109 bytes, over the 108 Linux allows\. /mu);
+});
+
+test("the socket path is measured in bytes, not characters", () => {
+  // 104 characters, which fit, and 105 bytes, which do not.
+  const home = `${copilotHomeFor(103)}é`;
+
+  const printed = squizDoctor(withCopilot(undefined, {}, home));
+
+  assert.match(printed.stdout, /^warning: copilot's extension cannot listen: .+ is 105 bytes, over the 104 macOS allows\. /mu);
+});
+
+test("with Claude Code missing and copilot installed, Claude Code is not required and the check exits 0", () => {
+  const { claude: _claude, ...rest } = EVERY_FAKE;
+
+  const printed = squizDoctor(context({ ...rest, copilot: COPILOT_1_2 }));
+
+  assert.match(printed.stdout, /^Claude Code: not found\. Not required: copilot is installed, and either can be the coding agent$/mu);
+  assert.equal(printed.exit, 0, printed.stdout);
+});
+
+test("with copilot both the reviewer and installed, the coding agent's row says its features and the reviewer's its model", () => {
+  const base = withCopilot('{"experimental": true, "model": "gpt-6-astra"}');
+
+  const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
+
+  assert.deepEqual(
+    printed.stdout.split("\n").filter((line) => /copilot/iu.test(line) && !/cannot listen/u.test(line)),
+    ["copilot 1.2.0, experimental features on", "Reviewer copilot 1.2.0, model gpt-6-astra, Copilot's default. Its sign-in is not checked"],
+  );
 });
 
 // The reviewer's row.
@@ -545,7 +707,7 @@ function linkRow(target: string, path: string) {
   return pathLink(
     () => target,
     () => scratch,
-  )({ environment: { PATH: path, HOME: scratch }, directory: scratch, nodeVersion: "24.6.0", boundMs: 10_000 });
+  )({ environment: { PATH: path, HOME: scratch }, directory: scratch, nodeVersion: "24.6.0", boundMs: 10_000, platform: "darwin" });
 }
 
 const NO_LINK =
