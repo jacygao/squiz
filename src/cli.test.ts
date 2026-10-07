@@ -178,7 +178,7 @@ test("a command the binary does not have is named on stderr, and still exits 0",
   assert.equal(result.code, 0, "the binary is the hook entry point, and only exit 2 may block a turn");
   assert.equal(
     result.stderr,
-    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review, init\n',
+    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review, init, doctor\n',
     "the list backs the message, so a command the binary has must be on it",
   );
   assert.equal(result.stdout, "");
@@ -188,7 +188,7 @@ test("no command at all is reported the same way", async () => {
   const result = await run(shim, [], { cwd: elsewhere });
 
   assert.equal(result.code, 0);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init, doctor\n");
   assert.equal(result.stdout, "");
 });
 

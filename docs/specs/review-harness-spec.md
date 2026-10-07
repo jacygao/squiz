@@ -2206,7 +2206,9 @@ are still marked, because what it spent is in none of them.
 
 ## 6. Commands
 
-Everything the harness ships to be run: one binary and one slash command.
+Everything the harness ships to be run is a subcommand of one binary, `squiz`,
+run from a shell. Squiz ships no slash command: the setup check is
+`squiz doctor`.
 
 ### The `squiz` binary
 
@@ -2221,6 +2223,7 @@ already on it.
 | `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. |
 | `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
 | `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
+| `squiz doctor` | A person | Prints a line per dependency, saying it is present or naming what is missing or unauthenticated, and exits 1 where a required one is not usable (The setup check). |
 | `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for the payload's `cwd` and returns, as § 3 sets out. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
@@ -2590,13 +2593,94 @@ squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a direc
 
 ### The setup check
 
-`/squiz doctor` is a slash command, run by a person. It reports which of the
-dependencies is missing or unauthenticated. The reviewer it checks for is the one
-`reviewer` names, `pi` or `copilot`.
+`squiz doctor` is run by a person, from a shell. It prints one line per
+dependency on stdout, saying it is present or naming what is wrong with it:
 
-It also reports what `squiz init`'s link would find on `PATH`, whichever coding
-agent is in use: no link to this squiz, a link to an earlier version, or a
-`squiz` that is not this one, named as `squiz init` names it.
+```
+git 2.51.0
+gh 2.97.0, signed in as ana
+Claude Code 2.4.1
+Node 24.6.0
+tmux: not found. Not required: without tmux or Herdr, reviews run detached
+Herdr 0.9.3
+```
+
+It exits 0 where every required dependency is usable and 1 otherwise. It writes
+nothing, in the repository it is run from or anywhere else, and runs outside a
+repository as well. Outside Claude Code's Bash tool, a shell finds `squiz` by
+name only once `squiz init` has linked it onto `PATH`.
+
+Each line is one row of a list, in the order printed. A row is at one of three
+levels, and only `failed` changes the exit status:
+
+| Level | Meaning | Example |
+|---|---|---|
+| present | Usable, or an optional tool that is absent | `tmux: not found. Not required: without tmux or Herdr, reviews run detached` |
+| warning | Something a person should see, which squiz runs without | `tmux: warning: could not be run: tmux exited 134: dyld: Library not loaded` |
+| failed | A required dependency is missing, unusable or unauthenticated | `gh 2.97.0: not signed in. Run gh auth login` |
+
+The rows:
+
+| Row | Required | Read from |
+|---|---|---|
+| `git` | Yes | `git --version` |
+| `gh`, and its sign-in | Yes | `gh --version`, then `gh auth status --json hosts --active` |
+| Claude Code | Yes | `claude --version` |
+| Node | Yes | The Node running squiz |
+| tmux | No | `tmux -V` |
+| Herdr | No | `herdr --version` |
+
+**Each tool is found on `PATH` and started once to ask its version.** What
+starting it came to decides the line, and only a version read from its output
+makes it present:
+
+| Starting it | The line |
+|---|---|
+| No directory on `PATH` holds it | `git: not found` |
+| It exits non-zero | `git: could not be run: git exited 1: xcrun: error: invalid active developer path`, with the first line it printed |
+| It does not answer within 15 seconds | `git: could not be run: git did not answer within 15 seconds` |
+| It prints no version | `Claude Code: could not be run: claude printed no version: hello` |
+
+An optional tool that could be found but not run is a warning rather than a
+failure.
+
+**`gh` is signed in where `gh auth status --json` reports an account whose check
+succeeded.** That command exits 0 whatever the login's state, and reports each
+host's active account with the outcome of checking it against GitHub. `gh auth
+token` is not used, because it can print a token from the system's credential
+store that `gh` itself does not use.
+
+```
+gh 2.97.0, signed in as ana
+gh 2.97.0, signed in as ana on github.example.com
+gh 2.97.0: not signed in. Run gh auth login
+gh 2.97.0: not signed in: the login ana on github.com failed its check: non-200 OK status code: 401 Unauthorized
+gh 2.20.0: its sign-in could not be checked: gh exited 1: unknown flag: --json
+```
+
+**The Node reported is the one running squiz**, which is the `node` that
+`bin/squiz` found on `PATH`. Every subcommand runs on that one, so it is the
+version § 8 Language requires. A version below 24 fails:
+
+```
+Node 23.6.0: too old. Squiz needs Node 24 or later
+```
+
+A Node too old to strip types cannot load squiz at all, and fails before the
+check prints anything.
+
+Claude Code is required on every machine, including one whose only coding agent
+is Copilot. The rows below are each added to the list by a later change, and
+until then the check does not report them:
+
+- the reviewer `reviewer` names, `pi` or `copilot`, and its model;
+- the Copilot CLI wherever Copilot is the reviewer or a coding agent, and, for a
+  Copilot coding agent, whether Copilot's experimental features are on, as a
+  warning;
+- what `squiz init`'s link would find on `PATH`, whichever coding agent is in
+  use: no link to this squiz, a link to an earlier version, or a `squiz` that is
+  not this one, named as `squiz init` names it;
+- the reviewer settings squiz overrides in this project.
 
 ## 7. Failure modes
 
@@ -2933,13 +3017,12 @@ plugin is the package, so there is no separate packaging step.
 .claude-plugin/marketplace.json  the marketplace named squiz, listing this repository's root as the one plugin
 hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code and Copilot triggers
 extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
-commands/                    slash commands; the setup check is the first
 bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
 charter.md                   the standing review instructions, shipped as one file
 src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
-  review/                    the squiz review entry point, what it prints and exits with, squiz status, and squiz init
+  review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, and squiz doctor
   hook/                      the Stop and SubagentStop trigger, which resolves the pull request and queues the review
   host/                      the round host, which takes queued states and runs their rounds
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, and the note and its wake; no review knowledge
@@ -2995,7 +3078,7 @@ until something asks.
 | **P1** | The history tools | `git_log_search`, `git_blame` and `git_show`, granted to every reviewer, each running one `git` subcommand that reads, with no argument reaching a shell and nothing in the repository able to make `git` run a program |
 | **P1** | `squiz status` | The reviews running and finished in every worktree, for a person and a coordinator |
 | **P1** | The token bound | 10,000,000 tokens a round, read before a round starts and again when one records what it spent |
-| **P1** | The setup check | A slash command that names which of the dependencies is missing or unauthenticated, and whether `squiz init`'s link puts this squiz on `PATH` |
+| **P1** | The setup check | `squiz doctor`, run from a shell, which names which of the dependencies is missing or unauthenticated, and whether `squiz init`'s link puts this squiz on `PATH` |
 | **P1** | `squiz init` | Links `squiz` onto `PATH` without replacing another, for coding agents other than Claude Code |
 | **P1** | A second reviewer adapter | The Copilot adapter: its shell line, the reporting server, the custom agent that carries the charter, the grant, the read of its usage line in tokens and AI credits, and `reviewer` in configuration |
 | **P1** | The reviewer's model in configuration | A `model` setting, so a project chooses the model its reviewer runs on, defaulting to the user's default |
@@ -3051,7 +3134,7 @@ Three things in the host project, the last one optional.
 3. **Optional.** `.squiz.json`, to change any of the settings below. Every one
    has a working default, so a project that writes none still runs.
 
-Then run `/squiz doctor`.
+Then run `squiz doctor` from a shell.
 
 **A Claude Code or Copilot coding agent needs no instruction to start a review.**
 The plugin's hooks start one each time the agent finishes its work, and the
