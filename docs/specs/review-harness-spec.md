@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.26 (draft)
+**Version:** 1.27 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2524,10 +2524,12 @@ run from a shell. Squiz ships no slash command: the setup check is
 ### The `squiz` binary
 
 A plugin's `bin/` is added to the Bash tool's `PATH` while the plugin is
-enabled, so a coding agent in Claude Code runs the binary by name. Every other
-coding agent's shell, Copilot's included, gets the `PATH` it was started with,
-and runs `squiz` by name through the link `squiz init` makes in a directory
-already on it.
+enabled, so a coding agent in Claude Code runs the binary by name. A command a
+person types after `!` in a Claude Code session gets the same `PATH`, so
+`! squiz doctor` and `! squiz init` run by name too. Every other coding agent's
+shell, Copilot's included, and a person's terminal outside Claude Code get the
+`PATH` they were started with, and run `squiz` by name through the link
+`squiz init` makes in a directory already on it.
 
 | Command | Run by | What it does |
 |---|---|---|
@@ -2899,9 +2901,10 @@ taken for none.
 
 `squiz init` links `squiz` into a directory already on `PATH`, so that a coding
 agent whose shell does not have the plugin's `bin/` on its `PATH` runs `squiz` by
-name. Only Claude Code puts the plugin's `bin/` there, and only in its own Bash
-tool. It prints a line for what it did, and exits 0 where the link is in
-place afterwards and 1 otherwise, with the line on stderr. It writes nothing in
+name. Only Claude Code puts the plugin's `bin/` there, and only for its Bash
+tool and the commands typed after `!` (The `squiz` binary). It prints a line
+for what it did, and exits 0 where the link is in place afterwards and 1
+otherwise, with the line on stderr. It writes nothing in
 the repository it is run from, and runs outside one as well.
 
 - **The link's target is this squiz:** the real path of the `bin/squiz` that is
@@ -3672,7 +3675,14 @@ Three things in the host project, the last one optional.
 3. **Optional.** `.squiz.json`, to change any of the settings below. Every one
    has a working default, so a project that writes none still runs.
 
-Then run `squiz doctor` from a shell.
+Then check the setup with `squiz doctor` (§ 6 The setup check), from the
+repository. In a Claude Code session, type it after `!`:
+
+```
+! squiz doctor
+```
+
+Elsewhere, run `squiz doctor` in a shell once `squiz init` has linked it.
 
 **A Claude Code or Copilot coding agent needs no instruction to start a review.**
 The plugin's hooks start one each time the agent finishes its work, and the
@@ -3719,7 +3729,7 @@ it says so in the session as a warning.
 **Any other coding agent reaches `squiz` through a link `squiz init` makes,**
 because no runtime but Claude Code puts the plugin's `bin/` on its shell's
 `PATH`. Run `squiz init` once on each machine. Where Claude Code has squiz
-enabled, run it by name from a Claude Code session, so that every agent runs
+enabled, type `! squiz init` in a Claude Code session, so that every agent runs
 the squiz Claude Code uses. Where only Copilot has it, run it by path from
 Copilot's copy:
 
