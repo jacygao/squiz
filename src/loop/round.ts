@@ -29,6 +29,7 @@ import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
+import type { ClosedBy } from "../github/failure-body.ts";
 import type { CommentPosting } from "../github/summary.ts";
 import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
@@ -282,6 +283,12 @@ export type RoundConclusion =
        * round that reviewed.
        */
       readonly salvaged?: RoundAccount;
+      /**
+       * The bound that leaves the episode no round after this one, so that the
+       * failure comment does not promise a retry. Absent where a round remains,
+       * and where the round failed before recording what it spent.
+       */
+      readonly closed?: ClosedBy;
       /**
        * What became of the failure comment. Absent where none was attempted:
        * the round never found its pull request, the caller asked for none, or
@@ -639,12 +646,19 @@ async function reviewOn(
     stopwatch,
   };
 
-  if (review.outcome !== "reviewed") return salvage(review, handedOver, posting, confinement);
+  // A failed round closes nothing, but where it spent the last round the cap
+  // allows, or reached the token bound, no round runs after it either.
+  const left = closedBy(recorded, bounds);
+  const leftClosed = left === undefined ? {} : { closed: left };
+
+  if (review.outcome !== "reviewed") {
+    return { ...salvage(review, handedOver, posting, confinement), ...leftClosed };
+  }
 
   const account = report(review, handedOver, posting);
   // A round that put none of its findings up has handed nothing over, so its
-  // close would read as a review with nothing open. It fails instead, the episode
-  // stays open, and a new commit, reply or run of `squiz review` retries it.
+  // close would read as a review with nothing open. It fails instead, and the
+  // episode stays open for a retry wherever the bounds leave a round for one.
   const outcomes = account.findings.outcomes;
   if (outcomes.length > 0 && outcomes.every((outcome) => outcome.outcome === "failed")) {
     const them = outcomes.length === 1 ? "1 finding and could not post it" : `${outcomes.length} findings and could not post them`;
@@ -654,6 +668,7 @@ async function reviewOn(
       reason: `round ${recorded.rounds.length} found ${them} to PR #${pullRequest.number}`,
       confinement,
       salvaged: account,
+      ...leftClosed,
     };
   }
   const threads = [
@@ -677,6 +692,7 @@ async function reviewOn(
       reason: `the round's end could not be recorded: ${ended.reason}`,
       confinement,
       salvaged: account,
+      ...leftClosed,
     };
   }
   const ends = ended.ends;
@@ -828,6 +844,19 @@ function exhausted(state: EpisodeState, bounds: EpisodeBounds): ClosingReason | 
     return "round-cap";
   }
   return null;
+}
+
+/**
+ * The bound the next firing finds spent, from the state as this round left it,
+ * or `undefined` where a round remains. Read as `exhausted` reads it, so the
+ * failure comment says closed exactly where the next firing closes.
+ */
+function closedBy(state: EpisodeState, bounds: EpisodeBounds): ClosedBy | undefined {
+  const over = exhausted(state, bounds);
+  const roundsRun = state.rounds.length;
+  if (over === "token-bound") return { bound: "token-bound", tokens: bounds.tokens, roundsRun };
+  if (over === "round-cap") return { bound: "round-cap", roundsRun, cap: bounds.rounds };
+  return undefined;
 }
 
 /** What a round that ran nothing did, which is nothing, said rather than implied. */

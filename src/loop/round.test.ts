@@ -3190,6 +3190,37 @@ test("a failed round posts one failure comment after what it salvaged, naming th
   assert.deepEqual(ran.conclusion.failureComment, { pullRequest: PULL_REQUEST, posting: { outcome: "posted" } });
 });
 
+test("#544: a failed round that was the last the cap allows says the review closed", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 2 },
+    rounds: [ANSWER_COST],
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(
+    failureBody(ran).split("\n\n")[1],
+    "The finding is posted as a thread. The review is closed: it has run 2 rounds, and the round cap allows 2. " +
+      "No round runs again. A new commit or reply, or running `squiz review`, posts its summary.",
+  );
+});
+
+test("#544: a failed round that reached the token bound says the review closed", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, tokens: 1_000 },
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(
+    failureBody(ran).split("\n\n")[1],
+    "The finding is posted as a thread. The review is closed: it reached the token bound of 1,000 tokens. " +
+      "No round runs again. A new commit or reply, or running `squiz review`, posts its summary.",
+  );
+});
+
 test("a failed round's comment counts the findings that landed, not the ones reported", async () => {
   const { create: _create, ...noCreate } = FAILING;
   const ran = await runInFixture({

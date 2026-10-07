@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.05 (draft)
+**Version:** 1.06 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2739,7 +2739,7 @@ nothing retries one.
 | The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped with the rest. A reviewer handed a subset of the threads rules on a subset, and the round then applies verdicts that close nothing while reading as a round that settled everything. |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. |
-| No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode, so a new commit, a new reply or a run of `squiz review` retries it. |
+| No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode. A new commit, a new reply or a run of `squiz review` retries it where a round remains, and closes the episode where none does, as The failure comment below says. |
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. |
 | The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub answered or that the reserve was spent. Nothing is retried: posting is a create, so a second attempt is a second comment. |
 | The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 5 says: with the summary, the open threads and exit 3 or 0 where those attempts left any of the reviewer's threads, and with exit 0 and a line on stderr where they left none. |
@@ -2753,8 +2753,9 @@ nothing retries one.
 ### The failure comment
 
 A round that fails posts one issue-level comment on the pull request saying so. It
-names what failed. A round that salvaged findings says how many of them it posted
-as threads. A list follows, holding two kinds of item:
+names what failed, and says what happens next. A round that salvaged findings
+says how many of them it posted as threads. A list follows, holding two kinds of
+item:
 
 - **Each salvaged finding that no thread holds**, written as the summary's Notes
   write it (§ 5 What the comment carries): a finding about the change as a whole,
@@ -2766,6 +2767,10 @@ as threads. A list follows, holding two kinds of item:
 
 The findings come first, as they do in Notes.
 
+Where a round remains under the round cap and the token bound, the comment says
+the review is still open and that a new commit or reply, or running
+`squiz review`, retries it:
+
 ```markdown
 **Squiz review failed — the reviewer was killed at its 900-second bound, and the round kept the 3 findings the reviewer had reported**
 
@@ -2775,6 +2780,29 @@ The findings come first, as they do in Notes.
 - About the change as a whole: The retry queue duplicates the scheduler
 - `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 ```
+
+**Where the round leaves no round to run, the comment says the review is closed,
+and which bound closed it.** That is a failed round that was the last the cap
+allows, and a failed attempt whose tokens reached the token bound. Whether a round
+remains is read from the episode's state once the attempt has recorded what it
+spent, the way the next run reads it before starting a reviewer:
+
+```markdown
+**Squiz review failed — the reviewer was killed at its 900-second bound, and the round recorded no findings**
+
+The review is closed: it has run 3 rounds, and the round cap allows 3. No round runs again. A new commit or reply, or running `squiz review`, posts its summary.
+```
+
+```markdown
+The review is closed: it reached the token bound of 10,000,000 tokens. No round runs again. A new commit or reply, or running `squiz review`, posts its summary.
+```
+
+The failed round itself posts no summary, as § 5 says. The next run finds the
+bound spent and closes the episode with its summary. An episode that ran no round
+may have no thread for a summary to count, so its comment ends at "No round runs
+again." The close waits on that next run: until a commit, a reply or
+`squiz review` starts one, the pull request carries the failure comment and no
+summary.
 
 The reason on the first line is the reason the command prints on stderr, word for
 word. Each item the round established is a line there too, as § 6 shows. The
