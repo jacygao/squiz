@@ -45,12 +45,11 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the eight defaults", () => {
+test("an absent .squiz.json is not an error, and yields the seven defaults", () => {
   assert.deepEqual(load(null), {
     reviewer: "pi",
     rounds: 3,
     depth: "read",
-    test: null,
     timeout: 900,
     tokens: 10_000_000,
     thinking: "medium",
@@ -58,7 +57,7 @@ test("an absent .squiz.json is not an error, and yields the eight defaults", () 
   });
 });
 
-test("a .squiz.json with no keys yields the same eight defaults", () => {
+test("a .squiz.json with no keys yields the same seven defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -71,13 +70,12 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"reviewer": "copilot", "rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
+      `{"reviewer": "copilot", "rounds": 5, "depth": "read", "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
     ),
     {
       reviewer: "copilot",
       rounds: 5,
       depth: "read",
-      test: "npm test",
       timeout: 90,
       tokens: 400_000,
       thinking: "high",
@@ -222,26 +220,12 @@ test("a value of the wrong type is refused like one out of range", () => {
   rejection(`{"rounds": null}`);
   rejection(`{"rounds": true}`);
   rejection(`{"depth": 3}`);
-  rejection(`{"test": 5}`);
   rejection(`{"timeout": null}`);
   rejection(`{"tokens": "150000"}`);
   rejection(`{"tokens": []}`);
   rejection(`{"thinking": 3}`);
   rejection(`{"thinking": true}`);
   rejection(`{"thinking": ["high"]}`);
-});
-
-test("no test command is null rather than an empty string", () => {
-  assert.equal(load("{}").test, null);
-  assert.equal(load(`{"rounds": 3}`).test, null);
-  assert.equal(load(`{"test": "npm test"}`).test, "npm test");
-});
-
-test("an empty test command is refused, because it is not the same as none", () => {
-  const error = rejection(`{"test": ""}`);
-  assert.match(error.message, /"test" is ""/);
-  assert.match(error.message, /leave "test" out/);
-  rejection(`{"test": "   "}`);
 });
 
 // The error names the setting, the value given and what was expected. One
@@ -310,7 +294,6 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"depth": "shallow"}`, setting: "depth", given: `"shallow"`, expected: /"read" or "deep"/ },
     { contents: `{"depth": 3}`, setting: "depth", given: "3", expected: /"read" or "deep"/ },
     { contents: `{"depth": "deep"}`, setting: "depth", given: `"deep"`, expected: /not supported yet/ },
-    { contents: `{"test": ""}`, setting: "test", given: `""`, expected: /a command to run/ },
     { contents: `{"timeout": 3601}`, setting: "timeout", given: "3601", expected: /seconds from 60 to 3,600/ },
     { contents: `{"timeout": 59}`, setting: "timeout", given: "59", expected: /seconds from 60 to 3,600/ },
     { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 60 to 3,600/ },
@@ -359,7 +342,12 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking" and "model"/);
+  assert.match(error.message, /"reviewer", "rounds", "depth", "timeout", "tokens", "thinking" and "model"/);
+});
+
+test("a .squiz.json still setting test is refused like any other key that is not a setting", () => {
+  const error = rejection(`{"test": "npm test"}`);
+  assert.match(error.message, /"test" is not a setting, and the settings are "reviewer", "rounds", "depth", "timeout", "tokens", "thinking" and "model"$/u);
 });
 
 // What a project upgrading from the dollar bound meets. Silently ignoring it

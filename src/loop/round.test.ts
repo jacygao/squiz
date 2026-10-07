@@ -1049,34 +1049,18 @@ test("the first round of a first episode posts its finding, is handed no thread,
 });
 
 /**
- * The configured command reaches the prompt, and only where the reviewer has a
- * shell to run it with.
+ * The prompt tells the reviewer what the history tools are for only where it is
+ * granted them.
  *
  * The configuration is built here rather than loaded, so a round at `deep` runs
  * before the loader accepts that depth.
  */
-test("the configured test command reaches a reviewer at `deep` and not one at `read`", async () => {
-  const deep = await runInFixture({
-    answers: POSTING,
-    reviewer: reviews({}),
-    config: { depth: "deep", test: "pnpm vitest run" },
-  });
-  const read = await runInFixture({
-    answers: POSTING,
-    reviewer: reviews({}),
-    config: { depth: "read", test: "pnpm vitest run" },
-  });
+test("the history section reaches a reviewer at `deep` and not one at `read`", async () => {
+  const deep = await runInFixture({ answers: POSTING, reviewer: reviews({}), config: { depth: "deep" } });
+  const read = await runInFixture({ answers: POSTING, reviewer: reviews({}), config: { depth: "read" } });
 
-  assert.match(
-    deep.invocations[0]?.prompt ?? "",
-    /^pnpm vitest run$/mu,
-    "the project's own command did not reach the reviewer, so it runs whatever it infers",
-  );
-  assert.equal(
-    read.invocations[0]?.prompt.includes("pnpm vitest run"),
-    false,
-    "a reviewer with no shell was named a command to run the tests with",
-  );
+  assert.match(deep.invocations[0]?.prompt ?? "", /^## History$/mu);
+  assert.equal(read.invocations[0]?.prompt.includes("## History"), false, "a reviewer at read was told of tools it is not granted");
 });
 
 /**
@@ -2886,21 +2870,19 @@ test("the reviewer runs in a snapshot of the head commit, at either depth, with 
   }
 });
 
-// The deep tools read the snapshot and scratch space out of SQUIZ_ROUND, so it
-// has to name where the round really put them.
-test("at deep the round hands the deep tools the snapshot and scratch space the reviewer was given", async () => {
+// The deep tools read the snapshot out of SQUIZ_ROUND, so it has to name where
+// the round really put it.
+test("at deep the round hands the deep tools the snapshot the reviewer was given", async () => {
   const kept = await mkdtemp(join(tmpdir(), "squiz-round-variable-"));
   try {
     const seen = join(kept, "round.json");
     const ran = await runInFixture({
-      config: { depth: "deep", test: "npm test" },
+      config: { depth: "deep" },
       answers: POSTING,
       reviewer: { command: "/bin/sh", args: ["-c", `printf '%s' "$SQUIZ_ROUND" > '${seen}'`], parse: reviews({}).parse },
     });
     const handed = JSON.parse(readFileSync(seen, "utf8")) as Record<string, unknown>;
     assert.equal(handed["snapshot"], snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }));
-    assert.equal(handed["scratch"], ran.invocations[0]?.scratchDirectory);
-    assert.equal(handed["test"], "npm test");
   } finally {
     await rm(kept, { recursive: true, force: true });
   }

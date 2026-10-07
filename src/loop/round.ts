@@ -581,10 +581,7 @@ async function reviewOn(
       {
         directory: tree,
         charterFile: setup.charterFile,
-        prompt: composePrompt(
-          { pullRequest, diff: fetched.diff, threads: handedOver },
-          { depth: config.depth, command: config.test },
-        ),
+        prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }, config.depth),
         sessionDirectory,
         promptFile: join(ownDirectory, "prompt.md"),
         reportsFile: join(ownDirectory, "reports.jsonl"),
@@ -593,7 +590,6 @@ async function reviewOn(
         thinking: config.thinking,
         model: config.model,
         depth: config.depth,
-        test: config.test,
         roundSpace,
         // Whatever this says, each attempt asks the adapter for a line for every
         // place the reviewer may run.

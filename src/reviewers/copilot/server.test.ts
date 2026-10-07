@@ -9,19 +9,16 @@
 
 import assert from "node:assert/strict";
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { deadlineIn } from "../deadline.ts";
 import { ROUND_VARIABLE, roundVariable } from "../deep-tools.ts";
 import { gitBlame, gitLogSearch, gitShow } from "../git-tools.ts";
-import { discardRoundSpace, KEEPER_VARIABLE, makeRoundSpace, RECORD_VARIABLE, stopRecordedGroups } from "../groups.ts";
 import { reportCalls } from "../report-calls.ts";
-import { runTestsTool, STOP_MARGIN_MS } from "../run-tests.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
 import { CHARTER_VARIABLE } from "./server.ts";
@@ -67,13 +64,11 @@ function started(
   t: { after: (fn: () => void) => void },
   cwd: string,
   env: Readonly<Record<string, string | undefined>> = {},
-  options: { readonly detached?: boolean } = {},
 ): Running {
   const child = spawn(process.execPath, [serverPath], {
     cwd,
     env: { ...process.env, ...env },
     stdio: ["pipe", "pipe", "pipe"],
-    detached: options.detached === true,
   });
   t.after(() => {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
@@ -368,8 +363,8 @@ for (const signal of ["SIGTERM", "SIGHUP"] as const) {
   });
 }
 
-/** The four tools a reviewer at `deep` is granted beside the reporting calls, in the grant's order. */
-const deepTools = [runTestsTool, gitLogSearch, gitBlame, gitShow];
+/** The three tools a reviewer at `deep` is granted beside the reporting calls, in the grant's order. */
+const deepTools = [gitLogSearch, gitBlame, gitShow];
 
 /** Run git in `directory`, failing the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): string {
@@ -414,31 +409,12 @@ function deepPlace(t: { after: (fn: () => void) => void }): Deep {
 function startedDeep(
   t: { after: (fn: () => void) => void },
   place: Deep,
-  command: string | null,
-  options: {
-    readonly endsAt?: number;
-    readonly extra?: Readonly<Record<string, string | undefined>>;
-    readonly detached?: boolean;
-  } = {},
 ): Running {
-  return started(
-    t,
-    place.scratch,
-    {
-      ...roundVariable({
-        snapshot: place.snapshot,
-        scratch: place.scratch,
-        test: command,
-        endsAt: options.endsAt ?? Date.now() + 120_000,
-      }),
-      ...options.extra,
-    },
-    { detached: options.detached === true },
-  );
+  return started(t, place.scratch, roundVariable({ snapshot: place.snapshot, endsAt: Date.now() + 120_000 }));
 }
 
-test("at deep the server lists the four deep tools after the reporting calls, with their own schemas", async (t) => {
-  const server = startedDeep(t, deepPlace(t), "true");
+test("at deep the server lists the three deep tools after the reporting calls, with their own schemas", async (t) => {
+  const server = startedDeep(t, deepPlace(t));
   const tools = resultOf(await server.request(1, "tools/list"))["tools"] as readonly Message[];
   assert.deepEqual(
     tools.map((tool) => tool["name"]),
@@ -459,7 +435,7 @@ test("at read the server serves no deep tool, though one is called", async (t) =
 
 test("each history tool runs its git subcommand in the snapshot", async (t) => {
   const place = deepPlace(t);
-  const server = startedDeep(t, place, null);
+  const server = startedDeep(t, place);
 
   const searched = toolAnswer(await server.request(1, "tools/call", call("git_log_search", { term: "margin" })));
   assert.equal(searched.isError, false, searched.text);
@@ -481,130 +457,22 @@ const malformed: readonly { readonly sent: string; readonly name: string; readon
   { sent: "no file", name: "git_blame", args: { line: 1 }, reason: /file is required/ },
   { sent: "a commit that is a number", name: "git_show", args: { commit: 42 }, reason: /commit must be a string/ },
   { sent: "arguments that are a list", name: "git_log_search", args: ["margin"], reason: /arguments must be an object/ },
-  { sent: "an argument it does not take", name: "run_tests", args: { command: "touch pwned" }, reason: /takes no argument command/ },
 ];
 
 for (const { sent, name, args, reason } of malformed) {
   test(`a ${name} call with ${sent} is refused before it runs`, async (t) => {
-    const place = deepPlace(t);
-    const marker = join(place.scratch, "ran");
-    const server = startedDeep(t, place, `touch '${marker}'`);
+    const server = startedDeep(t, deepPlace(t));
     const answer = toolAnswer(await server.request(1, "tools/call", call(name, args)));
     assert.equal(answer.isError, true, answer.text);
     assert.match(answer.text, reason);
     assert.match(answer.text, new RegExp(`^${name} was not run`));
-    assert.ok(!existsSync(marker), "the test command ran on a call its schema refuses");
   });
 }
 
-test("run_tests runs the configured command in the snapshot, in the reviewer's environment less the server's own", async (t) => {
-  const place = deepPlace(t);
-  const server = startedDeep(
-    t,
-    place,
-    'pwd; printf "tmp=%s mark=%s reports=%s\\n" "$TMPDIR" "$MARK" "${SQUIZ_REPORTS-unset}"',
-    { extra: { MARK: "from-the-reviewer", [REPORTS_VARIABLE]: join(place.scratch, "reports.jsonl") } },
-  );
-  const answer = toolAnswer(await server.request(1, "tools/call", call("run_tests", {})));
-  assert.equal(answer.isError, false, answer.text);
-  assert.match(answer.text, /exited 0/);
-  assert.ok(answer.text.includes(place.snapshot), answer.text);
-  assert.ok(answer.text.includes(`tmp=${place.scratch} mark=from-the-reviewer reports=unset`), answer.text);
-});
-
-test("run_tests sent no arguments at all runs the command", async (t) => {
-  const server = startedDeep(t, deepPlace(t), "exit 4");
-  const answer = toolAnswer(await server.request(1, "tools/call", { name: "run_tests" }));
-  assert.match(answer.text, /exited 4/);
-});
-
-test("run_tests handed a round it cannot read runs nothing rather than running unbounded", async (t) => {
+test("a history tool handed a round it cannot read runs nothing", async (t) => {
   const place = deepPlace(t);
   const server = started(t, place.scratch, { [ROUND_VARIABLE]: "not json" });
-  const answer = toolAnswer(await server.request(1, "tools/call", call("run_tests", {})));
+  const answer = toolAnswer(await server.request(1, "tools/call", call("git_show", { commit: "HEAD" })));
   assert.equal(answer.isError, true, answer.text);
   assert.match(answer.text, /could not run/);
 });
-
-test("run_tests stops a command that would outrun the round, before the round's deadline", async (t) => {
-  const place = deepPlace(t);
-  const endsAt = Date.now() + STOP_MARGIN_MS + 1_500;
-  const leftPid = join(place.scratch, "left");
-  const server = startedDeep(t, place, `sleep 60 & printf '%s' "$!" > '${leftPid}'; wait`, { endsAt });
-  server.send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call("run_tests", {}) });
-  const answer = toolAnswer(await server.next());
-  assert.ok(Date.now() < endsAt, `run_tests answered ${Date.now() - endsAt} ms after the round's deadline`);
-  assert.match(answer.text, /stopped after \d+ seconds, because the round's time ran out/);
-  assert.ok(!alive(Number(readFileSync(leftPid, "utf8"))), "the command outlived the run");
-});
-
-test("a run_tests call Copilot cancels stops the command, and is not answered", async (t) => {
-  const place = deepPlace(t);
-  const leftPid = join(place.scratch, "left");
-  const server = startedDeep(t, place, `sleep 600 & printf '%s' "$!" > '${leftPid}'; wait`);
-  server.send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call("run_tests", {}) });
-  await untilWritten(leftPid);
-  server.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 1, reason: "the user stopped it" } });
-  assert.ok(await goneWithin(Number(readFileSync(leftPid, "utf8")), 5_000), "the command outlived the cancel");
-  // The next message answers the ping, so nothing answered the cancelled call first.
-  resultOf(await server.request(2, "ping"));
-});
-
-test("a test command still running when the round ends is stopped through the round's record", async (t) => {
-  const place = deepPlace(t);
-  const made = makeRoundSpace(place.scratch);
-  assert.equal(made.outcome, "made");
-  if (made.outcome !== "made") return;
-  t.after(() => discardRoundSpace(made.space));
-  const leftPid = join(place.scratch, "left");
-
-  // The server leads a group of its own, as the reviewer's `sh` leads the group
-  // Copilot and the server run in, and the round's variables reach it as they
-  // reach Copilot.
-  const server = startedDeep(t, place, `sleep 600 & printf '%s' "$!" > '${leftPid}'; wait`, {
-    extra: { [RECORD_VARIABLE]: made.space.shellRecord, [KEEPER_VARIABLE]: made.space.keeperName },
-    detached: true,
-  });
-  server.send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call("run_tests", {}) });
-  await untilWritten(leftPid);
-  const sleeping = Number(readFileSync(leftPid, "utf8"));
-
-  // The server goes on answering while the tests run.
-  resultOf(await server.request(2, "ping"));
-
-  // The round's signal to the reviewer's group reaches the server, and not the
-  // test command, which leads a group of its own.
-  process.kill(-(server.child.pid ?? 0), "SIGTERM");
-  await server.exited();
-  assert.ok(alive(sleeping), "the test command was in the server's group after all");
-
-  const stopped = await stopRecordedGroups(made.space, 1_500, deadlineIn(20_000));
-  assert.equal(stopped.signalled.length, 1, `the round reached no group: ${JSON.stringify(stopped)}`);
-  assert.ok(await goneWithin(sleeping, 5_000), "the test command outlived the round");
-});
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function goneWithin(pid: number, milliseconds: number): Promise<boolean> {
-  const until = Date.now() + milliseconds;
-  while (alive(pid)) {
-    if (Date.now() > until) return false;
-    await new Promise((settle) => setTimeout(settle, 25));
-  }
-  return true;
-}
-
-async function untilWritten(path: string): Promise<void> {
-  const until = Date.now() + 10_000;
-  while (!existsSync(path) || readFileSync(path, "utf8") === "") {
-    assert.ok(Date.now() < until, `${path} never appeared, so the command never started`);
-    await new Promise((settle) => setTimeout(settle, 20));
-  }
-}

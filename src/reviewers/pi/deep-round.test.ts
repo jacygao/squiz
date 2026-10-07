@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -22,7 +22,6 @@ import { standIn } from "../../testing/stand-in.ts";
 import type { Invocation } from "../adapter.ts";
 import { deepToolNames } from "../deep-tools.ts";
 import { type Round, runRound } from "../round.ts";
-import { STOP_MARGIN_MS } from "../run-tests.ts";
 import { pi } from "./adapter.ts";
 
 const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url));
@@ -34,7 +33,7 @@ type Answered = { readonly text: string; readonly failed: boolean };
 
 test("a round at deep calls each deep tool once and gets its result back", async () => {
   await inTheFixture(async (tree) => {
-    const round = await runRound(pi, invocationIn(tree, 'echo "the suite ran in $PWD"'), 60);
+    const round = await runRound(pi, invocationIn(tree), 60);
     assert.equal(round.outcome, "reviewed", accountOf(round));
 
     const answered = answeredIn(tree);
@@ -42,32 +41,13 @@ test("a round at deep calls each deep tool once and gets its result back", async
     for (const [name, answer] of Object.entries(answered)) {
       assert.ok(!answer.failed, `${name} failed: ${answer.text}`);
     }
-    assert.match(answered["run_tests"]?.text ?? "", /^The test command exited 0\./u);
-    assert.ok(answered["run_tests"]?.text.includes(`the suite ran in ${realpathSync(tree)}`));
     assert.match(answered["git_log_search"]?.text ?? "", /Add lastSaid/u);
     assert.match(answered["git_blame"]?.text ?? "", /comments\[comments\.length\]/u);
     assert.match(answered["git_show"]?.text ?? "", /^commit [0-9a-f]{40}/u);
   });
 });
 
-// The round's deadline reaches run_tests through the round, so a suite that
-// would outlast the round is stopped and the reviewer still finishes in time.
-test("run_tests in a round is stopped before the round's own bound", async () => {
-  await inTheFixture(async (tree) => {
-    const seconds = Math.ceil(STOP_MARGIN_MS / 1_000) + 4;
-    const started = Date.now();
-    const round = await runRound(pi, invocationIn(tree, "sleep 120"), seconds);
-    const took = Date.now() - started;
-    assert.equal(round.outcome, "reviewed", accountOf(round));
-    assert.ok(took < seconds * 1_000, `the round took ${took} ms of its ${seconds} seconds`);
-    assert.match(
-      answeredIn(tree)["run_tests"]?.text ?? "",
-      /was stopped after \d+ seconds, because the round's time ran out/u,
-    );
-  });
-});
-
-function invocationIn(tree: string, command: string): Invocation {
+function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
@@ -78,7 +58,6 @@ function invocationIn(tree: string, command: string): Invocation {
     scratchDirectory: scratchIn(tree),
     githubConfigDirectory: ".squiz/1/rounds/1/gh",
     depth: "deep",
-    test: command,
     thinking: "medium",
     model: null,
     roundSpace: undefined,
@@ -175,7 +154,6 @@ const give = (said) => {
 };
 
 const calls = {
-  run_tests: {},
   git_log_search: { term: "comments.length" },
   git_blame: { file: "src/threads.ts", line: 2 },
   git_show: { commit: "HEAD" },

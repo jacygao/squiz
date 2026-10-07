@@ -290,18 +290,13 @@ function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
-    prompt: composePrompt(
-      { pullRequest, diff: diffOf(tree), threads: [thread] },
-      // The fixture runs at `read`, which no test command reaches.
-      { depth: "read", command: null },
-    ),
+    prompt: composePrompt({ pullRequest, diff: diffOf(tree), threads: [thread] }, "read"),
     sessionDirectory,
     promptFile: ".squiz/104/rounds/1/prompt.md",
     reportsFile,
     scratchDirectory,
     githubConfigDirectory: ".squiz/104/rounds/1/gh",
     depth: "read",
-    test: null,
     thinking: "medium",
     model: null,
     roundSpace: undefined,

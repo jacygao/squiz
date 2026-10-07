@@ -123,7 +123,6 @@ const shownInPi: Readonly<
 
 /** How `pi` lists each `deep` tool. */
 const deepLabels: Readonly<Record<string, string>> = {
-  run_tests: "Run tests",
   git_log_search: "Search history",
   git_blame: "Blame line",
   git_show: "Show commit",

@@ -31,7 +31,6 @@ function fixture(t: TestContext): Fixture {
     scratchDirectory: ".squiz/7/scratch",
     githubConfigDirectory: ".squiz/7/rounds/1/gh",
     depth: "read",
-    test: null,
     thinking: "medium",
     model: null,
     roundSpace: undefined,

@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -702,12 +702,7 @@ function deepLoaded(environment: Readonly<Record<string, string | undefined>>): 
 }
 
 /** A round whose snapshot is this repository, which has a history to read. */
-const thisRound = roundVariable({
-  snapshot: process.cwd(),
-  scratch: tmpdir(),
-  test: null,
-  endsAt: Date.now() + 600_000,
-});
+const thisRound = roundVariable({ snapshot: process.cwd(), endsAt: Date.now() + 600_000 });
 
 /** The tools `pi` brings itself, which the extension does not register. */
 const builtIn = new Set(["read", "grep", "find", "ls"]);
@@ -751,14 +746,4 @@ test("a deep tool's result is the call's answer", async () => {
 test("the signal pi hands a call reaches the runner", async () => {
   const tool = toolOf(deepLoaded(thisRound), "git_show");
   await assert.rejects(tool.execute("call_1", { commit: "HEAD" }, AbortSignal.abort()));
-});
-
-test("a run_tests call pi cancelled before it started runs nothing", async (t) => {
-  const scratch = mkdtempSync(join(tmpdir(), "squiz-extension-"));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
-  const started = join(scratch, "started");
-  const round = roundVariable({ snapshot: scratch, scratch, test: `touch ${started}`, endsAt: Date.now() + 600_000 });
-  const tool = toolOf(deepLoaded({ ...round, PATH: process.env["PATH"] }), "run_tests");
-  await assert.rejects(tool.execute("call_1", {}, AbortSignal.abort()), /cancelled/u);
-  assert.ok(!existsSync(started), "a cancelled call started the test command");
 });

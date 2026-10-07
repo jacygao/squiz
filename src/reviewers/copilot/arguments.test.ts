@@ -5,7 +5,6 @@ import { mismatchOf } from "./arguments.ts";
 import { deepTools } from "../deep-tools.ts";
 
 const valid: Readonly<Record<string, unknown>> = {
-  run_tests: {},
   git_log_search: { term: "margin" },
   git_blame: { file: "src/place.ts", line: 12 },
   git_show: { commit: "HEAD~1" },

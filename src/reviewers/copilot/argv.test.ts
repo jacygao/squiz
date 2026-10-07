@@ -21,7 +21,6 @@ const invocation: Invocation = {
   scratchDirectory: ".squiz/7/scratch",
   githubConfigDirectory: ".squiz/7/rounds/1/gh",
   depth: "read",
-  test: null,
   thinking: "medium",
   model: null,
   roundSpace: undefined,
@@ -54,10 +53,9 @@ test("the grant at read is the three reading tools and the three reporting calls
   ]);
 });
 
-test("the grant at deep is the read grant and the four deep tools under the server's name", () => {
+test("the grant at deep is the read grant and the three deep tools under the server's name", () => {
   assert.deepEqual(grants.deep, [
     ...grants.read,
-    "squiz-run_tests",
     "squiz-git_log_search",
     "squiz-git_blame",
     "squiz-git_show",

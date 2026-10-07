@@ -8,8 +8,7 @@
  * The round is the one the round host runs: the adapter named, at the depth
  * named, thinking `medium`, 900 seconds, in a snapshot of the change's head made
  * as a round makes it, handed the change's diff and its description and no
- * threads. At `deep`, `run_tests` runs the case's own test command. The depth
- * and the model are handed to the round directly, as the round host hands them
+ * threads. The depth and the model are handed to the round directly, as the round host hands them
  * over, so nothing here reads `.squiz.json`.
  *
  * The reviewer's CLI must be on `PATH` and signed in, and each run spends real
@@ -144,7 +143,7 @@ const round = await runRound(
   {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, diff: prepared.diff, threads: [] }, { depth, command: measured.test }),
+    prompt: composePrompt({ pullRequest, diff: prepared.diff, threads: [] }, depth),
     sessionDirectory: join(own, "session"),
     promptFile: join(own, "prompt.md"),
     reportsFile: join(own, "reports.jsonl"),
@@ -152,7 +151,6 @@ const round = await runRound(
     githubConfigDirectory: join(own, "gh"),
     depth,
     model: model ?? null,
-    test: measured.test,
     thinking: "medium",
     roundSpace,
     terminal: "none",

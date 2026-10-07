@@ -317,9 +317,9 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * `GH_CONFIG_DIR` names `github`, which the round has emptied. They come after
  * the confinement's, so no adapter puts a token back.
  *
- * At `deep` the tools the CLI serves are handed the snapshot, the test command,
- * the scratch space and the moment the round ends. The moment is on the wall
- * clock, because that is the one clock the tools can read as well.
+ * At `deep` the tools the CLI serves are handed the snapshot and the moment the
+ * round ends. The moment is on the wall clock, because that is the one clock the
+ * tools can read as well.
  */
 function variablesOf(
   invocation: Invocation,
@@ -333,8 +333,6 @@ function variablesOf(
     invocation.depth === "deep"
       ? roundVariable({
           snapshot: resolve(invocation.directory),
-          scratch,
-          test: invocation.test,
           endsAt: Date.now() + bound.remaining(),
         })
       : {};

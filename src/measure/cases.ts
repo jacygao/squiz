@@ -38,7 +38,7 @@ export type Case = {
   readonly source: Source;
   /** The description, as a file beside this one. */
   readonly description: string;
-  /** The test command `run_tests` runs at `deep`, which works in a fresh checkout. */
+  /** The project's own test command, which works in a fresh checkout and fails on each defect marked `test`. */
   readonly test: string;
   /** Why the case is in the set, and how its defects were chosen. */
   readonly chosen: string;

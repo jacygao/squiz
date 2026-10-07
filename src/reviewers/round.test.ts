@@ -732,18 +732,14 @@ test("the reviewer is told where to record, and told nothing where there is no r
 
 // The deep tools run inside the reviewer's CLI, where the round's values are
 // readable only off the environment.
-test("at deep the reviewer is handed the round's snapshot, test command, scratch space and end", async () => {
+test("at deep the reviewer is handed the round's snapshot and end, and nothing else", async () => {
   await inATree(async (tree) => {
     const seconds = 30;
     const before = Date.now();
-    const deep = { ...atDeep(tree), test: "npm test" };
-    const round = await runRound(reviewer(reporting(`process.env.${ROUND_VARIABLE}`)).adapter, deep, seconds);
+    const round = await runRound(reviewer(reporting(`process.env.${ROUND_VARIABLE}`)).adapter, atDeep(tree), seconds);
     const after = Date.now();
     const handed = JSON.parse(headlineOf(round)) as Record<string, unknown>;
-    assert.deepEqual(
-      { ...handed, endsAt: undefined },
-      { snapshot: tree, scratch: join(tree, scratchDirectory), test: "npm test", endsAt: undefined },
-    );
+    assert.deepEqual({ ...handed, endsAt: undefined }, { snapshot: tree, endsAt: undefined });
     const endsAt = handed["endsAt"];
     assert.ok(
       typeof endsAt === "number" && endsAt >= before + seconds * 1_000 && endsAt <= after + seconds * 1_000,
@@ -1598,7 +1594,6 @@ function at(tree: string): Invocation {
     scratchDirectory,
     githubConfigDirectory,
     depth: "read",
-    test: null,
     thinking: "medium",
     model: null,
     roundSpace: undefined,

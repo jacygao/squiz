@@ -205,7 +205,6 @@ function invocationIn(tree: string): Invocation {
     scratchDirectory: join(tree, ".squiz/142/scratch"),
     githubConfigDirectory: join(tree, ".squiz/142/rounds/1/gh"),
     depth: "read",
-    test: null,
     thinking: "medium",
     model: null,
     roundSpace: undefined,

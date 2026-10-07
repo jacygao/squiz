@@ -147,11 +147,10 @@ function invocationIn(tree: string): Invocation {
     scratchDirectory: ".squiz/agent-1/scratch",
     githubConfigDirectory: ".squiz/agent-1/rounds/1/gh",
     depth: "deep",
-    test: null,
     thinking: "medium",
     model: null,
     // No space, so nothing records a group. What a refused call does is the whole
-    // of what this reads, and nothing here runs the test command.
+    // of what this reads.
     roundSpace: undefined,
     terminal: "none",
   };

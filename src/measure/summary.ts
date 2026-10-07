@@ -61,7 +61,6 @@ export type Summary = {
   readonly findings: readonly string[];
 };
 
-// A failing suite says what failed at the end of its output, so the end is kept.
 const ANSWER_KEPT = 2_000;
 
 const LOOKING_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "find", "ls", "view", "glob"]);
