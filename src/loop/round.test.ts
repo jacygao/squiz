@@ -80,6 +80,7 @@ type Kind =
   | "lookup"
   | "resolve"
   | "unresolve"
+  | "reply"
   | "summary"
   | "failure";
 
@@ -750,6 +751,7 @@ const GH_SCRIPT = [
   'request="$* $(cat "$dir/stdin-$n")"',
   "kind=unknown",
   'case "$request" in',
+  "  *'addPullRequestReviewThreadReply'*) kind=reply ;;",
   // Before the resolve: one spelling is inside the other.
   "  *'unresolveReviewThread'*) kind=unresolve ;;",
   "  *'resolveReviewThread'*) kind=resolve ;;",
@@ -850,6 +852,12 @@ const RESOLVED = included(
 const REOPENED = included(
   "200 OK",
   JSON.stringify({ data: { unresolveReviewThread: { thread: { isResolved: false } } } }),
+);
+
+/** A reply GitHub took, on a thread the reviewer kept open. */
+const REPLIED = included(
+  "200 OK",
+  JSON.stringify({ data: { addPullRequestReviewThreadReply: { comment: { databaseId: 2140876600 } } } }),
 );
 
 /** The summary comment GitHub created: an issue comment, on no line of the diff. */
@@ -1035,16 +1043,17 @@ test("a second episode's first round is handed the threads already on the pull r
       ]),
       resolve: RESOLVED,
       unresolve: REOPENED,
+      reply: REPLIED,
     },
     reviewer: reviews({
       verdicts: [
         { thread: "PRRT_one", verdict: "fixed" },
-        { thread: "PRRT_two", verdict: "open" },
+        { thread: "PRRT_two", verdict: "open", reason: "Still wrong." },
       ],
     }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve", "reply"]);
   const prompt = ran.invocations[0]?.prompt ?? "";
   assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
   assert.match(prompt, /### PRRT_two\n\nResolved\./u);
@@ -1146,11 +1155,12 @@ test("a resolved thread of the reviewer's own is handed over, and a verdict re-o
       diff: DIFF,
       threads: listed([{ id: "PRRT_closed", isResolved: true }]),
       unresolve: REOPENED,
+      reply: REPLIED,
     },
-    reviewer: reviews({ verdicts: [{ thread: "PRRT_closed", verdict: "open" }] }),
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_closed", verdict: "open", reason: "Still wrong." }] }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "unresolve"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "unresolve", "reply"]);
   assert.equal(ran.conclusion.outcome, "block");
 });
 
@@ -1192,16 +1202,17 @@ test("a later round hands over the reviewer's threads with their state and appli
       ]),
       resolve: RESOLVED,
       unresolve: REOPENED,
+      reply: REPLIED,
     },
     reviewer: reviews({
       verdicts: [
         { thread: "PRRT_one", verdict: "fixed" },
-        { thread: "PRRT_two", verdict: "open" },
+        { thread: "PRRT_two", verdict: "open", reason: "Still wrong." },
       ],
     }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "resolve", "unresolve", "reply"]);
   const prompt = ran.invocations[0]?.prompt ?? "";
   assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
   assert.match(prompt, /### PRRT_two\n\nResolved\./u);
@@ -1250,14 +1261,15 @@ test("a closing round posts one comment carrying the summary it composed", async
       diff: DIFF,
       threads: listed([{ id: "PRRT_open", isResolved: false }]),
       summary: SUMMARY_POSTED,
+      reply: REPLIED,
     },
-    reviewer: reviews({ verdicts: [{ thread: "PRRT_open", verdict: "open" }] }),
+    reviewer: reviews({ verdicts: [{ thread: "PRRT_open", verdict: "open", reason: "Still wrong." }] }),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
   assert.equal(ran.conclusion.because, "round-cap");
   assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "diff", "reply", "summary"]);
   assert.equal(
     ran.state?.closeReported,
     true,
@@ -1445,9 +1457,10 @@ test("a round that reached the token bound closes the episode", async () => {
       diff: DIFF,
       threads: listed([{ id: "PRRT_one", isResolved: false }]),
       unresolve: REOPENED,
+      reply: REPLIED,
       summary: SUMMARY_POSTED,
     },
-    reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open" }] }),
+    reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open", reason: "Still wrong." }] }),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
@@ -1494,9 +1507,10 @@ test("a Copilot round with a cost is held to the token bound, its credits record
       diff: DIFF,
       threads: listed([{ id: "PRRT_one", isResolved: false }]),
       unresolve: REOPENED,
+      reply: REPLIED,
       summary: SUMMARY_POSTED,
     },
-    reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open" }] }),
+    reviewer: reviews({ cost: wide, verdicts: [{ thread: "PRRT_one", verdict: "open", reason: "Still wrong." }] }),
   });
 
   assert.ok(ran.conclusion.outcome === "close");
@@ -1682,6 +1696,7 @@ test("the verdicts a failed round reported are applied, and no other thread is t
       ]),
       resolve: RESOLVED,
       unresolve: REOPENED,
+      reply: REPLIED,
     },
     reviewer: hangs(ANSWER_COST, { verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] }),
   });
@@ -1708,6 +1723,7 @@ test("a round that reported nothing before it failed posts only its failure comm
       ...POSTING,
       threads: listed([{ id: "PRRT_two", isResolved: true }]),
       unresolve: REOPENED,
+      reply: REPLIED,
     },
     reviewer: hangs(ANSWER_COST),
   });

@@ -4,7 +4,8 @@
  * reports what the test plans.
  *
  * The fake `gh` opens a thread for each comment the round creates, resolves one
- * when the round's verdict asks, and lists what it holds. A test replies on a
+ * when the round's verdict asks, adds the reply the round posts on a thread it
+ * keeps open, and lists what it holds. A test replies on a
  * thread by adding a comment to that file, which is how the coding agent's
  * `squiz reply` reaches the next listing.
  */
@@ -22,9 +23,9 @@ import { renderReply } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
-import type { Verdict } from "../findings/status.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Plan, PlannedStart } from "./host-fixture.ts";
+import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { runReview } from "./review.ts";
 
@@ -89,6 +90,16 @@ function answer(body) {
   if (argv[1] === "graphql") {
     const request = JSON.parse(body);
     const query = request.query;
+    if (query.includes("addPullRequestReviewThreadReply")) {
+      if (state.rejectReply) {
+        return http("200 OK", { data: null, errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }] });
+      }
+      const thread = state.threads.find((t) => t.id === request.variables.threadId);
+      const n = thread.comments.length + 1;
+      thread.comments.push({ id: thread.id + "_reply" + n, databaseId: 9900 + n, body: request.variables.body, createdAt: "2026-10-05T07:25:00Z" });
+      save();
+      return http("200 OK", { data: { addPullRequestReviewThreadReply: { comment: { databaseId: 9900 + n } } } });
+    }
     if (query.includes("resolveReviewThread")) {
       const resolving = !query.includes("unresolveReviewThread");
       const thread = state.threads.find((t) => t.id === request.variables.threadId);
@@ -160,6 +171,8 @@ type GhState = {
   readonly rejectCreate?: boolean;
   /** Whether GitHub refuses every issue comment, which is how the summary is posted. */
   readonly rejectSummary?: boolean;
+  /** Whether GitHub refuses every reply the round posts on a thread. */
+  readonly rejectReply?: boolean;
 };
 
 type Fixture = {
@@ -230,16 +243,18 @@ const hostLog = (episode: Episode): string => {
   return existsSync(file) ? readFileSync(file, "utf8") : "";
 };
 
-const rulings: readonly [Verdict, number, string][] = [
-  ["withdrawn", 0, "Nothing is open. The review is closed, and its summary is on the pull request."],
-  ["open", 2, "1 thread is open:"],
+const KEPT_OPEN = "A fixture still needs a line saying what it is for. Add one, or show where the header says it.";
+
+const rulings: readonly [ThreadVerdict, number, string][] = [
+  [{ thread: "PRRT_1", verdict: "withdrawn" }, 0, "Nothing is open. The review is closed, and its summary is on the pull request."],
+  [{ thread: "PRRT_1", verdict: "open", reason: KEPT_OPEN }, 2, "1 thread is open:"],
 ];
 
-for (const [verdict, exit, paragraph] of rulings) {
-  test(`a disputed finding with no commit after it is a new state, whose round rules it ${verdict} and counts against the cap`, async () => {
+for (const [ruling, exit, paragraph] of rulings) {
+  test(`a disputed finding with no commit after it is a new state, whose round rules it ${ruling.verdict} and counts against the cap`, async () => {
     const starts: PlannedStart[] = [
       { findings: [FINDING], verdicts: [] },
-      { findings: [], verdicts: [{ thread: "PRRT_1", verdict }] },
+      { findings: [], verdicts: [ruling] },
     ];
     await withPullRequest(starts, async (fixture) => {
       const first = await review(fixture);
@@ -262,9 +277,62 @@ for (const [verdict, exit, paragraph] of rulings) {
       assert.equal(lines[1], "Squiz reviewed PR #41 at " + fixture.gh().head.slice(0, 7) + ": round 2 of 3, no new findings.");
       assert.equal(lines[3], paragraph);
       assert.equal(stateOf(fixture.episode).rounds.length, 2, "the round the reply started did not count against the cap");
+      const comments = fixture.gh().threads[0]?.comments ?? [];
+      if (ruling.verdict !== "open") {
+        assert.equal(comments.length, 2, "a thread the reviewer closed was replied on");
+        return;
+      }
+      assert.deepEqual(
+        lines.slice(5, 13),
+        [
+          "PRRT_1 src/ui/card.ts:2 high — The new line says nothing",
+          "  - A reader cannot tell what it is for.",
+          "",
+          "  **Suggested fix:** Say what it is for.",
+          "",
+          "  **Squiz coding agent**",
+          "",
+          "  The line is a fixture, and says so in the file's header.",
+        ],
+      );
+      assert.deepEqual(
+        lines.slice(13, 17),
+        ["", "  **Squiz reviewer · still open**", "", `  ${KEPT_OPEN}`],
+        "the reviewer's reason for keeping the thread open did not reach the coding agent",
+      );
+      assert.equal(second.stderr, "");
     });
   });
 }
+
+test("a reason GitHub refuses to post is named on stderr, and the thread stays open (#511)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "open", reason: KEPT_OPEN }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 2, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    const gh = fixture.gh();
+    gh.threads[0]?.comments.push({
+      id: "PRRC_reply",
+      databaseId: 9500,
+      body: renderReply("The line is a fixture, and says so in the file's header."),
+      createdAt: "2026-10-05T07:20:00Z",
+    });
+    fixture.setGh({ ...gh, rejectReply: true });
+
+    const second = await review(fixture);
+    assert.equal(second.exit, 2, `${second.stdout}${second.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(
+      second.stderr,
+      /the reviewer's reply on thread PRRT_1 could not be posted: GitHub reported a GraphQL error: Resource not accessible by integration/u,
+    );
+    assert.equal(fixture.gh().threads[0]?.comments.length, 2);
+    assert.equal(fixture.gh().threads[0]?.isResolved, false);
+  });
+});
 
 test("a cap lowered after a round blocked closes the episode at the next run, which posts the summary and prints the cap (#508)", async () => {
   await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {

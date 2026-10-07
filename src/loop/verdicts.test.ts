@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { renderOpenReason } from "../findings/comment.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { applyVerdicts, type HandedOverThread } from "./verdicts.ts";
@@ -125,6 +126,13 @@ function notFound(id: string): string {
  * mutation's name inside its own, so the resolve rule matches both.
  */
 const healthy: readonly Rule[] = [
+  {
+    when: "addPullRequestReviewThreadReply",
+    answer: included(
+      "200 OK",
+      JSON.stringify({ data: { addPullRequestReviewThreadReply: { comment: { databaseId: 1 } } } }),
+    ),
+  },
   { when: "unresolveReviewThread", answer: reported("unresolveReviewThread", false) },
   { when: "resolveReviewThread", answer: reported("resolveReviewThread", true) },
 ];
@@ -144,20 +152,31 @@ function closed(id: string): HandedOverThread {
   return { id, isResolved: true };
 }
 
-/** One mutation the fake `gh` was sent: which thread, and which of the two. */
-type Sent = { readonly thread: string; readonly mutation: "close" | "reopen" };
+/** One mutation the fake `gh` was sent: which thread, and which of the three. */
+type Sent =
+  | { readonly thread: string; readonly mutation: "close" | "reopen" }
+  | { readonly thread: string; readonly mutation: "reply"; readonly body: string };
 
 /** Every mutation `gh` was sent, in order, read back out of its log. */
 function sent(gh: Fake): readonly Sent[] {
-  return gh.requests().map((line) => {
-    const request = JSON.parse(line) as { query: string; variables: { threadId: string } };
-    return {
-      thread: request.variables.threadId,
-      // `unresolveReviewThread` holds the other name, so it is tested first.
-      mutation: request.query.includes("unresolveReviewThread") ? "reopen" : "close",
-    };
+  return gh.requests().map((line): Sent => {
+    const request = JSON.parse(line) as { query: string; variables: { threadId: string; body?: string } };
+    const thread = request.variables.threadId;
+    if (request.query.includes("addPullRequestReviewThreadReply")) {
+      return { thread, mutation: "reply", body: request.variables.body ?? "" };
+    }
+    // `unresolveReviewThread` holds the other name, so it is tested first.
+    return { thread, mutation: request.query.includes("unresolveReviewThread") ? "reopen" : "close" };
   });
 }
+
+/** The mutations `gh` was sent that set a thread's state, leaving out every reply. */
+function stateChanges(gh: Fake): readonly Sent[] {
+  return sent(gh).filter((each) => each.mutation !== "reply");
+}
+
+/** What a reply GitHub took comes back as. */
+const acted = { outcome: "acted" } as const;
 
 test("fixed and withdrawn close the thread each names", async () => {
   await withFakeGh(healthy, (gh) => {
@@ -186,17 +205,17 @@ test("open re-opens a thread that was closed and counts it as re-opened", async 
     const applied = applyVerdicts(
       [closed("PRRT_reopen"), open("PRRT_close")],
       [
-        { thread: "PRRT_reopen", verdict: "open" },
+        { thread: "PRRT_reopen", verdict: "open", reason: "Still wrong." },
         { thread: "PRRT_close", verdict: "fixed" },
       ],
       anywhere,
     );
 
     assert.deepEqual(applied.threads, [
-      { thread: "PRRT_reopen", ruled: "open", outcome: "reopened" },
+      { thread: "PRRT_reopen", ruled: "open", outcome: "reopened", reply: acted },
       { thread: "PRRT_close", ruled: "fixed", outcome: "closed" },
     ]);
-    assert.deepEqual(sent(gh), [
+    assert.deepEqual(stateChanges(gh), [
       { thread: "PRRT_reopen", mutation: "reopen" },
       { thread: "PRRT_close", mutation: "close" },
     ]);
@@ -207,14 +226,14 @@ test("open leaves a thread that is already open alone", async () => {
   await withFakeGh(healthy, (gh) => {
     const applied = applyVerdicts(
       [open("PRRT_still")],
-      [{ thread: "PRRT_still", verdict: "open" }],
+      [{ thread: "PRRT_still", verdict: "open", reason: "Still wrong." }],
       anywhere,
     );
 
     assert.deepEqual(applied.threads, [
-      { thread: "PRRT_still", ruled: "open", outcome: "left-open" },
+      { thread: "PRRT_still", ruled: "open", outcome: "left-open", reply: acted },
     ]);
-    assert.deepEqual(sent(gh), [], "a thread in the state the verdict asks for takes no mutation");
+    assert.deepEqual(stateChanges(gh), [], "a thread in the state the verdict asks for takes no mutation");
   });
 });
 
@@ -226,7 +245,7 @@ test("a thread the reviewer returned no verdict for takes the path an open verdi
   await withFakeGh(healthy, (gh) => {
     const applied = applyVerdicts(
       [closed("PRRT_forgotten"), closed("PRRT_ruled"), open("PRRT_untouched")],
-      [{ thread: "PRRT_ruled", verdict: "open" }],
+      [{ thread: "PRRT_ruled", verdict: "open", reason: "Still wrong." }],
       anywhere,
     );
 
@@ -238,7 +257,7 @@ test("a thread the reviewer returned no verdict for takes the path an open verdi
     });
     assert.deepEqual(untouched, { thread: "PRRT_untouched", ruled: null, outcome: "left-open" });
     assert.deepEqual(
-      sent(gh),
+      stateChanges(gh),
       [
         { thread: "PRRT_forgotten", mutation: "reopen" },
         { thread: "PRRT_ruled", mutation: "reopen" },
@@ -256,18 +275,18 @@ test("a verdict reaches the thread it names and not the one in its place", async
     const handedOver = [open("PRRT_first"), closed("PRRT_second"), open("PRRT_third")];
     const verdicts: readonly ThreadVerdict[] = [
       { thread: "PRRT_third", verdict: "fixed" },
-      { thread: "PRRT_first", verdict: "open" },
-      { thread: "PRRT_second", verdict: "open" },
+      { thread: "PRRT_first", verdict: "open", reason: "Still wrong." },
+      { thread: "PRRT_second", verdict: "open", reason: "Still wrong." },
     ];
 
     const applied = applyVerdicts(handedOver, verdicts, anywhere);
 
     assert.deepEqual(applied.threads, [
-      { thread: "PRRT_first", ruled: "open", outcome: "left-open" },
-      { thread: "PRRT_second", ruled: "open", outcome: "reopened" },
+      { thread: "PRRT_first", ruled: "open", outcome: "left-open", reply: acted },
+      { thread: "PRRT_second", ruled: "open", outcome: "reopened", reply: acted },
       { thread: "PRRT_third", ruled: "fixed", outcome: "closed" },
     ]);
-    assert.deepEqual(sent(gh), [
+    assert.deepEqual(stateChanges(gh), [
       { thread: "PRRT_second", mutation: "reopen" },
       { thread: "PRRT_third", mutation: "close" },
     ]);
@@ -304,17 +323,17 @@ test("a thread ruled twice takes the first ruling, and the second is reported", 
     const applied = applyVerdicts(
       [open("PRRT_twice")],
       [
-        { thread: "PRRT_twice", verdict: "open" },
+        { thread: "PRRT_twice", verdict: "open", reason: "Still wrong." },
         { thread: "PRRT_twice", verdict: "fixed" },
       ],
       anywhere,
     );
 
     assert.deepEqual(applied.threads, [
-      { thread: "PRRT_twice", ruled: "open", outcome: "left-open" },
+      { thread: "PRRT_twice", ruled: "open", outcome: "left-open", reply: acted },
     ]);
     assert.deepEqual(applied.unapplied[0]?.verdict, "fixed");
-    assert.deepEqual(sent(gh), [], "the later ruling must not decide the thread");
+    assert.deepEqual(stateChanges(gh), [], "the later ruling must not decide the thread");
   });
 });
 
@@ -367,7 +386,7 @@ test("a re-open GitHub refused is not counted as a thread re-opened", async () =
   await withFakeGh(refusing("PRRT_refused"), () => {
     const applied = applyVerdicts(
       [closed("PRRT_refused")],
-      [{ thread: "PRRT_refused", verdict: "open" }],
+      [{ thread: "PRRT_refused", verdict: "open", reason: "Still wrong." }],
       anywhere,
     );
 
@@ -398,8 +417,8 @@ test("a gh that is not installed fails every thread and throws nothing", async (
       [open("PRRT_one"), closed("PRRT_two"), open("PRRT_three")],
       [
         { thread: "PRRT_one", verdict: "fixed" },
-        { thread: "PRRT_two", verdict: "open" },
-        { thread: "PRRT_three", verdict: "open" },
+        { thread: "PRRT_two", verdict: "open", reason: "Still wrong." },
+        { thread: "PRRT_three", verdict: "open", reason: "Still wrong." },
       ],
       anywhere,
     );
@@ -408,6 +427,90 @@ test("a gh that is not installed fails every thread and throws nothing", async (
       applied.threads.map((thread) => thread.outcome),
       // The third asked for nothing, so there was no call for gh to fail.
       ["failed", "failed", "left-open"],
+    );
+  });
+});
+
+test("a thread kept open is replied on with the reviewer's reason, after it is re-opened (#511)", async () => {
+  await withFakeGh(healthy, (gh) => {
+    const applied = applyVerdicts(
+      [open("PRRT_open"), closed("PRRT_closed")],
+      [
+        { thread: "PRRT_open", verdict: "open", reason: "The clamp still runs first." },
+        { thread: "PRRT_closed", verdict: "open", reason: "Nothing measures the card." },
+      ],
+      anywhere,
+    );
+
+    assert.deepEqual(applied.threads, [
+      { thread: "PRRT_open", ruled: "open", outcome: "left-open", reply: { outcome: "acted" } },
+      { thread: "PRRT_closed", ruled: "open", outcome: "reopened", reply: { outcome: "acted" } },
+    ]);
+    assert.deepEqual(sent(gh), [
+      { thread: "PRRT_open", mutation: "reply", body: renderOpenReason("The clamp still runs first.") },
+      { thread: "PRRT_closed", mutation: "reopen" },
+      { thread: "PRRT_closed", mutation: "reply", body: renderOpenReason("Nothing measures the card.") },
+    ]);
+  });
+});
+
+test("a thread closed, or passed over, is not replied on", async () => {
+  await withFakeGh(healthy, (gh) => {
+    const applied = applyVerdicts(
+      [open("PRRT_fixed"), open("PRRT_withdrawn"), open("PRRT_forgotten")],
+      [
+        { thread: "PRRT_fixed", verdict: "fixed" },
+        { thread: "PRRT_withdrawn", verdict: "withdrawn" },
+      ],
+      anywhere,
+    );
+
+    assert.deepEqual(
+      applied.threads.map((thread) => thread.reply),
+      [undefined, undefined, undefined],
+    );
+    assert.deepEqual(
+      sent(gh).map((each) => each.mutation),
+      ["close", "close"],
+      "the default open is no ruling, and has no reason to post",
+    );
+  });
+});
+
+test("a reason ruled on a thread that was not handed over, or ruled twice, is not posted", async () => {
+  await withFakeGh(healthy, (gh) => {
+    applyVerdicts(
+      [open("PRRT_handed")],
+      [
+        { thread: "PRRT_handed", verdict: "fixed" },
+        { thread: "PRRT_handed", verdict: "open", reason: "Second thoughts." },
+        { thread: "PRRT_invented", verdict: "open", reason: "Somewhere else." },
+      ],
+      anywhere,
+    );
+
+    assert.deepEqual(sent(gh), [{ thread: "PRRT_handed", mutation: "close" }]);
+  });
+});
+
+test("a reason GitHub refuses leaves the verdict standing, and says why", async () => {
+  const refusingReplies: readonly Rule[] = [
+    { when: "addPullRequestReviewThreadReply", answer: notFound("PRRT_refused") },
+    ...healthy,
+  ];
+  await withFakeGh(refusingReplies, () => {
+    const applied = applyVerdicts(
+      [closed("PRRT_refused")],
+      [{ thread: "PRRT_refused", verdict: "open", reason: "Still wrong." }],
+      anywhere,
+    );
+
+    const [thread] = applied.threads;
+    assert.equal(thread?.outcome, "reopened", "a reply that failed undid the verdict");
+    assert.equal(thread?.reply?.outcome, "failed");
+    assert.match(
+      thread?.reply?.outcome === "failed" ? thread.reply.reason : "",
+      /Could not resolve to PullRequestReviewThread node/u,
     );
   });
 });

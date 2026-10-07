@@ -129,6 +129,36 @@ test("a verdict reads as the thread it names and the ruling it gives", () => {
   assert.deepEqual(valueOf(readVerdict(ruling)), ruling);
 });
 
+test("an open verdict carries the reason the reviewer gave for it", () => {
+  const ruling = {
+    thread: "PRRT_kwDOAbc123",
+    verdict: "open",
+    reason: "The clamp still reads the height before the animation. Measure it after.",
+  };
+  assert.deepEqual(valueOf(readVerdict(ruling)), ruling);
+});
+
+test("an open verdict with no reason is refused, so the reviewer is asked for one", () => {
+  for (const reason of [undefined, "", "   ", 7]) {
+    assert.match(
+      refusalOf(readVerdict({ thread: "PRRT_kwDOAbc123", verdict: "open", reason })),
+      /keeps thread PRRT_kwDOAbc123 open and gives no reason/u,
+      `a reason of ${JSON.stringify(reason)} was accepted`,
+    );
+  }
+});
+
+test("a fixed or withdrawn verdict carrying a reason is refused rather than trimmed", () => {
+  // Nothing posts a reason for either, and dropping it here would tell the
+  // reviewer a reply had landed that nobody will ever read.
+  for (const verdict of ["fixed", "withdrawn"]) {
+    assert.match(
+      refusalOf(readVerdict({ thread: "PRRT_kwDOAbc123", verdict, reason: "Looks right now." })),
+      new RegExp(`is ${verdict} and carries a reason, which only an open verdict takes`, "u"),
+    );
+  }
+});
+
 test("a verdict outside the three is caught", () => {
   const ruling = { thread: "PRRT_kwDOAbc123", verdict: "resolved" };
   assert.match(

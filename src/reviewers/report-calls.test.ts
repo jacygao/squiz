@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { reportCalls } from "./report-calls.ts";
 import type { Line, ReportFile } from "./report-file.ts";
-import { FINISH_REVIEW, REPORT_FINDING, reportingTools } from "./reporting.ts";
+import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "./reporting.ts";
 
 /** A file that keeps its lines in memory. */
 function kept(): { file: ReportFile; lines: Line[] } {
@@ -51,6 +51,25 @@ test("a call answers with the reviewer's text and the harness's details, once re
   assert.equal(answer?.text, `Reported: ${finding.headline}`);
   assert.deepEqual(answer?.details, finding);
   assert.deepEqual(lines, [{ type: "report", call: REPORT_FINDING, value: finding }]);
+});
+
+test("an open verdict with no reason is refused, and the thread can be ruled on again", () => {
+  const { file, lines } = kept();
+  const verdict = reportCalls(file).calls.find((each) => each.name === REPORT_VERDICT);
+  assert.throws(
+    () => verdict?.answer({ thread: "PRRT_one", verdict: "open" }),
+    /the verdict keeps thread PRRT_one open and gives no reason/u,
+  );
+
+  const ruling = { thread: "PRRT_one", verdict: "open", reason: "The bound is still missing." };
+  assert.deepEqual(verdict?.answer(ruling).details, ruling);
+  assert.deepEqual(lines.at(-1), { type: "report", call: REPORT_VERDICT, value: ruling });
+});
+
+test("the verdict's schema offers the reason the reviewer must give for open", () => {
+  const verdict = reportCalls(kept().file).calls.find((each) => each.name === REPORT_VERDICT);
+  const properties = (verdict?.parameters as { properties: Record<string, { type: string }> }).properties;
+  assert.equal(properties["reason"]?.type, "string");
 });
 
 test("a call stopped before it ran is recorded, and answered with its reason as given", () => {

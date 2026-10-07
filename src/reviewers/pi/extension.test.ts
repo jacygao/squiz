@@ -228,11 +228,20 @@ test("a verdict is answered with the ruling the harness will read", async () => 
 test("a second ruling on one thread is refused, and the first stands", async () => {
   const tool = toolNamed(REPORT_VERDICT);
   await tool.execute("call_1", { thread: "PRRT_kwDOAbc123", verdict: "fixed" });
-  const refused = await refusalOf(tool, { thread: "PRRT_kwDOAbc123", verdict: "open" });
+  const refused = await refusalOf(tool, { thread: "PRRT_kwDOAbc123", verdict: "open", reason: "Still there." });
   assert.match(refused, /PRRT_kwDOAbc123 was already ruled on/);
 
-  const other = { thread: "PRRT_kwDOAbc456", verdict: "open" };
+  const other = { thread: "PRRT_kwDOAbc456", verdict: "open", reason: "Still there." };
   assert.deepEqual((await tool.execute("call_3", other)).details, other);
+});
+
+test("an open verdict with no reason is refused, and pi's reviewer can rule again", async () => {
+  const tool = toolNamed(REPORT_VERDICT);
+  const refused = await refusalOf(tool, { thread: "PRRT_kwDOAbc123", verdict: "open" });
+  assert.match(refused, /keeps thread PRRT_kwDOAbc123 open and gives no reason/u);
+
+  const ruling = { thread: "PRRT_kwDOAbc123", verdict: "open", reason: "The clamp still runs first." };
+  assert.deepEqual((await tool.execute("call_2", ruling)).details, ruling);
 });
 
 test("a malformed verdict is refused with the reason", async () => {
@@ -312,7 +321,7 @@ test("a report the call refused is recorded with its refusal, as one that ran", 
   const extension = loaded(reports);
   const verdict = toolOf(extension, REPORT_VERDICT);
   await verdict.execute("call_1", { thread: "PRRT_kwDOAbc123", verdict: "fixed" });
-  const second = await refusalOf(verdict, { thread: "PRRT_kwDOAbc123", verdict: "open" });
+  const second = await refusalOf(verdict, { thread: "PRRT_kwDOAbc123", verdict: "open", reason: "Still there." });
   const malformed = await refusalOf(toolOf(extension, REPORT_FINDING), { scope: "line" });
 
   assert.deepEqual(linesIn(reports).slice(1), [

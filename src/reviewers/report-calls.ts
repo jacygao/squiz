@@ -116,6 +116,11 @@ const verdictParameters = {
       description:
         "fixed where the defect is gone, withdrawn where there was none, open where it is still there.",
     },
+    reason: {
+      type: "string",
+      description:
+        "Required on open, and refused on fixed or withdrawn. Posted as your reply on the thread: tell the coding agent what is still wrong and what change or argument would settle it.",
+    },
   },
   required: ["thread", "verdict"],
 };
@@ -154,7 +159,7 @@ export function reportCalls(file: ReportFile): ReportCalls {
     {
       name: REPORT_VERDICT,
       description:
-        "Rule on one thread you were handed. Call it once per thread, naming the thread by the identifier it was handed to you under.",
+        "Rule on one thread you were handed. Call it once per thread, naming the thread by the identifier it was handed to you under. A thread you keep open needs a reason, which is posted as your reply on it.",
       parameters: verdictParameters,
       answer: (params) => {
         const verdict = readVerdict(params);

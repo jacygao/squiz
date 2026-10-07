@@ -176,14 +176,17 @@ function oneLine(text: string): string {
  * Notes, or nothing at all.
  *
  * An earlier round's findings come first, then the closing round's in the order
- * they were posted, which runs `high` severity first. The rounds the time bound
- * cut short follow them, and the bound that closed the episode comes last: the
- * findings are each about one defect, the cuts are about the rounds, and the
- * bound is about the episode.
+ * they were posted, which runs `high` severity first, then the threads kept open
+ * with no reason on them. The rounds the time bound cut short follow them, and
+ * the bound that closed the episode comes last: the findings and the threads are
+ * each about one defect, the cuts are about the rounds, and the bound is about
+ * the episode.
  */
 function notes(episode: ClosedEpisode): readonly string[] {
   const lines = [
-    ...[...episode.earlier, ...unthreadedNotes(episode.findings)].map((note) => `- ${note}`),
+    ...[...episode.earlier, ...unthreadedNotes(episode.findings), ...unpostedReasonNotes(episode.threads)].map(
+      (note) => `- ${note}`,
+    ),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
@@ -249,8 +252,23 @@ function noteLine(note: Noted | Failed): string {
   return line(note.location, note.finding.headline, "no thread could be opened for it");
 }
 
+/**
+ * Each thread the reviewer kept open whose reply giving the reason could not be
+ * posted, one line each and with no bullet.
+ *
+ * What GitHub said is left out, as it is for a finding: it is unbounded text,
+ * and the round reports it.
+ */
+function unpostedReasonNotes(threads: readonly ClassifiedThread[]): readonly string[] {
+  return threads
+    .filter((thread) => thread.reasonUnposted === true)
+    .map((thread) =>
+      line(thread.location, thread.headline, "kept open, and the reviewer's reason could not be posted on its thread"),
+    );
+}
+
 /** One Notes line: where the defect is, what it is, and what became of the finding. */
-function line(location: string | undefined, headline: string, what?: string): string {
+function line(location: string | undefined, headline: string | null, what?: string): string {
   const disposition = what === undefined ? "" : ` (${what})`;
   const said = named(headline);
   if (location === undefined) return `About the change as a whole: ${said}${disposition}`;
