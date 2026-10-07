@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.20 (draft)
+**Version:** 1.21 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2603,7 +2603,9 @@ squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a direc
 ### The setup check
 
 `squiz doctor` is run by a person, from a shell. It prints one line per
-dependency on stdout, saying it is present or naming what is wrong with it:
+dependency on stdout, saying it is present or naming what is wrong with it, and
+a line naming the project's `pi` settings a review does not use, where it has
+any:
 
 ```
 git 2.51.0
@@ -2630,7 +2632,7 @@ levels, and only `failed` changes the exit status:
 | warning | Something a person should see, which squiz runs without | `tmux: warning: could not be run: tmux exited 134: dyld: Library not loaded` |
 | failed | A required dependency is missing, unusable or unauthenticated | `gh 2.97.0: not signed in. Run gh auth login` |
 
-The rows, in the order they print, the reviewer last:
+The rows, in the order they print:
 
 | Row | Required | Read from |
 |---|---|---|
@@ -2642,6 +2644,7 @@ The rows, in the order they print, the reviewer last:
 | Herdr | No | `herdr --version` |
 | The `squiz` link | No | What `squiz init` finds on `PATH` |
 | The reviewer, and its model | Yes | `.squiz.json`, then `pi --version` or `copilot --version`, then the reviewer CLI's own settings |
+| The project's `pi` settings a review does not use | No | The repository's root, where the reviewer is `pi` |
 
 **Each tool is found on `PATH` and started once to ask its version.** What
 starting it came to decides the line, and only a version read from its output
@@ -2761,12 +2764,49 @@ Copilot adapter).
 system's credential store, and no `copilot` command that leaves the model
 unused reports whether it is signed in.
 
-The rows below are each added to the list by a later change, and until then the
-check does not report them:
+**Where the reviewer is `pi`, the row after it names the project's own `pi`
+settings, which a review does not use.** A round runs `pi` with `--no-approve`
+(§ 4 The `pi` adapter), and `pi` takes none of these from a project it does not
+trust:
 
-- the Copilot CLI wherever Copilot is a coding agent, and whether Copilot's
-  experimental features are on, as a warning;
-- the reviewer settings squiz overrides in this project.
+- `.pi/settings.json`, named with its top-level keys where it is a JSON object
+- `.pi/extensions`, `.pi/skills`, `.pi/prompts` and `.pi/themes`
+- `.pi/SYSTEM.md` and `.pi/APPEND_SYSTEM.md`
+- `.agents/skills`
+
+In their place the review takes the user's own `pi` settings, the ones under
+`PI_CODING_AGENT_DIR` or `~/.pi/agent`. The row ends with the context file that
+still reaches the reviewer, where the root holds one. `pi` loads a context file
+whatever the trust, and only one from a directory: the first of
+`AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md` and `CLAUDE.MD` that
+is there.
+
+```
+pi project settings: a review does not use .pi/settings.json (defaultModel, retry), .pi/SYSTEM.md or .agents/skills, and takes your own pi settings instead. AGENTS.md still reaches the reviewer
+pi project settings: a review does not use .pi/APPEND_SYSTEM.md, and takes your own pi settings instead
+```
+
+The row prints nothing where the root holds none of these, as for a bare `.pi`
+directory. Nor does it print where the reviewer is Copilot, outside a
+repository, or where the reviewer's row failed on the repository or its
+`.squiz.json`. It reads the root the reviewer's row found, and git is not asked
+for it again.
+
+**The row reports configuration, not that a review leaves it unused.** It
+establishes that the files are there for `pi` to find. It does not establish:
+
+- That `pi` honours `--no-approve`. The flag is on squiz's own command line, so a
+  row that checked for it would restate squiz's assumption. A `pi` that renamed
+  the flag would leave the row unchanged.
+- That a round reads these files at all. The row reads the working tree at the
+  repository's root, and a round reads a snapshot of the head commit (§ 4 The
+  snapshot), so a file not committed there is named all the same.
+- That the list is `pi`'s whole list. It is the list `pi` 0.85.1 requires trust
+  for, read from its code, and a later `pi` may add to it.
+
+The row below is added to the list by a later change, and until then the check
+does not report it: the Copilot CLI wherever Copilot is a coding agent, and
+whether Copilot's experimental features are on, as a warning.
 
 ## 7. Failure modes
 

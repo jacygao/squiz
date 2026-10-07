@@ -8,7 +8,8 @@
  *
  * It starts each tool once to ask its version, `gh` a second time for its
  * sign-in, and `git` a second time for the repository whose `.squiz.json`
- * names the reviewer. It reads settings files and writes nothing anywhere.
+ * names the reviewer, which every row that reads the repository shares. It
+ * reads settings files and writes nothing anywhere.
  */
 
 import { spawnSync } from "node:child_process";
@@ -39,14 +40,17 @@ export type DoctorContext = {
   readonly boundMs: number;
 };
 
-/** One dependency's check. It never throws: whatever went wrong is its line. */
-export type Check = (context: DoctorContext) => Row;
+/**
+ * One dependency's check. It never throws: whatever went wrong is its line.
+ * `undefined` prints nothing, for a row with nothing to say in this project.
+ */
+export type Check = (context: DoctorContext) => Row | undefined;
 
 export type DoctorPrinted = { readonly stdout: string; readonly stderr: string; readonly exit: number };
 
 /** Run `checks` in order, printing a line each, and exit 1 where any failed. */
 export function squizDoctor(context: DoctorContext, checks: readonly Check[] = CHECKS): DoctorPrinted {
-  const rows = checks.map((check) => check(context));
+  const rows = checks.map((check) => check(context)).filter((row) => row !== undefined);
   const stdout = rows.map((row) => `${row.line}\n`).join("");
   return { stdout, stderr: "", exit: rows.some((row) => row.level === "failed") ? 1 : 0 };
 }
@@ -210,7 +214,7 @@ const node: Check = (context) => {
  * one. Anything `squiz init` would refuse or change is a warning, in its words,
  * and takes the same precedence it does.
  */
-export function pathLink(target: () => string = thisSquiz, directory: () => string = () => process.cwd()): Check {
+export function pathLink(target: () => string = thisSquiz, directory: () => string = () => process.cwd()): (context: DoctorContext) => Row {
   return (context) => {
     let found;
     try {
@@ -245,14 +249,9 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
  * starts under it, and so does a git that cannot name the repository.
  */
 const reviewer: Check = (context) => {
-  const root = repositoryRoot(context);
-  if (root.outcome === "failed") return { level: "failed", line: `Reviewer: the repository could not be found: ${root.reason}` };
-  let config: Config;
-  try {
-    config = root.outcome === "outside" ? { ...defaultConfig } : loadConfig(root.path);
-  } catch (cause) {
-    return { level: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
-  }
+  const project = projectOf(context);
+  if (project.outcome === "failed") return { level: "failed", line: project.line };
+  const { config } = project;
 
   const label = `Reviewer ${config.reviewer}`;
   const found = versionOf(config.reviewer, ["--version"], context);
@@ -274,6 +273,63 @@ const reviewer: Check = (context) => {
   if (user.failsTheRound) return { level: "failed", line: `${installed}: model unknown: ${user.problem}` };
   return { level: "warning", line: `${installed}: warning: model unknown: ${user.problem}` };
 };
+
+/**
+ * The project's own reviewer settings that a review leaves unused, and the
+ * context file that reaches the reviewer all the same.
+ *
+ * It reports configuration only: that the files exist where the reviewer would
+ * look. Whether the reviewer leaves them unused is not tested here. Nothing
+ * prints for a reviewer whose adapter reads no project settings, outside a
+ * repository, or where the reviewer's row failed on the repository and already
+ * said why.
+ */
+const projectSettings: Check = (context) => {
+  const project = projectOf(context);
+  if (project.outcome === "failed" || project.root === undefined) return undefined;
+  const { reviewer } = project.config;
+  const read = adapterFor(reviewer).projectSettings;
+  if (read === undefined) return undefined;
+  const { unused, contextFile } = read(project.root);
+  if (unused.length === 0) return undefined;
+  const named = unused.map(({ path, keys }) => (keys.length === 0 ? path : `${path} (${keys.join(", ")})`));
+  const reaches = contextFile === undefined ? "" : `. ${contextFile} still reaches the reviewer`;
+  return {
+    level: "present",
+    line: `${reviewer} project settings: a review does not use ${inProse(named)}, and takes your own ${reviewer} settings instead${reaches}`,
+  };
+};
+
+function inProse(items: readonly string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
+}
+
+/** The repository's root, `undefined` outside one, and the configuration read there. */
+type Project =
+  | { readonly outcome: "found"; readonly root: string | undefined; readonly config: Config }
+  | { readonly outcome: "failed"; readonly line: string };
+
+const projects = new WeakMap<DoctorContext, Project>();
+
+/** The project the check runs in, found once per run and shared by every row that reads it. */
+function projectOf(context: DoctorContext): Project {
+  const known = projects.get(context);
+  if (known !== undefined) return known;
+  const found = findProject(context);
+  projects.set(context, found);
+  return found;
+}
+
+function findProject(context: DoctorContext): Project {
+  const root = repositoryRoot(context);
+  if (root.outcome === "failed") return { outcome: "failed", line: `Reviewer: the repository could not be found: ${root.reason}` };
+  if (root.outcome === "outside") return { outcome: "found", root: undefined, config: { ...defaultConfig } };
+  try {
+    return { outcome: "found", root: root.path, config: loadConfig(root.path) };
+  } catch (cause) {
+    return { outcome: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
+  }
+}
 
 type Root =
   | { readonly outcome: "found"; readonly path: string }
@@ -313,6 +369,7 @@ export const CHECKS: readonly Check[] = [
   optional("Herdr", "herdr", ["--version"], MULTIPLEXER_OPTIONAL),
   pathLink(),
   reviewer,
+  projectSettings,
 ];
 
 function firstLine(output: string): string {

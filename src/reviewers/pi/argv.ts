@@ -19,11 +19,10 @@
  * project's own `.pi/settings.json` over the user's global settings wherever the
  * project is trusted, and a trust decision saved against any directory above the
  * worktree trusts it. What a tree could set there is the whole of the
- * configuration: the shell command prefix the round delivers its recording line
- * in, the model the review runs on, and the prompt the charter is appended to. So
- * `--no-approve` untrusts the project, and nothing of the tree's reaches `pi`. The
- * prefix the project configured is carried forward by `confine`, which resolves it
- * itself; nothing else of the project's applies.
+ * configuration, the model the review runs on and the system prompt the charter
+ * is appended to among it. So `--no-approve` untrusts the project, and none of
+ * its `.pi/` reaches `pi`. Its `AGENTS.md` or `CLAUDE.md` still does, because
+ * `pi` loads a context file whatever the trust.
  *
  * `--thinking` is on every command line. Without it `pi` takes
  * the level from the user's own settings, which the harness does not choose, and
@@ -94,10 +93,6 @@ export function argv(invocation: Invocation): CommandLine {
       // which starts a fresh process.
       "--session-dir",
       invocation.sessionDirectory,
-      // The tree under review is not trusted to configure the reviewer. A
-      // project prefix of its own would otherwise replace the one the round
-      // delivers its recording line in, and every tool the reviewer detached
-      // would be beyond the round's reach with nothing saying so.
       "--no-approve",
       // Only the harness's own extension loads. Whatever the machine or the
       // tree under review has installed could otherwise register a tool of the

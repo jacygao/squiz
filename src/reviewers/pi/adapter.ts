@@ -12,7 +12,7 @@ import { argv, grants } from "./argv.ts";
 import { confine } from "./confine.ts";
 import { readReports } from "./reports.ts";
 import { resumeLine } from "./session.ts";
-import { userModel } from "./settings.ts";
+import { projectSettings, userModel } from "./settings.ts";
 
 export const pi: Adapter = {
   argv,
@@ -24,4 +24,5 @@ export const pi: Adapter = {
     return resume.kind === "resumable" ? resume.line : undefined;
   },
   userModel,
+  projectSettings,
 };
