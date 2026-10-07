@@ -137,8 +137,10 @@ Code, so on a machine where only Copilot is installed it fails that one line.
 
 ## What you see
 
-Each finding is a review thread on the line it is about. The coding agent
-answers in the thread, and a later round resolves it. A thread from this
+Each finding is a review thread on the line it is about, or on the whole file
+where no one line is. The coding agent answers in the thread, and a later round
+resolves it. A finding about the change as a whole goes into the summary comment
+instead. A thread from this
 repository's own pull request #672, trimmed:
 
 > **Squiz reviewer · low — A link to a newer version of the same install is reported as "an earlier version of this install"**
