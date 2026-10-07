@@ -3206,6 +3206,55 @@ test("a failed round's comment counts the findings that landed, not the ones rep
   assert.match(failureBody(ran), /\n1 of the 2 findings the reviewer reported is posted as a thread\./u);
 });
 
+test("a killed round's findings that no thread holds are listed in its failure comment (#357)", async () => {
+  const wholeChange: Finding = {
+    scope: "change",
+    severity: "medium",
+    headline: "The retry queue duplicates the scheduler",
+    reasoning: ["Nothing calls the scheduler."],
+    suggestedFix: "Use the scheduler.",
+  };
+  // The fixture's diff touches only `src/ui/card.ts`, so this file has nowhere to hang a thread.
+  const unplaced: Finding = {
+    scope: "line",
+    file: "src/cache.ts",
+    line: 12,
+    severity: "high",
+    headline: "The cache is never cleared",
+    reasoning: ["Nothing evicts an entry."],
+    suggestedFix: "Evict on write.",
+  };
+  const ran = await runInFixture({
+    config: { timeout: 1 },
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST, {
+      findings: [finding("The flag is never read"), wholeChange, unplaced],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "timed-out");
+  const body = failureBody(ran);
+  assert.match(body, /\n1 of the 3 findings the reviewer reported is posted as a thread\./u);
+  assert.match(
+    body,
+    /\n\n- `src\/cache\.ts:12` — The cache is never cleared \(no thread could be opened for it\)\n- About the change as a whole: The retry queue duplicates the scheduler$/u,
+  );
+});
+
+test("a round that could post none of its findings lists them in its failure comment (#357)", async () => {
+  const ran = await runInFixture({
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]), failure: FAILURE_POSTED },
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.match(
+    failureBody(ran),
+    /\n\n- `src\/ui\/card\.ts:88` — The flag is never read \(raised, and its comment could not be posted\)$/u,
+  );
+});
+
 test("a failure comment gh refuses leaves the round failed as it was, and is not retried", async () => {
   const reviewer = hangs(ANSWER_COST, { findings: [finding("The flag is never read")] });
   const refused = await runInFixture({ config: { timeout: 1 }, answers: POSTING, reviewer });

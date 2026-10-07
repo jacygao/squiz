@@ -11,6 +11,13 @@
 export type FailureReport = {
   /** Why the round failed, as one line. */
   readonly reason: string;
+  /**
+   * Each salvaged finding no thread holds, one line each, as the summary's Notes
+   * write it. Listed in the comment and never printed on stderr: a failed round
+   * posts no summary, so this comment is the only place on the pull request that
+   * holds them.
+   */
+  readonly unthreaded?: readonly string[];
   /** What else the round established, one item each, as one line each. */
   readonly established: readonly string[];
   /**
@@ -37,9 +44,10 @@ export function renderFailure(report: FailureReport): string {
       "A new commit or reply, or running `squiz review` again, retries it.",
     ].join(" "),
   ];
-  if (report.established.length > 0) {
-    blocks.push(report.established.map((item) => `- ${item}`).join("\n"));
-  }
+  // The findings come first and the worktree after, the order the summary's
+  // Notes keep.
+  const items = [...(report.unthreaded ?? []), ...report.established];
+  if (items.length > 0) blocks.push(items.map((item) => `- ${item}`).join("\n"));
   return blocks.join("\n\n");
 }
 

@@ -14,7 +14,7 @@
 import { renderFailure, type FailureReport } from "../github/failure-body.ts";
 import type { GhCall } from "../github/gh.ts";
 import { postIssueComment, type CommentPosting } from "../github/summary.ts";
-import { worktreeNotes } from "../github/summary-body.ts";
+import { unthreadedNotes, worktreeNotes } from "../github/summary-body.ts";
 import { evidenceWith, nothingEstablished, type RoundConfinement } from "./confinement.ts";
 import type { PostedFindings } from "./post-findings.ts";
 
@@ -42,13 +42,15 @@ export function failureReport(round: FailedRound): FailureReport {
     round.confinement === undefined
       ? nothingEstablished
       : (evidenceWith(undefined, round.confinement) ?? nothingEstablished);
-  const outcomes = round.salvaged?.findings.outcomes ?? [];
+  const salvaged = round.salvaged?.findings ?? { outcomes: [] };
+  const outcomes = salvaged.outcomes;
   return {
     reason: round.reason.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim(),
     established: worktreeNotes(evidence),
     ...(outcomes.length === 0
       ? {}
       : {
+          unthreaded: unthreadedNotes(salvaged),
           salvaged: {
             // What landed, read from what the posting returned. A finding the
             // reviewer reported and GitHub refused is not on the pull request.

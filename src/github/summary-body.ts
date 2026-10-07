@@ -191,8 +191,9 @@ function oneLine(text: string): string {
  */
 function notes(episode: ClosedEpisode): readonly string[] {
   const lines = [
-    ...unthreaded(episode.findings).map(noteLine),
-    ...worktreeNotes(episode.confinement).map((note) => `- ${note}`),
+    ...[...unthreadedNotes(episode.findings), ...worktreeNotes(episode.confinement)].map(
+      (note) => `- ${note}`,
+    ),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
@@ -301,6 +302,16 @@ function unthreaded(findings: PostedFindings): readonly (Noted | Failed)[] {
 }
 
 /**
+ * Each of `findings` that no thread holds, one line each and with no bullet, in
+ * the order Notes lists them.
+ *
+ * A failed round posts no summary, so its failure comment lists the same lines.
+ */
+export function unthreadedNotes(findings: PostedFindings): readonly string[] {
+  return unthreaded(findings).map(noteLine);
+}
+
+/**
  * One finding that no thread holds.
  *
  * A finding about the change as a whole has nowhere to point at and is named by
@@ -329,8 +340,8 @@ function noteLine(note: Noted | Failed): string {
 function line(location: string | undefined, headline: string, what?: string): string {
   const disposition = what === undefined ? "" : ` (${what})`;
   const said = named(headline);
-  if (location === undefined) return `- About the change as a whole: ${said}${disposition}`;
-  return `- \`${location}\` — ${said}${disposition}`;
+  if (location === undefined) return `About the change as a whole: ${said}${disposition}`;
+  return `\`${location}\` — ${said}${disposition}`;
 }
 
 /**

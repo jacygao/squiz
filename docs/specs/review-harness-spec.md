@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.04 (draft)
+**Version:** 1.05 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2156,6 +2156,10 @@ Three blocks, in this order.
    bound cut short, with the round's number and the bound; and a cap or bound
    that ended the episode early, with each queued state it left not reviewed.
 
+A failed round posts no summary, so the findings it salvaged that no thread
+holds are listed in its failure comment instead, as § 7 The failure comment sets
+out.
+
 A finding whose comment could not be posted is in Notes because nothing else on
 the pull request holds it. The reviewer confirmed it and the harness lost it, so
 a comment that left it out would read as a review that found nothing there.
@@ -2718,21 +2722,32 @@ nothing retries one.
 ### The failure comment
 
 A round that fails posts one issue-level comment on the pull request saying so. It
-names what failed, and lists what else the round established: a tracked file that
-changed or a `HEAD` that moved while the reviewer ran, and a comparison that
-could not be taken. A round that salvaged findings
-says how many it posted as threads.
+names what failed. A round that salvaged findings says how many of them it posted
+as threads. A list follows, holding two kinds of item:
+
+- **Each salvaged finding that no thread holds**, written as the summary's Notes
+  write it (§ 5 What the comment carries): a finding about the change as a whole,
+  one the harness could anchor to neither a line nor a file, and one whose
+  comment could not be posted at all. A failed round posts no summary, so this
+  comment is the only place on the pull request such a finding reaches.
+- **What else the round established**: a tracked file that changed or a `HEAD`
+  that moved while the reviewer ran, and a comparison that could not be taken.
+
+The findings come first, as they do in Notes.
 
 ```markdown
-**Squiz review failed — the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings**
+**Squiz review failed — the reviewer was killed at its 900-second bound, and the round kept the 3 findings the reviewer had reported**
 
-Both findings are posted as threads. The review is still open. A new commit or reply, or running `squiz review` again, retries it.
+1 of the 3 findings the reviewer reported is posted as a thread. The review is still open. A new commit or reply, or running `squiz review` again, retries it.
 
+- `src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)
+- About the change as a whole: The retry queue duplicates the scheduler
 - `HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 ```
 
 The reason on the first line is the reason the command prints on stderr, word for
-word, and each item of the list is a line there too, as § 6 shows.
+word. Each item the round established is a line there too, as § 6 shows. The
+findings are not: stderr is a pointer, and the comment is the report.
 
 The failure comment is posted in the posting reserve, after the salvaged findings,
 under the same deadline. It is never edited, and each failed round posts its own.
@@ -2783,7 +2798,8 @@ beside findings from another.
 **What a failed round salvaged goes on the pull request, and the round is a
 failed round still.** The findings the reviewer confirmed are posted and the
 verdicts it reported are applied, in the posting reserve and under the same
-deadline a finished review's posting runs under. None of that decides what the
+deadline a finished review's posting runs under. A finding no thread can hold is
+listed in the failure comment. None of that decides what the
 round became. The outcome is the reviewer's own, the cost is the floor the
 failure left, and the round neither hands threads back to the coding agent nor
 closes the episode over what it managed to put up. A round that posted two findings and
