@@ -66,5 +66,6 @@ reads `.zshenv` for that too.
 - Copilot was signed in through the keychain. A user signed in through
   `COPILOT_GITHUB_TOKEN` alone was not run, and one signed in through `GH_TOKEN`
   alone would have no model credential under these variables.
-- Whether Copilot reads `gh`'s keychain entry or one of its own was not told
-  apart. Either way it signed in with `gh`'s configuration empty.
+- Copilot signed in with `gh`'s keychain entry, which it reads by running
+  `gh auth token`; this machine has no Copilot login of its own. A user signed
+  in through Copilot's own `/login` was not run.
