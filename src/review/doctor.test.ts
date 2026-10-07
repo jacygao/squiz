@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { standIn } from "../testing/stand-in.ts";
-import { CHECKS, pathLink, squizDoctor, type Check, type DoctorContext } from "./doctor.ts";
+import { CHECKS, copilotCopies, pathLink, squizDoctor, type Check, type DoctorContext } from "./doctor.ts";
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "squiz-653-doctor-")));
 after(() => {
@@ -685,9 +685,9 @@ test("squiz doctor through the binary exits as its rows say and writes nothing i
 });
 
 /** A copy of squiz's plugin layout under `root`: a manifest naming squiz, and a bin/squiz. */
-function squizCopy(root: string): string {
+function squizCopy(root: string, manifest: string = JSON.stringify({ name: "squiz" })): string {
   mkdirSync(join(root, ".claude-plugin"), { recursive: true });
-  writeFileSync(join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "squiz" }), "utf8");
+  writeFileSync(join(root, ".claude-plugin", "plugin.json"), manifest, "utf8");
   mkdirSync(join(root, "bin"), { recursive: true });
   const binary = join(root, "bin", "squiz");
   writeFileSync(binary, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -821,3 +821,184 @@ test("squiz doctor run through squiz init's link identifies the squiz it runs as
 function escaped(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
+
+// Copilot's own copy of squiz.
+
+/** A squiz copy at `root` whose manifest carries `version`, returning the copy's root. */
+function versioned(root: string, version: string): string {
+  squizCopy(root, JSON.stringify({ name: "squiz", version }));
+  return root;
+}
+
+/**
+ * The row comparing Copilot's copies with a squiz at `version`, under a fresh
+ * COPILOT_HOME that `arrange` fills, with `copilot` on PATH unless `fakes` says
+ * otherwise. Never the owner's own ~/.copilot.
+ */
+function copiesRow(version: string, arrange: (home: string) => void, fakes: Fakes = { copilot: COPILOT_1_2 }) {
+  const base = context(fakes);
+  const home = join(scratch, `copilot-home-${made}`);
+  mkdirSync(home);
+  arrange(home);
+  const thisOne = versioned(directoryOnPath("this-squiz"), version);
+  const rows = copilotCopies(() => join(thisOne, "bin", "squiz"))({
+    ...base,
+    environment: { ...base.environment, COPILOT_HOME: home },
+  });
+  return { rows: [rows].flat(), home, thisOne };
+}
+
+const marketplaceCopy = (home: string) => join(home, "installed-plugins", "squiz", "squiz");
+const directCopy = (home: string) => join(home, "installed-plugins", "_direct", "jacygao--squiz");
+
+test("with no copy of squiz in Copilot, nothing is printed about one", () => {
+  assert.deepEqual(copiesRow("0.2.0", () => {}).rows, []);
+  assert.deepEqual(
+    copiesRow("0.2.0", (home) => mkdirSync(join(home, "installed-plugins", "_direct"), { recursive: true })).rows,
+    [],
+  );
+});
+
+test("with copilot not on PATH, a copy left in its home is not compared", () => {
+  const { rows } = copiesRow("0.2.0", (home) => versioned(marketplaceCopy(home), "0.1.0"), {});
+
+  assert.deepEqual(rows, []);
+});
+
+test("Copilot's copy at this squiz's version is named as the same", () => {
+  const { rows, home } = copiesRow("0.2.0", (home) => versioned(marketplaceCopy(home), "0.2.0"));
+
+  assert.deepEqual(rows, [{ level: "present", line: `Copilot's squiz: ${marketplaceCopy(home)} is 0.2.0, as this squiz is` }]);
+});
+
+test("an older Copilot copy is a warning naming both versions and both paths, and saying to update Copilot's", () => {
+  const { rows, home, thisOne } = copiesRow("0.2.0", (home) => versioned(marketplaceCopy(home), "0.1.0"));
+
+  assert.deepEqual(rows, [
+    {
+      level: "warning",
+      line: `Copilot's squiz: warning: ${marketplaceCopy(home)} is 0.1.0, and this squiz at ${thisOne} is 0.2.0. Copilot's hook runs its own copy, so two versions write one state file. Update Copilot's copy, which is older`,
+    },
+  ]);
+});
+
+test("a newer Copilot copy says to update this squiz, and versions are ordered as numbers, not text", () => {
+  const { rows } = copiesRow("0.9.0", (home) => versioned(marketplaceCopy(home), "0.10.0"));
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.level, "warning");
+  assert.match(rows[0]?.line ?? "", /is 0\.10\.0, and this squiz at .* is 0\.9\.0\. .*Update this squiz, which is older$/u);
+});
+
+test("versions that cannot be ordered say to update the older one, without guessing which", () => {
+  const { rows } = copiesRow("0.2.0", (home) => versioned(marketplaceCopy(home), "0.2.0-beta.1"));
+
+  assert.match(rows[0]?.line ?? "", /\. Update the older one$/u);
+});
+
+test("a marketplace copy and a direct one are each compared, not only the first found", () => {
+  const { rows, home } = copiesRow("0.2.0", (home) => {
+    versioned(marketplaceCopy(home), "0.2.0");
+    versioned(directCopy(home), "0.1.0");
+  });
+
+  assert.deepEqual(
+    rows.map((row) => [row.level, row.line.slice(0, row.line.indexOf(" is "))]),
+    [
+      ["warning", `Copilot's squiz: warning: ${directCopy(home)}`],
+      ["present", `Copilot's squiz: ${marketplaceCopy(home)}`],
+    ],
+  );
+});
+
+test("a direct install of another plugin is not read as a copy of squiz", () => {
+  const { rows } = copiesRow("0.2.0", (home) => {
+    const other = join(home, "installed-plugins", "_direct", "someone--other");
+    mkdirSync(join(other, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(other, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "other", version: "9.9.9" }), "utf8");
+  });
+
+  assert.deepEqual(rows, []);
+});
+
+test("a copy whose plugin.json is not JSON, or names no version, says its version could not be read", () => {
+  const { rows, home } = copiesRow("0.2.0", (home) => {
+    squizCopy(marketplaceCopy(home), "{ not json");
+    squizCopy(directCopy(home), JSON.stringify({ name: "squiz" }));
+  });
+
+  assert.deepEqual(
+    rows.map((row) => row.level),
+    ["warning", "warning"],
+    "an unreadable version must never read as the same version",
+  );
+  assert.match(rows[0]?.line ?? "", new RegExp(`^Copilot's squiz: warning: the version of ${escaped(directCopy(home))} could not be read: .*names no version`, "u"));
+  assert.match(rows[1]?.line ?? "", new RegExp(`^Copilot's squiz: warning: the version of ${escaped(marketplaceCopy(home))} could not be read: .*not JSON`, "u"));
+});
+
+test("a copy whose plugin.json names no plugin is unreadable, not another plugin's", () => {
+  const { rows, home } = copiesRow("0.2.0", (home) => {
+    squizCopy(marketplaceCopy(home), "{}");
+    squizCopy(directCopy(home), JSON.stringify({ version: "0.1.0" }));
+  });
+
+  assert.deepEqual(
+    rows.map((row) => row.line),
+    [
+      `Copilot's squiz: warning: the version of ${directCopy(home)} could not be read: ${join(directCopy(home), ".claude-plugin", "plugin.json")} names no plugin`,
+      `Copilot's squiz: warning: the version of ${marketplaceCopy(home)} could not be read: ${join(marketplaceCopy(home), ".claude-plugin", "plugin.json")} names no plugin`,
+    ],
+  );
+});
+
+test("a marketplace that cannot be searched is named as unreadable, not read as holding no copy", () => {
+  let marketplace = "";
+  const { rows, home } = copiesRow("0.2.0", (home) => {
+    versioned(marketplaceCopy(home), "0.2.0");
+    marketplace = dirname(marketplaceCopy(home));
+    chmodSync(marketplace, 0o000);
+  });
+  chmodSync(marketplace, 0o755);
+
+  assert.equal(rows.length, 1, "a copy that cannot be looked at must not vanish");
+  assert.match(rows[0]?.line ?? "", new RegExp(`^Copilot's squiz: warning: the version of ${escaped(marketplaceCopy(home))} could not be read: .*EACCES`, "u"));
+});
+
+test("a _direct that cannot be listed is a warning of its own, and the marketplace copy is still compared", () => {
+  let direct = "";
+  const { rows, home } = copiesRow("0.2.0", (home) => {
+    versioned(marketplaceCopy(home), "0.1.0");
+    versioned(directCopy(home), "0.1.0");
+    direct = dirname(directCopy(home));
+    chmodSync(direct, 0o000);
+  });
+  chmodSync(direct, 0o755);
+
+  assert.equal(rows.length, 2, "an unlistable _direct must not hide the marketplace copy's mismatch");
+  assert.match(rows[0]?.line ?? "", new RegExp(`^Copilot's squiz: warning: ${escaped(direct)} could not be read: .*EACCES`, "u"));
+  assert.match(rows[1]?.line ?? "", new RegExp(`^Copilot's squiz: warning: ${escaped(marketplaceCopy(home))} is 0\\.1\\.0, and this squiz at `, "u"));
+});
+
+test("a copy whose plugin.json is missing still holding bin/squiz is named as unreadable, not skipped", () => {
+  const { rows, home } = copiesRow("0.2.0", (home) => {
+    mkdirSync(join(marketplaceCopy(home), "bin"), { recursive: true });
+    writeFileSync(join(marketplaceCopy(home), "bin", "squiz"), "#!/bin/sh\n", { mode: 0o755 });
+  });
+
+  assert.equal(rows.length, 1);
+  assert.match(rows[0]?.line ?? "", new RegExp(`^Copilot's squiz: warning: the version of ${escaped(marketplaceCopy(home))} could not be read`, "u"));
+});
+
+test("a different version in Copilot's copy leaves the exit at 0, and copilot --version is started once", () => {
+  const asked = join(scratch, `copilot-asked-${made}`);
+  const base = context({ ...EVERY_FAKE, copilot: `echo asked >> '${asked}'\necho "GitHub Copilot CLI 1.2.0."` });
+  const home = join(scratch, `copilot-home-full-${made}`);
+  versioned(marketplaceCopy(home), "0.0.1");
+  settingsAt(home, "settings.json", '{"experimental": true}');
+
+  const printed = squizDoctor({ ...base, environment: { ...base.environment, COPILOT_HOME: home } });
+
+  assert.match(printed.stdout, /^Copilot's squiz: warning: .* is 0\.0\.1, and this squiz at /mu);
+  assert.equal(printed.exit, 0, printed.stdout);
+  assert.equal(readFileSync(asked, "utf8"), "asked\n", "copilot --version is asked once per run");
+});
