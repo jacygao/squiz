@@ -1282,6 +1282,40 @@ test("an attempt the harness threw out of is charged beside the attempt before i
   });
 });
 
+/**
+ * The reviewer is still running when the harness throws, as one is that is
+ * mid-review. Its process group is stopped before the attempt returns, and its
+ * spend is read after the stop: the message it completes after the signal is
+ * part of what it cost.
+ */
+test("an attempt the harness threw out of stops its reviewer, then reads what it spent", async () => {
+  await inATree(async (tree) => {
+    const running = join(tree, "running");
+    const script = withTool(
+      tree,
+      [
+        // It takes its time over the last message, so a read that does not wait for the stop misses it.
+        `process.on("SIGTERM", () => setTimeout(() => { ${appending(reportingMessage)} process.exit(0); }, 300));`,
+        appending(reportingMessage),
+        `fs.writeFileSync(${JSON.stringify(running)}, "up");`,
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+    const round = await runRound(reviewer(script).adapter, at(tree), 10, {
+      name: "squiz-reviewer",
+      backends: breakingWhileItRuns(running),
+    });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(
+      round.cost,
+      { dollars: 0.004, tokens: 200, messages: 2, floor: true },
+      "the spend was read before the reviewer was stopped",
+    );
+    assert.ok(await gone(reviewerIn(tree), 1_000), "the reviewer was left running after the attempt returned");
+    assert.ok(await gone(toolIn(tree), 1_000), "the tool the reviewer started was left running after the attempt returned");
+  });
+});
+
 /** Resolves once the child has exited. */
 function exited(child: ChildProcessHandle): Promise<void> {
   return new Promise((settle) => {
@@ -1322,6 +1356,28 @@ function breakingAfterItRan(attempt: number): Backends {
       const started = await startChild(command, environment, boundMs);
       if (started.outcome !== "started" || starts !== attempt) return started;
       await exited(started.child);
+      const broken = new Proxy(started.child, {
+        get: (target, property) => (property === "stderr" ? undefined : Reflect.get(target, property)),
+      });
+      return { ...started, child: broken };
+    },
+  };
+}
+
+/**
+ * Backends that start the reviewer with no terminal, wait until it says it is
+ * running, and hand the round a process with no stderr, which the round throws
+ * reading while the reviewer runs on.
+ */
+function breakingWhileItRuns(runningFile: string): Backends {
+  return {
+    herdr: () => ({ outcome: "refused", reason: "not asked" }),
+    tmux: () => ({ outcome: "refused", reason: "not asked" }),
+    child: async (command, environment, boundMs) => {
+      const started = await startChild(command, environment, boundMs);
+      if (started.outcome !== "started") return started;
+      const until = Date.now() + 10_000;
+      while (!existsSync(runningFile) && Date.now() < until) await new Promise((settle) => setTimeout(settle, 25));
       const broken = new Proxy(started.child, {
         get: (target, property) => (property === "stderr" ? undefined : Reflect.get(target, property)),
       });
