@@ -639,6 +639,20 @@ test("the sign-in prompt runs outside the repository, so none of its files reach
   assert.ok(!directory.startsWith(realpathSync(row.directory)), `the prompt ran in ${directory}`);
 });
 
+test("a copilot found through a relative PATH entry is the one sent the sign-in prompt, though it runs elsewhere", () => {
+  made += 1;
+  const record = join(scratch, `copilot-record-${made}`);
+  const { copilot: _copilot, ...rest } = { ...EVERY_FAKE };
+  const base = context(rest);
+  const directory = repository('{"reviewer":"copilot","model":"gpt-6-astra"}');
+  mkdirSync(join(directory, "tools"));
+  standIn(join(directory, "tools"), "copilot", copilotSigningIn(record, "echo OK"));
+
+  const printed = squizDoctor({ ...base, directory, environment: { ...base.environment, PATH: `tools:${String(base.environment.PATH)}` } });
+
+  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.93, model gpt-6-astra, from \.squiz\.json\. Signed in; the check spent one request on gpt-5-mini$/mu);
+});
+
 test("the sign-in check's scratch directory is gone once the row is printed", () => {
   const row = signInRow("echo OK");
 

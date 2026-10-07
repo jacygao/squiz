@@ -17,7 +17,7 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
@@ -541,7 +541,11 @@ function copilotSignIn(line: string, context: DoctorContext): Row {
     const github = join(scratch, "github");
     mkdirSync(home);
     mkdirSync(github);
-    const environment = { ...context.environment, ...variablesOf(github, { COPILOT_HOME: home, COPILOT_ALLOW_ALL: "" }) };
+    const environment = {
+      ...context.environment,
+      ...absolutePath(context),
+      ...variablesOf(github, { COPILOT_HOME: home, COPILOT_ALLOW_ALL: "" }),
+    };
     const asked = probe(
       "copilot",
       ["-p", "Reply with the single word OK.", "--model", SIGN_IN_MODEL, "--no-ask-user"],
@@ -558,6 +562,17 @@ function copilotSignIn(line: string, context: DoctorContext): Row {
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * `PATH` with each relative or empty entry read from the directory the check
+ * was run in, so that a probe started elsewhere finds the tools the version
+ * probes found, in the same order.
+ */
+function absolutePath(context: DoctorContext): { PATH?: string } {
+  const path = context.environment["PATH"];
+  if (path === undefined) return {};
+  return { PATH: path.split(delimiter).map((entry) => resolve(context.directory, entry)).join(delimiter) };
 }
 
 /**

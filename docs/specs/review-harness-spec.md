@@ -3148,7 +3148,9 @@ copilot -p "Reply with the single word OK." --model gpt-5-mini --no-ask-user
 It runs with the variables a round gives a Copilot reviewer, so it signs in the
 way a round does. `COPILOT_HOME` and `GH_CONFIG_DIR` name empty directories in
 the prompt's temporary directory, and `COPILOT_ALLOW_ALL` and the four `gh`
-token variables are empty (§ 4 Tools, The Copilot adapter). The model is
+token variables are empty (§ 4 Tools, The Copilot adapter). A relative or
+empty `PATH` entry is read from the directory the check was run in, so the
+prompt reaches the `copilot` whose version the row names. The model is
 `gpt-5-mini` whatever model a round would run on. On Copilot CLI 1.0.93 the
 prompt cost 0.35 AI credits and took 13 seconds. It is bounded at 60 seconds
 rather than the 15 a version is given.
