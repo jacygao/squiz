@@ -149,8 +149,24 @@ export type StateRecord = Shared &
         readonly reason: string;
         /** The state that superseded this one, where one did. `reason` names it for a person, and only by its commit. */
         readonly supersededBy?: StateKey;
+        /** The close, on the state the round host took and found the episode's bound spent on. */
+        readonly closed?: ClosedBeforeReview;
       }
   );
+
+/**
+ * The close of an episode whose round cap or token bound was spent before a
+ * round took the state, as `squiz review` prints it.
+ */
+export type ClosedBeforeReview = {
+  /** No round remains after it, so it is never 2. */
+  readonly exitStatus: 0 | 3;
+  /** The node ids of the reviewer's threads open as the close listed them. */
+  readonly openThreads: readonly string[];
+  readonly closedAt: ClosingBound;
+  /** What failed without changing the close, a line each. */
+  readonly problems?: readonly string[];
+};
 
 export type ReadRecord = { readonly record: StateRecord } | { readonly problem: string };
 
@@ -228,6 +244,11 @@ export function recordFrom(entry: unknown): ReadRecord {
     case "not reviewed": {
       const reason = entry["reason"];
       if (!isText(reason)) return { problem: `has "reason" as ${render(reason)}` };
+      if (entry["closed"] !== undefined) {
+        const closed = closedFrom(entry["closed"]);
+        if ("problem" in closed) return closed;
+        return { record: { ...shared, status, reason, closed: closed.closed } };
+      }
       const by = entry["supersededBy"];
       if (by === undefined) return { record: { ...shared, status, reason } };
       const byHead = isObject(by) ? by["head"] : undefined;
@@ -381,6 +402,27 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
   }
   const bound: { closedAt?: ClosingBound } = closedAt === undefined ? {} : { closedAt };
   return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
+}
+
+function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {
+  if (!isObject(found)) return { problem: `has "closed" as ${render(found)}` };
+  const exitStatus = found["exitStatus"];
+  if (exitStatus !== 0 && exitStatus !== 3) {
+    return { problem: `has "closed.exitStatus" as ${render(exitStatus)} rather than 0 or 3` };
+  }
+  const openThreads = found["openThreads"];
+  if (!Array.isArray(openThreads) || !openThreads.every(isText)) {
+    return { problem: `has "closed.openThreads" as ${render(openThreads)} rather than an array of thread ids` };
+  }
+  const closedAt = found["closedAt"];
+  if (closedAt !== "round cap" && closedAt !== "token bound") {
+    return { problem: `has "closed.closedAt" as ${render(closedAt)} rather than "round cap" or "token bound"` };
+  }
+  const problems = found["problems"];
+  if (problems !== undefined && !isLines(problems)) {
+    return { problem: `has "closed.problems" as ${render(problems)} rather than an array of lines` };
+  }
+  return { closed: { exitStatus, openThreads, closedAt, ...(problems === undefined ? {} : { problems }) } };
 }
 
 type ReadReport = { readonly report: RoundReport } | { readonly problem: string };

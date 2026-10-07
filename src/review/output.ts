@@ -96,6 +96,24 @@ type AlreadyClosed = About & {
   readonly threads: readonly ReviewThread[];
 };
 
+/**
+ * A run whose own state the episode's spent cap or token bound stopped before a
+ * round took it, handed the close, exiting as the close did.
+ */
+type ClosedUnreviewed = About & {
+  readonly outcome: "closed unreviewed";
+  readonly exit: 0 | 3;
+  /** The run's own state, as `namedStates` names it. */
+  readonly state: string;
+  /** Why the state was not reviewed, as its record says. */
+  readonly reason: string;
+  readonly closedAt: Bound;
+  /** The threads the close left open, as they stand on the pull request now. */
+  readonly threads: readonly ReviewThread[];
+  /** False where the close has no summary on the pull request. */
+  readonly summarised: boolean;
+};
+
 /** A round that failed, exit 1, with what its failure comment says and where it went. */
 type Failed = About & {
   readonly outcome: "failed";
@@ -122,6 +140,7 @@ export type ReviewResult =
   | ClosedOpen
   | StillReviewing
   | AlreadyClosed
+  | ClosedUnreviewed
   | Failed
   | NotRun
   | Unposted;
@@ -174,6 +193,8 @@ export function composeReview(result: ReviewResult, path: string): Printed {
       return { exit: 4, stdout: printedAt(path, [stillReviewing(result)]), stderr: problems };
     case "closed":
       return { exit: result.exit, stdout: printedAt(path, closedBlocks(result)), stderr: problems };
+    case "closed unreviewed":
+      return { exit: result.exit, stdout: printedAt(path, unreviewedBlocks(result)), stderr: problems };
     case "failed":
       return { exit: 1, stdout: "", stderr: failedLines(result) + problems + NOT_AGAIN };
     case "not run":
@@ -224,26 +245,39 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         ...movedParagraph(result.moved),
       ];
     case 0:
-      return [
-        withNotReviewed(heading, result, result.notReviewed),
-        "Nothing is open. The review is closed, and its summary is on the pull request.",
-      ];
+      return [withNotReviewed(heading, result, result.notReviewed), NOTHING_OPEN];
     case 3: {
       const unreviewed = result.notReviewed?.state;
       const notReviewed =
         unreviewed === undefined ? undefined : { state: unreviewed, closedAt: result.closedAt };
       return [
         withNotReviewed(heading, result, notReviewed),
-        [
-          `The ${result.closedAt} is reached. The review is closed with ${counted(open.length, "thread")} open, and its summary`,
-          "is on the pull request. A person takes it from here, so do not run",
-          `\`squiz review ${result.pullRequest}\` again.`,
-        ].join("\n"),
+        boundReached(result.closedAt, open.length, result.pullRequest),
         ...open.map(printedThread),
         ...movedParagraph(result.moved),
       ];
     }
   }
+}
+
+const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";
+
+/** What a close at a bound with threads open tells the coding agent to do. */
+function boundReached(closedAt: Bound, open: number, pullRequest: number): string {
+  return [
+    `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
+    "is on the pull request. A person takes it from here, so do not run",
+    `\`squiz review ${pullRequest}\` again.`,
+  ].join("\n");
+}
+
+function unreviewedBlocks(result: ClosedUnreviewed): readonly string[] {
+  const heading = `Squiz did not review PR #${result.pullRequest} at ${result.state}: ${result.reason}.`;
+  const open = result.threads.filter((thread) => !thread.isResolved);
+  if (result.exit === 0) {
+    return [heading, result.summarised ? NOTHING_OPEN : "Nothing is open, and the review is closed."];
+  }
+  return [heading, boundReached(result.closedAt, open.length, result.pullRequest), ...open.map(printedThread)];
 }
 
 /** `heading`, followed where the close left the run's own state unreviewed by the line saying why. */

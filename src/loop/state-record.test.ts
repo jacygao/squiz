@@ -130,6 +130,19 @@ const everyState: readonly StateRecord[] = [
     status: "not reviewed",
     reason: "the episode closed at the round cap, after reviewing 3f9c2e0",
   },
+  // The state a round host took and found the bound spent on, which carries the close.
+  {
+    head: laterHead,
+    activity: null,
+    status: "not reviewed",
+    reason: "the episode closed at the token bound before a round took this state",
+    closed: {
+      exitStatus: 3,
+      openThreads: ["PRRT_kwDOL7tYbc5abcd1"],
+      closedAt: "token bound",
+      problems: ["the review of PR #41 closed without its summary: GitHub answered 502"],
+    },
+  },
 ];
 
 function roundShape(round: FinishedRound | undefined): string {
@@ -255,6 +268,11 @@ const malformed: readonly [string, unknown][] = [
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.
   ["a failed record not saying whether its owner was noted", { head, activity: null, status: "failed", reason: "r" }],
   ["a not reviewed record with no reason", { head, activity: null, status: "not reviewed" }],
+  // A close before the review leaves nothing for another round, so it never exits 2.
+  ["a close before the review exiting 2", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 2, openThreads: [], closedAt: "round cap" } }],
+  ["a close before the review naming no bound", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, openThreads: [] } }],
+  ["a close before the review with no open threads listed", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, closedAt: "round cap" } }],
+  ["a close before the review whose problems are not strings", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, openThreads: [], closedAt: "round cap", problems: [1] } }],
 ];
 
 for (const [what, entry] of malformed) {

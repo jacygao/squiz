@@ -27,8 +27,8 @@ import { listReviewThreads, type ReviewThread, type ThreadListing } from "../git
 import type { GhCall } from "../github/gh.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
-import { namedStates } from "../loop/round-end.ts";
-import { recordFor, sameState, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
+import { lastReviewed, namedStates } from "../loop/round-end.ts";
+import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
@@ -276,6 +276,10 @@ function notReviewed(
     if (newer === undefined || hops >= records.length) return undefined;
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
   }
+  const before = records.find((held): held is ClosedFirst => held.status === "not reviewed" && held.closed !== undefined);
+  if (state.closeReported === true && before !== undefined && record.reason === before.reason) {
+    return compose((threads) => closedUnreviewed(waiting, records, before, record, threads));
+  }
   const closing = closingRecord(records);
   const stopped = /^the episode closed at the (round cap|token bound), after reviewing /u.exec(record.reason);
   if (state.closeReported === true && closing !== undefined && stopped !== null) {
@@ -291,6 +295,39 @@ function notReviewed(
 }
 
 type NotReviewed = Extract<StateRecord, { readonly status: "not reviewed" }>;
+
+/** The state a close before the review was reached on, which carries the close. */
+type ClosedFirst = NotReviewed & { readonly closed: ClosedBeforeReview };
+
+/**
+ * The close before the review, for `record`: the state that close was reached
+ * on, or one queued behind it. Each is named as the close named them, after the
+ * last state the episode reviewed.
+ */
+function closedUnreviewed(
+  waiting: Waiting,
+  records: readonly StateRecord[],
+  first: ClosedFirst,
+  record: NotReviewed,
+  threads: readonly ReviewThread[],
+): ReviewResult {
+  const left = records.filter((held) => held.status === "not reviewed" && held.reason === first.reason);
+  const names = namedStates(lastReviewed(records), left);
+  const { closed } = first;
+  const problems = closed.problems ?? [];
+  return {
+    outcome: "closed unreviewed",
+    pullRequest: waiting.pullRequest,
+    exit: closed.exitStatus,
+    state: names[left.findIndex((held) => sameState(held, record))] ?? record.head.slice(0, 7),
+    reason: record.reason,
+    closedAt: closed.closedAt,
+    threads: threads.filter((thread) => closed.openThreads.includes(thread.id)),
+    // The close records a problem only where its summary is not on the pull request.
+    summarised: problems.length === 0,
+    problems,
+  };
+}
 
 const SUPERSEDED = "superseded by ";
 
@@ -360,7 +397,7 @@ function roundResult(
 /** The close of an episode already over, exiting as it did. */
 function closedResult(context: Context, state: EpisodeState, threads: readonly ReviewThread[]): ReviewResult {
   const closing = closingRecord(state.records ?? []);
-  // An episode closed before any round ran left only the threads earlier attempts opened.
+  // An episode closed before a round took its last state has no closing round, and its threads are all the reviewer opened.
   const left =
     closing === undefined
       ? threads.filter((thread) => readComment(thread.comments[0]?.body ?? "").by === "reviewer")

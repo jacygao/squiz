@@ -22,7 +22,7 @@ import { postSummary, type CommentPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
 import type { ConfinementEvidence } from "./confinement.ts";
-import type { EpisodeState, RoundRecord } from "./episode-state.ts";
+import type { RoundRecord } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
 import type { LeftNotReviewed } from "./round-end.ts";
@@ -110,30 +110,14 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Comment
 }
 
 /**
- * What became of the summary of an episode closed before its review ran.
+ * What became of the summary of an episode that closed before any round ran,
+ * with none of the reviewer's threads on the pull request.
  *
- * No comment is composed on that close and none is attempted. The firing runs no
- * reviewer and lists none of the episode's threads, so a comment written from what
- * it holds would report an episode that raised nothing.
- *
- * The episode ends here with nothing on the pull request reporting it, and the
- * rounds it ran say what that costs. Rounds ran means findings are up there with
- * no comment counting them, and a person is told so that they go and read the
- * threads. No round at all means there was nothing to report in the first place.
- * Both are closes at exit 0, where silence reads as a review that went fine.
+ * There is nothing for a comment to report, so none is composed. The close still
+ * says why there is none: it exits 0, where silence reads as a review that went
+ * fine.
  */
-export function summaryNotComposed(state: EpisodeState): EpisodeSummary {
-  const rounds = state.rounds.length;
-  if (rounds === 0) {
-    return { outcome: "never-composed", reason: "no round of the episode ever ran" };
-  }
-  return {
-    outcome: "never-composed",
-    reason: `the bound was spent before this firing listed the episode's threads, and nothing reports the ${counted(rounds)} it ran`,
-  };
-}
-
-/** How many rounds, the plural agreeing with the number. */
-function counted(rounds: number): string {
-  return `${rounds} ${rounds === 1 ? "round" : "rounds"}`;
-}
+export const closedBeforeAnyRound: EpisodeSummary = {
+  outcome: "never-composed",
+  reason: "the episode closed before any round ran",
+};

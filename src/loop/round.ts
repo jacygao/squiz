@@ -62,15 +62,21 @@ import {
   roundRecord,
   recordSpendOutsideRounds,
   type EpisodeState,
-  type StateWrite,
 } from "./episode-state.ts";
 import { episodeAt, roundDirectory, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
 import { postFailure } from "./failure-comment.ts";
-import type { LeftNotReviewed, QueuedRecord, RoundEnd } from "./round-end.ts";
+import {
+  closedBeforeReview,
+  lastReviewed,
+  type LeftNotReviewed,
+  type QueuedRecord,
+  type RoundEnd,
+  type StoppingBound,
+} from "./round-end.ts";
 import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } from "./state-record.ts";
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
-import { postEpisodeSummary, summaryNotComposed, type EpisodeSummary } from "./post-summary.ts";
+import { closedBeforeAnyRound, postEpisodeSummary, type EpisodeSummary } from "./post-summary.ts";
 import { tokenBoundIsReached, type ClosingReason, type EpisodeBounds } from "./round-decision.ts";
 import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 
@@ -257,12 +263,12 @@ export type RoundConclusion =
        */
       readonly summary: EpisodeSummary;
       /**
-       * Whether the close was recorded in the episode's state.
-       *
-       * A close nothing recorded is one no later firing can read, so it reviews
-       * this pull request again. The caller reports the write that failed.
+       * Present only on a close reached before a reviewer started, which reviewed
+       * nothing, so the caller records the state it took as not reviewed.
+       * `openThreads` is the node ids of the reviewer's threads open on the pull
+       * request as the close listed them.
        */
-      readonly recorded: StateWrite;
+      readonly beforeReview?: { readonly openThreads: readonly string[] };
     } & RoundAccount &
       AroundTheReviewer)
   /**
@@ -506,13 +512,7 @@ async function reviewOn(
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return closing(
-      episode,
-      over,
-      summaryNotComposed(state),
-      preReview.until,
-      nothingDone(pullRequest.number),
-    );
+    return closeBeforeReview(over, pullRequest, { setup, episode, preReview, posting: startPosting, stopwatch });
   }
 
   const listing = handOver(pullRequest, preReview);
@@ -822,7 +822,7 @@ function orEmpty(state: EpisodeState | null): EpisodeState {
  * count already recorded. A cap that is not a whole number leaves no round,
  * because nothing here may spend a review on a number it cannot count.
  */
-function exhausted(state: EpisodeState, bounds: EpisodeBounds): ClosingReason | null {
+function exhausted(state: EpisodeState, bounds: EpisodeBounds): StoppingBound | null {
   if (tokenBoundIsReached(widestAttempt(state), bounds.tokens)) return "token-bound";
   if (!Number.isInteger(bounds.rounds) || state.rounds.length >= bounds.rounds) {
     return "round-cap";
@@ -1204,35 +1204,110 @@ function closeAfterReview(
     },
     { directory: on.directory, until: on.reserve },
   ));
-  return { outcome: "close", because, summary, recorded: { outcome: "written" }, confinement, ...account };
+  return { outcome: "close", because, summary, confinement, ...account };
 }
 
 /**
- * The close of an episode whose bounds were spent before a reviewer started,
- * written to the episode's state.
+ * The close of an episode whose bounds were spent before a reviewer started.
  *
- * The mark is what stops a later firing reviewing the same pull request, so a
- * close without it is one the loop does not treat as ended at all.
+ * No reviewer runs, and the rest is what any close does: list the reviewer's
+ * threads, write the close, and post the summary from the threads and the
+ * episode's state. The state the caller took is left not reviewed, with every
+ * state queued behind it, and the summary's Notes name them.
  *
- * A write that failed is carried out rather than swallowed. It leaves the episode
- * looking open to every later firing, which is worth a line of its own.
+ * The threads are listed before the close is written. A listing that fails ends
+ * the round with nothing recorded and nothing posted, as at any round: a summary
+ * composed from part of the threads reports the rest as never raised.
+ *
+ * An episode that ran no round and holds none of the reviewer's threads has
+ * nothing for a summary to report, and posts none.
  */
-function closing(
-  episode: Episode,
-  because: ClosingReason,
-  summary: EpisodeSummary,
-  until: Deadline,
-  account: RoundAccount,
+function closeBeforeReview(
+  bound: StoppingBound,
+  pullRequest: PullRequest,
+  { setup, episode, preReview, posting, stopwatch }: Omit<AfterTheGate, "opened">,
 ): RoundConclusion {
-  const updated = updateState(episode, (current) => ({ ...current, closeReported: true }), {
-    until: lockWait(until),
-  });
+  const listing = handOver(pullRequest, preReview);
+  if ("ended" in listing) return listing.ended;
+  const threads = listing.step.threads;
+  const openThreads = threads.filter((thread) => !thread.isResolved).map((thread) => thread.id);
+
+  const reserve = posting();
+  let left: LeftNotReviewed | null | undefined;
+  const written = updateState(
+    episode,
+    (current) => {
+      left = leftBeforeReview(current, bound, setup.state);
+      return { ...current, closeReported: true };
+    },
+    { until: lockWait(reserve) },
+  );
+  if (written.outcome === "failed") {
+    return failed("harness", `the episode's close could not be recorded: ${written.reason}`);
+  }
+
+  const state = written.state;
+  const account = nothingDone(pullRequest.number);
+  const summary =
+    state.rounds.length === 0 && threads.length === 0
+      ? closedBeforeAnyRound
+      : timed(stopwatch, reserve, () =>
+          postEpisodeSummary(
+            {
+              pullRequest: pullRequest.number,
+              rounds: state.rounds,
+              handedOver: threads,
+              verdicts: standing(threads),
+              findings: account.findings,
+              // The bound closed the episode either way, and the Notes name it
+              // through the states it left not reviewed.
+              because: openThreads.length === 0 ? "nothing-open" : bound,
+              confinement: state.confinement ?? nothingEstablished,
+              leftNotReviewed: left ?? null,
+            },
+            { directory: episode.worktree, until: reserve },
+          ),
+        );
+  return { outcome: "close", because: bound, summary, beforeReview: { openThreads }, ...account };
+}
+
+/**
+ * The states a close before the review leaves not reviewed: the one the caller
+ * took, then every state queued behind it. `null` where there are none.
+ */
+function leftBeforeReview(
+  state: EpisodeState,
+  bound: StoppingBound,
+  taken: StateKey | undefined,
+): LeftNotReviewed | null {
+  const records = state.records ?? [];
+  const queued = records.filter(
+    (record) => record.status === "queued" && (taken === undefined || !sameState(record, taken)),
+  );
+  const keys = [...(taken === undefined ? [] : [taken]), ...queued];
+  if (keys.length === 0) return null;
+  const reason = closedBeforeReview(bound);
   return {
-    outcome: "close",
-    because,
-    summary,
-    recorded: updated.outcome === "written" ? { outcome: "written" } : updated,
-    ...account,
+    bound,
+    after: lastReviewed(records),
+    states: keys.map(({ head, activity }) => ({ head, activity, status: "not reviewed", reason })),
+  };
+}
+
+/**
+ * The rulings a close before the review counts its threads by, where no reviewer
+ * ruled.
+ *
+ * A resolved thread is counted fixed: nothing records whether `fixed` or
+ * `withdrawn` closed it. An unresolved one is given no ruling, and reads as open
+ * or disputed as it does at any close.
+ */
+function standing(threads: readonly ReviewThread[]): AppliedVerdicts {
+  return {
+    threads: threads
+      .filter((thread) => thread.isResolved)
+      .map((thread) => ({ thread: thread.id, ruled: "fixed", outcome: "closed" })),
+    unapplied: [],
   };
 }
 
