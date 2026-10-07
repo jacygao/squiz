@@ -193,6 +193,8 @@ type Fixture = {
   readonly planFile: string;
   readonly gh: () => GhState;
   readonly setGh: (state: GhState) => void;
+  /** Commit a change and make it the pull request's head, as a push does. Returns the commit. */
+  readonly push: () => string;
 };
 
 async function withPullRequest(starts: readonly PlannedStart[], body: (fixture: Fixture) => Promise<void>): Promise<void> {
@@ -229,7 +231,17 @@ async function withPullRequest(starts: readonly PlannedStart[], body: (fixture: 
       git("commit", "--quiet", "--all", "--message", "say what the line is for");
       return git("rev-parse", "HEAD");
     };
-    await body({ worktree, commit, episode, planFile, gh: () => JSON.parse(readFileSync(ghFile, "utf8")) as GhState, setGh });
+    const gh = (): GhState => JSON.parse(readFileSync(ghFile, "utf8")) as GhState;
+    let pushes = 0;
+    const push = (): string => {
+      pushes += 1;
+      writeFileSync(join(worktree, FILE), `// line 1\n// line 2, fixed ${pushes}\n`, "utf8");
+      git("commit", "--quiet", "--all", "--message", `fix ${pushes}`);
+      const head = git("rev-parse", "HEAD");
+      setGh({ ...gh(), head });
+      return head;
+    };
+    await body({ worktree, commit, episode, planFile, gh, setGh, push });
   } finally {
     // A host still running would find its worktree gone and exit, so wait for it first.
     const lock = join(episode.directory, "host.lock");
@@ -685,3 +697,265 @@ function stateOf_ifAny(episode: Episode): string | undefined {
   const read = readState(episode);
   return read.outcome === "read" ? read.state.records?.[0]?.status : undefined;
 }
+
+const SECOND_FINDING: Finding = { ...FINDING, severity: "medium", headline: "The new line repeats the first" };
+
+const DROPPED: Finding = { ...FINDING, severity: "low", headline: "A finding the closing round may not raise" };
+
+/** The cap set to `rounds`, in the plan every later host reads and in the settings `squiz review` prints from. */
+function capAt(fixture: Fixture, rounds: number): void {
+  const plan = JSON.parse(readFileSync(fixture.planFile, "utf8")) as Plan;
+  writeFileSync(fixture.planFile, JSON.stringify({ ...plan, config: { rounds } }), "utf8");
+  writeFileSync(join(fixture.worktree, ".squiz.json"), JSON.stringify({ rounds }), "utf8");
+}
+
+/** How many reviewers the plan has started, across every host. */
+function started(fixture: Fixture): number {
+  const file = `${fixture.planFile}.started`;
+  return existsSync(file) ? Number(readFileSync(file, "utf8")) : 0;
+}
+
+test("a fix pushed after the cap closed the episode gets one closing round, which rules only on the open threads and posts no finding the reviewer reports (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING, SECOND_FINDING], verdicts: [] },
+    { findings: [DROPPED], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    capAt(fixture, 1);
+    const first = await review(fixture);
+    assert.equal(first.exit, 3, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    const reviewed = fixture.gh().head.slice(0, 7);
+    // A person resolves the second thread, and the coding agent pushes a fix for the first.
+    const gh = fixture.gh();
+    const second = gh.threads[1];
+    if (second !== undefined) second.isResolved = true;
+    fixture.setGh(gh);
+    const fixed = fixture.push().slice(0, 7);
+
+    const closing = await review(fixture);
+
+    assert.equal(closing.exit, 0, `${closing.stdout}${closing.stderr}\n${hostLog(fixture.episode)}`);
+    assert.deepEqual(closing.stdout.split("\n").slice(1, 4), [
+      `Squiz reviewed PR #41 at ${fixed}: the closing round, after 1 of 1 round.`,
+      "",
+      "Nothing is open. The review is closed, and its summary is on the pull request.",
+    ]);
+    const dropped =
+      "`src/ui/card.ts:2` — A finding the closing round may not raise (reported in the closing round, which raises no findings, so it was not posted)";
+    assert.equal(closing.stderr, `squiz: the closing round did not post this: ${dropped}\n`);
+    assert.deepEqual(
+      fixture.gh().threads.map((thread) => [thread.id, thread.isResolved]),
+      [["PRRT_1", true], ["PRRT_2", true]],
+      "the closing round opened a thread for a finding, or left the fixed one open",
+    );
+
+    assert.equal(
+      fixture.gh().threads[0]?.comments.at(-1)?.body,
+      `**Squiz reviewer · fixed**\n\nConfirmed in the closing round at ${fixed}.`,
+      "the closing round's fixed verdict did not post its reply, or did not name the closing round",
+    );
+
+    const prompt = readFileSync(join(fixture.episode.directory, "rounds", "2", "prompt.md"), "utf8");
+    assert.ok(prompt.includes("\n## Closing round\n"), `the closing round's prompt did not say what it is:\n${prompt}`);
+    assert.ok(prompt.includes("\n### PRRT_1\n"), "the open thread was not handed over");
+    assert.ok(!prompt.includes("PRRT_2"), "a resolved thread was handed to the closing round");
+
+    const rounds = stateOf(fixture.episode).rounds;
+    assert.deepEqual(rounds.map((round) => round.closing === true), [false, true], "the closing round's entry is not marked");
+
+    const [atCap, last, ...more] = fixture.gh().issueComments;
+    assert.deepEqual(more, []);
+    assert.match(atCap ?? "", /^\*\*Squiz review — 1 round, 2 findings\*\*/u);
+    assert.equal(
+      last,
+      [
+        "**Squiz review — 1 round and a closing round, 2 findings**",
+        "",
+        "Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0 · Resolved, ruling unknown 1",
+        "2,400 tokens over 1 round and the closing round: 1,200, 1,200 · $0.0200",
+        "Reviewed by `pi` on an unknown model",
+        "",
+        "**Needs a person**",
+        "",
+        "Nothing needs a person.",
+        "",
+        "**Rounds**",
+        "",
+        `- Round 1 at ${reviewed}: raised 2 findings`,
+        `- The closing round at ${fixed}: raised nothing, and ruled 1 fixed`,
+        "",
+        "**Notes**",
+        "",
+        `- ${dropped}`,
+        "- The closing round ruled on the 1 thread the round cap left open, and settled 1: `src/ui/card.ts:2` — The new line says nothing (fixed)",
+      ].join("\n"),
+    );
+  });
+});
+
+test("a second fix after the closing round runs no round, and leaves the thread for a person with exit 3 (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "open", reason: KEPT_OPEN }] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    capAt(fixture, 1);
+    const first = await review(fixture);
+    assert.equal(first.exit, 3, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    const fixed = fixture.push().slice(0, 7);
+    const closing = await review(fixture);
+    assert.equal(closing.exit, 3, `${closing.stdout}${closing.stderr}\n${hostLog(fixture.episode)}`);
+    assert.deepEqual(closing.stdout.split("\n").slice(1, 8), [
+      `Squiz reviewed PR #41 at ${fixed}: the closing round, after 1 of 1 round.`,
+      "",
+      "The closing round is done. The review is closed with 1 thread open, and its",
+      "summary is on the pull request. A person takes it from here, so do not run",
+      "`squiz review 41` again.",
+      "",
+      "PRRT_1 src/ui/card.ts:2 high — The new line says nothing",
+    ]);
+
+    fixture.push();
+    const after = await review(fixture);
+
+    assert.equal(after.exit, 3, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(
+      after.stdout.split("\n")[1],
+      "Squiz's review of PR #41 closed after 1 round and its closing round, with 1 thread open. No round runs again in this worktree.",
+    );
+    assert.equal(started(fixture), 2, "a second closing round ran");
+    assert.equal(fixture.gh().threads[0]?.isResolved, false);
+    assert.equal(fixture.gh().issueComments.length, 2, "a third summary was posted");
+    const status = squizStatus(fixture.worktree).stdout;
+    assert.ok(status.includes("1 thread open, review closed by the closing round"), `squiz status did not name the closing round:\n${status}`);
+  });
+});
+
+test("a closing round whose reviewer would not start spent nothing, so its failure comment promises the retry and squiz review runs it (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [], refuse: "the provider refused the credential" },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    capAt(fixture, 1);
+    const first = await review(fixture);
+    assert.equal(first.exit, 3, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    fixture.push();
+    const refused = await review(fixture);
+    assert.equal(refused.exit, 1, `${refused.stdout}${refused.stderr}\n${hostLog(fixture.episode)}`);
+    const failure = fixture.gh().issueComments.find((body) => body.startsWith("**Squiz review failed"));
+    assert.ok(
+      failure?.includes("A new commit or reply, or running `squiz review` again, retries it."),
+      `the failure comment of a closing round that spent nothing did not promise the retry:\n${failure}`,
+    );
+
+    const retried = await review(fixture);
+
+    assert.equal(retried.exit, 0, `${retried.stdout}${retried.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(retried.stdout.split("\n")[1] ?? "", /: the closing round, after 1 of 1 round\.$/u);
+  });
+});
+
+test("a closing round's ruling on a resolved thread it was not handed is named in its summary as not handed over (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING, SECOND_FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }, { thread: "PRRT_2", verdict: "withdrawn", reason: "The line repeats nothing." }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    capAt(fixture, 1);
+    const first = await review(fixture);
+    assert.equal(first.exit, 3, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const gh = fixture.gh();
+    const second = gh.threads[1];
+    if (second !== undefined) second.isResolved = true;
+    fixture.setGh(gh);
+    fixture.push();
+
+    const closing = await review(fixture);
+
+    assert.equal(closing.exit, 0, `${closing.stdout}${closing.stderr}\n${hostLog(fixture.episode)}`);
+    const last = fixture.gh().issueComments.at(-1) ?? "";
+    assert.ok(
+      last.includes("- A ruling of withdrawn on thread `PRRT_2`, which was not handed to the reviewer, was not applied\n"),
+      `the summary did not say the ruling named a thread never handed over:\n${last}`,
+    );
+  });
+});
+
+test("a token bound lowered past what the episode spent stops the closing round before its reviewer starts (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    capAt(fixture, 1);
+    const first = await review(fixture);
+    assert.equal(first.exit, 3, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    // Round 1 spent 1,200 tokens, which a bound of 1,000 has been reached by.
+    const plan = JSON.parse(readFileSync(fixture.planFile, "utf8")) as Plan;
+    writeFileSync(fixture.planFile, JSON.stringify({ ...plan, config: { rounds: 1, tokens: 1000 } }), "utf8");
+    fixture.push();
+
+    const after = await review(fixture);
+
+    assert.equal(after.exit, 3, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(started(fixture), 1, "the closing round's reviewer ran past the token bound");
+    assert.equal(fixture.gh().threads[0]?.isResolved, false);
+    assert.equal(fixture.gh().issueComments.length, 1, "a second summary was posted for a closing round that never ran");
+    assert.equal(stateOf(fixture.episode).rounds.length, 1);
+  });
+});
+
+test("a close at the token bound with threads open leaves no closing round, so a fix after it runs no reviewer (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    // Round 1 spends 1,200 tokens, which reaches a bound of 1,000.
+    const plan = JSON.parse(readFileSync(fixture.planFile, "utf8")) as Plan;
+    writeFileSync(fixture.planFile, JSON.stringify({ ...plan, config: { tokens: 1000 } }), "utf8");
+    const first = await review(fixture);
+    assert.equal(first.exit, 3, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(first.stdout, /^The token bound is reached\./mu);
+
+    // Raised after the close, so the bound would let a closing round spend.
+    writeFileSync(fixture.planFile, JSON.stringify({ ...plan, config: { tokens: 100_000 } }), "utf8");
+    fixture.push();
+    const after = await review(fixture);
+
+    assert.equal(after.exit, 3, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(started(fixture), 1, "a closing round ran after a close at the token bound");
+    assert.equal(fixture.gh().issueComments.length, 1);
+  });
+});
+
+test("a close before any reviewer ran leaves no closing round, so a fix after it runs no reviewer (#587)", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 2, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    // The cap is lowered, so the next state closes the episode before a reviewer starts.
+    capAt(fixture, 1);
+    fixture.push();
+    const closed = await review(fixture);
+    assert.equal(closed.exit, 3, `${closed.stdout}${closed.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(closed.stdout, /the episode closed at the round cap before a round took this state/u);
+
+    fixture.push();
+    const after = await review(fixture);
+
+    assert.equal(after.exit, 3, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(started(fixture), 1, "a closing round ran after a close before any review");
+    assert.equal(fixture.gh().issueComments.length, 1);
+  });
+});

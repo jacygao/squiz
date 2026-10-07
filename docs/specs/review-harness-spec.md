@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.25 (draft)
+**Version:** 1.26 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -152,12 +152,15 @@ below.
 |---|---|
 | **Round** | One review of one state of a pull request, its head commit and the replies on the reviewer's threads: gate, review, post, decide. A round either leaves threads open for the coding agent, whose next push or reply starts the next round, or ends the episode. |
 | **Episode** | Every round belonging to one pull request in one worktree. The round cap, the local state file and the summary comment are all per-episode; the review itself is per-round. |
+| **Closing round** | The one round an episode the round cap closed with threads open may still run, when a new commit or reply follows the close. It rules on the threads still open and raises nothing, and the cap does not count it (The round cap). |
 
 An episode is **live** from its first round until it closes, and its reviewer is
 reviewing or its coding agent is working on what the review said. It closes for
 one of three reasons: nothing is left open for another round to work, the round
 cap is spent, or a round reached the token bound. A round that failed closes
-nothing — it posts a failure comment under § 7, and the episode stays live.
+nothing — it posts a failure comment under § 7, and the episode stays live. An
+episode the cap closed with threads open is closed, and may still run its closing
+round, which closes it again (The round cap).
 
 A live episode is one whose close has not been recorded. Nothing else makes an
 episode live or over: not whether a round is running at this instant, because
@@ -168,9 +171,10 @@ long ago anything happened.
 
 **An episode is keyed by the number of its pull request.** Its state lives in
 `.squiz/<number>/` inside the worktree. The state file holds the round count, the
-cost of each round and what it reviewed and ruled (§ 5 The format), what the
-episode spent on attempts that were no round, whether the episode has reported
-its close and what was open at that close, and the reviewer's last ruling on each
+cost of each round, what it reviewed and ruled, and whether it was the closing
+round (§ 5 The format), what the episode spent on attempts that were no round,
+whether the episode has reported its close, what was open at that close and
+whether that close leaves a closing round, and the reviewer's last ruling on each
 thread. The directory also holds:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
@@ -215,7 +219,7 @@ Each record is in one of five states:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it yet. |
 | Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. A round that left the episode open also records each of its findings that no thread holds, as the line § 5's Notes would give it. |
+| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. A round that left the episode open also records each of its findings that no thread holds, as the line § 5's Notes would give it. The closing round's record says it was the closing round. |
 | Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
 | Not reviewed | The episode closed before a round took this state, or a later commit or reply superseded it before its round started, and why. |
 
@@ -341,7 +345,7 @@ starting a reviewer (§ 5), also writes the close before it posts the summary.
 
 **A state left not reviewed is named by its short head commit, and by its
 replies where an earlier state has the same commit.** The earlier states are the
-one the closing round reviewed and those queued ahead of it. A state with the head
+one the round that closed the episode reviewed and those queued ahead of it. A state with the head
 of an earlier state differs from it only in its replies: a reply was added or
 deleted, and the record cannot say which. Such a state is named "with different
 replies". A state whose head two earlier states have is named "with different
@@ -377,9 +381,10 @@ salvaged, and leaves every other thread's alone. A ruling is kept whether or not
 GitHub then takes it, because the thread's resolved state still says whether it
 is closed. A state file with no rulings holds none.
 
-**A closed episode stays closed in its worktree.** A second episode on the same
-pull request starts in another worktree on the same branch, which holds no state
-for it.
+**A closed episode stays closed in its worktree.** The one exception is the
+closing round, which a close at the round cap leaves for the next new state (The
+round cap). A second episode on the same pull request starts in another worktree
+on the same branch, which holds no state for it.
 
 **A state file an earlier version wrote may also hold what its rounds found by
 comparing the snapshot before and after the reviewer ran.** It reads as it would
@@ -392,8 +397,8 @@ flowchart TD
     A[Coding agent finishes its work,<br/>or runs squiz review 41] --> C{Pull request 41's head<br/>checked out here?}
     C -->|no| L[Name the branch and the directory,<br/>queue nothing]
     C -->|yes| K{Episode closed?}
-    K -->|yes| D[Print the close, exit 0 or 3]
-    K -->|no| R{Record for this commit<br/>and these replies?}
+    K -->|yes, and no closing<br/>round remains| D[Print the close, exit 0 or 3]
+    K -->|no, or a closing<br/>round remains| R{Record for this commit<br/>and these replies?}
     R -->|reviewed| P[Print its result,<br/>exit as it did]
     R -->|queued, or reviewing<br/>by a live host| W[squiz review waits;<br/>a hook returns]
     R -->|reviewing, host<br/>cannot be told| U[Change nothing;<br/>squiz review exits 1]
@@ -434,7 +439,8 @@ flowchart TD
    file. An episode that has reported its close is over: `squiz review` prints the
    close and exits as the close did, and no reviewer runs. The round cap and the
    token bound are not consulted, because an episode that is over stays over
-   whatever a bound would now allow. Otherwise the trigger lists the threads, and
+   whatever a bound would now allow. An episode whose closing round remains is
+   the one exception, and a new state is queued for that round (The round cap). Otherwise the trigger lists the threads, and
    the record for the pull request's state decides, as The state file sets out,
    whether the state is queued.
 3. **Run the reviewer.** The round host starts the reviewer as a session of its
@@ -477,6 +483,80 @@ or the round cap leaves it open.
 The cap defaults to 3 and is settable from 1 to 8. A cap of R hands open threads
 back to the coding agent at most R−1 times, because round R closes the episode
 whatever is still open. A cap of 1 reviews once and closes.
+
+**An episode the cap closed with threads open runs one closing round, when a new
+state follows the close.** Round R closes the episode as any close does: it
+records the close, posts the summary, and a run of `squiz review` waiting on it
+exits 3. The update that records the close also records that the closing round
+remains, so a trigger that reads the state while the summary is posted already
+finds it. The first new state after that, a new commit or a new reply on the
+reviewer's threads, has no record, so a trigger queues it as it queues any state
+with no record, and the round host runs it as the closing round. A trigger
+that finds the same state as before finds its record, and queues nothing.
+
+The closing round is a round as A round, step by step sets out, with five
+differences:
+
+- **It rules only on the threads still open.** It hands the reviewer the
+  reviewer's threads that are not resolved, and no others, so no verdict can
+  re-open a resolved one. A thread it is not handed keeps its state, and the
+  summary counts it by the ruling the state file recorded for it, as a close
+  before any review does (§ 5): `fixed` or `withdrawn`, or resolved with its
+  ruling unknown where none was recorded.
+- **It raises no findings.** Its prompt says so, in a section of its own before
+  the threads:
+
+  ```markdown
+  ## Closing round
+
+  The round cap is spent, and this is the review's closing round. Return a verdict on every thread below, and report no findings: a finding reported in this round is not posted.
+  ```
+
+  The round does not rely on the reviewer to obey. A finding the reviewer reports
+  anyway is never posted, and no thread is opened for it. The round names each
+  one in its summary's Notes, on `squiz review`'s stderr, and under its line in
+  `squiz status`, so a finding dropped this way is never lost without a line
+  saying so. A closing round that fails names them in its failure comment
+  instead of a summary, and on the other two all the same.
+- **The cap does not count it.** Its entry in the state file is marked as the
+  closing round. The cap's arithmetic leaves that entry out, and every other
+  ledger keeps it: its spend is the episode's, its directory is `rounds/<k>/`
+  with the next `k`, and its reviewer's label is `squiz-<number>-r<k>`.
+- **It closes the episode for good.** It writes the close again, in the update
+  that reads the queue, and posts a second summary comment (§ 5). A run of
+  `squiz review` waiting on it exits 0 where it left nothing open, and 3 where it
+  left threads open. A state queued behind it is recorded not reviewed, as one
+  queued behind a round that reached the cap is, with the reason "the episode
+  closed at the round cap, after reviewing" and the closing round's commit.
+- **The token bound is checked before it, as before any round.** Where the
+  episode's widest attempt has reached the bound, which only a bound lowered
+  since the close can bring about, no reviewer runs, nothing is posted, and the
+  state is recorded not reviewed with the reason "the episode had closed before a
+  round took this state".
+
+**The closing round runs once per episode.** It is spent once its entry is in the
+state file, which happens when its reviewer has run, however that review ended.
+The entry is written before the round posts, so a trigger for the state the
+closing round took finds that state's record still reviewing, and waits on it as
+on any state under review. A
+closing round the time bound cut short is spent, and so is one whose review
+failed after the reviewer reported. After it the episode is over as any closed
+episode is: a fix pushed after the closing round queues nothing, the threads it
+left open are a person's, and `squiz review` prints the close and exits 3. A
+closing round that failed after it was spent posts its failure comment, which
+says "The review is closed: its closing round has run. No round runs again." in
+place of the retry, and posts no second summary.
+
+**A closing round that spent nothing is a failed state like any other.** A
+reviewer that would not start, or a `gh` that could not answer before the
+review, records no entry. A hook does not retry that state, and `squiz review`
+or a new state does, as The state file sets out.
+
+**Only a round that reviewed and reached the cap leaves a closing round.** A
+close at the token bound leaves none, and so does a close before any reviewer
+ran (§ 5). A state queued behind the round that reached the cap is recorded not
+reviewed at that close, as The state file sets out, and only a state after the
+close starts the closing round.
 
 ### What starts a round
 
@@ -1891,6 +1971,9 @@ request carries the threads of every episode that has run on it, and the first
 round of a second episode is handed them. The first round of a first episode is
 handed none, because there are none yet.
 
+The closing round is the exception. It is handed only the reviewer's threads that
+are not resolved, and a finding it reports is never posted (§ 3 The round cap).
+
 A thread a person opened is left alone. It is not handed over, no verdict is
 applied to it, and nothing in the loop reads or answers it.
 
@@ -1933,7 +2016,8 @@ its reason every round it keeps it open, after the thread is put in its state:
 
 A thread the round closes gets its reply before it is resolved. The reply names
 the round and the short commit the round reviewed, and a withdrawal carries the
-reviewer's reason beneath:
+reviewer's reason beneath. The closing round's replies name it as "the closing
+round", as `Confirmed in the closing round at 9e01b2c.`:
 
 ```markdown
 **Squiz reviewer · fixed**
@@ -2069,10 +2153,13 @@ The comment is never edited or replaced. A second episode on the same pull
 request posts a second comment, and the comments accumulate as a history of the
 review passes.
 
-**An episode reports its close once.** The round that closes it writes the
-close to the episode's state, and then posts the comment, as The state file under
-§ 3 sets out. Every path that ends an episode writes the close, the paths that end
-one with no comment included.
+**An episode reports its close once, and its closing round reports it again.**
+The round that closes it writes the close to the episode's state, and then posts
+the comment, as The state file under § 3 sets out. Every path that ends an
+episode writes the close, the paths that end one with no comment included. A
+closing round (§ 3 The round cap) posts a second comment, composed the same way
+from the episode as the closing round leaves it. It is the episode's last, and the
+first stays as it was posted.
 
 A round that leaves threads open for the coding agent posts no summary and records
 no close, because the comment is the close of the episode rather than the end of a
@@ -2114,8 +2201,8 @@ someone closed the thread.
 
 Four blocks, in this order.
 
-1. **The counts, what the review spent, and who reviewed it.** Rounds run,
-   findings raised, how many ended `fixed`, `withdrawn`, `open` and `disputed`,
+1. **The counts, what the review spent, and who reviewed it.** Rounds run, and
+   the closing round where one ran, findings raised, how many ended `fixed`, `withdrawn`, `open` and `disputed`,
    and the tokens each round spent with the episode's total, followed by the
    dollars where the reviewer's CLI priced the model, and the AI credits where it
    reported those. Then the reviewer CLI and the model each round ran on, as the
@@ -2136,7 +2223,9 @@ Four blocks, in this order.
    reviewed, how many findings it raised, and the rulings it replied with: each
    thread it closed while the thread was open, and each it kept open. A round
    that raised nothing and ruled on nothing says so in one line, as
-   `- Round 4 at 9a0b1c2: found nothing new and ruled on nothing`. The list is
+   `- Round 4 at 9a0b1c2: found nothing new and ruled on nothing`. The closing
+   round is named as one, as `- The closing round at 9e01b2c: raised nothing,
+   and ruled 1 fixed and 2 open`. The list is
    read from the episode's state file and never from the pull request, so a
    round whose replies GitHub refused is listed all the same. A round whose entry
    holds none of this, which only a state file an earlier version wrote has, is
@@ -2146,13 +2235,14 @@ Four blocks, in this order.
    findings about the change as a whole, each with its headline; a finding the
    harness could anchor to neither a line nor a file, with its `file:line`; a
    finding whose comment could not be posted at all, with the location the
-   finding carries; a thread the closing round kept open whose reason could
+   finding carries; a thread the last round kept open whose reason could
    not be posted, with its location and headline; a thread any round closed
    whose reply could not be posted, with its location, headline and ruling; a
-   ruling of the closing round that could not be applied, with what the
-   reviewer ruled; a round whose review the time bound cut short, with the
-   round's number and the bound; and a cap or bound that ended the episode
-   early, with each queued state it left not reviewed.
+   ruling of the last round that could not be applied, with what the
+   reviewer ruled; a finding the closing round reported, which was not posted;
+   what the closing round settled; a round whose review the time bound cut
+   short, with the round's number and the bound; and a cap or bound that ended
+   the episode early, with each queued state it left not reviewed.
 
 **A closing reply that could not be posted is a line naming the ruling.** The
 thread is closed with nothing on it saying so, and the round recorded the line
@@ -2176,7 +2266,7 @@ by the id the reviewer gave. What GitHub answered is left out:
 - A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied
 ```
 
-**The findings that no thread holds are the closing round's, and those an
+**The findings that no thread holds are the last round's, and those an
 earlier round left that no later round settled.** A round that leaves the
 episode open posts no summary, so its record keeps each of those findings as
 its Notes line (§ 3 The state file), and `squiz review` prints each on stderr
@@ -2184,7 +2274,9 @@ for the coding agent working that round (§ 6). A later round whose reviewer
 finished its review settles them: the reviewer read the whole change again, and
 raised again each one it still found. The earlier findings are therefore listed
 only by a close that ran no reviewer, which lists those of the last round that
-reached a result. They come first in Notes, before the closing round's own.
+reached a result. They come first in Notes, before the last round's own. A
+closing round's summary does not list them again: the round that reached the cap
+listed its own in the first summary.
 
 A failed round settles nothing and posts no summary. The findings it salvaged
 that no thread holds are listed in its failure comment instead, as § 7 The
@@ -2202,6 +2294,23 @@ round that closes the episode later, from the episode's state:
 
 ```markdown
 - The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
+```
+
+**A closing round is a line of its own, saying what it settled.** It names the
+threads it was handed and each one it closed, with its location, its headline and
+the ruling that closed it. What it left open is under Needs a person:
+
+```markdown
+- The closing round ruled on the 2 threads the round cap left open, and settled 1: `src/queue.ts:134` — Retry backoff resets on every enqueue (fixed)
+- The closing round ruled on the 1 thread the round cap left open, and settled none
+```
+
+A finding the closing round reported is a line each, given as a finding no
+thread holds is, saying it was not posted. Findings raised does not count it,
+because nothing on the pull request raised it:
+
+```markdown
+- `src/cache.ts:12` — The cache is never cleared (reported in the closing round, which raises no findings, so it was not posted)
 ```
 
 **A cap or bound that left queued states not reviewed is one line, naming the
@@ -2247,6 +2356,38 @@ Reviewed by `pi` on `openai/gpt-5-mini`
 
 Notes is omitted when there is nothing to report.
 
+A closing round's summary names it in the heading, in the spend line, where its
+tokens come last, and in Rounds:
+
+```markdown
+**Squiz review — 3 rounds and a closing round, 6 findings**
+
+Fixed 3 · Withdrawn 1 · Open 1 · Disputed 1
+52,500 tokens over 3 rounds and the closing round: 20,100, 16,400, 11,700, 4,300 · $0.0151
+Reviewed by `pi` on `openai/gpt-5-mini`
+
+**Needs a person**
+
+- `packages/sync/src/session.ts:57` — Clock skew is read as token expiry (disputed)
+- `packages/sync/src/retry.ts` — Every path here is dead once the queue lands (open)
+
+**Rounds**
+
+- Round 1 at 3f9c2e0: raised 6 findings
+- Round 2 at 1b86987: raised nothing, and ruled 2 fixed, 1 withdrawn and 3 open
+- Round 3 at 8d21a4f: raised nothing, and ruled 3 open
+- The closing round at 9e01b2c: raised nothing, and ruled 1 fixed and 2 open
+
+**Notes**
+
+- The closing round ruled on the 3 threads the round cap left open, and settled 1: `packages/sync/src/queue.ts:134` — Retry backoff resets on every enqueue (fixed)
+- The episode ended at its round cap rather than with nothing left open
+```
+
+Where some rounds have no cost, the spend line counts the closing round among
+the rounds, as "over 3 of 4 rounds". Where the time bound cut the closing round
+short, its line names it "the closing round" rather than a round's number.
+
 Each round is written to the episode's local state file as the review finishes,
 before anything is posted. The closing replies it could not post are added when
 it records its end, and its posting time once posting ends:
@@ -2289,14 +2430,17 @@ it records its end, and its posting time once posting ends:
 - `unpostedReplies` is the Notes line of each reply on a thread the round
   closed that GitHub refused, and is absent where none was refused. A round
   that fails records none, and lists them in its failure comment.
+- `closing` is `true` on the closing round's entry, and absent on every other.
+  The round cap counts the entries that do not carry it. The closing round's
+  `raised` is 0, because the findings its reviewer reported were not posted.
 
 A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
 `postingSeconds`, `floor`, `credits`, `reviewer`, `models`, `head`, `raised`,
-`ruled` and `unpostedReplies` existed has none of them, and reads back as rounds
-with no timing, no cut, no credits, no reviewer and no model, costs that are
-totals, and no record of what they reviewed or ruled. A field that is there and
-does not hold a value of the right kind makes the file unreadable, like any
-other.
+`ruled`, `unpostedReplies` and `closing` existed has none of them, and reads back
+as rounds with no timing, no cut, no credits, no reviewer and no model, costs
+that are totals, no record of what they reviewed or ruled, and no closing round.
+A field that is there and does not hold a value of the right kind makes the file
+unreadable, like any other.
 
 The comment leads with the tokens, because every reviewer reports them and not
 every reviewer is priced. A model run on a subscription has no dollar figure at
@@ -2422,7 +2566,7 @@ invocation (§ 7). The exit status says what the coding agent does next:
 |---|---|---|
 | 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
-| 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
+| 3 | The round cap or the token bound closed the episode with threads still open, or its closing round left them open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
 | 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
 
@@ -2519,6 +2663,38 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 Where the token bound closed the episode, the second paragraph begins "The token
 bound is reached" instead.
 
+The closing round (§ 3 The round cap) is named as one, in place of a round's
+number, and exits 0 or 3 as any close does. Its heading gives no count of new
+findings, because it raises none. Nothing open, exit 0:
+
+```
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz reviewed PR #41 at 9e01b2c: the closing round, after 3 of 3 rounds.
+
+Nothing is open. The review is closed, and its summary is on the pull request.
+```
+
+Threads still open, exit 3:
+
+```
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz reviewed PR #41 at 9e01b2c: the closing round, after 3 of 3 rounds.
+
+The closing round is done. The review is closed with 1 thread open, and its
+summary is on the pull request. A person takes it from here, so do not run
+`squiz review 41` again.
+
+PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
+  …
+```
+
+A finding the reviewer reported in the closing round is a line on stderr, as
+§ 5's Notes write it:
+
+```
+squiz: the closing round did not post this: `src/cache.ts:12` — The cache is never cleared (reported in the closing round, which raises no findings, so it was not posted)
+```
+
 Still reviewing, exit 4. A run whose deadline arrived while its state's round
 ran:
 
@@ -2560,7 +2736,8 @@ Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs
 ```
 
 Where it closed with threads open, exit 3, the line counts them and the threads
-follow, each as exit 3 prints it:
+follow, each as exit 3 prints it. Where the episode ran its closing round, the
+line says "closed after 3 rounds and its closing round":
 
 ```
 Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
@@ -2662,7 +2839,8 @@ Each column holds:
   state not reviewed, why not. For a reviewed state, how many of the reviewer's
   threads it left open, and "review closed" where it closed the episode. Where
   the round cap or the token bound closed it with threads open, "review closed
-  at the round cap" or "at the token bound". Where GitHub refused some of the
+  at the round cap" or "at the token bound". The closing round's record says
+  "review closed by the closing round". Where GitHub refused some of the
   round's findings, the count follows, as "2 of 5 findings not posted".
 - **Session:** the backend and the label of the reviewer's tab or window,
   `squiz-<number>-r<k>` as § 4 The reviewer session opens it, with `k` the
@@ -2689,7 +2867,8 @@ is printed as one space, so each state keeps its one line.
 
 **A reviewed state's problems follow its line, one line each, indented by two
 spaces.** These are what failed without changing the round's outcome, such as a
-summary that could not be posted. Each is one line by the same rule as a cell,
+summary that could not be posted. A failed closing round's line is followed the
+same way by each finding it did not post. Each is one line by the same rule as a cell,
 and none of them widens a column. A reviewed state with no problems, no
 unposted findings and no closing bound prints as the table above shows:
 
@@ -3046,8 +3225,8 @@ every path reaches at least one of six surfaces a person reads:
 
 **A failure reaches the pull request once the round has found its pull request
 and can read the episode's state.** A round that fails after that posts a failure
-comment where GitHub can be reached, and a closing round's problems go into the
-summary's Notes. A failure before that posts nothing, and is read on the local
+comment where GitHub can be reached, and the problems of a round that closes the
+episode go into the summary's Notes. A failure before that posts nothing, and is read on the local
 surfaces alone.
 
 **A round that fails in the round host is recorded failed, with its reason.**

@@ -1,5 +1,5 @@
 /**
- * The episode's summary comment: composed from what the closing round holds, and
+ * The episode's summary comment: composed from what the last round holds, and
  * posted once.
  *
  * **The comment is the episode's close and not a round's.** Only a round that
@@ -17,7 +17,7 @@
  */
 
 import type { GhCall } from "../github/gh.ts";
-import { renderSummary, unappliedNotes } from "../github/summary-body.ts";
+import { renderSummary, unappliedNotes, type ClosingRoundSummary } from "../github/summary-body.ts";
 import { postSummary, type CommentPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
@@ -43,7 +43,7 @@ export type EpisodeSummary =
   | { readonly outcome: "never-composed"; readonly reason: string };
 
 /** What the round that closed the episode holds of it, which is the whole of it. */
-export type ClosingRound = {
+export type EpisodeClose = {
   readonly pullRequest: number;
   /**
    * Each round of the episode, in the order the rounds ran, this round included.
@@ -84,6 +84,8 @@ export type ClosingRound = {
    * stopped them, as the round's end decided. `null` where nothing was queued.
    */
   readonly leftNotReviewed: LeftNotReviewed | null;
+  /** Present where this round is the closing round, which the summary names. */
+  readonly closingRound?: ClosingRoundSummary;
 };
 
 /**
@@ -94,15 +96,18 @@ export type ClosingRound = {
  * the round past its bound. The summary is lost in that case, which is what the
  * caller reports.
  */
-export function postEpisodeSummary(closing: ClosingRound, call: GhCall): CommentPosting {
+export function postEpisodeSummary(closing: EpisodeClose, call: GhCall): CommentPosting {
   const body = renderSummary({
     rounds: closing.rounds,
     threads: classifyAtClose(closing),
     findings: closing.findings,
     earlier: closing.earlier,
-    unapplied: unappliedNotes(closing.handedOver, closing.verdicts),
+    // The closing round's rulings are read against the threads it was handed,
+    // so one naming a resolved thread reads as one it was never handed.
+    unapplied: unappliedNotes(closing.closingRound?.ruledOn ?? closing.handedOver, closing.verdicts),
     because: closing.because,
     leftNotReviewed: closing.leftNotReviewed,
+    ...(closing.closingRound === undefined ? {} : { closingRound: closing.closingRound }),
   });
   return postSummary(closing.pullRequest, body, call);
 }

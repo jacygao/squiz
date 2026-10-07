@@ -492,3 +492,21 @@ test("the host a trigger starts outlives the trigger's process group", async () 
     stop(host.pid);
   });
 });
+
+test("a trigger for the state the closing round is reviewing leaves it in hand, rather than reading the episode as over (#587)", async () => {
+  await withFixture((fixture) => {
+    // The closing round has recorded its entry and is still posting, so the
+    // episode leaves no closing round to start, and this state's own is running.
+    const cost = { dollars: 0, tokens: 1200, messages: 1 };
+    seed(fixture.episode, {
+      closeReported: true,
+      closingRoundDue: true,
+      rounds: [cost, { ...cost, closing: true }],
+      records: [{ ...state, status: "reviewing", host: ownIdentity(), round: { number: 2 } }],
+    });
+
+    const result = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+
+    assert.deepEqual(result.decision, { outcome: "in-hand" }, "a run on the running closing round's state would print the old close");
+  });
+});

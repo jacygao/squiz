@@ -823,7 +823,7 @@ test("a host that finds the bound spent before any round ran, with no thread of 
   });
 });
 
-test("#414: a closing round whose summary GitHub refuses keeps the reason on its record, in host.log and in squiz status", async () => {
+test("#414: a last round whose summary GitHub refuses keeps the reason on its record, in host.log and in squiz status", async () => {
   const ran = await host({ records: atHead, before: refuseSummary });
 
   const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;

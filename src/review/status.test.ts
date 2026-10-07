@@ -463,7 +463,7 @@ test("a reason that runs over several lines is printed on the state's one line",
   assert.equal(rowsOf(printed.stdout)[1]?.[6], "the provider refused the request: HTTP 529 overloaded");
 });
 
-test("a closing round's result names the bound that closed the review", () => {
+test("a last round's result names the bound that closed the review", () => {
   const closing = (closedAt: "round cap" | "token bound"): StateRecord => ({
     head,
     activity: null,
@@ -563,4 +563,26 @@ test("a reviewed record with no problems, unposted findings or bound prints as i
       "",
     ].join("\n"),
   );
+});
+
+test("a failed closing round's dropped findings are printed under its line (#587)", () => {
+  const dropped = "the closing round did not post this: `src/cache.ts:12` — The cache is never cleared (reported in the closing round, which raises no findings, so it was not posted)";
+  const root = worktree({
+    41: [
+      {
+        head,
+        activity: null,
+        status: "failed",
+        reason: "the reviewer was killed at its 900-second bound, and the round recorded no findings",
+        ownerNoted: false,
+        lines: [dropped, "the failure could not be posted on PR #41: gh: HTTP 502"],
+        problems: [dropped],
+      },
+    ],
+  });
+
+  const lines = composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout.trimEnd().split("\n");
+
+  assert.match(lines[1] ?? "", /^#41  3f9c2e0 .* failed /u);
+  assert.equal(lines[2], `  ${dropped}`, "a failed closing round's dropped finding is not in squiz status");
 });

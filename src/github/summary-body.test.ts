@@ -400,7 +400,7 @@ test("the token bound is a note", () => {
   );
 });
 
-/** The state the closing round reviewed, and states queued behind it, each a different head commit. */
+/** The state the last round reviewed, and states queued behind it, each a different head commit. */
 const reviewed = { head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", activity: null };
 const later = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null };
 const laterStill = { head: "c47e19b2a0d3f5e6c7b8a9d0e1f2a3b4c5d6e7f8", activity: "PRRC_kwDOL7tYbc6OmQx7a" };

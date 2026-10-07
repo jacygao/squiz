@@ -4,7 +4,7 @@
  *
  * **Two sources, and a reader of either alone is quietly wrong.** The threads
  * handed to the reviewer were listed before the review ran, so a thread the
- * closing round itself opened is not among them: its finding is in what the
+ * last round itself opened is not among them: its finding is in what the
  * round posted instead. A classifier that walked only the hand-over would drop
  * every finding raised in the last round, which is the round most likely to have
  * raised one and the round whose findings most need a person.
@@ -16,7 +16,7 @@
  *
  * Nothing is carried between rounds and nothing here reads GitHub. Every thread
  * the reviewer opened is handed over each round, resolved ones included, so the
- * closing round's own account covers the whole episode.
+ * last round's own account covers the whole episode.
  *
  * The comment itself is composed elsewhere, and nothing here throws.
  */
@@ -27,7 +27,7 @@ import type { ReviewThread } from "../github/threads.ts";
 import type { PostedFindings, Threaded } from "./post-findings.ts";
 import type { AppliedVerdicts } from "./verdicts.ts";
 
-/** What the closing round holds of the episode, which is the whole of it. */
+/** What the last round holds of the episode, which is the whole of it. */
 export type EpisodeAtClose = {
   /**
    * Every thread the round handed the reviewer, as it was listed before the
@@ -71,7 +71,7 @@ export type ClassifiedThread = {
    */
   readonly location: string;
   /**
-   * True where the reviewer kept the thread open in the closing round and its
+   * True where the reviewer kept the thread open in the last round and its
    * reply giving the reason could not be posted. The thread then shows no reason,
    * and Notes is the only place that says one was given.
    */
