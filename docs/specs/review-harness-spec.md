@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.15 (draft)
+**Version:** 1.16 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2607,8 +2607,7 @@ Herdr 0.9.3
 
 It exits 0 where every required dependency is usable and 1 otherwise. It writes
 nothing, in the repository it is run from or anywhere else, and runs outside a
-repository as well. Outside Claude Code's Bash tool, a shell finds `squiz` by
-name only once `squiz init` has linked it onto `PATH`.
+repository as well.
 
 Each line is one row of a list, in the order printed. A row is at one of three
 levels, and only `failed` changes the exit status:
@@ -2669,9 +2668,8 @@ Node 23.6.0: too old. Squiz needs Node 24 or later
 A Node too old to strip types cannot load squiz at all, and fails before the
 check prints anything.
 
-Claude Code is required on every machine, including one whose only coding agent
-is Copilot. The rows below are each added to the list by a later change, and
-until then the check does not report them:
+The rows below are each added to the list by a later change, and until then the
+check does not report them:
 
 - the reviewer `reviewer` names, `pi` or `copilot`, and its model;
 - the Copilot CLI wherever Copilot is the reviewer or a coding agent, and, for a
