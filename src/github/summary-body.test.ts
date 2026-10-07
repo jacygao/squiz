@@ -10,7 +10,6 @@ import { test } from "node:test";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
-import { nothingEstablished, type ConfinementEvidence } from "../loop/confinement.ts";
 import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSummary, type ClosedEpisode } from "./summary-body.ts";
@@ -55,9 +54,6 @@ function posted(...outcomes: readonly FindingOutcome[]): PostedFindings {
   return { outcomes };
 }
 
-/** A worktree every round had to itself and left alone. Nothing here is a note. */
-const undisturbed: ConfinementEvidence = nothingEstablished;
-
 /** An episode that raised nothing and closed with nothing open. */
 const quiet: ClosedEpisode = {
   rounds: [round(0.0061, 20_100)],
@@ -65,7 +61,6 @@ const quiet: ClosedEpisode = {
   findings: posted(),
   earlier: [],
   because: "nothing-open",
-  confinement: undisturbed,
   leftNotReviewed: null,
 };
 
@@ -90,21 +85,16 @@ const quietOpens = [
   "",
 ];
 
-/** The comment for an episode that raised nothing and whose round found `found`. */
-function aboutTheWorktree(found: Partial<ConfinementEvidence>): string {
-  return renderSummary({ ...quiet, confinement: { ...undisturbed, ...found } });
-}
-
 /**
  * An episode with a thread in every status.
  *
- * Its Notes carries a finding about the change as a whole, and a file that
- * changed while the reviewer ran. Each is one line rather than wrapped, because
- * the comment a person reads is markdown and the wrap is not in it.
+ * Its Notes carries a finding about the change as a whole, and a round the time
+ * bound cut short. Each is one line rather than wrapped, because the comment a
+ * person reads is markdown and the wrap is not in it.
  */
 test("the episode renders as the specification shows", () => {
   const episode: ClosedEpisode = {
-    rounds: [round(0.0061, 20_100), round(0.0044, 16_400), round(0.0029, 11_700)],
+    rounds: [round(0.0061, 20_100), { ...round(0.0044, 16_400), cutShortAtSeconds: 900 }, round(0.0029, 11_700)],
     threads: [
       thread("open", "packages/sync/src/queue.ts:134", "Retry backoff resets on every enqueue"),
       thread("fixed", "packages/sync/src/queue.ts:88"),
@@ -123,7 +113,6 @@ test("the episode renders as the specification shows", () => {
     ),
     earlier: [],
     because: "nothing-open",
-    confinement: { ...undisturbed, changed: ["packages/sync/src/queue.test.ts"] },
     leftNotReviewed: null,
   };
 
@@ -145,8 +134,7 @@ test("the episode renders as the specification shows", () => {
       "",
       "- About the change as a whole: the retry queue duplicates the scheduler already in" +
         " `packages/sync/src/scheduler.ts`, which nothing calls",
-      "- A file changed in the worktree while the reviewer ran:" +
-        " `packages/sync/src/queue.test.ts`",
+      "- The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then",
     ].join("\n"),
   );
 });
@@ -628,107 +616,5 @@ test("an episode no round of which has a cost carries no spend line", () => {
       ].join("\n"),
     ),
     `an episode with no cost carried a spend line: ${comment}`,
-  );
-});
-
-// The reviewer must not change what the coding agent would commit, and the
-// comparison is the only thing that catches a write it made through its shell.
-test("every file that changed while the reviewer ran is named in Notes", () => {
-  assert.equal(
-    aboutTheWorktree({ changed: ["src/queue.ts", "src/retry.ts"] }),
-    [
-      ...quietOpens,
-      "- Files changed in the worktree while the reviewer ran: `src/queue.ts`, `src/retry.ts`",
-    ].join("\n"),
-  );
-});
-
-// A commit leaves every file as it was, so a moved HEAD is named on its own line.
-test("every move of HEAD is named in Notes, after the files that changed", () => {
-  assert.equal(
-    aboutTheWorktree({
-      changed: ["src/queue.ts"],
-      moved: [
-        "from refs/heads/feature-a at 1111 to refs/heads/feature-a at 2222",
-        "from refs/heads/feature-a at 2222 to a detached HEAD at 2222",
-      ],
-    }),
-    [
-      ...quietOpens,
-      "- A file changed in the worktree while the reviewer ran: `src/queue.ts`",
-      "- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 1111 to refs/heads/feature-a at 2222",
-      "- `HEAD` moved while the reviewer ran: from refs/heads/feature-a at 2222 to a detached HEAD at 2222",
-    ].join("\n"),
-  );
-});
-
-/**
- * A round that found nothing and a round that never looked compose the same
- * comment if this is wrong, and the wrong one reads as reassurance.
- */
-test("a comparison the round never took does not read as a worktree nothing changed", () => {
-  const comment = aboutTheWorktree({
-    uncompared: ["the round had too little of its window left to read the worktree"],
-  });
-
-  assert.equal(
-    comment,
-    [
-      ...quietOpens,
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the round had too little of its window left to read the worktree",
-    ].join("\n"),
-  );
-  assert.notEqual(
-    comment,
-    renderSummary(quiet),
-    "a round nothing compared composed the comment of a round that compared and found nothing",
-  );
-});
-
-// Taken, and could not be had. The round's window, a git that failed, or a file
-// it could not read: each is a comparison that establishes nothing.
-test("a comparison that was taken and could not be had says so", () => {
-  const comment = aboutTheWorktree({
-    uncompared: ["the reading before could not be taken: git exited 128"],
-  });
-
-  assert.equal(
-    comment,
-    [
-      ...quietOpens,
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the reading before could not be taken: git exited 128",
-    ].join("\n"),
-  );
-  assert.notEqual(
-    comment,
-    renderSummary(quiet),
-    "a comparison that could not be had composed the comment of one that found nothing",
-  );
-});
-
-/**
- * The reasons are git's and the system's own words, and they are unbounded text.
- * A newline left in one would put a bullet in this comment that nothing wrote,
- * under counts that say there is no such finding.
- */
-test("a reason carrying newlines is one line of Notes", () => {
-  const comment = aboutTheWorktree({
-    uncompared: ["the reading before could not be taken:\ngit exited 128\n\nfatal: not a repository"],
-  });
-
-  assert.equal(
-    comment,
-    [
-      ...quietOpens,
-      "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-        " the reading before could not be taken: git exited 128 fatal: not a repository",
-    ].join("\n"),
-  );
-  assert.equal(
-    comment.split("\n").filter((line) => line.startsWith("- ")).length,
-    1,
-    `a reason opened a second bullet:\n${comment}`,
   );
 });

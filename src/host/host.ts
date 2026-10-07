@@ -24,8 +24,6 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { headMovedIn } from "../loop/confinement.ts";
-import { failureReport } from "../loop/failure-comment.ts";
 import { unthreadedNotes } from "../github/summary-body.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
@@ -429,7 +427,6 @@ function reportOf(
   conclusion: Extract<RoundConclusion, { readonly outcome: "block" | "clean, episode open" | "close" }>,
   ended: RoundEnd,
 ): RoundReport & { readonly closedAt?: ClosingBound } {
-  const moved = conclusion.confinement === undefined ? undefined : headMovedIn(conclusion.confinement);
   const problems = conclusion.outcome === "close" ? summaryProblems(conclusion) : [];
   // Only a close that left threads open is printed with its bound.
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
@@ -441,14 +438,13 @@ function reportOf(
   return {
     newFindings: conclusion.posted.length,
     ...(failed === 0 ? {} : { unposted: { failed, of: outcomes.length } }),
-    ...(moved === undefined ? {} : { moved }),
     ...(problems.length === 0 ? {} : { problems }),
     ...(unthreaded.length === 0 ? {} : { unthreaded }),
     ...(bound === "round-cap" ? { closedAt: "round cap" } : bound === "token-bound" ? { closedAt: "token bound" } : {}),
   };
 }
 
-/** What a failed round's comment lists after its reason, then where the comment went. */
+/** Where a failed round's comment went, as `squiz review` prints it after the reason. */
 export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>): readonly string[] {
   const comment = conclusion.failureComment;
   const went =
@@ -459,7 +455,7 @@ export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly o
             ? `the failure is posted on PR #${comment.pullRequest}`
             : `the failure could not be posted on PR #${comment.pullRequest}: ${comment.posting.reason}`,
         ];
-  return [...failureReport(conclusion).established, ...went];
+  return went;
 }
 
 /** Why a round that reviewed nothing for its state failed. */

@@ -1,7 +1,6 @@
 /**
  * The episode's state file: what each round spent, whether the close has been
- * reported, what the rounds established about the worktree they ran in, and the
- * record of each state of the pull request.
+ * reported, and the record of each state of the pull request.
  *
  * Absent and unreadable are different answers, and keeping them apart is most of
  * what this module is for. A file that is not there is a first round. A file
@@ -20,7 +19,6 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
-import type { ConfinementEvidence } from "./confinement.ts";
 import type { Episode } from "./episode.ts";
 import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 
@@ -109,18 +107,6 @@ export type EpisodeState = {
    * summary.
    */
   readonly closeReported?: boolean;
-  /**
-   * What the episode's rounds have established about the worktree they ran in.
-   *
-   * Here because a round that leaves threads open posts no summary. The summary
-   * is composed when the episode closes, and a composer reading the closing
-   * round's own readings alone would report the worktree of one round as the
-   * worktree of the whole episode.
-   *
-   * Absent is nothing established, which is what a file written before this field
-   * existed says and what an episode every reviewer left alone writes.
-   */
-  readonly confinement?: ConfinementEvidence;
   /**
    * One record for each state of the pull request a trigger has queued, oldest
    * first. No two are for the same state.
@@ -297,9 +283,6 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     return unreadable(`${path}: "closeReported" is ${render(reported)} rather than true or false`);
   }
 
-  const found = confinementIn(parsed);
-  if ("problem" in found) return unreadable(`${path}: ${found.problem}`);
-
   const kept = recordsIn(parsed);
   if ("problem" in kept) return unreadable(`${path}: ${kept.problem}`);
 
@@ -309,7 +292,6 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       rounds,
       spentOutsideRounds: outside.cost,
       ...(reported === undefined ? {} : { closeReported: reported }),
-      ...(found.evidence === undefined ? {} : { confinement: found.evidence }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
     },
   };
@@ -341,55 +323,6 @@ function recordsIn(parsed: Record<string, unknown>): ReadRecords {
     records.push(read.record);
   }
   return { records };
-}
-
-type ReadEvidence =
-  | { readonly evidence: ConfinementEvidence | undefined }
-  | { readonly problem: string };
-
-/**
- * What the file says the episode's rounds established about the worktree.
- *
- * Absent is nothing established, which is what a file written before this field
- * existed holds. A field that is there and cannot be read is a failure like any
- * other: standing it in for nothing established would say a worktree nothing
- * looked at is one nothing touched, and that is the reading this field exists to
- * stop.
- *
- * A key this reader has no name for is ignored, so a file an earlier or a later
- * version wrote is still the episode's own.
- */
-function confinementIn(parsed: Record<string, unknown>): ReadEvidence {
-  const found = parsed["confinement"];
-  if (found === undefined) return { evidence: undefined };
-  if (!isRecord(found)) {
-    return { problem: `"confinement" is ${render(found)} rather than a JSON object` };
-  }
-
-  const changed = linesIn(found, "changed");
-  if ("problem" in changed) return changed;
-  const moved = linesIn(found, "moved");
-  if ("problem" in moved) return moved;
-  const uncompared = linesIn(found, "uncompared");
-  if ("problem" in uncompared) return uncompared;
-
-  return { evidence: { changed: changed.lines, moved: moved.lines, uncompared: uncompared.lines } };
-}
-
-type ReadLines = { readonly lines: readonly string[] } | { readonly problem: string };
-
-/** One of the lists the field holds, a list that is not there being the empty one. */
-function linesIn(found: Record<string, unknown>, name: string): ReadLines {
-  const list = found[name];
-  if (list === undefined) return { lines: [] };
-  if (!isLines(list)) {
-    return { problem: `"confinement.${name}" is ${render(list)} rather than an array of strings` };
-  }
-  return { lines: list };
-}
-
-function isLines(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 /**

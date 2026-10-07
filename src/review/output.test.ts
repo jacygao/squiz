@@ -89,12 +89,6 @@ function reviewed(overrides: Partial<ReviewResult> & { exit: 0 | 2 | 3 }): Revie
   } as ReviewResult;
 }
 
-const MOVED =
-  "from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258";
-
-const MOVED_PARAGRAPH =
-  "`HEAD` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258. The move was in the reviewer's snapshot, which is removed after the round, and the coding agent's worktree is as it was.";
-
 test("the output file is .squiz/<number>/review.txt under the worktree, as an absolute path", () => {
   assert.equal(reviewOutputPath("/work/squiz", 41), PATH);
 });
@@ -274,17 +268,6 @@ test("a thread whose only comment is its first line prints as the line alone", (
   );
 
   assert.match(printed.stdout, /\n\nPRRT_bare packages\/sync\/src\/queue\.ts:1 low — Bare\n\nFix what applies/u);
-});
-
-test("a HEAD that moved in the snapshot ends an exit 2 or 3 output with the paragraph naming both ends", () => {
-  const two = composeReview(
-    reviewed({ exit: 2, newFindings: 1, threads: [backoffThread], moved: MOVED }),
-    PATH,
-  );
-  const three = composeReview(reviewed({ exit: 3, threads: [skewThread], moved: MOVED }), PATH);
-
-  assert.ok(two.stdout.endsWith(`\`squiz review 41\` again.\n\n${MOVED_PARAGRAPH}\n`), two.stdout);
-  assert.ok(three.stdout.endsWith(`already allows for it.\n\n${MOVED_PARAGRAPH}\n`), three.stdout);
 });
 
 test("still reviewing, exit 4: the run's own state is under review", () => {
@@ -524,8 +507,7 @@ test("exit 1 for a failed round prints nothing on stdout, and on stderr its reas
       outcome: "failed",
       pullRequest: 41,
       reason: "the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings",
-      items: [`\`HEAD\` moved while the reviewer ran: ${MOVED}`],
-      comment: { posted: true },
+      items: ["the failure is posted on PR #41"],
     },
     PATH,
   );
@@ -535,7 +517,6 @@ test("exit 1 for a failed round prints nothing on stdout, and on stderr its reas
   assert.equal(
     printed.stderr,
     `squiz: review failed: the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings
-squiz: \`HEAD\` moved while the reviewer ran: from a detached HEAD at 3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90 to a detached HEAD at 8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258
 squiz: the failure is posted on PR #41
 squiz: put these lines in your report rather than running squiz review again
 `,

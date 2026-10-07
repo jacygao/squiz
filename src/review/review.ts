@@ -382,7 +382,7 @@ function roundResult(
   };
   switch (record.exitStatus) {
     case 2:
-      return { ...base, exit: 2, moved: record.moved };
+      return { ...base, exit: 2 };
     case 0:
       return { ...base, exit: 0, notReviewed: left };
     case 3:
@@ -391,7 +391,6 @@ function roundResult(
         exit: 3,
         // A record written before records kept the bound: the cap where it is spent.
         closedAt: record.closedAt ?? (state.rounds.length >= waiting.cap ? "round cap" : "token bound"),
-        moved: record.moved,
         notReviewed: left === undefined ? undefined : { state: left.state },
       };
   }

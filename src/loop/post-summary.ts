@@ -21,7 +21,6 @@ import { renderSummary } from "../github/summary-body.ts";
 import { postSummary, type CommentPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
-import type { ConfinementEvidence } from "./confinement.ts";
 import type { RoundRecord } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
@@ -81,16 +80,6 @@ export type ClosingRound = {
    */
   readonly because: ClosingReason;
   /**
-   * What every round of the episode established about the worktree its reviewer
-   * ran in, read from the episode's state file.
-   *
-   * The episode's and not this round's. A round that leaves threads open posts
-   * no comment, so what its readings found reaches a person through this or not
-   * at all, and a close composed from the closing round's own readings would
-   * report the worktree of one round as the worktree of the whole episode.
-   */
-  readonly confinement: ConfinementEvidence;
-  /**
    * The queued states the close recorded not reviewed, and the bound that
    * stopped them, as the round's end decided. `null` where nothing was queued.
    */
@@ -112,7 +101,6 @@ export function postEpisodeSummary(closing: ClosingRound, call: GhCall): Comment
     findings: closing.findings,
     earlier: closing.earlier,
     because: closing.because,
-    confinement: closing.confinement,
     leftNotReviewed: closing.leftNotReviewed,
   });
   return postSummary(closing.pullRequest, body, call);

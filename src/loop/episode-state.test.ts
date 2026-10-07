@@ -208,14 +208,6 @@ const unreadableContents: readonly string[] = [
   // as yes, it closes the episode in silence.
   `{"rounds": [], "closeReported": "true"}`,
   `{"rounds": [], "closeReported": 1}`,
-  // What the rounds established about the worktree, read as nothing established,
-  // would say a worktree nothing looked at is one nothing touched. That is the
-  // reading this field is kept for.
-  `{"rounds": [], "confinement": []}`,
-  `{"rounds": [], "confinement": "src/card.ts"}`,
-  `{"rounds": [], "confinement": {"changed": "src/card.ts"}}`,
-  `{"rounds": [], "confinement": {"changed": [3]}}`,
-  `{"rounds": [], "confinement": {"uncompared": [null]}}`,
   // How long a round ran and posted, and the bound that cut it short, are the measurements a
   // later reading takes from this file. A figure that is there and cannot be read
   // would be a measurement nobody took.
@@ -343,168 +335,34 @@ test("a reported close is written and comes back, and one never written is absen
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
 });
 
-/**
- * What the rounds established about the worktree outlives the rounds, because a
- * round that leaves threads open posts no summary. The closing round composes the
- * summary from this.
- */
-test("what the rounds established about the worktree is written and comes back", (t) => {
+// Earlier versions compared the snapshot's tracked files and `HEAD` before and
+// after the reviewer, and kept what they found. Unreadable, the file would end
+// every round of that episode before the reviewer ran; read, what it held would
+// still be reported.
+test("a state file holding what the worktree comparison found reads without it", (t) => {
   const episode = episodeIn(t);
-  const state: EpisodeState = {
-    rounds: [firstRound],
-    spentOutsideRounds: unspent,
-    confinement: {
+  mkdirSync(episode.directory, { recursive: true });
+  const found = [
+    {
       changed: ["src/card.ts"],
       moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
       uncompared: ["the round had too little of its window left to read the worktree"],
     },
-  };
+    { moved: "HEAD" },
+    [],
+  ];
 
-  assert.deepEqual(writeState(episode, state), { outcome: "written" });
-  assert.deepEqual(readState(episode), { outcome: "read", state });
-});
-
-/**
- * A file written before the field existed, which must read as an episode that has
- * established nothing.
- *
- * Read as unreadable, it would end every round of that episode before the reviewer
- * ran, because the round count is what bounds the loop and a count that will not
- * read stops the round.
- */
-test("a state file naming nothing about the worktree has established nothing", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(episode.stateFile, `{"rounds": [], "spentOutsideRounds": {"dollars": 0, "tokens": 0, "messages": 0}}`);
-
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: { rounds: [], spentOutsideRounds: unspent },
-  });
-});
-
-// A list this reader does not have a name for is nobody's answer, and a file a
-// later version wrote is still the episode's own.
-test("a state file naming some of the worktree lists reads the ones it names", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(episode.stateFile, `{"rounds": [], "confinement": {"changed": ["src/card.ts"]}}`);
-
-  const read = readState(episode);
-  assert.deepEqual(read.outcome === "read" ? read.state.confinement : undefined, {
-    changed: ["src/card.ts"],
-    moved: [],
-    uncompared: [],
-  });
-});
-
-// A file written before HEAD was compared carries the lists it had, and the
-// episode it belongs to has run rounds the bound counts.
-test("a state file written before HEAD was compared reads with no move", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(
-    episode.stateFile,
-    JSON.stringify({
-      rounds: [firstRound],
-      spentOutsideRounds: unspent,
-      confinement: {
-        changed: ["src/card.ts"],
-        uncompared: [],
-        shared: ["ef56ab78"],
-        unestablished: [],
-      },
-    }),
-  );
-
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: {
-      rounds: [firstRound],
-      spentOutsideRounds: unspent,
-      confinement: {
-        changed: ["src/card.ts"],
-        moved: [],
-        uncompared: [],
-      },
-    },
-  });
-});
-
-// A live episode's state file can still hold the lists of the other episodes it
-// found and of why it could not tell, which earlier versions kept. Unreadable,
-// it would end every round of that episode before the reviewer ran.
-test("a state file holding the other-episodes and could-not-tell lists reads without them", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(
-    episode.stateFile,
-    JSON.stringify({
-      rounds: [firstRound],
-      spentOutsideRounds: unspent,
-      confinement: {
-        changed: ["src/card.ts"],
-        moved: [],
-        uncompared: ["the worktree is shared with live episode ef56ab78"],
-        shared: ["ef56ab78"],
-        unestablished: ["ps was killed by SIGKILL"],
-      },
-    }),
-  );
-
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: {
-      rounds: [firstRound],
-      spentOutsideRounds: unspent,
-      confinement: {
-        changed: ["src/card.ts"],
-        moved: [],
-        uncompared: ["the worktree is shared with live episode ef56ab78"],
-      },
-    },
-  });
-});
-
-// Earlier versions compared the git config and hooks the worktrees share, and
-// kept what they found. Unreadable, the file would end every round of that
-// episode before the reviewer ran; read, what it held would still be reported.
-test("a state file holding the shared git file lists reads without them", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(
-    episode.stateFile,
-    JSON.stringify({
-      rounds: [firstRound],
-      spentOutsideRounds: unspent,
-      confinement: {
-        changed: ["src/card.ts"],
-        moved: [],
-        uncompared: [],
-        sharedChanged: ["`core.hookspath` in `config`"],
-        sharedUncompared: ["the reading after could not be taken: info/exclude could not be read"],
-      },
-    }),
-  );
-
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: {
-      rounds: [firstRound],
-      spentOutsideRounds: unspent,
-      confinement: { changed: ["src/card.ts"], moved: [], uncompared: [] },
-    },
-  });
-});
-
-test("a move of HEAD that is not a list of strings is unreadable", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(episode.stateFile, `{"rounds": [], "confinement": {"moved": "HEAD"}}`);
-
-  const read = readState(episode);
-  assert.equal(read.outcome, "unreadable");
-  assert.match(read.outcome === "unreadable" ? read.reason : "", /"confinement\.moved" is "HEAD"/u);
+  for (const confinement of found) {
+    writeFileSync(
+      episode.stateFile,
+      JSON.stringify({ rounds: [firstRound], spentOutsideRounds: unspent, confinement }),
+    );
+    assert.deepEqual(
+      readState(episode),
+      { outcome: "read", state: { rounds: [firstRound], spentOutsideRounds: unspent } },
+      JSON.stringify(confinement),
+    );
+  }
 });
 
 test("the record for each state of the pull request is written and comes back", (t) => {

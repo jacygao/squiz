@@ -47,10 +47,7 @@ type RoundResult = About & {
   readonly recorded: boolean;
 };
 
-/** The move of `HEAD` the round's comparison found, as "from … to …". */
-type Moved = { readonly moved?: string | undefined };
-
-type Open = RoundResult & Moved & { readonly exit: 2 };
+type Open = RoundResult & { readonly exit: 2 };
 
 type Clean = RoundResult & {
   readonly exit: 0;
@@ -65,8 +62,7 @@ type Clean = RoundResult & {
  */
 type NotReviewed = { readonly state: string; readonly closedAt: Bound };
 
-type ClosedOpen = RoundResult &
-  Moved & {
+type ClosedOpen = RoundResult & {
     readonly exit: 3;
     readonly closedAt: Bound;
     /** The run's own state, which the close left unreviewed. */
@@ -118,7 +114,7 @@ type ClosedUnreviewed = About & {
 type Failed = About & {
   readonly outcome: "failed";
   readonly reason: string;
-  /** What else the round established, each an item of the failure comment's list. */
+  /** The lines the failed round's record keeps for after the reason, one each. */
   readonly items: readonly string[];
   /** Absent where the items already say where the comment went, or none was attempted. */
   readonly comment?: { readonly posted: true } | { readonly posted: false; readonly reason: string };
@@ -242,7 +238,6 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
           "what you changed or why you disagree. Commit and push what you changed, then run",
           `\`squiz review ${result.pullRequest}\` again.`,
         ].join("\n"),
-        ...movedParagraph(result.moved),
       ];
     case 0:
       return [withNotReviewed(heading, result, result.notReviewed), NOTHING_OPEN];
@@ -254,7 +249,6 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         withNotReviewed(heading, result, notReviewed),
         boundReached(result.closedAt, open.length, result.pullRequest),
         ...open.map(printedThread),
-        ...movedParagraph(result.moved),
       ];
     }
   }
@@ -302,13 +296,6 @@ function withNotReviewed(
   if (notReviewed === undefined) return heading;
   const why = `the episode closed at the ${notReviewed.closedAt}, after reviewing ${result.commit}`;
   return `${heading}\nSquiz did not review PR #${result.pullRequest} at ${notReviewed.state}: ${why}.`;
-}
-
-function movedParagraph(moved: string | undefined): readonly string[] {
-  if (moved === undefined) return [];
-  return [
-    `\`HEAD\` moved while the reviewer ran: ${moved}. The move was in the reviewer's snapshot, which is removed after the round, and the coding agent's worktree is as it was.`,
-  ];
 }
 
 function stillReviewing(result: StillReviewing): string {

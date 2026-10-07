@@ -25,7 +25,6 @@ import type { ReviewThread } from "../github/threads.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { nothingEstablished, type ConfinementEvidence } from "./confinement.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import { postEpisodeSummary, type ClosingRound } from "./post-summary.ts";
 
@@ -173,9 +172,6 @@ const findings: PostedFindings = {
   ],
 };
 
-/** A worktree every round had to itself and left alone. No note at all. */
-const undisturbed: ConfinementEvidence = nothingEstablished;
-
 /**
  * An episode of two rounds, closing at its cap with one thread still open and a
  * later state queued behind it.
@@ -191,7 +187,6 @@ const closing: ClosingRound = {
   findings,
   earlier: [],
   because: "round-cap",
-  confinement: undisturbed,
   leftNotReviewed: {
     bound: "round-cap",
     after: { head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", activity: null },
@@ -236,7 +231,6 @@ test("the body posted is the body the composer wrote for the episode", async () 
         findings,
         earlier: carried.earlier,
         because: "round-cap",
-        confinement: undisturbed,
         leftNotReviewed: closing.leftNotReviewed,
       }),
       "the comment is never edited, so a body composed from anything but the episode is permanent",
@@ -265,50 +259,6 @@ test("the composed body carries the counts, the spend, what needs a person and t
         "**Notes**",
         "",
         "- About the change as a whole: The queue duplicates the scheduler",
-        "- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f",
-      ].join("\n"),
-    );
-  });
-});
-
-/**
- * What the episode established about its worktree reaches the body that is posted.
- *
- * The whole comment, because the failure worth catching is a summary that reads
- * as a round that compared the tree and found nothing changed in it. That is the
- * finding a person would act on, rendered as silence, and it is permanent: the
- * comment is posted once and never edited.
- */
-test("a round that could not compare its worktree says so in the comment it posts", async () => {
-  await withFakeGh({ stdout: CREATED }, (gh) => {
-    postEpisodeSummary(
-      {
-        ...closing,
-        confinement: {
-          ...nothingEstablished,
-          uncompared: ["the reading before could not be taken: git exited 128"],
-        },
-      },
-      margin(),
-    );
-
-    assert.equal(
-      sent(gh.stdin()),
-      [
-        "**Squiz review — 2 rounds, 2 findings**",
-        "",
-        "Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0",
-        "2,400 tokens over 2 rounds: 1,200, 1,200 · $0.0800",
-        "",
-        "**Needs a person**",
-        "",
-        "- `src/ui/card.ts:88` — The name says nothing (open)",
-        "",
-        "**Notes**",
-        "",
-        "- About the change as a whole: The queue duplicates the scheduler",
-        "- A round could not tell whether a file changed or `HEAD` moved while the reviewer ran:" +
-          " the reading before could not be taken: git exited 128",
         "- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f",
       ].join("\n"),
     );
