@@ -83,6 +83,13 @@ and handed a round.
 - **`pi --print` writes no event stream.** The rig puts a `pi` ahead of the real
   one on `PATH` that adds `--mode json` and copies stdout. Copilot's needs
   `--output-format json`, and it names a reporting-server tool `squiz-<name>`.
+- **The wrapper must leave every other call alone.** `pi`'s adapter runs
+  `pi --list-models` to check a configured model, and with `--mode json` added
+  the check refuses a model `pi` offers. The wrapper adds its flags only to the
+  call carrying `--print` for `pi` or `-p` for Copilot.
+- **`MEASURE_MODEL` is the `model` setting, handed over directly.** It goes to
+  the adapter as `model` does from `.squiz.json`, in the CLI's own spelling:
+  `provider/id` for `pi`. The rig reads no `.squiz.json`.
 - **A reviewer reports the snapshot by its resolved path.** On macOS the
   temporary directory is reached through `/var`, and both CLIs report
   `/private/var/...`.

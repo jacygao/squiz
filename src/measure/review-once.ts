@@ -9,12 +9,12 @@
  * named, thinking `medium`, 900 seconds, in a snapshot of the change's head made
  * as a round makes it, handed the change's diff and its description and no
  * threads. At `deep`, `run_tests` runs the case's own test command. The depth
- * is handed to the round directly, as the round host hands it over, so nothing
- * here reads `.squiz.json`.
+ * and the model are handed to the round directly, as the round host hands them
+ * over, so nothing here reads `.squiz.json`.
  *
  * The reviewer's CLI must be on `PATH` and signed in, and each run spends real
- * money. `MEASURE_MODEL` names the model, which goes on the CLI's command line;
- * without it the CLI's own default is used. `MEASURE_CACHE` is where the cases
+ * money. `MEASURE_MODEL` names the model in the CLI's own spelling, as
+ * `model` in `.squiz.json` would; without it the CLI's own default is used. `MEASURE_CACHE` is where the cases
  * on other projects are cloned, the temporary directory by default. `prepare`
  * clones every case once, which has to happen before runs go side by side.
  *
@@ -63,9 +63,9 @@ if (caseName === "prepare") {
 }
 
 const measured = caseName === undefined ? undefined : cases[caseName];
-const adapters: Readonly<Record<string, { adapter: Adapter; cli: string; jsonFlags: readonly string[] }>> = {
-  pi: { adapter: pi, cli: "pi", jsonFlags: ["--mode", "json"] },
-  copilot: { adapter: copilot, cli: "copilot", jsonFlags: ["--output-format", "json"] },
+const adapters: Readonly<Record<string, { adapter: Adapter; cli: string; jsonFlags: readonly string[]; review: string }>> = {
+  pi: { adapter: pi, cli: "pi", jsonFlags: ["--mode", "json"], review: "--print" },
+  copilot: { adapter: copilot, cli: "copilot", jsonFlags: ["--output-format", "json"], review: "-p" },
 };
 const reviewer = reviewerName === undefined ? undefined : adapters[reviewerName];
 const depth = depthName === "read" || depthName === "deep" ? depthName : undefined;
@@ -101,7 +101,8 @@ writeFileSync(
   join(bin, reviewer.cli),
   shimScript({
     real: execFileSync("which", [reviewer.cli], { encoding: "utf8" }).trim(),
-    flags: [...reviewer.jsonFlags, ...(model === undefined ? [] : ["--model", model])],
+    flags: reviewer.jsonFlags,
+    review: reviewer.review,
     granted: join(out, "granted.txt"),
     stream,
   }),
@@ -151,6 +152,7 @@ const round = await runRound(
     scratchDirectory: join(own, "scratch"),
     githubConfigDirectory: join(own, "gh"),
     depth,
+    model: model ?? null,
     test: measured.test,
     thinking: "medium",
     roundSpace,
