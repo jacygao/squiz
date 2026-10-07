@@ -143,9 +143,10 @@ export function renderOpenReason(reason: string): string {
  * The round a ruling was made in, and the full commit that round reviewed.
  *
  * `round` is `null` for an attempt that spent no round, whose number the next
- * round takes.
+ * round takes. `closing` marks the closing round, which is named as one rather
+ * than by a number the cap never counted.
  */
-export type RuledAt = { readonly round: number | null; readonly commit: string };
+export type RuledAt = { readonly round: number | null; readonly commit: string; readonly closing?: true };
 
 /** A ruling that closes its thread, with the reason a withdrawal carries. */
 export type ClosingRuling =
@@ -161,7 +162,8 @@ export type ClosingRuling =
  */
 export function renderClosingReply(ruling: ClosingRuling, at: RuledAt): string {
   const commit = `at ${at.commit.slice(0, 7)}`;
-  const where = at.round === null ? commit : `in round ${at.round} ${commit}`;
+  const where =
+    at.round === null ? commit : at.closing === true ? `in the closing round ${commit}` : `in round ${at.round} ${commit}`;
   if (ruling.verdict === "fixed") return `${reviewerMarker}fixed${boldClose}\n\nConfirmed ${where}.`;
   return [`${reviewerMarker}withdrawn${boldClose}`, `Withdrawn ${where}.`, ruling.reason.trim()]
     .filter(nonEmpty)

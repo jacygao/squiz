@@ -130,6 +130,8 @@ export type StateRecord = Shared &
             readonly openThreads: readonly string[];
             /** The bound that closed the episode with threads open, on a round that exited 3. */
             readonly closedAt?: ClosingBound;
+            /** Present on the closing round's record alone. */
+            readonly closingRound?: true;
           }
         | {
             // Nothing was left open, and a later state was queued behind this one,
@@ -144,6 +146,8 @@ export type StateRecord = Shared &
         readonly round?: FinishedRound;
         /** What `squiz review` prints on stderr after the reason: where the failure comment went. */
         readonly lines?: readonly string[];
+        /** What `squiz status` prints under the record's line: the findings a closing round did not post. */
+        readonly problems?: readonly string[];
       }
     | {
         readonly status: "not reviewed";
@@ -240,7 +244,21 @@ export function recordFrom(entry: unknown): ReadRecord {
       const kept = round.round === undefined ? {} : { round: round.round };
       const lines = entry["lines"];
       if (lines !== undefined && !isLines(lines)) return { problem: `has "lines" as ${render(lines)} rather than an array of lines` };
-      return { record: { ...shared, status, reason, ownerNoted: noted, ...kept, ...(lines === undefined ? {} : { lines }) } };
+      const problems = entry["problems"];
+      if (problems !== undefined && !isLines(problems)) {
+        return { problem: `has "problems" as ${render(problems)} rather than an array of lines` };
+      }
+      return {
+        record: {
+          ...shared,
+          status,
+          reason,
+          ownerNoted: noted,
+          ...kept,
+          ...(lines === undefined ? {} : { lines }),
+          ...(problems === undefined ? {} : { problems }),
+        },
+      };
     }
     case "not reviewed": {
       const reason = entry["reason"];
@@ -402,7 +420,12 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
     return { problem: `has "closedAt" as ${render(closedAt)} rather than "round cap" or "token bound"` };
   }
   const bound: { closedAt?: ClosingBound } = closedAt === undefined ? {} : { closedAt };
-  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
+  const closingRound = entry["closingRound"];
+  if (closingRound !== undefined && closingRound !== true) {
+    return { problem: `has "closingRound" as ${render(closingRound)}` };
+  }
+  const closing: { closingRound?: true } = closingRound === undefined ? {} : { closingRound: true };
+  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...closing, ...kept } };
 }
 
 function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {

@@ -37,7 +37,7 @@ export type ClosedEpisode = {
   /** Every thread of this review on the pull request, as the status it ended in. */
   readonly threads: readonly ClassifiedThread[];
   /**
-   * What became of the closing round's own findings, which is where the ones no
+   * What became of the last round's own findings, which is where the ones no
    * thread holds are.
    */
   readonly findings: PostedFindings;
@@ -46,7 +46,7 @@ export type ClosedEpisode = {
    * no round after it settled.
    */
   readonly earlier: readonly string[];
-  /** The Notes lines of the closing round's rulings that could not be applied. */
+  /** The Notes lines of the last round's rulings that could not be applied. */
   readonly unapplied: readonly string[];
   /**
    * Which bound closed the episode. `null` where none of them did, which is a
@@ -58,6 +58,18 @@ export type ClosedEpisode = {
    * stopped them. `null` where nothing was queued.
    */
   readonly leftNotReviewed: LeftNotReviewed | null;
+  /** Present where the closing round is what posts this comment. */
+  readonly closingRound?: ClosingRoundSummary;
+};
+
+/** What the closing round did, which its summary names. */
+export type ClosingRoundSummary = {
+  /** The threads it was handed, which are the ones open when it started. */
+  readonly ruledOn: readonly ReviewThread[];
+  /** What it ruled on them. */
+  readonly verdicts: AppliedVerdicts;
+  /** The findings the reviewer reported anyway, none of which was posted. */
+  readonly dropped: readonly Finding[];
 };
 
 /**
@@ -121,9 +133,10 @@ function roundsList(rounds: readonly RoundRecord[]): readonly string[] {
   return [`**Rounds**\n\n${rounds.map(roundLine).join("\n")}`];
 }
 
-/** One round of the list, numbered from 1. */
+/** One round of the list, numbered from 1, and the closing round named as one. */
 function roundLine(round: RoundRecord, index: number): string {
-  const named = `- Round ${index + 1}${round.head === undefined ? "" : ` at ${round.head.slice(0, 7)}`}`;
+  const which = round.closing === true ? "The closing round" : `Round ${index + 1}`;
+  const named = `- ${which}${round.head === undefined ? "" : ` at ${round.head.slice(0, 7)}`}`;
   if (round.raised === undefined || round.ruled === undefined) return `${named}: not recorded`;
   const rulings = rulingsGiven(round.ruled);
   if (round.raised === 0 && rulings === null) return `${named}: found nothing new and ruled on nothing`;
@@ -142,14 +155,16 @@ function rulingsGiven(ruled: RulingCounts): string | null {
 
 /** What the review counted, what it spent, and who reviewed it, under the marker. */
 function tally(episode: ClosedEpisode): string {
-  const rounds = counted(episode.rounds.length, "round");
+  const closing = episode.rounds.some((round) => round.closing === true);
+  const capped = episode.rounds.filter((round) => round.closing !== true).length;
+  const rounds = `${counted(capped, "round")}${closing ? " and a closing round" : ""}`;
   const findings = counted(countRaised(episode), "finding");
   const statuses = (Object.entries(countedAs) as [CountedStatus, string][])
     .map(([status, word]) => ({ status, word, count: howMany(episode.threads, status) }))
     .filter(({ status, count }) => count > 0 || alwaysCounted.has(status))
     .map(({ word, count }) => `${word} ${count}`)
     .join(" · ");
-  const spend = renderSpendLine(episode.rounds.map(costOf));
+  const spend = renderSpendLine(episode.rounds.map(costOf), closing);
   const reviewedBy = renderReviewerLine(episode.rounds);
   const below = [statuses, spend, reviewedBy].filter((line) => line !== null).join("\n");
   return `${marker}${rounds}, ${findings}**\n\n${below}`;
@@ -228,7 +243,7 @@ function oneLine(text: string): string {
 /**
  * Notes, or nothing at all.
  *
- * An earlier round's findings come first, then the closing round's in the order
+ * An earlier round's findings come first, then the last round's in the order
  * they were posted, which runs `high` severity first, then the threads kept open
  * with no reason on them, then the threads closed with no reply on them, round
  * by round, then the rulings that could not be applied. The rounds
@@ -241,10 +256,12 @@ function notes(episode: ClosedEpisode): readonly string[] {
     ...[
       ...episode.earlier,
       ...unthreadedNotes(episode.findings),
+      ...droppedNotes(episode.closingRound?.dropped ?? []),
       ...unpostedReasonNotes(episode.threads),
       ...episode.rounds.flatMap((round) => round.unpostedReplies ?? []),
       ...episode.unapplied,
     ].map((note) => `- ${note}`),
+    ...closingRoundNote(episode.closingRound),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
@@ -265,12 +282,43 @@ function cutShort(rounds: readonly RoundRecord[]): readonly string[] {
       ? []
       : [
           `- The review was cut short by the ${round.cutShortAtSeconds}-second time bound` +
-            ` in round ${index + 1}, and the round kept only the findings it had reported by then`,
+            ` in ${round.closing === true ? "the closing round" : `round ${index + 1}`}, and the round kept only the findings it had reported by then`,
         ],
   );
 }
 
-/** The findings of the closing round that no thread on the pull request holds. */
+/**
+ * Each finding the reviewer reported in the closing round, one line each and
+ * with no bullet. None was posted, and this line is the only record of it.
+ */
+export function droppedNotes(findings: readonly Finding[]): readonly string[] {
+  return findings.map((finding) =>
+    line(where(finding), finding.headline, "reported in the closing round, which raises no findings, so it was not posted"),
+  );
+}
+
+/**
+ * The line naming the closing round and each thread it closed, or nothing where
+ * this summary is not the closing round's.
+ *
+ * Without it, a summary after a closing round reads exactly like one from an
+ * episode that never had one.
+ */
+function closingRoundNote(closing: ClosingRoundSummary | undefined): readonly string[] {
+  if (closing === undefined) return [];
+  const byId = new Map(closing.ruledOn.map((thread) => [thread.id, thread]));
+  const settled = closing.verdicts.threads.flatMap((applied) => {
+    const thread = byId.get(applied.thread);
+    if (applied.outcome !== "closed" || applied.ruled === null || thread === undefined) return [];
+    const reading = readThread(thread);
+    return [line(locationOf(thread), reading.raised === "finding" ? reading.headline : null, applied.ruled)];
+  });
+  const handed = `ruled on the ${counted(closing.ruledOn.length, "thread")} the round cap left open`;
+  const what = settled.length === 0 ? "settled none" : `settled ${settled.length}: ${settled.join("; ")}`;
+  return [`- The closing round ${handed}, and ${what}`];
+}
+
+/** The findings of the last round that no thread on the pull request holds. */
 function unthreaded(findings: PostedFindings): readonly (Noted | Failed)[] {
   return findings.outcomes.filter((outcome) => outcome.outcome !== "threaded");
 }

@@ -137,7 +137,7 @@ const nothingPosted = posted();
 
 const nothingHandedOver: readonly ReviewThread[] = [];
 
-/** An episode whose closing round raised nothing and was handed nothing. */
+/** An episode whose last round raised nothing and was handed nothing. */
 const quiet: EpisodeAtClose = {
   handedOver: nothingHandedOver,
   verdicts: rulings({}),
@@ -286,7 +286,7 @@ test("a thread no marker claims is left out", () => {
 
 // The failure this cannot have: the thread was opened after the hand-over
 // listing was read, so it is in the round's posted findings and nowhere else.
-test("a thread the closing round itself posted is classified", () => {
+test("a thread the last round itself posted is classified", () => {
   const raised = onLine("src/retry.ts", 8, "Every path here is dead once the queue lands");
   const classified = classifyAtClose({
     ...quiet,
@@ -300,7 +300,7 @@ test("a thread the closing round itself posted is classified", () => {
   );
 });
 
-test("a thread the closing round posted is classified beside the threads handed over", () => {
+test("a thread the last round posted is classified beside the threads handed over", () => {
   const classified = classifyAtClose({
     handedOver: [threadFor("PRRT_1", onLine("src/queue.ts", 12, "Backoff resets on enqueue"))],
     verdicts: rulings({ PRRT_1: "fixed" }),
@@ -318,7 +318,7 @@ test("a thread the closing round posted is classified beside the threads handed 
   );
 });
 
-test("a thread the closing round posted whose thread id did not come back is classified", () => {
+test("a thread the last round posted whose thread id did not come back is classified", () => {
   const raised = onLine("src/retry.ts", 8, "Dead once the queue lands");
   assert.deepEqual(
     classifyAtClose({ ...quiet, findings: posted(threadedWithoutId(raised, "inline")) }),

@@ -45,6 +45,11 @@ type RoundResult = About & {
   readonly threads: readonly ReviewThread[];
   /** True where the run was handed a result already recorded rather than producing it. */
   readonly recorded: boolean;
+  /**
+   * True where the round was the closing round. `round` is then the number of
+   * rounds the cap counted before it.
+   */
+  readonly closing?: boolean;
 };
 
 type Open = RoundResult & { readonly exit: 2 };
@@ -88,7 +93,10 @@ type StillReviewing = About & { readonly outcome: "reviewing" } & (
 type AlreadyClosed = About & {
   readonly outcome: "closed";
   readonly exit: 0 | 3;
+  /** The rounds the cap counted. */
   readonly rounds: number;
+  /** Whether the episode ran its closing round after them. */
+  readonly closing?: boolean;
   readonly threads: readonly ReviewThread[];
 };
 
@@ -225,7 +233,12 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
   const verb = result.recorded ? "already reviewed" : "reviewed";
   const findings =
     result.newFindings === 0 ? "no new findings" : counted(result.newFindings, "new finding");
-  const heading = `Squiz ${verb} PR #${result.pullRequest} at ${result.commit}: round ${result.round} of ${result.cap}, ${findings}.`;
+  // The closing round raises nothing, so it has no findings to count.
+  const which =
+    result.closing === true
+      ? `the closing round, after ${result.round} of ${counted(result.cap, "round")}`
+      : `round ${result.round} of ${result.cap}, ${findings}`;
+  const heading = `Squiz ${verb} PR #${result.pullRequest} at ${result.commit}: ${which}.`;
 
   switch (result.exit) {
     case 2:
@@ -247,7 +260,9 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         unreviewed === undefined ? undefined : { state: unreviewed, closedAt: result.closedAt };
       return [
         withNotReviewed(heading, result, notReviewed),
-        boundReached(result.closedAt, open.length, result.pullRequest),
+        result.closing === true
+          ? closingRoundDone(open.length, result.pullRequest)
+          : boundReached(result.closedAt, open.length, result.pullRequest),
         ...open.map(printedThread),
       ];
     }
@@ -270,6 +285,15 @@ function boundReached(closedAt: Bound, open: number, pullRequest: number, summar
   return [
     `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
     "is on the pull request. A person takes it from here, so do not run",
+    `\`squiz review ${pullRequest}\` again.`,
+  ].join("\n");
+}
+
+/** What the closing round tells the coding agent where it left threads open. */
+function closingRoundDone(open: number, pullRequest: number): string {
+  return [
+    `The closing round is done. The review is closed with ${counted(open, "thread")} open, and its`,
+    "summary is on the pull request. A person takes it from here, so do not run",
     `\`squiz review ${pullRequest}\` again.`,
   ].join("\n");
 }
@@ -317,7 +341,7 @@ function closedBlocks(result: AlreadyClosed): readonly string[] {
   const open = result.threads.filter((thread) => !thread.isResolved);
   const left = open.length === 0 ? "nothing open" : `${counted(open.length, "thread")} open`;
   return [
-    `Squiz's review of PR #${result.pullRequest} closed after ${counted(result.rounds, "round")}, with ${left}. No round runs again in this worktree.`,
+    `Squiz's review of PR #${result.pullRequest} closed after ${counted(result.rounds, "round")}${result.closing === true ? " and its closing round" : ""}, with ${left}. No round runs again in this worktree.`,
     ...open.map(printedThread),
   ];
 }

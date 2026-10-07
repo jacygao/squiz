@@ -26,6 +26,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import type { Config } from "../config/config.ts";
+import type { Finding } from "../findings/finding.ts";
 import { latestActivity } from "../findings/activity.ts";
 import type { RuledAt } from "../findings/comment.ts";
 import { readThread } from "../findings/thread.ts";
@@ -63,6 +64,7 @@ import {
   type Timings,
   type RulingCounts,
 } from "./episode-state.ts";
+import { cappedRounds, closingRoundRan, closingRoundRemains, leavesClosingRound } from "./closing-round.ts";
 import { episodeAt, roundDirectory, type Episode } from "./episode.ts";
 import { updateState } from "./state-update.ts";
 import { postFailure } from "./failure-comment.ts";
@@ -184,6 +186,8 @@ export type RoundTally = {
   /** Rounds the episode has finished, counting from 1 and including this one. */
   readonly roundsRun: number;
   readonly tokens: number;
+  /** Whether this was the closing round, which closes the episode whatever is open. */
+  readonly closing: boolean;
 };
 
 /** Why a round reported a failure, and whose failure it was. */
@@ -224,6 +228,11 @@ export type RoundAccount = {
    * be posted, written here for the reason `unappliedNotes` is.
    */
   readonly unpostedReplyNotes: readonly string[];
+  /**
+   * The findings the reviewer reported in the closing round, none of which was
+   * posted. Absent on every other round.
+   */
+  readonly dropped?: readonly Finding[];
 };
 
 /** What one round concluded. */
@@ -401,8 +410,10 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   // An episode that reported its close is over, and nothing but the lookup that
   // found its key is asked before this. The bounds are the wrong question: a cap
   // raised between firings would let a closed episode review again, and it would
-  // post a second comment for one episode.
-  if (onFile?.closeReported === true) return { outcome: "episode-over" };
+  // post a second comment for one episode. The closing round is the one round a
+  // close leaves, and the state says whether it remains.
+  const closing = onFile !== null && closingRoundRemains(onFile);
+  if (onFile?.closeReported === true && !closing) return { outcome: "episode-over" };
 
   // One posting reserve for the round, made the first time anything asks for it.
   // The failure comment goes up under the deadline the salvaged findings ran
@@ -420,6 +431,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
     preReview,
     posting,
     stopwatch,
+    closing,
   });
   const reported: RoundConclusion =
     concluded.outcome !== "failed" || setup.postsFailure === false
@@ -514,27 +526,39 @@ type AfterTheGate = {
    */
   readonly posting: (reviewOverAt?: number) => Deadline;
   readonly stopwatch: Stopwatch;
+  /** Whether this is the episode's closing round. */
+  readonly closing: boolean;
 };
 
 /** Everything a round does once the gate has found its pull request. */
 async function reviewOn(
   pullRequest: PullRequest,
   onFile: EpisodeState | null,
-  { setup, opened, episode, preReview, posting: startPosting, stopwatch }: AfterTheGate,
+  { setup, opened, episode, preReview, posting: startPosting, stopwatch, closing }: AfterTheGate,
 ): Promise<RoundConclusion> {
   const { config } = setup;
   const directory = episode.worktree;
   const state = orEmpty(onFile);
 
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
-  const over = exhausted(state, bounds);
-  if (over !== null) {
-    return closeBeforeReview(over, pullRequest, { setup, episode, preReview, posting: startPosting, stopwatch });
+  if (closing) {
+    // The cap does not count the closing round, and the token bound still holds.
+    // The close is written already, so a bound reached ends it as a closed
+    // episode rather than closing it a second time.
+    if (tokenBoundIsReached(widestAttempt(state), bounds.tokens)) return { outcome: "episode-over" };
+  } else {
+    const over = exhausted(state, bounds);
+    if (over !== null) {
+      return closeBeforeReview(over, pullRequest, { setup, episode, preReview, posting: startPosting, stopwatch, closing });
+    }
   }
 
   const listing = handOver(pullRequest, preReview);
   if ("ended" in listing) return listing.ended;
-  const handedOver = listing.step.threads;
+  // Every thread of the review, for the summary to count. The closing round
+  // rules on the open ones alone, so no verdict reaches a resolved thread.
+  const listed = listing.step.threads;
+  const handedOver = closing ? listed.filter((thread) => !thread.isResolved) : listed;
   // The state the round would review is the pull request as it stands, and a
   // result recorded against any other state would claim a review it never had.
   const now: StateKey = { head: pullRequest.headSha, activity: listing.step.activity };
@@ -578,7 +602,7 @@ async function reviewOn(
     {
       directory: tree,
       charterFile: setup.charterFile,
-      prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }),
+      prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver, closing }),
       sessionDirectory,
       promptFile: join(ownDirectory, "prompt.md"),
       reportsFile: join(ownDirectory, "reports.jsonl"),
@@ -615,12 +639,22 @@ async function reviewOn(
   const ruledAt: RuledAt = {
     round: isRound(review) ? ordinal : null,
     commit: setup.state?.head ?? pullRequest.headSha,
+    ...(closing ? { closing: true } : {}),
   };
+  // The closing round raises nothing, whatever the reviewer reports. Its findings
+  // are named rather than posted, and no thread is opened for one, so its entry
+  // counts none raised.
+  const dropped = closing ? review.findings : [];
+  const kept: Review = closing ? { ...review, findings: [] } : review;
   const recording = keepCost(
     episode,
     state,
-    review,
-    { ran: { reviewer: config.reviewer, elapsedSeconds }, ruledAt, handedOver },
+    kept,
+    {
+      ran: { reviewer: config.reviewer, elapsedSeconds, ...(closing ? { closing: true } : {}) },
+      ruledAt,
+      handedOver,
+    },
     rulings,
   );
   if ("ended" in recording) return recording.ended;
@@ -638,14 +672,17 @@ async function reviewOn(
 
   // A failed round closes nothing, but where it spent the last round the cap
   // allows, or reached the token bound, no round runs after it either.
-  const left = closedBy(recorded, bounds);
+  const left = closedBy(recorded, bounds, closing);
   const leftClosed = left === undefined ? {} : { closed: left };
+  const droppedField = dropped.length === 0 ? {} : { dropped };
 
-  if (review.outcome !== "reviewed") {
-    return { ...salvage(review, handedOver, posting), ...leftClosed };
+  if (kept.outcome !== "reviewed") {
+    const failure = salvage(kept, handedOver, posting);
+    if (failure.outcome !== "failed" || dropped.length === 0) return { ...failure, ...leftClosed };
+    return { ...failure, salvaged: { ...(failure.salvaged ?? nothingDone(pullRequest.number)), ...droppedField }, ...leftClosed };
   }
 
-  const account = report(review, handedOver, posting);
+  const account = { ...report(kept, handedOver, posting), ...droppedField };
   // A round that put none of its findings up has handed nothing over, so its
   // close would read as a review with nothing open. It fails instead, and the
   // episode stays open for a retry wherever the bounds leave a round for one.
@@ -672,6 +709,7 @@ async function reviewOn(
     roundsRun: recorded.rounds.length,
     // A round with no cost counts nothing against the token bound.
     tokens: review.cost?.tokens ?? 0,
+    closing,
   };
   const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve, {
     round: recorded.rounds.length,
@@ -695,7 +733,7 @@ async function reviewOn(
     ends.because,
     account,
     ended.state,
-    handedOver,
+    closing ? { listed, ruledOn: handedOver } : { listed: handedOver, ruledOn: handedOver },
     posting,
     ends.leftNotReviewed,
   );
@@ -830,7 +868,7 @@ function orEmpty(state: EpisodeState | null): EpisodeState {
  */
 function exhausted(state: EpisodeState, bounds: EpisodeBounds): StoppingBound | null {
   if (tokenBoundIsReached(widestAttempt(state), bounds.tokens)) return "token-bound";
-  if (!Number.isInteger(bounds.rounds) || state.rounds.length >= bounds.rounds) {
+  if (!Number.isInteger(bounds.rounds) || cappedRounds(state.rounds) >= bounds.rounds) {
     return "round-cap";
   }
   return null;
@@ -841,9 +879,13 @@ function exhausted(state: EpisodeState, bounds: EpisodeBounds): StoppingBound | 
  * or `undefined` where a round remains. Read as `exhausted` reads it, so the
  * failure comment says closed exactly where the next firing closes.
  */
-function closedBy(state: EpisodeState, bounds: EpisodeBounds): ClosedBy | undefined {
+function closedBy(state: EpisodeState, bounds: EpisodeBounds, closing: boolean): ClosedBy | undefined {
+  // Nothing runs after the closing round, and its summary went up with the close.
+  if (closingRoundRan(state.rounds)) return { bound: "closing-round" };
+  // A closing round that recorded no entry spent nothing, and remains to retry.
+  if (closing) return undefined;
   const over = exhausted(state, bounds);
-  const roundsRun = state.rounds.length;
+  const roundsRun = cappedRounds(state.rounds);
   if (over === "token-bound") return { bound: "token-bound", tokens: bounds.tokens, roundsRun };
   if (over === "round-cap") return { bound: "round-cap", roundsRun, cap: bounds.rounds };
   return undefined;
@@ -1188,7 +1230,10 @@ function endUnderLock(
       );
       ends = endsOn(tally, queued);
       const kept = recordUnpostedReplies(current, unposted.round, unposted.lines);
-      return ends.outcome === "closed" ? { ...kept, closeReported: true } : kept;
+      if (ends.outcome !== "closed") return kept;
+      // Written with the close, so no trigger reads a close that does not yet say
+      // whether it leaves the closing round.
+      return leavesClosingRound(tally, ends) ? { ...kept, closeReported: true, closingRoundDue: true } : { ...kept, closeReported: true };
     },
     { until: lockWait(until) },
   );
@@ -1217,22 +1262,38 @@ function closeAfterReview(
   because: ClosingReason,
   account: RoundAccount,
   state: EpisodeState,
-  handedOver: readonly ReviewThread[],
+  threads: { readonly listed: readonly ReviewThread[]; readonly ruledOn: readonly ReviewThread[] },
   on: Posting,
   leftNotReviewed: LeftNotReviewed | null,
 ): RoundConclusion {
+  const closing = closingRoundRan(state.rounds);
+  // A thread the closing round was not handed is resolved, and is counted as a
+  // close before any review counts one: by the ruling the state recorded for it.
+  const handedOver = new Set(threads.ruledOn.map((thread) => thread.id));
+  const standingAside = standing(
+    threads.listed.filter((thread) => !handedOver.has(thread.id)),
+    state.rulings,
+  );
   const summary = timed(on.stopwatch, on.reserve, () => postEpisodeSummary(
     {
       pullRequest: account.pullRequest,
       rounds: state.rounds,
-      handedOver,
-      verdicts: account.verdicts,
+      handedOver: threads.listed,
+      verdicts: {
+        threads: [...account.verdicts.threads, ...standingAside.threads],
+        unapplied: account.verdicts.unapplied,
+      },
       findings: account.findings,
       // This round's reviewer read the whole change again, which settles every
-      // earlier round's findings: what it still found, it raised itself.
+      // earlier round's findings: what it still found, it raised itself. The
+      // closing round reads only the threads, and the summary at the cap listed
+      // those findings already.
       earlier: [],
       because,
       leftNotReviewed,
+      ...(closing
+        ? { closingRound: { ruledOn: threads.ruledOn, verdicts: account.verdicts, dropped: account.dropped ?? [] } }
+        : {}),
     },
     { directory: on.directory, until: on.reserve },
   ));

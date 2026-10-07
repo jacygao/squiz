@@ -26,7 +26,7 @@ import type { RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { PostedFindings } from "./post-findings.ts";
-import { postEpisodeSummary, type ClosingRound } from "./post-summary.ts";
+import { postEpisodeSummary, type EpisodeClose } from "./post-summary.ts";
 
 const PULL_REQUEST = 142;
 
@@ -141,7 +141,7 @@ function generalFinding(headline: string): Finding {
   };
 }
 
-/** A thread of an earlier round, as the closing round's own listing read it back. */
+/** A thread of an earlier round, as the last round's own listing read it back. */
 function handedOver(id: string, headline: string): ReviewThread {
   return {
     id,
@@ -161,7 +161,7 @@ function handedOver(id: string, headline: string): ReviewThread {
   };
 }
 
-/** What the closing round raised: one finding no thread holds, so Notes carries it. */
+/** What the last round raised: one finding no thread holds, so Notes carries it. */
 const findings: PostedFindings = {
   outcomes: [
     {
@@ -176,7 +176,7 @@ const findings: PostedFindings = {
  * An episode of two rounds, closing at its cap with one thread still open and a
  * later state queued behind it.
  */
-const closing: ClosingRound = {
+const closing: EpisodeClose = {
   pullRequest: PULL_REQUEST,
   rounds: [{ ...COST, reviewer: "pi" }, { ...COST, reviewer: "pi" }],
   handedOver: [handedOver("PRRT_one", "The name says nothing")],

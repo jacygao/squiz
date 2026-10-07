@@ -18,7 +18,7 @@ import type { StateRecord } from "./state-record.ts";
 export type TriggerKind = "hook" | "review";
 
 export type TriggerSituation = {
-  /** Whether the episode has reported its close. */
+  /** Whether the episode has reported its close, and has no closing round left to run. */
   readonly closed: boolean;
   /** The record for the pull request's state as it stands now, or none. */
   readonly record: StateRecord | undefined;

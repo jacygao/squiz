@@ -24,7 +24,8 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { unthreadedNotes } from "../github/summary-body.ts";
+import { droppedNotes, unthreadedNotes } from "../github/summary-body.ts";
+import { closingRoundRemains, decideClosingEnd } from "../loop/closing-round.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
@@ -150,8 +151,9 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       taken = undefined;
       closed = [];
       // The close is checked again here, under the state lock, so a round that
-      // closed the episode after this host read the file runs nothing more.
-      if (state.closeReported === true) {
+      // closed the episode after this host read the file runs nothing more. A
+      // close that leaves the closing round takes the oldest state for it.
+      if (state.closeReported === true && !closingRoundRemains(state)) {
         closed = inOrder(queuedIn(state).map((record) => notReviewed(keyOf(record), ALREADY_CLOSED)));
         return withRecords(state, closed.map(({ record }) => record));
       }
@@ -258,7 +260,9 @@ export function endsOnFor(
   config: Pick<Config, "rounds" | "tokens">,
 ): RoundSetup["endsOn"] {
   return (tally, queued) =>
-    decideRoundEnd({ ...tally, state }, { rounds: config.rounds, tokens: config.tokens }, queued);
+    tally.closing
+      ? decideClosingEnd({ ...tally, state }, queued)
+      : decideRoundEnd({ ...tally, state }, { rounds: config.rounds, tokens: config.tokens }, queued);
 }
 
 /**
@@ -379,7 +383,13 @@ function resultOf(
       const reason = failureOf(conclusion);
       const round = reviewer === undefined ? timing : { ...timing, reviewer };
       const lines = conclusion.outcome === "failed" ? failureLinesOf(conclusion) : [];
-      const failed = { ...failedRecord(key, reason), round, ...(lines.length === 0 ? {} : { lines }) };
+      const dropped = conclusion.outcome === "failed" ? droppedLines(conclusion) : [];
+      const failed = {
+        ...failedRecord(key, reason),
+        round,
+        ...(lines.length === 0 ? {} : { lines }),
+        ...(dropped.length === 0 ? {} : { problems: dropped }),
+      };
       const closed = conclusion.outcome === "failed" ? conclusion.closed : undefined;
       return {
         records: () => inOrder([failed]).map((written) => (closed === undefined ? written : { ...written, closed })),
@@ -431,6 +441,7 @@ function reportOf(
   ended: RoundEnd,
 ): RoundReport & { readonly closedAt?: ClosingBound } {
   const problems = [
+    ...droppedNotes(conclusion.dropped ?? []).map((note) => `the closing round did not post this: ${note}`),
     ...unpostedReasons(conclusion.verdicts),
     ...unappliedRulings(conclusion.verdicts),
     ...(conclusion.outcome === "close" ? summaryProblems(conclusion) : []),
@@ -463,7 +474,14 @@ export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly o
             : `the failure could not be posted on PR #${comment.pullRequest}: ${comment.posting.reason}`,
         ];
   const verdicts = conclusion.salvaged?.verdicts;
-  return [...(verdicts === undefined ? [] : [...unpostedReasons(verdicts), ...unappliedRulings(verdicts)]), ...went];
+  // Kept on the record, so a finding the closing round dropped is named even
+  // where its failure comment never landed.
+  return [...droppedLines(conclusion), ...(verdicts === undefined ? [] : [...unpostedReasons(verdicts), ...unappliedRulings(verdicts)]), ...went];
+}
+
+/** A line for each finding a failed closing round did not post. */
+function droppedLines(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>): readonly string[] {
+  return droppedNotes(conclusion.salvaged?.dropped ?? []).map((note) => `the closing round did not post this: ${note}`);
 }
 
 /** Why a round that reviewed nothing for its state failed. */

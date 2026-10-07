@@ -14,7 +14,8 @@
 import { renderFailure, type ClosedBy, type FailureReport } from "../github/failure-body.ts";
 import type { GhCall } from "../github/gh.ts";
 import { postIssueComment, type CommentPosting } from "../github/summary.ts";
-import { unthreadedNotes } from "../github/summary-body.ts";
+import { droppedNotes, unthreadedNotes } from "../github/summary-body.ts";
+import type { Finding } from "../findings/finding.ts";
 import type { PostedFindings } from "./post-findings.ts";
 
 /** What a failed round holds that its report is composed from. */
@@ -25,6 +26,8 @@ export type FailedRound = {
     readonly findings: PostedFindings;
     readonly unappliedNotes: readonly string[];
     readonly unpostedReplyNotes: readonly string[];
+    /** What the reviewer reported in a closing round, which was not posted. */
+    readonly dropped?: readonly Finding[];
   };
   /** The bound that leaves the episode no round after this one, absent where one remains. */
   readonly closed?: ClosedBy;
@@ -42,14 +45,16 @@ function failureReport(round: FailedRound): FailureReport {
   const outcomes = salvaged.outcomes;
   // A failed round posts no summary, so the closing replies it could not post are listed here.
   const unapplied = [...(round.salvaged?.unpostedReplyNotes ?? []), ...(round.salvaged?.unappliedNotes ?? [])];
+  const dropped = droppedNotes(round.salvaged?.dropped ?? []);
   return {
     reason: round.reason.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim(),
     ...(round.closed === undefined ? {} : { closed: round.closed }),
     ...(unapplied.length === 0 ? {} : { unapplied }),
+    ...(dropped.length === 0 || outcomes.length > 0 ? {} : { unthreaded: dropped }),
     ...(outcomes.length === 0
       ? {}
       : {
-          unthreaded: unthreadedNotes(salvaged),
+          unthreaded: [...unthreadedNotes(salvaged), ...dropped],
           salvaged: {
             // What landed, read from what the posting returned. A finding the
             // reviewer reported and GitHub refused is not on the pull request.

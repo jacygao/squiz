@@ -130,7 +130,7 @@ export function decideRoundEnd(
   );
   if (decision.next === "block") return { outcome: "threads open", record: exited(round, 2) };
   if (decision.because !== "nothing-open") {
-    return closed(round, decision.because, notReviewed(queued, decision.because, round));
+    return closed(round, decision.because, notReviewedBehind(queued, decision.because, round));
   }
   if (queued.length === 0) return closed(round, "nothing-open", null);
 
@@ -150,7 +150,7 @@ export function decideRoundEnd(
   // Only the queued states were stopped by a bound, and a close the decision
   // gave no bound for reads as the cap rather than keeping the episode open.
   const bound = next.because === "token-bound" ? "token-bound" : "round-cap";
-  return closed(round, "nothing-open", notReviewed(queued, bound, round));
+  return closed(round, "nothing-open", notReviewedBehind(queued, bound, round));
 }
 
 function closed(
@@ -172,7 +172,11 @@ function exited(round: EndedRound, exitStatus: 0 | 2 | 3): ReviewedRecord {
   };
 }
 
-function notReviewed(
+/**
+ * The queued states a close at `bound` leaves not reviewed, each with the reason
+ * naming the state `round` reviewed, or `null` where nothing was queued.
+ */
+export function notReviewedBehind(
   queued: readonly QueuedRecord[],
   bound: StoppingBound,
   round: EndedRound,

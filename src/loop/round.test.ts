@@ -38,6 +38,7 @@ import { startChild } from "../sessions/child.ts";
 import type { Backends } from "../sessions/session.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { snapshotPath } from "../worktree/snapshot.ts";
+import { closingRoundRemains } from "./closing-round.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
@@ -1245,7 +1246,7 @@ test("a round that leaves nothing open closes the episode", async () => {
  * listed before the review, the status from the verdict the reviewer returned, and
  * the note from the bound that closed the episode.
  */
-test("a closing round posts one comment carrying the summary it composed", async () => {
+test("a last round posts one comment carrying the summary it composed", async () => {
   const ran = await runInFixture({
     config: { rounds: 2 },
     // One round recorded, so this round is the second and the last the cap allows.
@@ -3450,7 +3451,7 @@ const MUTATION_REFUSED = included(
   JSON.stringify({ data: null, errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }] }),
 );
 
-test("a closing round names in its summary each ruling it could not apply (#605)", async () => {
+test("a last round names in its summary each ruling it could not apply (#605)", async () => {
   const ran = await runInFixture({
     config: { rounds: 2 },
     rounds: [ANSWER_COST],
@@ -3662,5 +3663,50 @@ test("a failed round names in its failure comment each closing reply it could no
   assert.match(
     failureBody(ran),
     /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the reviewer's reply could not be posted on its thread\)$/u,
+  );
+});
+
+test("a cap close with threads open leaves the closing round from the update that writes the close, before any record of the round (#587)", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 1 },
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close");
+  assert.equal(ran.conclusion.because, "round-cap");
+  assert.ok(ran.state !== null);
+  // The round host writes the reviewed record only after the summary is posted,
+  // and a trigger reading the state in between must already see a closing round.
+  assert.equal(
+    ran.state.records?.some((record) => record.status === "reviewed") ?? false,
+    false,
+    "the fixture's state holds a reviewed record, so it no longer shows the window",
+  );
+  assert.equal(closingRoundRemains(ran.state), true, "a fix pushed while the cap's summary posts would get no closing round");
+});
+
+test("a failed closing round names each finding it did not post on squiz review's lines, whether or not its failure comment landed (#587)", () => {
+  const dropped = finding("The flag is never read");
+  const lines = failureLinesOf({
+    outcome: "failed",
+    failure: "timed-out",
+    reason: "the reviewer was killed at its 1-second bound, and the round recorded no findings",
+    salvaged: {
+      pullRequest: PULL_REQUEST,
+      posted: [],
+      findings: { outcomes: [] },
+      verdicts: { threads: [], unapplied: [] },
+      unappliedNotes: [],
+      unpostedReplyNotes: [],
+      dropped: [dropped],
+    },
+    closed: { bound: "closing-round" },
+    failureComment: { pullRequest: PULL_REQUEST, posting: { outcome: "failed", reason: "gh: HTTP 502" } },
+  });
+
+  assert.ok(
+    lines.some((line) => line.startsWith("the closing round did not post this: ") && line.includes("The flag is never read")),
+    `no line names the dropped finding: ${JSON.stringify(lines)}`,
   );
 });

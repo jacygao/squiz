@@ -40,8 +40,12 @@ const unitsPerCredit = 100;
  * A round whose cost is a floor reads "at least", and so does every total of an
  * episode holding one, tokens, dollars and credits alike. That includes a floor
  * round named as unknown: it spent something the totals do not count.
+ *
+ * `closingLast` says the last of `rounds` is the closing round, which the line
+ * names apart from the rounds the cap counted. Where some rounds have no cost it
+ * is counted among the rounds.
  */
-export function renderSpendLine(rounds: readonly Spend[]): string | null {
+export function renderSpendLine(rounds: readonly Spend[], closingLast = false): string | null {
   // An episode can close having run no round at all, and there is then no spend
   // to report rather than a spend of nothing.
   if (rounds.length === 0) return "No rounds ran";
@@ -49,9 +53,11 @@ export function renderSpendLine(rounds: readonly Spend[]): string | null {
   const costed = rounds.filter((round) => round !== undefined);
   if (costed.length === 0) return null;
 
+  const capped = closingLast ? rounds.length - 1 : rounds.length;
+  const closing = closingLast ? " and the closing round" : "";
   const over =
     costed.length === rounds.length
-      ? `over ${rounds.length} ${rounds.length === 1 ? "round" : "rounds"}`
+      ? `over ${capped} ${capped === 1 ? "round" : "rounds"}${closing}`
       : `over ${costed.length} of ${rounds.length} rounds`;
   const reported = costed.filter(wasReported);
   if (reported.length === 0) return `No spend was reported ${over}`;

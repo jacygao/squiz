@@ -196,7 +196,7 @@ function linesOf(
       place,
       line.resume,
     ];
-    rows.push({ row, problems: record.status === "reviewed" ? (record.problems ?? []) : [] });
+    rows.push({ row, problems: record.status === "reviewed" || record.status === "failed" ? (record.problems ?? []) : [] });
   }
   return { rows, active, latest, pullRequest, worktree: episode.worktree };
 }
@@ -272,6 +272,7 @@ function outcomeOf(record: StateRecord & { readonly status: "reviewed" }): strin
   // Exit 2 is a round that left threads open and the episode with them. 0 and 3
   // closed the episode.
   if (record.exitStatus === 2) return open;
+  if (record.closingRound === true) return `${open}, review closed by the closing round`;
   return record.closedAt === undefined ? `${open}, review closed` : `${open}, review closed at the ${record.closedAt}`;
 }
 
