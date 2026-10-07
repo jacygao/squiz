@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.35 (draft)
+**Version:** 0.36 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -260,7 +260,7 @@ It left these held, with `milestone:M9`:
 ## M9 — Install and dogfood
 
 The marketplace manifest, a README carrying the getting-started steps,
-`/squiz doctor`, and `docs/notes/` consolidated.
+`squiz doctor`, and `docs/notes/` consolidated.
 
 ### Acceptance criteria
 
@@ -269,7 +269,7 @@ The marketplace manifest, a README carrying the getting-started steps,
       loaded into Copilot, with `copilot plugin install` or `--plugin-dir`, with
       Copilot's experimental features on as the harness specification's § 9
       says (#602).*
-- [ ] `/squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
+- [ ] `squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
       Code, and the Node version, naming whatever is missing. *Changed by
       detached sessions: it also reports whether tmux or Herdr is present.
       Neither is required.* It reports whether `squiz init`'s link puts this
@@ -277,7 +277,9 @@ The marketplace manifest, a README carrying the getting-started steps,
       agent: in place of `pi`, it reports the reviewer `.squiz.json` names, and
       that reviewer's model (#512). It reports the Copilot CLI wherever Copilot
       is the reviewer or a coding agent, and, for a Copilot coding agent,
-      whether Copilot's experimental features are on.*
+      whether Copilot's experimental features are on.* *Changed by planning
+      M9: the check is `squiz doctor`, a subcommand run from a shell, and
+      squiz ships no slash command (#653).*
 - [ ] A subagent there produces a reviewed pull request end to end. *Changed by
       detached sessions: a main session does too, woken by a note. Changed by
       Copilot as a coding agent: so does a Copilot session, woken through the
@@ -287,7 +289,7 @@ The marketplace manifest, a README carrying the getting-started steps,
 
 ### Issues
 
-- #259, have `/squiz doctor` name the reviewer settings squiz overrides in this
+- #259, have `squiz doctor` name the reviewer settings squiz overrides in this
   project
 - #271, name the reviewer and its model in the summary comment
 - #274, look once at whether an interactive session shows a hook's stderr when

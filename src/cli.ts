@@ -1,10 +1,11 @@
 /**
  * The entry point `bin/squiz` execs. Every command dispatches from here, and
  * the dispatch itself runs under the top-level trap. Every command but
- * `squiz review` and `squiz init` exits 0 whatever it is handed, and says on
- * stderr what failed. `squiz review` exits with the status its result gives,
- * and 1 where it could not run. `squiz init` is run by a person, and exits 1
- * where it could not add the section or link squiz onto PATH.
+ * `squiz review`, `squiz init` and `squiz doctor` exits 0 whatever it is
+ * handed, and says on stderr what failed. `squiz review` exits with the status
+ * its result gives, and 1 where it could not run. `squiz init` and
+ * `squiz doctor` are run by a person: `init` exits 1 where it could not link
+ * squiz onto PATH, and `doctor` where a required dependency is not usable.
  *
  * stdout carries the answer to a command and nothing else. Everything that is
  * not an answer — a failure, a usage line, a branch with no pull request — goes
@@ -22,6 +23,7 @@ import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";
 import { runUnderTrap, type HookExit, type Trapped } from "./hook/trap.ts";
 import { hostCommand } from "./host/command.ts";
+import { squizDoctor } from "./review/doctor.ts";
 import { squizInit } from "./review/init.ts";
 import { thisSquiz } from "./review/path-link.ts";
 import { runReview } from "./review/review.ts";
@@ -29,7 +31,10 @@ import { squizStatus } from "./review/status.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
-const commands = ["hook", "threads", "reply", "status", "host", "review", "init"];
+const commands = ["hook", "threads", "reply", "status", "host", "review", "init", "doctor"];
+
+// `gh auth status` asks GitHub about each login, so it is given a network's time.
+const PROBE_BOUND_MS = 15_000;
 
 const numberSpelling = /^[1-9][0-9]*$/u;
 
@@ -55,6 +60,12 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
   }
   if (command === "host") {
     return hostCommand(argv.slice(1), process.cwd());
+  }
+  if (command === "doctor") {
+    const printed = squizDoctor({ environment: process.env, nodeVersion: process.versions.node, boundMs: PROBE_BOUND_MS });
+    process.stdout.write(printed.stdout);
+    process.stderr.write(printed.stderr);
+    return printed.exit;
   }
   if (command === "init") {
     const printed = squizInit(process.cwd(), process.env, thisSquiz());
@@ -188,6 +199,7 @@ function postReply(args: readonly string[]): HookExit {
 function trappedFor(command: string | undefined): Trapped | undefined {
   if (command === "review") return { exit: 1, failed: "the review failed" };
   if (command === "init") return { exit: 1, failed: "squiz init failed" };
+  if (command === "doctor") return { exit: 1, failed: "squiz doctor failed" };
   return undefined;
 }
 

@@ -90,7 +90,7 @@ test("the link it makes runs the real squiz by name from a directory that is not
   const result = spawnSync("squiz", [], { cwd: fresh("elsewhere"), env: { PATH, HOME: home }, encoding: "utf8" });
 
   assert.equal(result.error, undefined);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init, doctor\n");
 });
 
 test("this squiz is the real path of bin/squiz in the checkout running the test", () => {
