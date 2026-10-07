@@ -26,7 +26,8 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes how folder trust is d
   started. The snapshot is now in the temporary directory, and the rule holds
   for whatever folder above it a user trusts. With `COPILOT_HOME`
   pointing at an empty directory, neither happened, and the run still
-  authenticated, because the credential lives in the system's credential store.
+  authenticated, because Copilot signed in with `gh`'s login, which it reads by
+  running `gh auth token` and which is not kept in `COPILOT_HOME`.
 - **Set `COPILOT_ALLOW_ALL` to the empty string in the reviewer's environment.**
   Set to exactly `true`, it trusts the working directory whatever `COPILOT_HOME`
   holds. Empty, it trusts nothing, and it replaces a `true` a pane's server

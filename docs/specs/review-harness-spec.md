@@ -1222,18 +1222,34 @@ has (The reviewer session). Everything the reviewer starts inherits them, so a
 and `gh api` refuses to run.
 
 The credential each CLI needs for its model is left alone: `pi`'s provider key,
-such as `DEEPSEEK_API_KEY`, and Copilot's own login in the system's credential
-store. A Copilot reviewer signs in under these variables.
+such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot looks for that login in
+three places:
 
-**The system's credential store stays readable.** On macOS, `gh auth token`
-still prints the login `gh` keeps in the keychain, whatever `GH_CONFIG_DIR`
-names, and any process running as the user can read that keychain. Copilot's own
-login is in the same store, so it cannot be closed to the reviewer without being
-closed to Copilot. `COPILOT_GITHUB_TOKEN` is left set where the round host has it,
-since a user who signs Copilot in that way has no other model credential. A user
-who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no model
-credential in the round, and nothing here handles that. The operating-system
-sandbox under § 8 What ships is what would close both.
+- **`COPILOT_GITHUB_TOKEN`, which is left set where the round host has it.** A
+  user who signs Copilot in that way has no other model credential. Only a
+  made-up token has been tried. With `gh` off `PATH`, Copilot refuses it with
+  `Error: Authentication token found but could not be validated.`; with `gh` on
+  `PATH`, it falls back to `gh`'s login and answers. A valid token is untested.
+- **A login of Copilot's own, from its `/login` command.** Untested: no machine
+  Squiz has run on has had one. Where Copilot keeps it, and whether a reviewer
+  finds it under the adapter's `COPILOT_HOME` (Keeping the project and the user
+  out), are not known.
+- **`gh`'s login, which Copilot reads by running `gh auth token`.** Tested on
+  macOS. `gh auth token` prints the login `gh` keeps in the keychain whatever
+  `GH_CONFIG_DIR` names, and the round passes its `PATH` on unchanged, so a
+  reviewer that finds `gh` on that `PATH` signs in under the variables above.
+  With `gh` off `PATH` and the token variables empty, Copilot exits 1 at once
+  with `Error: No authentication information found.`
+
+A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
+model credential in the round, because the round sets both empty, and nothing
+here handles that.
+
+**The system's credential store stays readable.** On macOS any process running
+as the user can read the keychain, and `gh auth token` prints `gh`'s login from
+it whatever `GH_CONFIG_DIR` names. That command is how Copilot reads `gh`'s
+login, so that login cannot be closed to the reviewer without being closed to Copilot.
+The operating-system sandbox under § 8 What ships is what would close it.
 
 ### Confinement
 
@@ -1688,9 +1704,9 @@ runs a project's hooks and starts its MCP servers only in a folder it trusts,
 and it trusts a folder below any folder it was told to trust, so a user who
 trusted any folder above the snapshots would have trusted every one of them.
 Under the adapter's `COPILOT_HOME`, Copilot trusts
-nothing, and none of the tree's hooks or MCP servers runs. The credential is in
-the system's credential store rather than in `COPILOT_HOME`, so the reviewer
-still signs in.
+nothing, and none of the tree's hooks or MCP servers runs. The reviewer still
+signs in through `gh`'s login, which is not kept in `COPILOT_HOME` (Tools).
+Whether a login from Copilot's own `/login` survives the change is untested.
 
 `COPILOT_ALLOW_ALL` set to exactly `true` trusts the working directory whatever
 `COPILOT_HOME` holds. Empty, it trusts nothing, so the adapter sets it to the
@@ -3689,7 +3705,10 @@ the part that rests on it is built, and each result is written as a finding in
 `docs/notes/`.
 
 - **Linux.** The detach and pane probes ran on macOS alone, and so did every
-  Copilot run, whose credential was in macOS's own credential store.
+  Copilot run, whose credential was `gh`'s login in macOS's keychain.
+- **A Copilot login from `/login`.** Every Copilot run signed in through `gh`'s
+  login. Whether a login from Copilot's own `/login` reaches a reviewer under the
+  adapter's `COPILOT_HOME` has not been run.
 
 ## 9. Adoption
 
