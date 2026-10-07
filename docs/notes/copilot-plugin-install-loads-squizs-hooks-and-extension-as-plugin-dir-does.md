@@ -154,46 +154,12 @@ with `woke its owner through <socket>`. A session started without
 experimental features logs neither line, has no socket file, and its record's
 owner carries `sessionId` alone.
 
-### What a wake looks like
-
-On `jacygao/greet-cli`, with the plugin installed from a local path, from the
-session's `events.jsonl` and the round's `host.log`:
-
-```
-08:03:58.238Z events    hook.start agentStop
-08:03:59.513Z events    hook.end agentStop
-08:04:40.513Z host.log  942ed8b: woke its owner through /tmp/s602/ch/session-state/00aee401-…/squiz.sock
-08:04:40.538Z events    user.message "Squiz reviewed PR #33 at 942ed8b: 2 threads are open. Run `squiz review 33` to read them." source=system
-08:04:47.738Z events    bash "squiz review 33"
-```
-
-The run on the GitHub marketplace shape was woken the same way, 37
-milliseconds after its `host.log` line, by a failed round's note.
-
-### Setup
-
-- **A scratch `COPILOT_HOME` per shape**, `/tmp/s602/<name>`, short enough for
-  the socket's 104-byte limit. Copilot signed in under each with no step of its
-  own. The owner's `~/.copilot` was not touched.
-- **No `CLAUDE*` variable**, and a `PATH` with no `squiz` but the scratch link.
-- **`squiz init`** run by path from the run's copy, with `HOME` a scratch
-  directory whose `.local/bin` was on `PATH`:
-  `squiz: linked /tmp/s602/home/.local/bin/squiz to /private/tmp/s602/uch/installed-plugins/squiz-local/squiz/bin/squiz`.
-  The link was removed and made again from the other copy between the runs.
-- **A fresh clone per run**, trusted in `config.json`'s `trustedFolders`, with
-  `.squiz.json` in `.git/info/exclude`: `{"reviewer": "copilot"}` for the
-  marketplace run, whose reviewer took Copilot's default `claude-sonnet-5`,
-  and `{"reviewer": "copilot", "model": "gpt-6-astra"}` for the local-path run.
-- **The session** in a pseudo-terminal nothing was typed into, started with
-  `copilot --model gpt-5-mini --allow-all --log-dir <dir> --log-level debug -i
-  "<prompt>"`. The prompt was the paging task the earlier Copilot runs used,
-  ending `Do not run squiz review yourself: squiz reviews the pull request on
-  its own and sends you a message when its review is done.` Experimental
-  features were already on from an earlier `--experimental` run on that home.
-
 ### Reproducing it
 
-With `COPILOT_HOME` a fresh short directory:
+With `COPILOT_HOME` a fresh directory short enough that
+`<COPILOT_HOME>/session-state/<session id>/squiz.sock` fits in 104 bytes, and
+no `CLAUDE*` variable in the environment, since a Copilot started from inside
+Claude Code passes them to its hooks:
 
 ```
 copilot plugin install <squiz checkout>
