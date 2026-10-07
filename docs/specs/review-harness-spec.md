@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.21 (draft)
+**Version:** 1.22 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2611,6 +2611,7 @@ any:
 git 2.51.0
 gh 2.97.0, signed in as ana
 Claude Code 2.4.1
+copilot 1.0.92, experimental features on
 Node 24.6.0
 tmux: not found. Not required: without tmux or Herdr, reviews run detached
 Herdr 0.9.3
@@ -2638,7 +2639,8 @@ The rows, in the order they print:
 |---|---|---|
 | `git` | Yes | `git --version` |
 | `gh`, and its sign-in | Yes | `gh --version`, then `gh auth status --json hosts --active` |
-| Claude Code | Yes | `claude --version` |
+| Claude Code | Where `copilot` is missing or cannot be run | `claude --version` |
+| Copilot, and its experimental features | No, and printed only where `copilot` is on `PATH` | `copilot --version`, then `<COPILOT_HOME>/settings.json` |
 | Node | Yes | The Node running squiz |
 | tmux | No | `tmux -V` |
 | Herdr | No | `herdr --version` |
@@ -2764,6 +2766,62 @@ Copilot adapter).
 system's credential store, and no `copilot` command that leaves the model
 unused reports whether it is signed in.
 
+**Claude Code is required only where Copilot cannot be the coding agent
+instead.** Either can be (§ 2), so where `claude` is not on `PATH` and
+`copilot` answers with its version, the row is present. Where `copilot` is
+missing too, or cannot be run, the row fails. A `claude` that is installed and
+cannot be run fails the row either way.
+
+```
+Claude Code: not found. Not required: copilot is installed, and either can be the coding agent
+Claude Code: not found
+```
+
+**Copilot is reported as a coding agent wherever `copilot` is on `PATH`,** since
+`.squiz.json` names the reviewer and nothing names the coding agents. Where it
+is not on `PATH`, the check prints nothing about it. Every line of this row is
+present or a warning, and none changes the exit status.
+
+The row says whether experimental features are on, because a Copilot session
+without them is never woken by its review (§ 9 Getting started). They are on
+where `"experimental"` is `true` in the user's own `<COPILOT_HOME>/settings.json`,
+under `COPILOT_HOME` or `~/.copilot` where that is unset. The file is read as
+the reviewer's model is read from it, with Copilot's `//` lines removed. They
+are off where the file is missing, sets no `"experimental"`, or sets it to
+`false`. A repository's `.github/copilot/settings.json` is not read, because it
+turns nothing on.
+
+| Found | Level | The line |
+|---|---|---|
+| `"experimental": true` | present | `copilot 1.2.0, experimental features on` |
+| No file, no key, or `false` | warning | `warning: copilot 1.2.0 has experimental features off. If Copilot writes your code, it is never woken when a review finishes. Run /experimental on in Copilot, or start it once with copilot --experimental` |
+| A file that cannot be read, is not JSON, or is not an object | warning | `warning: copilot 1.2.0: whether experimental features are on is unknown: the user's Copilot settings /Users/ana/.copilot/settings.json are not JSON: Unexpected token` |
+| `"experimental"` set to anything else | warning | `warning: copilot 1.2.0: whether experimental features are on is unknown: "experimental" is "yes" in /Users/ana/.copilot/settings.json` |
+| A `copilot` that cannot be run | warning | `copilot: warning: could not be run: copilot exited 139: segfault` |
+
+A second line follows where the extension's socket path is too long to listen
+on. The path is `<COPILOT_HOME>/session-state/<session id>/squiz.sock`, and a
+session id is a 36-character UUID. Its length in bytes is measured against 104
+on macOS and 108 on Linux, and a longer one is a warning:
+
+```
+warning: copilot's extension cannot listen: its socket /Users/ana/work/tools/copilot-home-of-ana-1/session-state/<session id>/squiz.sock is 105 bytes, over the 104 macOS allows. Set COPILOT_HOME to a shorter directory
+```
+
+**Where Copilot is both a coding agent and the reviewer, both rows print, and
+each says what the other does not.** The coding agent's row says whether its
+experimental features are on and whether its socket fits. The reviewer's row
+says its model and that its sign-in is not checked. A round runs the reviewer
+under a `COPILOT_HOME` of its own, so neither the features nor the socket bear
+on it.
+
+```
+copilot 1.0.92, experimental features on
+Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is not checked
+```
+
+`copilot --version` is started once, however many rows read it.
+
 **Where the reviewer is `pi`, the row after it names the project's own `pi`
 settings, which a review does not use.** A round runs `pi` with `--no-approve`
 (§ 4 The `pi` adapter), and `pi` takes none of these from a project it does not
@@ -2803,10 +2861,6 @@ establishes that the files are there for `pi` to find. It does not establish:
   snapshot), so a file not committed there is named all the same.
 - That the list is `pi`'s whole list. It is the list `pi` 0.85.1 requires trust
   for, read from its code, and a later `pi` may add to it.
-
-The row below is added to the list by a later change, and until then the check
-does not report it: the Copilot CLI wherever Copilot is a coding agent, and
-whether Copilot's experimental features are on, as a warning.
 
 ## 7. Failure modes
 
@@ -3151,7 +3205,7 @@ src/
   review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, and squiz doctor
   hook/                      the Stop and SubagentStop trigger, which resolves the pull request and queues the review
   host/                      the round host, which takes queued states and runs their rounds
-  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, and the note and its wake; no review knowledge
+  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution and the reviewer's snapshot
   reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
@@ -3168,11 +3222,11 @@ the directory that does the work.
 
 **`src/sessions/` knows nothing about reviews.** It starts a command as a
 session, finds it again by pid and start time, closes its pane, reads a hook's
-payload into the session that stopped and the session that owns it, and writes
-and delivers a note. Nothing in it names a pull request, a round or a finding,
-and it imports nothing from the rest of `src/`, so it can be lifted out whole if
-a second tool needs it. A test will read its imports and fail on any that reaches
-into the rest of `src/`.
+payload into the session that stopped and the session that owns it, writes
+and delivers a note, and reads the user's Copilot settings. Nothing in it names
+a pull request, a round or a finding, and it imports nothing from the rest of
+`src/`, so it can be lifted out whole if a second tool needs it. A test will
+read its imports and fail on any that reaches into the rest of `src/`.
 
 A test sits beside the code it tests, named for it: `src/config/config.ts` is
 tested by `src/config/config.test.ts`. One `include` then covers the code and
@@ -3320,8 +3374,8 @@ run, and it learns the result only from a `squiz review` it runs itself.
 
 The socket's path, `<COPILOT_HOME>/session-state/<session id>/squiz.sock`, must
 fit in the 104 bytes macOS allows a socket path, and the 108 Linux allows. The
-default `~/.copilot` fits under a home directory of up to 32 characters on macOS
-and 36 on Linux. Under a longer `COPILOT_HOME` the extension cannot listen, and
+default `~/.copilot` fits under a home directory of up to 33 characters on macOS
+and 37 on Linux. Under a longer `COPILOT_HOME` the extension cannot listen, and
 it says so in the session as a warning.
 
 **Any other coding agent reaches `squiz` through a link `squiz init` makes,**

@@ -137,8 +137,18 @@ Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Its sign-in is no
 
 The last line names the reviewer, its version and the model it will run on. It
 fails where that reviewer is not installed or `.squiz.json` is refused. It
-cannot tell whether Copilot is signed in. Doctor also requires Claude Code, so
-on a machine where only Copilot is installed it fails that one line.
+cannot tell whether Copilot is signed in.
+
+Where the Copilot CLI is installed, a line after Claude Code's gives its
+version and says whether its experimental features are on. Off is a warning,
+which leaves the exit status alone:
+
+```
+warning: copilot 1.0.92 has experimental features off. If Copilot writes your code, it is never woken when a review finishes. Run /experimental on in Copilot, or start it once with copilot --experimental
+```
+
+Either Claude Code or Copilot can be the coding agent, so Claude Code missing
+fails the check only where Copilot is missing too.
 
 ## What you see
 
