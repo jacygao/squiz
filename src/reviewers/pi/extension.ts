@@ -1,6 +1,6 @@
 /**
  * The extension `pi` loads: the calls the reviewer reports each finding
- * through and the `deep` tools, registered through `pi`'s API, the handler that
+ * through and the history tools, registered through `pi`'s API, the handler that
  * refuses a call to any tool outside the grant and a read outside the snapshot,
  * and the end of the review.
  *
@@ -26,7 +26,7 @@
  * with one.
  */
 
-import { deepTools } from "../deep-tools.ts";
+import { historyTools } from "../git-tools.ts";
 import { reportCalls } from "../report-calls.ts";
 import { reportFileAt, REPORTS_VARIABLE, type UsageLine } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
@@ -121,8 +121,8 @@ const shownInPi: Readonly<
   },
 };
 
-/** How `pi` lists each `deep` tool. */
-const deepLabels: Readonly<Record<string, string>> = {
+/** How `pi` lists each history tool. */
+const historyLabels: Readonly<Record<string, string>> = {
   git_log_search: "Search history",
   git_blame: "Blame line",
   git_show: "Show commit",
@@ -130,26 +130,18 @@ const deepLabels: Readonly<Record<string, string>> = {
 
 /**
  * The extension as `pi` loads it, reporting to the file the adapter named and
- * serving the `deep` tools in the round the round named, under the grant the
- * adapter handed over.
- *
- * Both are registered at every depth. `--tools` drops whatever the depth does
- * not grant, and the handler refuses it where `--tools` did not.
+ * serving the history tools in the snapshot, which is where `pi` runs, under
+ * the grant the adapter handed over.
  */
 export default function reportAsYouGo(pi: Registrar): void {
   reportInto(pi, process.env[REPORTS_VARIABLE], process.cwd(), grantIn(process.env[GRANT_VARIABLE]));
-  serveDeepTools(pi, process.env);
+  serveHistoryTools(pi, process.cwd());
 }
 
-/**
- * Register the `deep` tools, run with `environment` as the reviewer's own.
- *
- * `pi`'s process environment is the reviewer's: the round's variables over its
- * host's, with no GitHub credential. `pi` adds only markers of its own to it.
- */
-export function serveDeepTools(pi: Registrar, environment: Readonly<Record<string, string | undefined>>): void {
-  for (const tool of deepTools(environment)) {
-    const label = deepLabels[tool.name];
+/** Register the history tools, each run in `snapshot`. */
+export function serveHistoryTools(pi: Registrar, snapshot: string): void {
+  for (const tool of historyTools) {
+    const label = historyLabels[tool.name];
     if (label === undefined) throw new Error(`${tool.name} has no label to show in pi`);
     pi.registerTool({
       name: tool.name,
@@ -157,7 +149,7 @@ export function serveDeepTools(pi: Registrar, environment: Readonly<Record<strin
       description: tool.description,
       parameters: tool.parameters,
       execute: async (_toolCallId, params, signal) => {
-        const { text, failed } = await tool.call(params, signal);
+        const { text, failed } = await tool.run(snapshot, params, signal);
         // `pi` reads a call's answer as an error only where `execute` throws.
         if (failed) throw new Error(text);
         return { content: [{ type: "text", text }] };

@@ -67,16 +67,18 @@ about a defect `read` also found. The history defect is in upstream commit
 export MEASURE_CACHE=/tmp/squiz-measure-cases   # where the upstream cases are cloned
 node src/measure/review-once.ts prepare          # once, before runs go side by side
 MEASURE_MODEL=deepseek/deepseek-v4-pro caffeinate -i \
-  node src/measure/review-once.ts qs-comma-limit pi deep charter.md /tmp/runs/pi-deep-qs-comma-limit-1
+  node src/measure/review-once.ts qs-comma-limit pi charter.md /tmp/runs/pi-qs-comma-limit-1
 node src/measure/table.ts /tmp/runs/*/
 ```
 
+The rig no longer takes a depth. It runs the one grant every review has, the
+reading tools, the reporting calls and the history tools, so the two columns
+above cannot be re-run as they were.
+
 The case names are the keys of `cases` in `src/measure/cases.ts`. Each run makes
-a snapshot with `addSnapshot`, as a round does, and hands the depth and the
-case's test command straight to `runRound`, so `.squiz.json` and its refusal of
-`deep` are not read. `granted.txt` in the run's directory holds the CLI's
-arguments and `SQUIZ_ROUND`, which show whether the `deep` tools were granted
-and handed a round.
+a snapshot with `addSnapshot`, as a round does, and hands the model straight to
+`runRound`, so `.squiz.json` is not read. `granted.txt` in the run's directory
+holds the CLI's arguments, which show the grant.
 
 ### Traps
 

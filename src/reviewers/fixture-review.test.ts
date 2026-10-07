@@ -233,14 +233,14 @@ test("the adapter returns the seeded defect as a finding in the contract's shape
  * scratch space. A round that reviewed says every input arrived; this says what
  * each one was.
  */
-test("the prompt, the read grant, the charter and the tree all reach the reviewer", async () => {
+test("the prompt, the grant, the charter and the tree all reach the reviewer", async () => {
   await inTheFixture(async ({ tree }) => {
     const round = await runRound(pi, invocationIn(tree), BOUND_SECONDS);
     assert.equal(round.outcome, "reviewed", accountOf(round));
 
     const handed = handedTo(tree);
     assert.equal(handed["cwd"], realpathSync(tree));
-    assert.equal(handed["tools"], pi.grants.read.join(","));
+    assert.equal(handed["tools"], pi.grants.join(","));
     assert.equal(handed["extension"], extensionFile);
     assert.equal(handed["charterFile"], charterFile);
     assert.equal(handed["charterOpens"], readFileSync(charterFile, "utf8").split("\n")[0]);
@@ -284,18 +284,17 @@ test("the round leaves the fixture tree as it found it", async () => {
   });
 });
 
-/** The invocation for one round over the fixture, at the depth the harness sets. */
+/** The invocation for one round over the fixture. */
 function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, diff: diffOf(tree), threads: [thread] }, "read"),
+    prompt: composePrompt({ pullRequest, diff: diffOf(tree), threads: [thread] }),
     sessionDirectory,
     promptFile: ".squiz/104/rounds/1/prompt.md",
     reportsFile,
     scratchDirectory,
     githubConfigDirectory: ".squiz/104/rounds/1/gh",
-    depth: "read",
     thinking: "medium",
     model: null,
     terminal: "none",

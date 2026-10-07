@@ -35,21 +35,17 @@ function reasonFor(call: { toolName: string; input: unknown }, grant: readonly s
 const ungranted = ["bash", "edit", "write", "delete_everything"];
 
 test("a tool the grant does not name is refused, and the reviewer is told so", () => {
-  for (const grant of Object.values(grants)) {
-    for (const tool of ungranted) {
-      assert.equal(
-        reasonFor(called(tool, { path: "src/threads.ts" }), grant),
-        `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
-      );
-    }
+  for (const tool of ungranted) {
+    assert.equal(
+      reasonFor(called(tool, { path: "src/threads.ts" }), grants),
+      `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
+    );
   }
 });
 
 test("every tool the grant names is left alone", () => {
-  for (const grant of Object.values(grants)) {
-    for (const tool of grant) {
-      assert.equal(refuse(called(tool, { path: "src/threads.ts" }), grant), undefined, tool);
-    }
+  for (const tool of grants) {
+    assert.equal(refuse(called(tool, { path: "src/threads.ts" }), grants), undefined, tool);
   }
 });
 
@@ -62,22 +58,20 @@ test("a tool is refused under a grant that leaves it out", () => {
 /** The name is the whole of it: nothing is read out of what the call was given. */
 test("a refused tool is refused whatever it was given, including nothing", () => {
   for (const input of [undefined, {}, { command: "git status" }]) {
-    assert.equal(refuse(called("bash", input), grants.read)?.block, true, JSON.stringify(input));
+    assert.equal(refuse(called("bash", input), grants)?.block, true, JSON.stringify(input));
   }
 });
 
 test("with no grant handed over, every call is refused", () => {
   assert.deepEqual(grantIn(undefined), []);
   assert.deepEqual(grantIn(""), []);
-  for (const tool of grants.deep) {
+  for (const tool of grants) {
     assert.equal(refuse(called(tool, {}), grantIn(undefined))?.block, true, tool);
   }
 });
 
 test("the grant is read back as the names it was handed over as", () => {
-  for (const grant of Object.values(grants)) {
-    assert.deepEqual(grantIn(grant.join(",")), grant);
-  }
+  assert.deepEqual(grantIn(grants.join(",")), grants);
 });
 
 /**
@@ -92,6 +86,6 @@ test("the handler answers rather than throwing, whatever the call carries", () =
     { toolName: "read", input: Object.create(null) as unknown },
   ];
   for (const call of hostile) {
-    assert.doesNotThrow(() => refuse(call as { toolName: string; input: unknown }, grants.read));
+    assert.doesNotThrow(() => refuse(call as { toolName: string; input: unknown }, grants));
   }
 });

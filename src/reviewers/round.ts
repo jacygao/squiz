@@ -37,7 +37,6 @@ import {
   unspent,
 } from "./adapter.ts";
 import { type Deadline, deadlineIn } from "./deadline.ts";
-import { roundVariable } from "./deep-tools.ts";
 import { follow } from "./follow.ts";
 
 /**
@@ -288,8 +287,6 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * here overrides one the server has. `gh` reads an empty token as none.
  * `GH_CONFIG_DIR` names `github`, which the round has emptied. They come after
  * the confinement's, so no adapter puts a token back.
- *
- * At `deep` the tools the CLI serves are handed the snapshot.
  */
 function variablesOf(
   invocation: Invocation,
@@ -297,11 +294,9 @@ function variablesOf(
   github: string,
   confinement: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
-  const deep = invocation.depth === "deep" ? roundVariable({ snapshot: resolve(invocation.directory) }) : {};
   return {
     TMPDIR: scratch,
     ...confinement,
-    ...deep,
     ...Object.fromEntries(GITHUB_TOKENS.map((name) => [name, ""])),
     GH_CONFIG_DIR: github,
   };

@@ -13,22 +13,21 @@ const invocation: Invocation = {
   reportsFile: ".squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/7/scratch",
   githubConfigDirectory: ".squiz/7/rounds/1/gh",
-  depth: "read",
   thinking: "medium",
   model: null,
   terminal: "none",
 };
 
-test("the adapter carries a command line, what it confines with, a reader, the grants and a resume", () => {
+test("the adapter carries a command line, what it confines with, a reader, the grant and a resume", () => {
   assert.equal(copilot.argv(invocation).command, "sh");
-  assert.deepEqual(Object.keys(copilot.grants).toSorted(), ["deep", "read"]);
+  assert.ok(copilot.grants.length > 0);
   assert.equal(typeof copilot.parse, "function");
   assert.equal(typeof copilot.resume, "function");
 });
 
 test("the grant on the command line is the one the adapter names", () => {
   const script = copilot.argv(invocation).args[1] ?? "";
-  assert.ok(script.includes(` --available-tools=${copilot.grants.read.join(",")} `), script);
+  assert.ok(script.includes(` --available-tools=${copilot.grants.join(",")} `), script);
 });
 
 test("the adapter reads the report file the reporting server writes", async () => {

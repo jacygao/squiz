@@ -1,5 +1,5 @@
 /**
- * The `.squiz.json` loader: the seven settings, their defaults and their ranges.
+ * The `.squiz.json` loader: the six settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
  */
@@ -13,12 +13,6 @@ export const configFileName = ".squiz.json";
 export type Reviewer = "pi" | "copilot";
 
 /**
- * The two grants a reviewer can be given. A union of string literals stands
- * where an enum would: Node cannot strip an enum.
- */
-export type Depth = "read" | "deep";
-
-/**
  * How hard the reviewer thinks, which is most of what a round spends. The names
  * are the reviewer CLI's own, and none of them means "whatever this machine is
  * set to": the level a project gets is one the harness passes.
@@ -29,8 +23,6 @@ export type Config = {
   reviewer: Reviewer;
   // The round cap.
   rounds: number;
-  // `deep` adds the shell.
-  depth: Depth;
   // Seconds one round's reviewer may run.
   timeout: number;
   // Tokens one round may spend.
@@ -47,7 +39,6 @@ export type Config = {
 export const defaultConfig: Readonly<Config> = Object.freeze({
   reviewer: "pi",
   rounds: 3,
-  depth: "read",
   timeout: 900,
   // Well above the widest round a legitimate review has been measured spending,
   // so a reviewer that reads widely does not reach it.
@@ -70,13 +61,11 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["reviewer", "rounds", "depth", "timeout", "tokens", "thinking", "model"] as const;
+const settingNames = ["reviewer", "rounds", "timeout", "tokens", "thinking", "model"] as const;
 
-const settingList = `"reviewer", "rounds", "depth", "timeout", "tokens", "thinking" and "model"`;
+const settingList = `"reviewer", "rounds", "timeout", "tokens", "thinking" and "model"`;
 
 const reviewers = ["pi", "copilot"] as const;
-
-const depths = ["read", "deep"] as const;
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -146,7 +135,6 @@ function parse(source: string, path: string): Config {
     rounds: has(raw, "rounds")
       ? wholeNumber(path, "rounds", raw["rounds"], 1, 8, "a whole number from 1 to 8")
       : defaultConfig.rounds,
-    depth: has(raw, "depth") ? depthOf(path, raw["depth"]) : defaultConfig.depth,
     timeout: has(raw, "timeout")
       ? wholeNumber(
           path,
@@ -203,23 +191,6 @@ function reviewerOf(path: string, value: unknown): Reviewer {
     if (value === reviewer) return reviewer;
   }
   throw new ConfigError(reject(path, "reviewer", value, `"pi" or "copilot"`));
-}
-
-function depthOf(path: string, value: unknown): Depth {
-  for (const depth of depths) {
-    if (value !== depth) continue;
-    // `deep` grants the shell, the shell writes, and the comparison of tracked
-    // files that detects such a write is not built. Refusing says so; loading
-    // `read` in its place would leave a project believing its tests were being
-    // run when only files were being read.
-    if (depth === "deep") {
-      throw new ConfigError(
-        `${path}: "depth" is "deep", which is not supported yet: it grants the shell, and the comparison of tracked files that detects a write made through the shell is not built. Use "read".`,
-      );
-    }
-    return depth;
-  }
-  throw new ConfigError(reject(path, "depth", value, `"read" or "deep"`));
 }
 
 function thinkingOf(path: string, value: unknown): Thinking {

@@ -27,3 +27,9 @@ test("nothing outside src/reviewers/ reaches into one reviewer's adapter", () =>
 
   assert.deepEqual(reaching, [], "the adapter is chosen by adapterFor alone");
 });
+
+// The history tools are granted at every review, so there is one grant and they end it.
+test("each adapter's one grant ends in the history tools, under its own names", () => {
+  assert.deepEqual(pi.grants.slice(-3), ["git_log_search", "git_blame", "git_show"]);
+  assert.deepEqual(copilot.grants.slice(-3), ["squiz-git_log_search", "squiz-git_blame", "squiz-git_show"]);
+});

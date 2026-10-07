@@ -1,6 +1,6 @@
 /**
  * The task prompt the reviewer is handed each round: the pull request under
- * review, the threads already on it, and at `deep` what its tools are for.
+ * review, what the history tools are for, and the threads already on it.
  *
  * It sits above the adapters rather than inside one. Every adapter hands its
  * CLI the same prompt, so a second reviewer is a second command line and not a
@@ -14,7 +14,6 @@
  * and the threads are the whole of what it knows about the rounds before it.
  */
 
-import type { Depth } from "../config/config.ts";
 import type { PullRequest } from "../github/pull-request.ts";
 import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 
@@ -45,27 +44,19 @@ export type UnderReview = {
  * Never throws, and refuses nothing. A field that arrived empty is carried as
  * it is, because a round with a thin description is still a round to review.
  */
-export function composePrompt(underReview: UnderReview, depth: Depth): string {
+export function composePrompt(underReview: UnderReview): string {
   const { pullRequest, diff, threads } = underReview;
   return [
     `# Review pull request #${pullRequest.number}`,
     `Head \`${pullRequest.headRef}\`, base \`${pullRequest.baseRef}\`.`,
     "## Description",
     described(pullRequest.description),
-    ...historySection(depth),
+    "## History",
+    "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
     "## Diff",
     block(diff, "diff"),
     ...threadSections(threads),
   ].join("\n\n");
-}
-
-/** What the history tools are for, or nothing at `read`, where none is granted. */
-function historySection(depth: Depth): readonly string[] {
-  if (depth !== "deep") return [];
-  return [
-    "## History",
-    "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
-  ];
 }
 
 /**

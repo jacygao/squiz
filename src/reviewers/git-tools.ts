@@ -1,6 +1,6 @@
 /**
- * The three history tools a reviewer at depth `deep` is granted, as any CLI's
- * server of them runs them: `git_log_search`, `git_blame` and `git_show`.
+ * The three history tools every reviewer is granted, as any CLI's server of
+ * them runs them: `git_log_search`, `git_blame` and `git_show`.
  *
  * Each runs its one git subcommand in the snapshot, by `execFile` with an
  * argument array, never through a shell. The repository under review is

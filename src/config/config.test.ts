@@ -45,11 +45,10 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the seven defaults", () => {
+test("an absent .squiz.json is not an error, and yields the six defaults", () => {
   assert.deepEqual(load(null), {
     reviewer: "pi",
     rounds: 3,
-    depth: "read",
     timeout: 900,
     tokens: 10_000_000,
     thinking: "medium",
@@ -57,7 +56,7 @@ test("an absent .squiz.json is not an error, and yields the seven defaults", () 
   });
 });
 
-test("a .squiz.json with no keys yields the same seven defaults", () => {
+test("a .squiz.json with no keys yields the same six defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -70,12 +69,11 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"reviewer": "copilot", "rounds": 5, "depth": "read", "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
+      `{"reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
     ),
     {
       reviewer: "copilot",
       rounds: 5,
-      depth: "read",
       timeout: 90,
       tokens: 400_000,
       thinking: "high",
@@ -152,11 +150,11 @@ test("a value in range but below the default survives the load", () => {
   assert.equal(load(`{"tokens": 100000}`).tokens, 100_000);
 });
 
-test("depth is read, and anything else is refused", () => {
-  assert.equal(load(`{"depth": "read"}`).depth, "read");
-  rejection(`{"depth": "shallow"}`);
-  rejection(`{"depth": "READ"}`);
-  rejection(`{"depth": ""}`);
+// The grant is the same at every review, so the setting that chose one is gone.
+test("an old depth key is refused like any unknown setting", () => {
+  for (const value of [`"read"`, `"deep"`]) {
+    assert.match(rejection(`{"depth": ${value}}`).message, /"depth" is not a setting, and the settings are /u);
+  }
 });
 
 test("reviewer is pi or copilot, and anything else is refused", () => {
@@ -174,23 +172,6 @@ test("reviewer is pi or copilot, and anything else is refused", () => {
 test("reviewer defaults to pi", () => {
   assert.equal(load("{}").reviewer, "pi");
   assert.equal(load(`{"rounds": 3}`).reviewer, "pi");
-});
-
-// The Copilot adapter grants nothing at `deep`, so the pair must never reach a round.
-test("depth deep is refused for copilot with the refusal every reviewer gets", () => {
-  // Each load is from its own temporary directory, so the path is left out.
-  const refusal = (contents: string): string =>
-    rejection(contents).message.replace(/^.*?\.squiz\.json: /u, "");
-  assert.equal(refusal(`{"reviewer": "copilot", "depth": "deep"}`), refusal(`{"depth": "deep"}`));
-});
-
-// The refusal is what stands between a project that asked for `deep` and a
-// reviewer holding a shell whose writes nothing detects.
-test("depth deep is refused, and the refusal says so rather than loading read", () => {
-  const error = rejection(`{"depth": "deep"}`);
-  assert.match(error.message, /"depth" is "deep"/);
-  assert.match(error.message, /not supported yet/);
-  assert.match(error.message, /Use "read"/);
 });
 
 // The levels are the reviewer CLI's own names, matched exactly. A name it does
@@ -219,7 +200,6 @@ test("a value of the wrong type is refused like one out of range", () => {
   rejection(`{"rounds": "3"}`);
   rejection(`{"rounds": null}`);
   rejection(`{"rounds": true}`);
-  rejection(`{"depth": 3}`);
   rejection(`{"timeout": null}`);
   rejection(`{"tokens": "150000"}`);
   rejection(`{"tokens": []}`);
@@ -291,9 +271,6 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"reviewer": 1}`, setting: "reviewer", given: "1", expected: /"pi" or "copilot"/ },
     { contents: `{"rounds": 12}`, setting: "rounds", given: "12", expected: /whole number from 1 to 8/ },
     { contents: `{"rounds": "3"}`, setting: "rounds", given: `"3"`, expected: /whole number from 1 to 8/ },
-    { contents: `{"depth": "shallow"}`, setting: "depth", given: `"shallow"`, expected: /"read" or "deep"/ },
-    { contents: `{"depth": 3}`, setting: "depth", given: "3", expected: /"read" or "deep"/ },
-    { contents: `{"depth": "deep"}`, setting: "depth", given: `"deep"`, expected: /not supported yet/ },
     { contents: `{"timeout": 3601}`, setting: "timeout", given: "3601", expected: /seconds from 60 to 3,600/ },
     { contents: `{"timeout": 59}`, setting: "timeout", given: "59", expected: /seconds from 60 to 3,600/ },
     { contents: `{"timeout": null}`, setting: "timeout", given: "null", expected: /seconds from 60 to 3,600/ },
@@ -342,12 +319,12 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"reviewer", "rounds", "depth", "timeout", "tokens", "thinking" and "model"/);
+  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking" and "model"/);
 });
 
 test("a .squiz.json still setting test is refused like any other key that is not a setting", () => {
   const error = rejection(`{"test": "npm test"}`);
-  assert.match(error.message, /"test" is not a setting, and the settings are "reviewer", "rounds", "depth", "timeout", "tokens", "thinking" and "model"$/u);
+  assert.match(error.message, /"test" is not a setting, and the settings are "reviewer", "rounds", "timeout", "tokens", "thinking" and "model"$/u);
 });
 
 // What a project upgrading from the dollar bound meets. Silently ignoring it

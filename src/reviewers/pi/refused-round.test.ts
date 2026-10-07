@@ -135,7 +135,7 @@ function toldIn(round: Awaited<ReturnType<typeof runRound>>): ReadonlyMap<string
 /** The prompt that tells the stand-in to review without reaching for anything. */
 const TRIES_NOTHING = "# Review pull request #1\n\nReach for nothing.";
 
-/** The invocation for one round over the fixture, at `deep`. */
+/** The invocation for one round over the fixture. */
 function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
@@ -146,7 +146,6 @@ function invocationIn(tree: string): Invocation {
     reportsFile: ".squiz/1/rounds/1/reports.jsonl",
     scratchDirectory: ".squiz/agent-1/scratch",
     githubConfigDirectory: ".squiz/agent-1/rounds/1/gh",
-    depth: "deep",
     thinking: "medium",
     model: null,
     // No space, so nothing records a group. What a refused call does is the whole

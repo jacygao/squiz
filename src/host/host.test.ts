@@ -222,7 +222,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
           result: { kind: "reviewed", findings: arranged.findings?.[started - 1] ?? [], verdicts: [] },
         };
       },
-      grants: { read: ["read"], deep: ["read", "bash"] },
+      grants: ["read"],
       ...(arranged.resume === undefined ? {} : { resume: arranged.resume }),
     };
 

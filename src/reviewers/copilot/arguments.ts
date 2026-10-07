@@ -1,6 +1,6 @@
 /**
  * A call's arguments checked against the JSON Schema of the tool it calls, as
- * far as the schemas of the `deep` tools reach.
+ * far as the schemas of the history tools reach.
  *
  * Copilot passes a call to the server as the model sent it, so this is the only
  * check the arguments get before a tool runs. The whole schema is read before

@@ -2,8 +2,7 @@
  * The script the rig puts ahead of the reviewer's CLI on `PATH`.
  *
  * It adds the flags that make the CLI write its JSON events, copies those events
- * to a file, and records the CLI's arguments and `SQUIZ_ROUND`, which show the
- * grant and whether the `deep` tools were handed a round to run in.
+ * to a file, and records the CLI's arguments, which show the grant.
  */
 
 export type Shim = {
@@ -29,7 +28,6 @@ export function shimScript(shim: Shim): string {
     "set -o pipefail",
     `case " $* " in *${quoted(` ${shim.review} `)}*) ;; *) exec ${quoted(shim.real)} "$@" ;; esac`,
     `printf '%s\\n' "$@" >> ${granted}`,
-    `printf 'SQUIZ_ROUND=%s\\n' "$SQUIZ_ROUND" >> ${granted}`,
     `${[shim.real, ...shim.flags].map(quoted).join(" ")} "$@" | tee -a ${quoted(shim.stream)}`,
     "",
   ].join("\n");

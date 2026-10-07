@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { mismatchOf } from "./arguments.ts";
-import { deepTools } from "../deep-tools.ts";
+import { historyTools } from "../git-tools.ts";
 
 const valid: Readonly<Record<string, unknown>> = {
   git_log_search: { term: "margin" },
@@ -11,8 +11,8 @@ const valid: Readonly<Record<string, unknown>> = {
 };
 
 // A keyword the check does not know would refuse every call to the tool.
-test("every deep tool's schema is one the check can read, and passes a call that matches it", () => {
-  for (const tool of deepTools({})) {
+test("every history tool's schema is one the check can read, and passes a call that matches it", () => {
+  for (const tool of historyTools) {
     assert.ok(tool.name in valid, `no valid call for ${tool.name}`);
     assert.equal(mismatchOf(tool.parameters, valid[tool.name]), undefined, tool.name);
   }

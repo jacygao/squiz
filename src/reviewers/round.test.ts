@@ -10,7 +10,6 @@ import type { Backends } from "../sessions/session.ts";
 
 import { type Adapter, type Confinement, type Invocation, type ParsedRun, unspent } from "./adapter.ts";
 import { copilot } from "./copilot/adapter.ts";
-import { ROUND_VARIABLE } from "./deep-tools.ts";
 import { pi } from "./pi/adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { readReports as parse } from "./pi/reports.ts";
@@ -603,9 +602,9 @@ test("a reviewer that complains at length is drained as it goes, and only the en
 
 /**
  * A reviewer that ignores the signal is killed, and the tools it started go
- * with it. At depth `read` the grant is the only confinement there is, and a
- * subprocess outliving the round can still write to the tree the coding agent
- * is about to commit.
+ * with it. The grant is the only confinement there is, and a subprocess
+ * outliving the round can still write to the tree the coding agent is about to
+ * commit.
  */
 test("a killed reviewer takes the processes it started with it", async () => {
   await inATree(async (tree) => {
@@ -702,18 +701,6 @@ test("a tool that outlives a reviewer which took the signal is stopped too", asy
   });
 });
 
-// The deep tools run inside the reviewer's CLI, where the round's values are
-// readable only off the environment.
-test("at deep the reviewer is handed the round's snapshot, and nothing else", async () => {
-  await inATree(async (tree) => {
-    const round = await runRound(reviewer(reporting(`process.env.${ROUND_VARIABLE}`)).adapter, atDeep(tree), 30);
-    assert.deepEqual(JSON.parse(headlineOf(round)), { snapshot: tree });
-
-    const read = await runRound(reviewer(reporting(`String(process.env.${ROUND_VARIABLE})`)).adapter, at(tree), 10);
-    assert.equal(headlineOf(read), "undefined", "a depth with no deep tools is handed nothing for them");
-  });
-});
-
 test("what the adapter puts on the environment reaches the reviewer", async () => {
   await inATree(async (tree) => {
     const running = reviewer(reporting("process.env.AN_ADAPTER_SETTING"));
@@ -721,7 +708,7 @@ test("what the adapter puts on the environment reaches the reviewer", async () =
       ...running.adapter,
       confine: () => ({ outcome: "prepared", environment: { AN_ADAPTER_SETTING: "/somewhere" } }),
     };
-    assert.equal(headlineOf(await runRound(adapter, atDeep(tree), 10)), "/somewhere");
+    assert.equal(headlineOf(await runRound(adapter, at(tree), 10)), "/somewhere");
   });
 });
 
@@ -840,7 +827,7 @@ test("a confinement that could not be put in place is a setup problem, and nothi
       ...running.adapter,
       confine: () => ({ outcome: "failed", reason: "the settings could not be written" }),
     };
-    const round = await runRound(adapter, atDeep(tree), 10);
+    const round = await runRound(adapter, at(tree), 10);
     assert.equal(round.outcome, "setup");
     assert.equal(round.outcome === "setup" ? round.reason : "", "the settings could not be written");
     assert.equal(running.starts(), 0);
@@ -1513,16 +1500,10 @@ function at(tree: string): Invocation {
     reportsFile,
     scratchDirectory,
     githubConfigDirectory,
-    depth: "read",
     thinking: "medium",
     model: null,
     terminal: "none",
   };
-}
-
-/** The same invocation at `deep`. */
-function atDeep(tree: string): Invocation {
-  return { ...at(tree), depth: "deep" };
 }
 
 /** The Copilot adapter, running the test's command line in place of Copilot's. */

@@ -2,14 +2,14 @@
  * Run the real reviewer once over one of the measured changes, outside the hook,
  * and summarise what it did.
  *
- *   node src/measure/review-once.ts <case> <pi|copilot> <read|deep> <charter-file> <out-directory>
+ *   node src/measure/review-once.ts <case> <pi|copilot> <charter-file> <out-directory>
  *   node src/measure/review-once.ts prepare
  *
- * The round is the one the round host runs: the adapter named, at the depth
- * named, thinking `medium`, 900 seconds, in a snapshot of the change's head made
- * as a round makes it, handed the change's diff and its description and no
- * threads. The depth and the model are handed to the round directly, as the round host hands them
- * over, so nothing here reads `.squiz.json`.
+ * The round is the one the round host runs: the adapter named, with the one
+ * grant every round has, thinking `medium`, 900 seconds, in a snapshot of the
+ * change's head made as a round makes it, handed the change's diff and its
+ * description and no threads. The model is handed to the round directly, as the
+ * round host hands it over, so nothing here reads `.squiz.json`.
  *
  * The reviewer's CLI must be on `PATH` and signed in, and each run spends real
  * money. `MEASURE_MODEL` names the model in the CLI's own spelling, as
@@ -18,7 +18,7 @@
  * clones every case once, which has to happen before runs go side by side.
  *
  * The out-directory gets `stream.jsonl`, the CLI's JSON events as they arrived;
- * `granted.txt`, the CLI's arguments and `SQUIZ_ROUND`; `round.json`, what the
+ * `granted.txt`, the CLI's arguments; `round.json`, what the
  * round returned; and `summary.json`, which is also printed.
  */
 
@@ -43,7 +43,7 @@ const SECONDS = 900;
 const patches = fileURLToPath(new URL("cases/", import.meta.url));
 const cache = process.env["MEASURE_CACHE"] ?? join(tmpdir(), "squiz-measure-cases");
 
-const [caseName, reviewerName, depthName, charterArgument, outArgument] = process.argv.slice(2);
+const [caseName, reviewerName, charterArgument, outArgument] = process.argv.slice(2);
 
 if (caseName === "prepare") {
   let failed = 0;
@@ -65,16 +65,14 @@ const clis: Readonly<Record<Reviewer, { cli: string; jsonFlags: readonly string[
   copilot: { cli: "copilot", jsonFlags: ["--output-format", "json"], review: "-p" },
 };
 const reviewer = reviewerName === "pi" || reviewerName === "copilot" ? clis[reviewerName] : undefined;
-const depth = depthName === "read" || depthName === "deep" ? depthName : undefined;
 if (
   measured === undefined ||
   reviewer === undefined ||
-  depth === undefined ||
   charterArgument === undefined ||
   outArgument === undefined
 ) {
   console.error(
-    `usage: node src/measure/review-once.ts <${Object.keys(cases).join("|")}> <pi|copilot> <read|deep> <charter-file> <out-directory>`,
+    `usage: node src/measure/review-once.ts <${Object.keys(cases).join("|")}> <pi|copilot> <charter-file> <out-directory>`,
   );
   process.exit(2);
 }
@@ -135,13 +133,12 @@ const round = await runRound(
   {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, diff: prepared.diff, threads: [] }, depth),
+    prompt: composePrompt({ pullRequest, diff: prepared.diff, threads: [] }),
     sessionDirectory: join(own, "session"),
     promptFile: join(own, "prompt.md"),
     reportsFile: join(own, "reports.jsonl"),
     scratchDirectory: join(own, "scratch"),
     githubConfigDirectory: join(own, "gh"),
-    depth,
     model: model ?? null,
     thinking: "medium",
     terminal: "none",
@@ -154,7 +151,6 @@ const run: Run = { label: basename(out), tree, seconds: (Date.now() - started) /
 const summary = {
   case: caseName,
   reviewer: reviewerName,
-  depth,
   model: model ?? "the CLI's default",
   ...summarise(run, readFileSync(stream, "utf8"), prepared.diff),
 };

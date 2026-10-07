@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 
-import type { Depth, Thinking } from "../../config/config.ts";
+import type { Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
-import { deepToolNames } from "../deep-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
 import { argv, extensionFile, grants } from "./argv.ts";
@@ -23,50 +22,47 @@ const invocation: Invocation = {
   reportsFile: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
   scratchDirectory: ".squiz/agent-7/scratch",
   githubConfigDirectory: ".squiz/agent-7/rounds/1/gh",
-  depth: "read",
   thinking: "medium",
   model: null,
   terminal: "none",
 };
 
-const depths: readonly Depth[] = ["read", "deep"];
-
 const levels: readonly Thinking[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-function lineAt(depth: Depth): CommandLine {
-  return argv({ ...invocation, depth });
+const terminals = ["pane", "none"] as const;
+
+const grant = "read,grep,find,ls,report_finding,report_verdict,finish_review,git_log_search,git_blame,git_show";
+
+function line(): CommandLine {
+  return argv(invocation);
 }
 
 /** The names `--tools` actually carries, read back off the command line. */
-function toolsAt(depth: Depth): readonly string[] {
-  const { args } = lineAt(depth);
+function tools(): readonly string[] {
+  const { args } = line();
   const flag = args.indexOf("--tools");
   assert.notEqual(
     flag,
     -1,
-    `depth ${depth} must pass --tools, and without it pi grants its own default set of read, bash, edit and write`,
+    "the line must pass --tools, and without it pi grants its own default set of read, bash, edit and write",
   );
   const granted = args[flag + 1];
-  assert.ok(granted !== undefined, `--tools must be followed by the grant at depth ${depth}`);
+  assert.ok(granted !== undefined, "--tools must be followed by the grant");
   return granted.split(",");
 }
 
 /** The level `--thinking` actually carries, read back off the command line. */
-function thinkingAt(depth: Depth, thinking: Thinking): string {
-  const { args } = argv({ ...invocation, depth, thinking });
+function thinkingAt(thinking: Thinking): string {
+  const { args } = argv({ ...invocation, thinking });
   const flag = args.indexOf("--thinking");
-  assert.notEqual(
-    flag,
-    -1,
-    `depth ${depth} must pass --thinking, and without it pi takes the level from its own settings file`,
-  );
+  assert.notEqual(flag, -1, "the line must pass --thinking, and without it pi takes the level from its own settings file");
   assert.equal(
     args.lastIndexOf("--thinking"),
     flag,
-    `depth ${depth} passes --thinking twice, and which of the two pi keeps is not a question worth having`,
+    "the line passes --thinking twice, and which of the two pi keeps is not a question worth having",
   );
   const level = args[flag + 1];
-  assert.ok(level !== undefined, `--thinking must be followed by the level at depth ${depth}`);
+  assert.ok(level !== undefined, "--thinking must be followed by the level");
   return level;
 }
 
@@ -77,7 +73,7 @@ test("the command line is the one the specification gives", () => {
     stdin: "/dev/null",
     environment: {
       SQUIZ_REPORTS: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
-      SQUIZ_GRANT: "read,grep,find,ls,report_finding,report_verdict,finish_review",
+      SQUIZ_GRANT: grant,
     },
     args: [
       "--print",
@@ -88,7 +84,7 @@ test("the command line is the one the specification gives", () => {
       "--extension",
       extensionFile,
       "--tools",
-      "read,grep,find,ls,report_finding,report_verdict,finish_review",
+      grant,
       "--thinking",
       "medium",
       "--append-system-prompt",
@@ -99,17 +95,15 @@ test("the command line is the one the specification gives", () => {
 });
 
 test("a configured model is passed with --model, and changes nothing else", () => {
-  for (const depth of depths) {
-    const unset = argv({ ...invocation, depth });
-    const set = argv({ ...invocation, depth, model: "openai/gpt-5-mini" });
-    const flag = set.args.indexOf("--model");
-    assert.notEqual(flag, -1, `depth ${depth} leaves the configured model off the line`);
-    assert.equal(set.args[flag + 1], "openai/gpt-5-mini");
-    assert.equal(set.args.lastIndexOf("--model"), flag);
-    assert.deepEqual([...set.args.slice(0, flag), ...set.args.slice(flag + 2)], unset.args);
-    assert.deepEqual({ ...set, args: [] }, { ...unset, args: [] });
-    assert.ok(!unset.args.includes("--model"), `depth ${depth} passes --model with none configured`);
-  }
+  const unset = argv(invocation);
+  const set = argv({ ...invocation, model: "openai/gpt-5-mini" });
+  const flag = set.args.indexOf("--model");
+  assert.notEqual(flag, -1, "the configured model is left off the line");
+  assert.equal(set.args[flag + 1], "openai/gpt-5-mini");
+  assert.equal(set.args.lastIndexOf("--model"), flag);
+  assert.deepEqual([...set.args.slice(0, flag), ...set.args.slice(flag + 2)], unset.args);
+  assert.deepEqual({ ...set, args: [] }, { ...unset, args: [] });
+  assert.ok(!unset.args.includes("--model"), "--model is passed with none configured");
 });
 
 /**
@@ -118,34 +112,28 @@ test("a configured model is passed with --model, and changes nothing else", () =
  * mode, so it is the one whose stdin has to be `/dev/null`.
  */
 test("a reviewer with no terminal runs in print mode, with stdin from /dev/null", () => {
-  for (const depth of depths) {
-    const line = argv({ ...invocation, depth, terminal: "none" });
-    assert.ok(line.args.includes("--print"), `depth ${depth} with no terminal runs interactively`);
-    assert.equal(line.stdin, "/dev/null", `depth ${depth} runs pi --print with stdin inherited`);
-  }
+  const detached = argv({ ...invocation, terminal: "none" });
+  assert.ok(detached.args.includes("--print"), "a reviewer with no terminal runs interactively");
+  assert.equal(detached.stdin, "/dev/null", "pi --print runs with stdin inherited");
 });
 
 // A pane line that kept print mode would run headless in the pane and look as
 // if it worked, with nothing for a person to watch or type into.
 test("a reviewer in a pane runs interactively, with the pane as its terminal", () => {
-  for (const depth of depths) {
-    const line = argv({ ...invocation, depth, terminal: "pane" });
-    assert.ok(!line.args.includes("--print"), `depth ${depth} in a pane runs in print mode`);
-    assert.ok(!line.args.includes("--mode"), `depth ${depth} in a pane sets an output mode`);
-    assert.equal(line.stdin, "terminal", `depth ${depth} in a pane reads stdin from elsewhere`);
-  }
+  const pane = argv({ ...invocation, terminal: "pane" });
+  assert.ok(!pane.args.includes("--print"), "a reviewer in a pane runs in print mode");
+  assert.ok(!pane.args.includes("--mode"), "a reviewer in a pane sets an output mode");
+  assert.equal(pane.stdin, "terminal", "a reviewer in a pane reads stdin from elsewhere");
 });
 
 test("the pane and the detached command lines differ in print mode and nothing else", () => {
-  for (const depth of depths) {
-    const detached = argv({ ...invocation, depth, terminal: "none" });
-    const pane = argv({ ...invocation, depth, terminal: "pane" });
-    assert.deepEqual(detached.args.slice(0, 1), ["--print"]);
-    assert.deepEqual(pane.args, detached.args.slice(1), `depth ${depth} differs beyond the mode`);
-    assert.equal(pane.command, detached.command);
-    assert.equal(pane.directory, detached.directory);
-    assert.deepEqual(pane.environment, detached.environment);
-  }
+  const detached = argv({ ...invocation, terminal: "none" });
+  const pane = argv({ ...invocation, terminal: "pane" });
+  assert.deepEqual(detached.args.slice(0, 1), ["--print"]);
+  assert.deepEqual(pane.args, detached.args.slice(1));
+  assert.equal(pane.command, detached.command);
+  assert.equal(pane.directory, detached.directory);
+  assert.deepEqual(pane.environment, detached.environment);
 });
 
 /**
@@ -154,17 +142,15 @@ test("the pane and the detached command lines differ in print mode and nothing e
  * answering every call as accepted.
  */
 test("every command line names the report file the extension writes to", () => {
-  for (const terminal of ["pane", "none"] as const) {
-    for (const depth of depths) {
-      const line = argv({ ...invocation, depth, terminal });
-      assert.equal(line.environment[REPORTS_VARIABLE], invocation.reportsFile, `${terminal}, ${depth}`);
-    }
+  for (const terminal of terminals) {
+    const each = argv({ ...invocation, terminal });
+    assert.equal(each.environment[REPORTS_VARIABLE], invocation.reportsFile, terminal);
   }
 });
 
 /** Nothing reads `pi`'s output any longer, so nothing asks it for the event stream. */
 test("no command line asks pi for its event stream", () => {
-  for (const terminal of ["pane", "none"] as const) {
+  for (const terminal of terminals) {
     assert.ok(!argv({ ...invocation, terminal }).args.includes("--mode"), terminal);
   }
 });
@@ -174,24 +160,20 @@ test("no command line asks pi for its event stream", () => {
  * resume. `--session-dir` is where it goes instead of the user's own history.
  */
 test("the session is kept, in the directory handed over, wherever the reviewer runs", () => {
-  for (const terminal of ["pane", "none"] as const) {
-    for (const depth of depths) {
-      const { args } = argv({ ...invocation, depth, terminal });
-      assert.ok(!args.includes("--no-session"), `${terminal}, ${depth}: the session is not kept`);
-      assert.equal(args[args.indexOf("--session-dir") + 1], invocation.sessionDirectory);
-    }
+  for (const terminal of terminals) {
+    const { args } = argv({ ...invocation, terminal });
+    assert.ok(!args.includes("--no-session"), `${terminal}: the session is not kept`);
+    assert.equal(args[args.indexOf("--session-dir") + 1], invocation.sessionDirectory);
   }
 });
 
-test("depth arrives as a parameter, and each value produces its own grant", () => {
-  const reporting = [...reportingTools];
-  assert.deepEqual(toolsAt("read"), ["read", "grep", "find", "ls", ...reporting]);
-  assert.deepEqual(toolsAt("deep"), [
+test("the grant is the reading tools, the reporting calls and the history tools", () => {
+  assert.deepEqual(tools(), [
     "read",
     "grep",
     "find",
     "ls",
-    ...reporting,
+    ...reportingTools,
     "git_log_search",
     "git_blame",
     "git_show",
@@ -199,28 +181,22 @@ test("depth arrives as a parameter, and each value produces its own grant", () =
 });
 
 // `grants` is what a round says it allowed, and `--tools` is what pi allowed.
-test("the grant and --tools name the same tools, at each depth", () => {
-  for (const depth of depths) {
-    assert.deepEqual(toolsAt(depth), grants[depth], `depth ${depth} grants one thing and says another`);
-  }
+test("the grant and --tools name the same tools", () => {
+  assert.deepEqual(tools(), grants, "the adapter grants one thing and says another");
 });
 
 // The extension refuses whatever the variable leaves out, so a variable that
 // differed from --tools would refuse a granted tool or allow an ungranted one.
-test("the extension is handed the grant --tools carries, at each depth and on every backend", () => {
-  for (const terminal of ["pane", "none"] as const) {
-    for (const depth of depths) {
-      const line = argv({ ...invocation, depth, terminal });
-      assert.deepEqual(grantIn(line.environment[GRANT_VARIABLE]), toolsAt(depth), `${terminal}, ${depth}`);
-    }
+test("the extension is handed the grant --tools carries, on every backend", () => {
+  for (const terminal of terminals) {
+    const each = argv({ ...invocation, terminal });
+    assert.deepEqual(grantIn(each.environment[GRANT_VARIABLE]), tools(), terminal);
   }
 });
 
-test("no depth grants a shell", () => {
-  for (const depth of depths) {
-    assert.ok(!toolsAt(depth).includes("bash"), `depth ${depth} passes bash on --tools`);
-    assert.ok(!grants[depth].includes("bash"), `depth ${depth} lists bash in its grant`);
-  }
+test("the grant carries no shell", () => {
+  assert.ok(!tools().includes("bash"), "bash is passed on --tools");
+  assert.ok(!grants.includes("bash"), "bash is listed in the grant");
 });
 
 /**
@@ -229,19 +205,14 @@ test("no depth grants a shell", () => {
  * empty stderr, so a grant short of a reporting call is a round that returns
  * nothing and says nothing about why.
  */
-test("every reporting call is in the grant, at both depths", () => {
-  for (const depth of depths) {
-    for (const call of reportingTools) {
-      assert.ok(
-        toolsAt(depth).includes(call),
-        `depth ${depth} withholds ${call}, so the reviewer has no way to report through it`,
-      );
-    }
+test("every reporting call is in the grant", () => {
+  for (const call of reportingTools) {
+    assert.ok(tools().includes(call), `the grant withholds ${call}, so the reviewer has no way to report through it`);
   }
 });
 
 test("the reporting calls are loaded from a file that is there to load", () => {
-  const { args } = lineAt("read");
+  const { args } = line();
   assert.equal(args[args.indexOf("--extension") + 1], extensionFile);
   assert.ok(
     existsSync(extensionFile),
@@ -254,10 +225,8 @@ test("the reporting calls are loaded from a file that is there to load", () => {
  * or sits in the tree under review could otherwise register a tool of a
  * reporting call's name and take the round's findings.
  */
-test("no extension but the harness's own is loaded, at both depths", () => {
-  for (const depth of depths) {
-    assert.ok(lineAt(depth).args.includes("--no-extensions"), `depth ${depth} loads what it finds`);
-  }
+test("no extension but the harness's own is loaded", () => {
+  assert.ok(line().args.includes("--no-extensions"), "pi loads whatever extensions it finds");
 });
 
 /**
@@ -266,95 +235,50 @@ test("no extension but the harness's own is loaded, at both depths", () => {
  * trusts it. That file could name the model the review runs on and the prompt
  * the charter is appended to.
  */
-test("the tree under review is not trusted to configure the reviewer, at either depth", () => {
-  for (const depth of depths) {
-    assert.ok(
-      lineAt(depth).args.includes("--no-approve"),
-      `depth ${depth} lets the tree under review set pi's own settings`,
-    );
-  }
+test("the tree under review is not trusted to configure the reviewer", () => {
+  assert.ok(line().args.includes("--no-approve"), "the tree under review can set pi's own settings");
 });
 
 // The level is the largest thing the harness decides about a round, and a
 // command line missing it hands that decision to a file on the machine.
-test("the level the harness set reaches the command line, at both depths", () => {
-  for (const depth of depths) {
-    for (const level of levels) {
-      assert.equal(
-        thinkingAt(depth, level),
-        level,
-        `depth ${depth} passed a level other than the ${level} it was given`,
-      );
-    }
+test("the level the harness set reaches the command line", () => {
+  for (const level of levels) {
+    assert.equal(thinkingAt(level), level, `a level other than the ${level} given was passed`);
   }
 });
 
-test("edit and write appear in no command line, at either depth", () => {
-  for (const depth of depths) {
-    const line = lineAt(depth);
-    // The extension's path is the machine's rather than the harness's, and
-    // whatever a checkout is called is not a tool name on the command line.
-    const whole = [line.command, ...line.args.filter((arg) => arg !== extensionFile)].join(" ");
-    for (const writer of ["edit", "write"]) {
-      assert.ok(
-        !toolsAt(depth).includes(writer),
-        `depth ${depth} grants ${writer}, which lets the reviewer change the code it is reviewing`,
-      );
-      assert.ok(
-        !whole.includes(writer),
-        `depth ${depth} names ${writer} somewhere on its command line: ${whole}`,
-      );
-    }
+test("edit and write appear nowhere on the command line", () => {
+  const { command, args } = line();
+  // The extension's path is the machine's rather than the harness's, and
+  // whatever a checkout is called is not a tool name on the command line.
+  const whole = [command, ...args.filter((arg) => arg !== extensionFile)].join(" ");
+  for (const writer of ["edit", "write"]) {
+    assert.ok(!tools().includes(writer), `the grant has ${writer}, which lets the reviewer change the code it is reviewing`);
+    assert.ok(!whole.includes(writer), `${writer} is named somewhere on the command line: ${whole}`);
   }
 });
 
 /**
- * Nothing is refused at `read`, and the grant is why: the shell is not there and
- * neither writer is. A round at `read` that refused nothing is the grant holding
- * rather than the handler having gone missing, and that reading only stands
- * while the grant carries none of them.
+ * A round that refused nothing is the grant holding rather than the handler
+ * having gone missing, and that reading only stands while the grant carries
+ * none of the tools the refusal would catch.
  */
-test("the read grant carries nothing the refusal would have to catch", () => {
+test("the grant carries nothing the refusal would have to catch", () => {
   for (const name of ["edit", "write", "bash"]) {
     assert.ok(
-      !grants.read.includes(name),
-      `depth read grants ${name}, so a round at read that refused nothing says nothing about the handler`,
+      !grants.includes(name),
+      `the grant has ${name}, so a round that refused nothing says nothing about the handler`,
     );
   }
 });
 
-test("adding the reporting calls did not add the writers pi grants by default", () => {
-  for (const depth of depths) {
-    assert.deepEqual(
-      toolsAt(depth).filter((name) => ["edit", "write"].includes(name)),
-      [],
-      `depth ${depth} grants a writer, so the reviewer can change the code it is reviewing`,
-    );
-  }
+test("the grant names each tool once", () => {
+  const granted = tools();
+  assert.deepEqual([...new Set(granted)], granted, `a tool name is repeated: ${granted.join(",")}`);
 });
 
-test("the deep grant is the read grant and the deep tools, so no name is spelled twice", () => {
-  assert.deepEqual(
-    grants.deep,
-    [...grants.read, ...deepToolNames],
-    "a name spelled a second time is a name that can be misspelled, and pi drops an unrecognised name in silence",
-  );
-});
-
-test("a grant names each tool once", () => {
-  for (const depth of depths) {
-    const granted = toolsAt(depth);
-    assert.deepEqual(
-      [...new Set(granted)],
-      granted,
-      `depth ${depth} repeats a tool name: ${granted.join(",")}`,
-    );
-  }
-});
-
-test("the grant table holds against a caller that would add to it", () => {
-  assert.throws(() => (grants.read as string[]).push("write"));
-  assert.throws(() => (grants.deep as string[]).push("edit"));
+test("the grant holds against a caller that would add to it", () => {
+  assert.throws(() => (grants as string[]).push("write"));
 });
 
 // Herdr refuses to start a command with a newline or a tab in any argument.

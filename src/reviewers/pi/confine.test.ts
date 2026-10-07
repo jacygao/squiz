@@ -52,7 +52,6 @@ function fixture(t: TestContext, listing: string, status = 0): Fixture {
     reportsFile: ".squiz/7/rounds/1/reports.jsonl",
     scratchDirectory: ".squiz/7/scratch",
     githubConfigDirectory: ".squiz/7/rounds/1/gh",
-    depth: "read",
     thinking: "medium",
     model: null,
     terminal: "none",

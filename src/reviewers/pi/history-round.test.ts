@@ -1,5 +1,5 @@
 /**
- * A round at `deep` whose reviewer calls each `deep` tool once, driven over a
+ * A round whose reviewer calls each history tool once, driven over a
  * real git repository with a stand-in for `pi`.
  *
  * **The stand-in loads the extension the way `pi` loads it**, from the path on
@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { standIn } from "../../testing/stand-in.ts";
 import type { Invocation } from "../adapter.ts";
-import { deepToolNames } from "../deep-tools.ts";
+import { historyTools } from "../git-tools.ts";
 import { type Round, runRound } from "../round.ts";
 import { pi } from "./adapter.ts";
 
@@ -31,13 +31,13 @@ const scratchIn = (tree: string): string => join(tree, "..", "worktree", ".squiz
 /** What one call answered: its text, and whether `pi` would read it as an error. */
 type Answered = { readonly text: string; readonly failed: boolean };
 
-test("a round at deep calls each deep tool once and gets its result back", async () => {
+test("a round calls each history tool once and gets its result back", async () => {
   await inTheFixture(async (tree) => {
     const round = await runRound(pi, invocationIn(tree), 60);
     assert.equal(round.outcome, "reviewed", accountOf(round));
 
     const answered = answeredIn(tree);
-    assert.deepEqual(Object.keys(answered), [...deepToolNames]);
+    assert.deepEqual(Object.keys(answered), historyTools.map((tool) => tool.name));
     for (const [name, answer] of Object.entries(answered)) {
       assert.ok(!answer.failed, `${name} failed: ${answer.text}`);
     }
@@ -51,13 +51,12 @@ function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
-    prompt: "# Review pull request #1\n\nCall each deep tool once.",
+    prompt: "# Review pull request #1\n\nCall each history tool once.",
     sessionDirectory: ".squiz/agent-1/session",
     promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile: ".squiz/1/rounds/1/reports.jsonl",
     scratchDirectory: scratchIn(tree),
     githubConfigDirectory: ".squiz/1/rounds/1/gh",
-    depth: "deep",
     thinking: "medium",
     model: null,
     terminal: "none",
@@ -77,7 +76,7 @@ function accountOf(round: Round): string {
 
 /** A git repository with two commits, the second adding a line to blame, and the stand-in on `PATH` as `pi`. */
 async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void> {
-  const under = mkdtempSync(join(tmpdir(), "squiz-deep-round-"));
+  const under = mkdtempSync(join(tmpdir(), "squiz-history-round-"));
   const tree = join(under, "tree");
   const wasOnPath = process.env["PATH"] ?? "";
   try {
@@ -131,7 +130,7 @@ function git(args: readonly string[], tree: string): string {
 
 /**
  * The stand-in for `pi`: it loads the extension, keeps the tools `--tools`
- * grants, calls each deep tool once, and writes what each answered to the
+ * grants, calls each history tool once, and writes what each answered to the
  * scratch space. A call that throws is an error, as `pi` reads one.
  *
  * Plain CommonJS, because it is written to a file and run by a fresh process
