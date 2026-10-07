@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.31 (draft)
+**Version:** 0.32 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -266,9 +266,8 @@ The marketplace manifest, a README carrying the getting-started steps,
 - [ ] `/squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
       Code, and the Node version, naming whatever is missing. *Changed by
       detached sessions: it also reports whether tmux or Herdr is present.
-      Neither is required.* It reports whether the plugin's skill or the
-      `AGENTS.md` section tells a coding agent to run `squiz review`, and
-      says so where neither does.
+      Neither is required.* It reports whether `squiz init`'s link puts this
+      squiz on `PATH`.
 - [ ] A subagent there produces a reviewed pull request end to end. *Changed by
       detached sessions: a main session does too, woken by a note.*
 - [ ] Squiz reviews its own pull requests in this repository.

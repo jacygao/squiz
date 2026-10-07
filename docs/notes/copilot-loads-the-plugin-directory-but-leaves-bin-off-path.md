@@ -24,6 +24,11 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin
   loaded successfully`, and quoted the skill's `Exit 3:` bullet word for word.
   Without `--plugin-dir` the same call failed with `Skill not found:
   squiz-review`, and nothing was listed.
+
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`.
 - **Something other than the plugin has to put `squiz` on the shell's `PATH`.**
   Copilot does not add a plugin's `bin/` to it. The shell saw exactly the `PATH`
   Copilot was started with, and `squiz` was `command not found`, exit 127, with
@@ -36,6 +41,8 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin
   one machine run different squizzes. It keeps one skill text for both
   runtimes, and `squiz review` and `squiz reply` keep the same names under
   both. § 6 `squiz init` says which directory and which conflicts.
+
+  2026-10-07: with the skill removed (#600), the link is all `squiz init` does.
 
 ## Needs your input
 

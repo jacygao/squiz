@@ -65,6 +65,11 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   This held in `auto` and in `acceptEdits`, and in the foreground and the
   background.
 
+  2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
+  wrote are removed (#600). The stop hook starts every review on Claude Code and
+  Copilot, and the wake delivers the result, so nothing relies on an
+  instruction to run `squiz review`.
+
 ## Needs your input
 
 - **How far below 600 seconds the window goes.** The round must be over, its

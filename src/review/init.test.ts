@@ -4,11 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
 
-import { REVIEW_SECTION, addReviewSection, squizInit } from "./init.ts";
+import { squizInit } from "./init.ts";
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "squiz-553-init-")));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "squiz-600-init-")));
 after(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
@@ -26,127 +25,6 @@ function repository(agents?: string): string {
   return realpathSync(root);
 }
 
-function agentsIn(root: string): string {
-  return readFileSync(join(root, "AGENTS.md"), "utf8");
-}
-
-const ADDED = "squiz: added the review section to AGENTS.md\n";
-const ALREADY = "squiz: AGENTS.md already has the review section; nothing changed\n";
-
-test("the section is the one the spec gives, so neither changes without the other", () => {
-  const spec = readFileSync(fileURLToPath(new URL("../../docs/specs/review-harness-spec.md", import.meta.url)), "utf8");
-  const introduced = spec.indexOf("`squiz init` adds:");
-  assert.notEqual(introduced, -1, "the spec no longer introduces the section the way this test looks for it");
-  const opened = spec.indexOf("```markdown\n", introduced) + "```markdown\n".length;
-  const closed = spec.indexOf("\n```\n", opened) + 1;
-
-  assert.equal(REVIEW_SECTION, spec.slice(opened, closed));
-});
-
-test("a repository with no AGENTS.md gets one holding the section alone", () => {
-  const root = repository();
-
-  const printed = addReviewSection(root);
-
-  assert.deepEqual(printed, { stdout: ADDED, stderr: "", exit: 0 });
-  assert.equal(agentsIn(root), REVIEW_SECTION);
-});
-
-test("an existing AGENTS.md keeps everything it had, with one blank line before the section", () => {
-  const before = "# Conventions\n\n- Tabs, not spaces.\n";
-  const root = repository(before);
-
-  const printed = addReviewSection(root);
-
-  assert.deepEqual(printed, { stdout: ADDED, stderr: "", exit: 0 });
-  assert.equal(agentsIn(root), `${before}\n${REVIEW_SECTION}`);
-});
-
-test("an AGENTS.md with no trailing newline is ended before the blank line", () => {
-  const before = "# Conventions\n\n- Tabs, not spaces.";
-  const root = repository(before);
-
-  addReviewSection(root);
-
-  assert.equal(agentsIn(root), `${before}\n\n${REVIEW_SECTION}`);
-});
-
-test("an AGENTS.md already ending on a blank line gets no second one", () => {
-  const before = "# Conventions\n\n";
-  const root = repository(before);
-
-  addReviewSection(root);
-
-  assert.equal(agentsIn(root), `${before}${REVIEW_SECTION}`);
-});
-
-test("a second run finds the section and changes nothing", () => {
-  const root = repository("# Conventions\n");
-  addReviewSection(root);
-  const once = agentsIn(root);
-
-  const printed = addReviewSection(root);
-
-  assert.deepEqual(printed, { stdout: ALREADY, stderr: "", exit: 0 });
-  assert.equal(agentsIn(root), once);
-});
-
-test("the section is found where the file goes on past it", () => {
-  const before = `# Conventions\n\n${REVIEW_SECTION}\n## Later\n\nMore.\n`;
-  const root = repository(before);
-
-  const printed = addReviewSection(root);
-
-  assert.deepEqual(printed, { stdout: ALREADY, stderr: "", exit: 0 });
-  assert.equal(agentsIn(root), before);
-});
-
-test("the section is found where it ends the file with no newline after it", () => {
-  const before = `# Conventions\n\n${REVIEW_SECTION.slice(0, -1)}`;
-  const root = repository(before);
-
-  const printed = addReviewSection(root);
-
-  assert.deepEqual(printed, { stdout: ALREADY, stderr: "", exit: 0 });
-  assert.equal(agentsIn(root), before);
-});
-
-test("a file that mentions squiz review, under a Review heading of its own, still gets the section", () => {
-  const before = "# Conventions\n\n## Review\n\nRun `squiz review <number>` when you feel like it.\n";
-  const root = repository(before);
-
-  const printed = addReviewSection(root);
-
-  assert.deepEqual(printed, { stdout: ADDED, stderr: "", exit: 0 });
-  assert.equal(agentsIn(root), `${before}\n${REVIEW_SECTION}`);
-});
-
-test("run from a subdirectory, it writes the AGENTS.md at the repository's root", () => {
-  const root = repository();
-  const nested = join(root, "src", "deep");
-  mkdirSync(nested, { recursive: true });
-
-  const printed = addReviewSection(nested);
-
-  assert.equal(printed.exit, 0);
-  assert.equal(agentsIn(root), REVIEW_SECTION);
-  assert.equal(existsSync(join(nested, "AGENTS.md")), false);
-});
-
-test("outside a git repository it writes nothing and exits 1 with one line on stderr", () => {
-  const outside = mkdtempSync(join(tmpdir(), "squiz-init-outside-"));
-  try {
-    const printed = addReviewSection(outside);
-
-    assert.equal(printed.exit, 1);
-    assert.equal(printed.stdout, "");
-    assert.match(printed.stderr, /^squiz: nothing changed: [^\n]+\n$/u);
-    assert.equal(existsSync(join(outside, "AGENTS.md")), false);
-  } finally {
-    rmSync(outside, { recursive: true, force: true });
-  }
-});
-
 /** A home whose ~/.local/bin is on PATH, and a squiz to link, both under the scratch space. */
 function linkable(): { environment: { PATH: string; HOME: string }; target: string; localBin: string } {
   made += 1;
@@ -160,42 +38,53 @@ function linkable(): { environment: { PATH: string; HOME: string }; target: stri
   return { environment: { PATH: localBin, HOME: home }, target, localBin };
 }
 
-test("squiz init adds the section and links squiz, with a line for each", () => {
+/** The opening of the section an earlier `squiz init` appended, which a project may have cut down since. */
+const EARLIER_SECTION = `## Review
+
+After you open a pull request, and after every push to it, run
+\`squiz review <number>\` from the worktree its branch is checked out in.
+`;
+
+test("squiz init links squiz and writes no AGENTS.md (#600)", () => {
   const root = repository();
   const { environment, target, localBin } = linkable();
 
   const printed = squizInit(root, environment, target);
 
-  assert.deepEqual(printed, {
-    stdout: `${ADDED}squiz: linked ${join(localBin, "squiz")} to ${target}\n`,
-    stderr: "",
-    exit: 0,
-  });
-  assert.equal(agentsIn(root), REVIEW_SECTION);
+  assert.deepEqual(printed, { stdout: `squiz: linked ${join(localBin, "squiz")} to ${target}\n`, stderr: "", exit: 0 });
+  assert.equal(existsSync(join(root, "AGENTS.md")), false);
 });
 
-test("a link squiz init cannot make exits 1, and the section is added all the same", () => {
+test("an AGENTS.md section an earlier squiz init wrote is left byte for byte (#600)", () => {
+  const before = `# Conventions\n\n- Tabs, not spaces.\n\n${EARLIER_SECTION}`;
+  const root = repository(before);
+  const { environment, target } = linkable();
+
+  squizInit(root, environment, target);
+
+  assert.equal(readFileSync(join(root, "AGENTS.md"), "utf8"), before);
+});
+
+test("outside a git repository squiz init still links squiz", () => {
+  const outside = mkdtempSync(join(tmpdir(), "squiz-600-outside-"));
+  const { environment, target, localBin } = linkable();
+  try {
+    const printed = squizInit(outside, environment, target);
+
+    assert.deepEqual(printed, { stdout: `squiz: linked ${join(localBin, "squiz")} to ${target}\n`, stderr: "", exit: 0 });
+    assert.equal(existsSync(join(outside, "AGENTS.md")), false);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("a link squiz init cannot make exits 1 with one line on stderr", () => {
   const root = repository();
   const { target } = linkable();
 
   const printed = squizInit(root, { PATH: "", HOME: scratch }, target);
 
   assert.equal(printed.exit, 1);
-  assert.equal(printed.stdout, ADDED);
+  assert.equal(printed.stdout, "");
   assert.match(printed.stderr, /^squiz: made no link: [^\n]+\n$/u);
-  assert.equal(agentsIn(root), REVIEW_SECTION);
-});
-
-test("a section squiz init cannot add exits 1, and the link is made all the same", () => {
-  const outside = mkdtempSync(join(tmpdir(), "squiz-553-outside-"));
-  const { environment, target, localBin } = linkable();
-  try {
-    const printed = squizInit(outside, environment, target);
-
-    assert.equal(printed.exit, 1);
-    assert.match(printed.stderr, /^squiz: nothing changed: [^\n]+\n$/u);
-    assert.equal(printed.stdout, `squiz: linked ${join(localBin, "squiz")} to ${target}\n`);
-  } finally {
-    rmSync(outside, { recursive: true, force: true });
-  }
 });
