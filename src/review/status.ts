@@ -39,9 +39,12 @@ export type StatusOptions = {
 /** One line of the table, every cell as printed. */
 type Row = readonly [string, string, string, string, string, string, string, string, string, string];
 
+/** One state's line, and what its round recorded that went wrong, a line each. */
+type StateLines = { readonly row: Row; readonly problems: readonly string[] };
+
 /** The lines of one episode, newest first, and what orders it among the others. */
 type EpisodeLines = {
-  readonly rows: readonly Row[];
+  readonly rows: readonly StateLines[];
   /** A review waits or runs in it. */
   readonly active: boolean;
   /** The latest time any of its records carries, or `undefined` where none carries one. */
@@ -155,7 +158,7 @@ export function composeStatus(collected: Collected): { readonly stdout: string; 
     const none = collected.problems.length === 0 ? "No review is recorded in any worktree of this repository.\n" : "";
     return { stdout: none, stderr };
   }
-  return { stdout: table([HEADER, ...rows]), stderr };
+  return { stdout: table(rows), stderr };
 }
 
 function newestFirst(one: EpisodeLines, other: EpisodeLines): number {
@@ -176,12 +179,12 @@ function linesOf(
   const place = worktreeShown(episode.worktree, options.main);
   let active = false;
   let latest: number | undefined;
-  const rows: Row[] = [];
+  const rows: StateLines[] = [];
   for (const record of [...records].reverse()) {
     const line = lineOf(episode, record, options, problems);
     if (record.status === "queued" || record.status === "reviewing") active = true;
     for (const time of line.times) latest = latest === undefined ? time : Math.max(latest, time);
-    rows.push([
+    const row: Row = [
       `#${episode.id}`,
       record.head.slice(0, 7),
       record.activity === null ? NONE : record.activity.slice(-6),
@@ -192,7 +195,8 @@ function linesOf(
       line.session,
       place,
       line.resume,
-    ]);
+    ];
+    rows.push({ row, problems: record.status === "reviewed" ? (record.problems ?? []) : [] });
   }
   return { rows, active, latest, pullRequest, worktree: episode.worktree };
 }
@@ -253,12 +257,22 @@ function lineOf(episode: Episode, record: StateRecord, options: StatusOptions, p
 }
 
 function reviewedResult(record: StateRecord & { readonly status: "reviewed" }): string {
+  const { unposted } = record;
+  const lost =
+    unposted === undefined
+      ? ""
+      : `, ${unposted.failed} of ${unposted.of} finding${unposted.of === 1 ? "" : "s"} not posted`;
+  return `${outcomeOf(record)}${lost}`;
+}
+
+function outcomeOf(record: StateRecord & { readonly status: "reviewed" }): string {
   if (record.result === "clean, episode open") return "nothing open, episode open";
   const count = record.openThreads.length;
   const open = count === 0 ? "nothing open" : `${count} thread${count === 1 ? "" : "s"} open`;
   // Exit 2 is a round that left threads open and the episode with them. 0 and 3
   // closed the episode.
-  return record.exitStatus === 2 ? open : `${open}, review closed`;
+  if (record.exitStatus === 2) return open;
+  return record.closedAt === undefined ? `${open}, review closed` : `${open}, review closed at the ${record.closedAt}`;
 }
 
 /**
@@ -320,18 +334,23 @@ function twoDigits(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-/** Each column as wide as its widest cell, two spaces apart, the last unpadded. */
-function table(given: readonly Row[]): string {
-  // A cell is one line, so a reason with line breaks in it cannot split a state's line.
-  const rows = given.map((row) => row.map(oneLine));
+/**
+ * Each column as wide as its widest cell, two spaces apart, the last unpadded.
+ * A state's problems follow its line, indented by two spaces, and set no width.
+ */
+function table(states: readonly StateLines[]): string {
+  // A cell or a problem is one line, so text with line breaks in it cannot
+  // split a state's line or pass for one.
+  const rows = [HEADER, ...states.map((state) => state.row)].map((row) => row.map(oneLine));
   const widths = HEADER.map((_, column) => Math.max(...rows.map((row) => [...row[column]!].length)));
+  const shown = (row: readonly string[]): string =>
+    row
+      .map((cell, column) => (column === row.length - 1 ? cell : cell + " ".repeat(widths[column]! - [...cell].length)))
+      .join("  ")
+      .trimEnd();
+  const below: readonly (readonly string[])[] = [[], ...states.map((state) => state.problems)];
   return rows
-    .map((row) =>
-      row
-        .map((cell, column) => (column === row.length - 1 ? cell : cell + " ".repeat(widths[column]! - [...cell].length)))
-        .join("  ")
-        .trimEnd(),
-    )
+    .flatMap((row, at) => [shown(row), ...below[at]!.map((problem) => `  ${oneLine(problem)}`)])
     .map((line) => `${line}\n`)
     .join("");
 }

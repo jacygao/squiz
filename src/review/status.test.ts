@@ -462,3 +462,105 @@ test("a reason that runs over several lines is printed on the state's one line",
   assert.equal(lines.length, 2, "the header and one line for the one state");
   assert.equal(rowsOf(printed.stdout)[1]?.[6], "the provider refused the request: HTTP 529 overloaded");
 });
+
+test("a closing round's result names the bound that closed the review", () => {
+  const closing = (closedAt: "round cap" | "token bound"): StateRecord => ({
+    head,
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 3,
+    openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
+    closedAt,
+  });
+  const root = worktree({ 41: [closing("round cap")], 42: [closing("token bound")] });
+
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const byPr = new Map(rows.slice(1).map((row) => [row[0], row]));
+
+  assert.equal(byPr.get("#41")?.[6], "1 thread open, review closed at the round cap");
+  assert.equal(byPr.get("#42")?.[6], "1 thread open, review closed at the token bound");
+});
+
+test("a round that could not post some of its findings says how many in its result", () => {
+  const root = worktree({
+    41: [
+      {
+        head,
+        activity: null,
+        status: "reviewed",
+        result: "exited",
+        exitStatus: 2,
+        openThreads: ["PRRT_kwDOL7tYbc5abcd2", "PRRT_kwDOL7tYbc5abcd3"],
+        unposted: { failed: 2, of: 5 },
+      },
+    ],
+    42: [{ head, activity: null, status: "reviewed", result: "clean, episode open", unposted: { failed: 1, of: 1 } }],
+  });
+
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const byPr = new Map(rows.slice(1).map((row) => [row[0], row]));
+
+  assert.equal(byPr.get("#41")?.[6], "2 threads open, 2 of 5 findings not posted");
+  assert.equal(byPr.get("#42")?.[6], "nothing open, episode open, 1 of 1 finding not posted");
+});
+
+test("a round's problems are printed under its line, a line each, indented by two spaces", () => {
+  const root = worktree({
+    41: [
+      {
+        head,
+        activity: null,
+        status: "reviewed",
+        result: "exited",
+        exitStatus: 0,
+        openThreads: [],
+        problems: [
+          "the review of PR #41 closed without its summary:\n  gh: HTTP 502",
+          "the snapshot could not be removed",
+        ],
+      },
+      { head: laterHead, activity: null, status: "queued" },
+    ],
+  });
+
+  const printed = composeStatus(collectStatus([root], { main: scratch, presence: running, now }));
+  const lines = printed.stdout.trimEnd().split("\n");
+
+  assert.equal(lines.length, 5, "the header, two states, and the reviewed state's two problems");
+  assert.match(lines[1] ?? "", /^#41  8d21a4f/u);
+  assert.match(lines[2] ?? "", /^#41  3f9c2e0 .* nothing open, review closed/u);
+  assert.equal(lines[3], "  the review of PR #41 closed without its summary: gh: HTTP 502");
+  assert.equal(lines[4], "  the snapshot could not be removed");
+});
+
+test("a reviewed record with no problems, unposted findings or bound prints as it did before records kept them", () => {
+  const reviewed = (at: string, startedAt: number, rest: object): StateRecord =>
+    ({
+      head: at,
+      activity: null,
+      status: "reviewed",
+      round: { number: 1, startedAt, endedAt: startedAt + 60, reviewer: { backend: "detached" } },
+      ...rest,
+    }) as StateRecord;
+  const root = worktree({
+    41: [reviewed(head, sevenOhSix, { result: "exited", exitStatus: 2, openThreads: ["PRRT_kwDOL7tYbc5abcd2"] })],
+    42: [reviewed(laterHead, sevenOhSix + 60, { result: "clean, episode open" })],
+    43: [reviewed(latestHead, sevenOhSix + 120, { result: "exited", exitStatus: 0, openThreads: [] })],
+    44: [reviewed(otherHead, sevenOhSix + 180, { result: "exited", exitStatus: 3, openThreads: ["PRRT_kwDOL7tYbc5abcd2"], newFindings: 1 })],
+  });
+
+  const printed = composeStatus(collectStatus([root], { main: root, presence: running, now }));
+
+  assert.equal(
+    printed.stdout,
+    [
+      "PR   Commit   Replies  State     Started   Elapsed  Result                        Session   Worktree  Resume",
+      "#44  a1b2c3d  —        reviewed  07:09:02  1m 00s   1 thread open, review closed  detached  .         —",
+      "#43  9e01b2c  —        reviewed  07:08:02  1m 00s   nothing open, review closed   detached  .         —",
+      "#42  8d21a4f  —        reviewed  07:07:02  1m 00s   nothing open, episode open    detached  .         —",
+      "#41  3f9c2e0  —        reviewed  07:06:02  1m 00s   1 thread open                 detached  .         —",
+      "",
+    ].join("\n"),
+  );
+});
