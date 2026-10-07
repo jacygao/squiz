@@ -23,6 +23,7 @@ const invocation: Invocation = {
   depth: "read",
   test: null,
   thinking: "medium",
+  model: null,
   roundSpace: undefined,
   terminal: "none",
 };
@@ -94,7 +95,22 @@ test("the script carries the grant, the agent, and every flag that keeps the tre
   }
   // The charter reaches Copilot as the agent's instructions, and only there.
   assert.ok(!script.includes("--allow-all-mcp-server-instructions"), script);
-  assert.ok(!script.includes("--model"), "the model is the user's, set through the environment");
+  assert.ok(!script.includes("--model"), "with no model configured, the model is the user's, set through the environment");
+});
+
+// `--model` refuses a model Copilot does not offer, before any request.
+// `COPILOT_MODEL` set to one runs the round on some other model, and exits 0.
+test("a configured model is passed with --model, as the script's $1, and changes nothing else", () => {
+  const unset = argv(invocation);
+  const set = argv({ ...invocation, model: "gpt-5-mini" });
+  assert.equal(set.args.length, 4, "the line is sh's -c, the script, the MCP configuration and the model");
+  assert.equal(set.args[3], "gpt-5-mini");
+  assert.equal(
+    scriptOf(set),
+    scriptOf(unset).replace(" --reasoning-effort ", ' --model "$1" --reasoning-effort '),
+  );
+  assert.deepEqual(set.args.slice(2, 3), unset.args.slice(2, 3));
+  assert.deepEqual(set.environment, unset.environment);
 });
 
 // Copilot confines its reading tools to the working directory and the system's
@@ -207,9 +223,10 @@ function standInTree(t: TestContext): { readonly tree: string; readonly bin: str
   return { tree, bin };
 }
 
-function lineIn(tree: string): CommandLine {
+function lineIn(tree: string, model: string | null = null): CommandLine {
   return argv({
     ...invocation,
+    model,
     directory: tree,
     sessionDirectory: join(tree, ".squiz/7/rounds/1/session"),
     promptFile: join(tree, ".squiz/7/rounds/1/prompt.md"),
@@ -274,6 +291,26 @@ test("the prompt reaches Copilot byte for byte as one argument, and the MCP conf
   assert.equal(ran.args?.[1], AWKWARD_PROMPT, "the prompt Copilot was handed is not the file's bytes");
   assert.equal(after(ran.args, "--additional-mcp-config"), line.args[2]);
   assert.equal(after(ran.args, "--usage-output-file"), join(tree, ".squiz/7/rounds/1/session/usage.json"));
+});
+
+// The script never reads the name, so a character the shell would act on reaches
+// Copilot as itself.
+test("a configured model reaches Copilot as one argument after --model, unread by the shell", (t) => {
+  const { tree, bin } = standInTree(t);
+  const model = "gpt-5-mini $(id) `uname`; exit 3 'x\"";
+  const line = lineIn(tree, model);
+  writeFileSync(join(tree, ".squiz/7/rounds/1/prompt.md"), AWKWARD_PROMPT);
+  const result = spawnSync(line.command, line.args, {
+    cwd: line.directory,
+    env: environmentFor(bin, tree, "0"),
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  const ran = ranIn(tree, result.status);
+  assert.equal(ran.status, 0);
+  assert.equal(after(ran.args, "--model"), model);
+  assert.equal(ran.args?.[1], AWKWARD_PROMPT);
+  assert.equal(after(ran.args, "--additional-mcp-config"), line.args[2]);
 });
 
 test("Copilot is not started where the prompt file cannot be read", (t) => {

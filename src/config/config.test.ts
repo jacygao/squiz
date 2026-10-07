@@ -45,7 +45,7 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the seven defaults", () => {
+test("an absent .squiz.json is not an error, and yields the eight defaults", () => {
   assert.deepEqual(load(null), {
     reviewer: "pi",
     rounds: 3,
@@ -54,10 +54,11 @@ test("an absent .squiz.json is not an error, and yields the seven defaults", () 
     timeout: 900,
     tokens: 10_000_000,
     thinking: "medium",
+    model: null,
   });
 });
 
-test("a .squiz.json with no keys yields the same seven defaults", () => {
+test("a .squiz.json with no keys yields the same eight defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -70,9 +71,18 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"reviewer": "copilot", "rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "tokens": 400000, "thinking": "high"}`,
+      `{"reviewer": "copilot", "rounds": 5, "depth": "read", "test": "npm test", "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
     ),
-    { reviewer: "copilot", rounds: 5, depth: "read", test: "npm test", timeout: 90, tokens: 400_000, thinking: "high" },
+    {
+      reviewer: "copilot",
+      rounds: 5,
+      depth: "read",
+      test: "npm test",
+      timeout: 90,
+      tokens: 400_000,
+      thinking: "high",
+      model: "gpt-5-mini",
+    },
   );
 });
 
@@ -237,6 +247,55 @@ test("an empty test command is refused, because it is not the same as none", () 
 // The error names the setting, the value given and what was expected. One
 // saying only that the configuration is invalid is the failure this checks for.
 
+test("no model is null, which leaves the reviewer on its CLI's own default", () => {
+  assert.equal(load("{}").model, null);
+  assert.equal(load(`{"rounds": 3}`).model, null);
+});
+
+test("model takes a name as each reviewer CLI spells one", () => {
+  for (const name of [
+    "gpt-5-mini",
+    "openai/gpt-5-mini",
+    "claude-opus-4.8",
+    "us.anthropic.claude-opus-4-6-v1",
+    "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
+    "openrouter/qwen/qwen3-coder:free",
+    "Ring-2.6-1T",
+  ]) {
+    assert.equal(load(JSON.stringify({ model: name })).model, name);
+  }
+});
+
+// The name reaches the reviewer CLI as one argument, and a pane's command line
+// is a shell's, so anything a shell or an option parser would read is refused.
+test("a model that is empty, or holds what could change the command line, is refused", () => {
+  for (const name of [
+    "",
+    " ",
+    " gpt-5-mini",
+    "gpt-5-mini ",
+    "gpt 5",
+    "gpt-5-mini;rm -rf ~",
+    "$(whoami)",
+    "`id`",
+    "gpt'5",
+    `gpt"5`,
+    "gpt-5\nmini",
+    "--help",
+    "-m",
+    "a|b",
+    "a&b",
+    "a>b",
+    "~/model",
+    "x".repeat(201),
+  ]) {
+    assert.match(rejection(JSON.stringify({ model: name })).message, /"model" is .*, but it must be /u);
+  }
+  for (const contents of [`{"model": null}`, `{"model": 5}`, `{"model": ["gpt-5-mini"]}`]) {
+    assert.match(rejection(contents).message, /"model" is .*, but it must be /u);
+  }
+});
+
 test("every refusal names the setting, the value given and what was expected", () => {
   const cases: ReadonlyArray<{
     contents: string;
@@ -259,6 +318,9 @@ test("every refusal names the setting, the value given and what was expected", (
     { contents: `{"tokens": true}`, setting: "tokens", given: "true", expected: /tokens from 100,000 to 10,000,000/ },
     { contents: `{"thinking": "higher"}`, setting: "thinking", given: `"higher"`, expected: /"medium".*"high".*"xhigh"/ },
     { contents: `{"thinking": 3}`, setting: "thinking", given: "3", expected: /one of "off"/ },
+    { contents: `{"model": "gpt 5"}`, setting: "model", given: `"gpt 5"`, expected: /model name/ },
+    { contents: `{"model": ""}`, setting: "model", given: `""`, expected: /leave "model" out/ },
+    { contents: `{"model": ".hidden"}`, setting: "model", given: `".hidden"`, expected: /starting with a letter, a digit or @/ },
   ];
 
   for (const { contents, setting, given, expected } of cases) {
@@ -297,7 +359,7 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"reviewer", "rounds", "depth", "test", "timeout", "tokens" and "thinking"/);
+  assert.match(error.message, /"reviewer", "rounds", "depth", "test", "timeout", "tokens", "thinking" and "model"/);
 });
 
 // What a project upgrading from the dollar bound meets. Silently ignoring it

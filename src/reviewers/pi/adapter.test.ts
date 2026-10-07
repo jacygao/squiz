@@ -21,6 +21,7 @@ const invocation: Invocation = {
   depth: "read",
   test: null,
   thinking: "medium",
+  model: null,
   roundSpace: undefined,
   terminal: "none",
 };
@@ -52,6 +53,12 @@ test("at deep, with a round space, nothing is written and nothing is added", () 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("the adapter checks a configured model before pi starts", () => {
+  // No pi lists this, and a pi that is missing or cannot list fails it too.
+  const unlisted = pi.confine({ ...invocation, model: "no-provider-lists-this/model" });
+  assert.equal(unlisted.outcome, "failed", JSON.stringify(unlisted));
 });
 
 test("the grant on the command line is the one the adapter names", () => {

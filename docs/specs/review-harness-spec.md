@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.02 (draft)
+**Version:** 1.03 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -787,7 +787,7 @@ CLI reports one. It never edits the code it is reviewing, and it holds no state
 between rounds: each round is a fresh session, and everything it knows about
 earlier rounds arrives in what it is handed.
 
-Five things are handed to it:
+Six things are handed to it:
 
 | | |
 |---|---|
@@ -796,6 +796,7 @@ Five things are handed to it:
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A depth** | How much the reviewer is allowed to do, `read` or `deep`. The two values are set out under Depth below. |
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
+| **A model** | The model the project configured, in the reviewer CLI's own spelling, or none, which leaves the CLI on the user's default. |
 
 **At depth `deep`, the prompt tells the reviewer what the `deep` tools are for.**
 It carries this section between the description and the diff, with the
@@ -1308,13 +1309,34 @@ nothing else. An adapter implements four things:
 
 | | |
 |---|---|
-| `argv(opts)` | Build the command line from a working directory, a charter file, a prompt, a session directory, and the depth. |
-| `confine(opts)` | Put in place whatever the CLI is handed outside its command line, and return what to add to its environment. A CLI handed nothing returns an empty environment and writes no file. |
+| `argv(opts)` | Build the command line from a working directory, a charter file, a prompt, a session directory, the depth, the thinking level and the model. |
+| `confine(opts)` | Put in place whatever the CLI is handed outside its command line, check what the CLI cannot be trusted to refuse, and return what to add to its environment. A CLI handed nothing returns an empty environment and writes no file. |
 | `read(reports)` | Report each finding and each verdict as the run makes it, from the file the reviewer reports into, and return the run's cost where the CLI reports one. A run the CLI reports as failed is told apart from one that reported no findings. |
 | `grants` | Which tools the CLI is given at each depth, the calls the reviewer reports through among them. |
 
 The harness passes `read` or `deep`, and the adapter turns that into the right
 flags for its CLI. The adapter must not choose for itself.
+
+**A configured model runs the round, or the round fails at setup.** The adapter
+passes it as an argument of its own, never through a shell's parsing. Where no
+model is configured, the command line and the environment are exactly what they
+are without the setting. A CLI that falls back to another model when handed one
+it does not offer is checked in `confine` first; one that refuses such a model
+before its first request is left to refuse it. Either way the round fails as a
+setup problem, with no review run and nothing spent, and the reason names
+`model` and its value:
+
+```
+"model" in .squiz.json is "openai/gpt-5", which is not a model pi offers; it must be a provider and model as pi --list-models lists them, such as "openai/gpt-5-mini"
+```
+
+Where a run with a configured model completed no message, the round adds the
+model to the reason, because a CLI in a pane that refused the model leaves the
+round nothing else to say:
+
+```
+the reviewer completed no message; "model" in .squiz.json is "gpt-5-nano", which the reviewer's CLI may not offer
+```
 
 **An adapter may ship files its CLI runs**, where reporting a finding needs one:
 an extension the CLI loads, or a server it starts. Each is the adapter's own, it
@@ -1544,6 +1566,23 @@ review a change gets depends on the machine it ran on. A level `pi` does not
 recognise is not taken silently: it warns on stderr and is otherwise ignored,
 which leaves the round thinking at the level those settings hold.
 
+**A configured model is `provider/id`, exactly as `pi --list-models` lists it**,
+such as `openai/gpt-5-mini`, and it goes on the line as `--model
+openai/gpt-5-mini`, after `--thinking`. With no model configured there is no
+`--model`, and `pi` runs on the user's default, `defaultProvider` and
+`defaultModel` in its own settings.
+
+`pi --model` does not refuse every name it does not have. A bare name matches
+any model whose name contains it, so `flash` runs on whichever model that
+happens to be, and a provider with an unknown id is sent to that provider as a
+model id of its own. So `confine` runs `pi --no-approve --no-extensions
+--list-models` in the snapshot, with no terminal, and prepares the round only
+where the configured model is one of the listed `provider/id` names, matched
+exactly. A bare id that is listed under one provider is refused with its full
+name in the reason. A `pi` that cannot be started, or exits non-zero listing,
+fails `confine` too. `--list-models` lists only the models whose provider has a
+credential, and makes no model request.
+
 ### The Copilot adapter
 
 The adapter for the GitHub Copilot CLI, which a project chooses with
@@ -1563,17 +1602,21 @@ sh -c 'prompt=$(cat .squiz/<number>/rounds/<k>/prompt.md && printf .) \
          --no-custom-instructions \
          --disable-builtin-mcps \
          --additional-mcp-config "$0" \
+         --model "$1" \
          --reasoning-effort medium \
          --usage-output-file .squiz/<number>/rounds/<k>/session/usage.json \
        && usage=$(tr -d "\n" < .squiz/<number>/rounds/<k>/session/usage.json) \
        && printf "{\"type\":\"usage\",\"usage\":%s}\n" "$usage" >> <reports-file>' \
-  '{"mcpServers":{"squiz":{"type":"local","command":"<node>","args":["<server>"],"env":{"SQUIZ_REPORTS":"<reports-file>"},"tools":["*"]}}}'
+  '{"mcpServers":{"squiz":{"type":"local","command":"<node>","args":["<server>"],"env":{"SQUIZ_REPORTS":"<reports-file>"},"tools":["*"]}}}' \
+  gpt-5-mini
 ```
 
 The line is shown wrapped. As `argv` builds it, the script is one argument with
 no newline in it, every path is absolute and single-quoted inside the script,
 and the MCP configuration travels as the script's `$0`, so its quotes need no
-escaping inside the script. `<node>` is the Node the harness runs on, and
+escaping inside the script. `--model "$1"` and the model after the MCP
+configuration are there only where `model` is configured, and the model reaches
+Copilot as the script's `$1`, which the shell passes on without reading. `<node>` is the Node the harness runs on, and
 `<server>` is the reporting server the adapter ships, by absolute path.
 
 At `deep` the line differs only in `--available-tools`, which carries the `deep`
@@ -1587,8 +1630,8 @@ The environment adds three variables:
   `.squiz/<number>/rounds/<k>/session/`, which `confine` creates holding the
   reviewer's agent file and nothing else;
 - `COPILOT_ALLOW_ALL`, set to the empty string, which Copilot reads as off;
-- `COPILOT_MODEL`, the user's default model, where the user has one
-  (Keeping the project and the user out).
+- `COPILOT_MODEL`, the user's default model, where the project configures no
+  `model` and the user has a default.
 
 **The task prompt is read from its file by the shell, not carried on the line.**
 `-p` takes the prompt as one argument, which the shell reads with `cat` as
@@ -1640,6 +1683,7 @@ inherits it.
 | `--disable-builtin-mcps` | The GitHub MCP server is not started for a reviewer that has no GitHub access of its own. |
 | `--additional-mcp-config` | Starts the reporting server. |
 | `--usage-output-file` | Where Copilot writes the run's usage as it exits. |
+| `--model` | The configured model, only where there is one. |
 | `--reasoning-effort` | The thinking level, on every command line. |
 
 The tree's `AGENTS.md` still reaches the reviewer, by the charter's instruction
@@ -1647,18 +1691,26 @@ to read it, which it does with `view`.
 
 `--reasoning-effort` takes `thinking` as it is, except that `off` is `none`.
 
-**The reviewer runs on the user's default model.** The adapter passes no
-`--model`. Copilot keeps the user's default as `model` in the user's own
-`settings.json`, under `~/.copilot/`, or under the `COPILOT_HOME` the user set.
-`confine` reads that one setting and returns it as `COPILOT_MODEL`, which sets
-the model Copilot runs. Nothing is written into the adapter's `COPILOT_HOME` for
-it. Where the round host's own environment already carries a `COPILOT_MODEL`,
-that is the user's default, and `confine` returns it in place of the setting, so
-that a pane, which does not inherit the host's environment, runs it too. A
-`settings.json` that is there and cannot be read, or does not hold a JSON object,
-fails `confine`. Where the user has neither, the round runs on whatever Copilot
-falls back to, and nothing makes sure that is a different model from the coding
-agent's, as § 2 requires. The later `model` setting maps to the same variable.
+**The reviewer runs on the configured model, or else the user's default.** A
+configured `model` is Copilot's own name for it, such as `gpt-5-mini`, and goes
+on `--model`. Copilot refuses a model the user cannot use there, before any
+request: it exits 1, spending nothing, with `Model "<name>" from --model flag
+is not available.` on stderr. `--model` wins over a `COPILOT_MODEL` in the
+environment. `COPILOT_MODEL` is never used for a configured model, because
+Copilot runs a round on some other model, and exits 0, when that variable names
+one it does not have.
+
+With no `model` configured the adapter passes no `--model`. Copilot keeps the
+user's default as `model` in the user's own `settings.json`, under
+`~/.copilot/`, or under the `COPILOT_HOME` the user set. `confine` reads that one
+setting and returns it as `COPILOT_MODEL`. Nothing is written into the adapter's
+`COPILOT_HOME` for it. Where the round host's own environment already carries a
+`COPILOT_MODEL`, that is the user's default, and `confine` returns it in place of
+the setting, so that a pane, which does not inherit the host's environment, runs
+it too. A `settings.json` that is there and cannot be read, or does not hold a
+JSON object, fails `confine`. Where the user has neither, the round runs on
+whatever Copilot falls back to, and nothing makes sure that is a different model
+from the coding agent's, as § 2 requires.
 
 #### Keeping the project and the user out
 
@@ -1686,7 +1738,7 @@ directory it names as trusted configuration.
 `skill`, and with it disabled no skill reaches the reviewer.
 
 **None of the user's own Copilot configuration reaches the reviewer except its
-model**: not its effort level, its hooks, its MCP servers or its skills. The harness
+default model, where the project configures none**: not its effort level, its hooks, its MCP servers or its skills. The harness
 sets the reasoning effort on the command line every round, and the user's MCP
 servers and hooks are code that would run with the round's environment.
 
@@ -1794,7 +1846,8 @@ nothing to the report file, and its stderr says `copilot` was not found.
 Detached, the round adds that stderr to the reason, as it does for any reviewer
 whose run completed no message. In a pane, stderr is the screen, and the reason
 names no cause. A run whose model provider refused it exits 1, with the provider's
-message on stderr, so it too is read as completing no message.
+message on stderr, so it too is read as completing no message, and so is a run
+whose configured model Copilot refused.
 
 **What the read concludes:**
 
@@ -3101,10 +3154,16 @@ its own branch. Squiz does not create them, and does not remove them.
 | `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 4 Adapters) |
 
 `timeout` is the time bound on the review part of a round, which runs in the
 round host. No caller's timeout limits it, so it is a guard against a reviewer
 that runs away rather than a fit to a window.
+
+`model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
+with a letter, a digit or `@`. An empty string is refused rather than read as
+none. A model the configured reviewer does not offer fails the round at setup,
+and never runs it on another model.
 
 `reviewer` chooses the adapter, and nothing else changes with it. `copilot`
 needs the GitHub Copilot CLI installed and signed in.

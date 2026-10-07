@@ -104,6 +104,9 @@ export function argv(invocation: Invocation): CommandLine {
       grants[invocation.depth].join(","),
       "--thinking",
       invocation.thinking,
+      // Always `provider/id` as `pi --list-models` lists it, which `confine`
+      // checks, so `pi` matches it exactly rather than by part of a name.
+      ...(invocation.model === null ? [] : ["--model", invocation.model]),
       "--append-system-prompt",
       invocation.charterFile,
       // `pi` reads an `@` argument's file into the first message, wrapped in a

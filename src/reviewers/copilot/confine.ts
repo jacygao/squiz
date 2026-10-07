@@ -9,7 +9,7 @@
  * trusted every one of them. Under a home of the round's own Copilot trusts nothing. The
  * credential is in the system's credential store, so the reviewer still signs
  * in. Nothing else of the user's configuration reaches the reviewer except its
- * model.
+ * default model, and that only where the project configured none.
  *
  * Nothing here throws. Every outcome is a value the caller reads.
  */
@@ -27,7 +27,8 @@ import { AGENT_NAME } from "./argv.ts";
  * Copilot settings and default model are found.
  */
 export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv = process.env): Confinement {
-  const model = modelOf(environment);
+  // A configured model is on the command line, where `--model` wins over the variable.
+  const model = invocation.model === null ? modelOf(environment) : undefined;
   if (typeof model === "object") return { outcome: "failed", reason: model.problem };
 
   let charter: string;
