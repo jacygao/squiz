@@ -18,27 +18,20 @@ recheck-when: the reviewer's model or the charter changes, a case set of unfamil
 
 ## Decisions
 
-- **Do not accept `deep` in configuration on this evidence.** Over 17 changes,
-  each reviewed three times at each depth by `pi` and by Copilot, `read` found
-  103 of 138 chances at a known defect and `deep` found 107. Of the 60 chances at
-  a defect the project's tests catch, each depth found all 60. The net four
-  are Copilot finding a defect only the history explains in 3 runs of 3 at
-  `deep` and none at `read`, less one reading defect, and `pi` finding two more
-  on squiz's own notes. That is too small to tell from run-to-run variation.
-  The owner's bar for #113 was a measurable improvement, and this is not one.
-- **Expect `deep` to cost a little more and to cost nothing in false findings.**
-  `deep` took 5 to 22% more time and 7 to 17% more money a run. Neither depth
-  reported anything on the three changes with no defect, in 18 runs each. Across
-  all 204 runs one finding was false, at `deep`.
-- **Count the `deep` tools as working.** Every one of the 102 `deep` runs called
-  `run_tests`, and every first call ended as the case says it should: a non-zero
-  exit on the ten changes whose suite fails, zero on the rest. The tools were
-  used as confirmation. 40 of the 111 findings at `deep` cite the test output,
-  and each of them names a defect `read` also found.
-- **Keep the rig and the cases for the next measurement.** On this set reading
-  found every defect a test catches, so the set cannot show what running tests
-  adds. A set that can is the next step, and the rig takes new cases as a patch
-  and a description each.
+- **Do not accept `deep` in configuration on this evidence.** It found 107 of
+  138 chances at a known defect against `read`'s 103, and every defect the tests
+  catch at both depths, which is too small a difference to tell from run-to-run
+  variation. The owner's bar for #113 was a measurable improvement.
+- **Expect `deep` to cost a little more and nothing in false findings.** It took
+  5 to 22% more time and 7 to 17% more money a run, and one false finding in 102
+  runs against none.
+- **Count the `deep` tools as working.** Every `deep` run called `run_tests`, and
+  every first call ended as its case says, so no run went without the tools.
+  One defect was found from a tool's answer and not by reading: the history
+  defect, which Copilot found through `git_log_search`.
+- **Keep the rig and the cases for the next measurement.** Reading found every
+  defect a test catches, so this set cannot show what running tests adds. The
+  rig takes a new case as a patch and a description.
 
 ## Needs your input
 
@@ -50,6 +43,23 @@ recheck-when: the reviewer's model or the charter changes, a case set of unfamil
   library.
 
 ## Reference
+
+### Each depth, over 17 changes, three runs each
+
+| | `pi` `read` | `pi` `deep` | Copilot `read` | Copilot `deep` |
+|---|---|---|---|---|
+| Defects the tests catch (10) | 30/30 | 30/30 | 30/30 | 30/30 |
+| Defects reading catches (12) | 21/36 | 23/36 | 21/36 | 20/36 |
+| Defect only the history explains (1) | 1/3 | 1/3 | 0/3 | 3/3 |
+| False findings | 0 | 1 | 0 | 0 |
+| Seconds, mean | 110 | 116 | 32 | 39 |
+| Cost a run | $0.086 | $0.092 | 33.9 credits | 39.7 credits |
+
+`pi` ran `deepseek/deepseek-v4-pro` and Copilot `gpt-6-astra`, both at thinking
+`medium` with the 900-second bound. Neither depth reported anything on the three
+changes with no defect. At `deep`, 40 of 111 findings cite the test output, each
+about a defect `read` also found. The history defect is in upstream commit
+`52afe00`, which says why the replaced code counted commas before splitting.
 
 ### Running it
 
