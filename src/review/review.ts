@@ -397,9 +397,11 @@ function roundResult(
   }
 }
 
-/** The close of an episode already over, exiting as it did. */
+/** The close of an episode already over, exiting as it did, with what the close recorded failing. */
 function closedResult(context: Context, state: EpisodeState, threads: readonly ReviewThread[]): ReviewResult {
-  const closing = closingRecord(state.records ?? []);
+  const records = state.records ?? [];
+  const closing = closingRecord(records);
+  const first = records.find((held): held is ClosedFirst => held.status === "not reviewed" && held.closed !== undefined);
   // An episode closed before a round took its last state has no closing round, and its threads are all the reviewer opened.
   const left =
     closing === undefined
@@ -412,6 +414,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
     exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
     rounds: state.rounds.length,
     threads: left,
+    problems: (closing === undefined ? first?.closed.problems : closing.problems) ?? [],
   };
 }
 

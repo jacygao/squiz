@@ -108,6 +108,12 @@ function answer(body) {
   }
   const at = argv.find((a) => a.startsWith("repos/"));
   if (at.includes("/issues/")) {
+    if (state.rejectSummary) {
+      process.stdout.write(http("403 Forbidden", { message: "Resource not accessible by integration" }));
+      process.stderr.write("gh: Resource not accessible by integration (HTTP 403)\n");
+      process.exitCode = 1;
+      return "";
+    }
     state.issueComments.push(JSON.parse(body).body);
     save();
     return http("201 Created", { id: 7000 + state.issueComments.length, node_id: "IC_" + state.issueComments.length, html_url: "https://github.com/o/r/pull/41#issuecomment-1" });
@@ -152,6 +158,8 @@ type GhState = {
   readonly issueComments: string[];
   /** Whether GitHub refuses every review comment the round creates. */
   readonly rejectCreate?: boolean;
+  /** Whether GitHub refuses every issue comment, which is how the summary is posted. */
+  readonly rejectSummary?: boolean;
 };
 
 type Fixture = {
@@ -331,6 +339,50 @@ test("a bound spent before any round ran, with nothing of the reviewer's on the 
     ]);
     assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: the episode closed before any round ran\n");
     assert.deepEqual(fixture.gh().issueComments, []);
+  });
+});
+
+test("a run after a round closed without its summary prints the failure the closing run printed (#425)", async () => {
+  await withPullRequest([{ findings: [], verdicts: [] }], async (fixture) => {
+    fixture.setGh({ ...fixture.gh(), rejectSummary: true });
+
+    const closing = await review(fixture);
+    assert.equal(closing.exit, 0, `${closing.stdout}${closing.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(closing.stderr, /^squiz: the review of PR #41 closed without its summary: .*403/u);
+
+    const later = await review(fixture);
+
+    assert.equal(later.exit, 0, `${later.stdout}${later.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(later.stdout.split("\n")[1], "Squiz's review of PR #41 closed after 1 round, with nothing open. No round runs again in this worktree.");
+    assert.equal(later.stderr, closing.stderr);
+  });
+});
+
+test("a run after a close before any review, without its summary, prints the failure the closing run printed (#425)", async () => {
+  await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 2, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const plan = JSON.parse(readFileSync(fixture.planFile, "utf8")) as Plan;
+    writeFileSync(fixture.planFile, JSON.stringify({ ...plan, config: { rounds: 1 } }), "utf8");
+    // A reply is a new state on the same commit, which the spent cap closes before a round takes it.
+    const gh = fixture.gh();
+    gh.threads[0]?.comments.push({
+      id: "PRRC_reply",
+      databaseId: 9500,
+      body: renderReply("The line is a fixture, and says so in the file's header."),
+      createdAt: "2026-10-05T07:20:00Z",
+    });
+    fixture.setGh({ ...gh, rejectSummary: true });
+
+    const closing = await review(fixture);
+    assert.equal(closing.exit, 3, `${closing.stdout}${closing.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(closing.stderr, /^squiz: the review of PR #41 closed without its summary: .*403/u);
+
+    const later = await review(fixture);
+
+    assert.equal(later.exit, 3, `${later.stdout}${later.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(later.stdout.split("\n")[1], "Squiz's review of PR #41 closed after 1 round, with 1 thread open. No round runs again in this worktree.");
+    assert.equal(later.stderr, closing.stderr);
   });
 });
 

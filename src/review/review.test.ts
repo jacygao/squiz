@@ -494,6 +494,40 @@ test("a run on a closed episode prints the close, exiting as it did", async () =
   });
 });
 
+test("a run on an episode a round closed without its summary prints the recorded failure on stderr (#425)", async () => {
+  await withWorktree(async (fixture) => {
+    const problem = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
+    records(fixture, [
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap", problems: [problem] },
+    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }, [OPEN_THREAD]) }));
+
+    assert.equal(printed.exit, 3);
+    assert.equal(printed.stderr, `squiz: ${problem}\n`);
+  });
+});
+
+test("a run on an episode closed before any review, without its summary, prints the recorded failure on stderr (#425)", async () => {
+  await withWorktree(async (fixture) => {
+    const problem = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
+    records(fixture, [
+      {
+        ...OWN,
+        status: "not reviewed",
+        reason: "the episode closed at the token bound before a round took this state",
+        closed: { exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "token bound", problems: [problem] },
+      },
+    ], { closeReported: true });
+    const triggered = { ...decided(fixture, { outcome: "closed" }, [OPEN_THREAD]), state: LATER };
+
+    const printed = await runReview(request(fixture, { triggered }));
+
+    assert.equal(printed.exit, 3);
+    assert.equal(printed.stderr, `squiz: ${problem}\n`);
+  });
+});
+
 test("a round host no one can tell running or gone exits 1 naming it", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [reviewing(OWN)]);
