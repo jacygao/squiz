@@ -899,6 +899,47 @@ test("a host whose worktree goes during a round takes nothing more", async () =>
   assert.equal(ran.started, 1);
 });
 
+test("a host whose state file cannot be read exits naming it in host.log, and asks nothing of GitHub", async () => {
+  let stateFile = "";
+  const ran = await host({
+    before: ({ episode }) => {
+      stateFile = episode.stateFile;
+      mkdirSync(episode.directory, { recursive: true });
+      writeFileSync(episode.stateFile, "{ not json", "utf8");
+    },
+  });
+
+  assert.equal(ran.end.outcome, "state unreadable");
+  assert.equal(ran.started, 0);
+  assert.deepEqual(ran.kinds, [], "a host that could not read its state called gh");
+  const last = ran.log.trimEnd().split("\n").at(-1) ?? "";
+  assert.ok(
+    last.includes(` exiting: ${stateFile} is not valid JSON: `),
+    `host.log's last line does not name the file and the parser's error:\n${ran.log}`,
+  );
+});
+
+test("a state file that stops reading once the host took its state ends the round with no reviewer, and posts no comment", async () => {
+  let stateFile = "";
+  const ran = await host({
+    records: atHead,
+    before: ({ episode, binaries }) => {
+      stateFile = episode.stateFile;
+      // The round's gate looks the pull request up before it reads the state.
+      writeFileSync(join(binaries, "on-prlist.sh"), `printf '{ not json' > '${episode.stateFile}'\n`, "utf8");
+    },
+  });
+
+  assert.equal(ran.started, 0);
+  assert.ok(ran.kinds.includes("prlist"), `the round never reached its gate: ${ran.kinds.join(", ")}`);
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "failure" || kind === "summary"),
+    [],
+    "a comment was posted on the pull request",
+  );
+  assert.ok(ran.log.includes(`${stateFile} is not valid JSON: `), `host.log does not name the file:\n${ran.log}`);
+});
+
 test("the host writes what it did to host.log", async () => {
   const ran = await host({ records: atHead });
 

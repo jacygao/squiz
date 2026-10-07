@@ -383,6 +383,27 @@ test("a round whose every finding failed to post is a failed round that leaves t
   });
 });
 
+test("a state file that cannot be read exits 1 naming it, starts no host, and posts no comment", async () => {
+  await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {
+    mkdirSync(fixture.episode.directory, { recursive: true });
+    writeFileSync(fixture.episode.stateFile, "{ not json", "utf8");
+
+    const printed = await review(fixture);
+
+    assert.equal(printed.exit, 1, `${printed.stdout}${printed.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(printed.stdout, "");
+    const [line, ...rest] = printed.stderr.split("\n");
+    assert.ok(
+      line?.startsWith(`squiz: no review ran: ${fixture.episode.stateFile} is not valid JSON: `),
+      `the first line does not name the file and the parser's error: ${printed.stderr}`,
+    );
+    assert.deepEqual(rest, ["squiz: put these lines in your report rather than running squiz review again", ""]);
+    assert.equal(readFileSync(fixture.episode.stateFile, "utf8"), "{ not json", "the run wrote over the file it could not read");
+    assert.equal(hostLog(fixture.episode), "", "a round host was started for a state nothing queued");
+    assert.deepEqual(fixture.gh().issueComments, [], "a comment was posted on the pull request");
+  });
+});
+
 test("stopping a run while it waits ends only the wait, and the next run returns the round's result", async () => {
   await withPullRequest([{ findings: [FINDING], verdicts: [], holdSeconds: 2 }], async (fixture) => {
     // A group of its own, so the whole group can be stopped as a runtime stops a command.

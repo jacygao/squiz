@@ -492,6 +492,45 @@ test("squiz status lists the reviews of every worktree, and never runs gh", asyn
   }
 });
 
+test("squiz status names a state file that cannot be read on stderr, lists the rest, and never runs gh", async () => {
+  const fakes = await mkdtemp(join(tmpdir(), "squiz-unread-"));
+  const readable = join(fakes, "squiz-readable");
+  const unreadable = join(fakes, "squiz-unreadable");
+  try {
+    gitIn(onABranch, ["worktree", "add", "--quiet", "--detach", readable]);
+    gitIn(onABranch, ["worktree", "add", "--quiet", "--detach", unreadable]);
+    await mkdir(join(readable, ".squiz", "41"), { recursive: true });
+    const record = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null, status: "queued" };
+    const state = { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 }, records: [record] };
+    await writeFile(join(readable, ".squiz", "41", "state.json"), JSON.stringify(state), "utf8");
+    await mkdir(join(unreadable, ".squiz", "38"), { recursive: true });
+    await writeFile(join(unreadable, ".squiz", "38", "state.json"), "{ not json", "utf8");
+    const called = join(fakes, "gh-was-called");
+    standIn(fakes, "gh", `#!/bin/sh\ntouch '${called}'\nexit 1\n`);
+
+    const result = await run(shim, ["status"], {
+      cwd: onABranch,
+      path: `${fakes}:${process.env["PATH"] ?? ""}`,
+    });
+
+    assert.equal(result.code, 0);
+    const [line, ...rest] = result.stderr.split("\n");
+    assert.match(
+      line ?? "",
+      /^squiz: the reviews of #38 in \S*squiz-unreadable could not be read: \S*squiz-unreadable\/\.squiz\/38\/state\.json is not valid JSON: /u,
+      "the line names the pull request, the worktree, the file and the parser's error",
+    );
+    assert.deepEqual(rest, [""], "one line, and nothing else");
+    assert.match(result.stdout, /\n#41 +8d21a4f +— +queued +— +— +— +— +\S*squiz-readable +—\n$/u);
+    assert.doesNotMatch(result.stdout, /#38/u);
+    await assert.rejects(stat(called), "squiz status asks nothing of GitHub");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", readable], { cwd: onABranch });
+    spawnSync("git", ["worktree", "remove", "--force", unreadable], { cwd: onABranch });
+    await rm(fakes, { recursive: true, force: true });
+  }
+});
+
 test("squiz host without a pull request's number reports how it is called, and starts nothing", async () => {
   const result = await run(shim, ["host", "forty-one"], { cwd: onABranch });
 
