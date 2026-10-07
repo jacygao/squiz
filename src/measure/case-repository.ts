@@ -13,7 +13,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export type Source =
@@ -48,9 +49,11 @@ const QUIET_GIT: NodeJS.ProcessEnv = {
 };
 
 /**
- * Prepare the case `name`, cloning an upstream case into `cache/<name>` the
- * first time and reusing that clone after. Concurrent first preparations of one
- * case race; prepare each case once before running them side by side.
+ * Prepare the case `name`, cloning an upstream case the first time and reusing
+ * that clone after. The clone is named for the case's project, commit and patch
+ * contents, so an edited patch is prepared afresh rather than read from a clone
+ * of the old one. Concurrent first preparations of one case race; prepare each
+ * case once before running them side by side.
  */
 export function prepareCase(name: string, source: Source, patches: string, cache: string): Prepared {
   try {
@@ -59,11 +62,17 @@ export function prepareCase(name: string, source: Source, patches: string, cache
       const head = git(source.repository, "rev-parse", `${source.head}^{commit}`);
       return { outcome: "prepared", repository: source.repository, base, head, diff: diffOf(source.repository, base, head) };
     }
-    const repository = join(cache, name);
+    const patch = resolve(patches, source.patch);
+    const identity = createHash("sha256")
+      .update(`${source.url}\n${source.commit}\n`)
+      .update(readFileSync(patch))
+      .digest("hex")
+      .slice(0, 16);
+    const repository = join(cache, `${name}-${identity}`);
     if (!existsSync(repository)) {
       execFileSync("git", ["clone", "--quiet", source.url, repository], { env: QUIET_GIT, stdio: "pipe" });
       git(repository, "checkout", "--quiet", "--detach", source.commit);
-      git(repository, "apply", resolve(patches, source.patch));
+      git(repository, "apply", patch);
       git(repository, "add", "--all");
       git(repository, "commit", "--quiet", "--no-verify", "-m", name);
     }

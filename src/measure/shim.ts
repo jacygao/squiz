@@ -1,0 +1,34 @@
+/**
+ * The script the rig puts ahead of the reviewer's CLI on `PATH`.
+ *
+ * It adds the flags that make the CLI write its JSON events, copies those events
+ * to a file, and records the CLI's arguments and `SQUIZ_ROUND`, which show the
+ * grant and whether the `deep` tools were handed a round to run in.
+ */
+
+export type Shim = {
+  /** The real CLI, by absolute path. */
+  readonly real: string;
+  /** Put before the arguments the adapter gives. */
+  readonly flags: readonly string[];
+  readonly granted: string;
+  /** Appended to, so a retried attempt keeps the first. */
+  readonly stream: string;
+};
+
+export function shimScript(shim: Shim): string {
+  const granted = quoted(shim.granted);
+  return [
+    "#!/bin/bash",
+    "set -o pipefail",
+    `printf '%s\\n' "$@" >> ${granted}`,
+    `printf 'SQUIZ_ROUND=%s\\n' "$SQUIZ_ROUND" >> ${granted}`,
+    `${[shim.real, ...shim.flags].map(quoted).join(" ")} "$@" | tee -a ${quoted(shim.stream)}`,
+    "",
+  ].join("\n");
+}
+
+/** `text` as one word to the shell, expanding nothing. */
+function quoted(text: string): string {
+  return `'${text.replaceAll("'", `'\\''`)}'`;
+}

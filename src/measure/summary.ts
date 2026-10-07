@@ -157,8 +157,11 @@ function toolCalls(stream: string): readonly ToolCall[] {
       const call = byId.get(String(data["toolCallId"]));
       if (call === undefined) continue;
       call.failed = data["success"] !== true;
+      // A failed call answers with its error's message, and carries no result.
       const content = recordOr(data["result"])["content"];
-      call.answered = typeof content === "string" ? content : JSON.stringify(content ?? null);
+      const message = recordOr(data["error"])["message"];
+      call.answered =
+        typeof content === "string" ? content : typeof message === "string" ? message : JSON.stringify(content ?? null);
     }
   }
   return calls;

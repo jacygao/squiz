@@ -128,6 +128,19 @@ test("each deep call is kept with its arguments, whether it failed, and the end 
   assert.deepEqual(blame, { tool: "git_blame", args: { file: "a.js", line: 3 }, failed: true, answered: "no such path" });
 });
 
+test("a Copilot deep call that failed keeps the error it answered with", () => {
+  const stream = [
+    copilotStart("s", "squiz-git_show", { commit: "nope" }),
+    JSON.stringify({
+      type: "tool.execution_complete",
+      data: { toolCallId: "s", success: false, error: { message: "MCP server 'squiz': no such commit", code: "failure" } },
+    }),
+  ].join("\n");
+  assert.deepEqual(summarise(run, stream, diff).deepCalls, [
+    { tool: "git_show", args: { commit: "nope" }, failed: true, answered: "MCP server 'squiz': no such commit" },
+  ]);
+});
+
 test("a deep call the run was stopped during is kept with nothing answered", () => {
   const stream = JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "run_tests", args: {} });
   assert.deepEqual(summarise(run, stream, diff).deepCalls, [

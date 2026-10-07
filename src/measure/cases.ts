@@ -19,6 +19,8 @@
  *   that way, and nothing in the tree does.
  */
 
+import { fileURLToPath } from "node:url";
+
 import type { Source } from "./case-repository.ts";
 
 /** A defect the change holds, with the line a finding about it belongs on. */
@@ -45,7 +47,7 @@ export type Case = {
 };
 
 /** Where this repository is, for the cases that are its own commits. */
-const HERE = new URL("../..", import.meta.url).pathname;
+const HERE = fileURLToPath(new URL("../..", import.meta.url));
 
 const NOTE_261 = "docs/notes/an-empty-group-loses-its-number-inside-one-round.md";
 const NOTE_286 = "docs/notes/a-subagent-cannot-write-inside-a-loaded-plugin.md";

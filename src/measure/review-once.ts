@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Adapter } from "../reviewers/adapter.ts";
 import { copilot } from "../reviewers/copilot/adapter.ts";
@@ -38,20 +39,27 @@ import { runRound } from "../reviewers/round.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
 import { prepareCase } from "./case-repository.ts";
 import { cases } from "./cases.ts";
+import { shimScript } from "./shim.ts";
 import { summarise, type Run } from "./summary.ts";
 
 const SECONDS = 900;
-const patches = new URL("cases/", import.meta.url).pathname;
+const patches = fileURLToPath(new URL("cases/", import.meta.url));
 const cache = process.env["MEASURE_CACHE"] ?? join(tmpdir(), "squiz-measure-cases");
 
 const [caseName, reviewerName, depthName, charterArgument, outArgument] = process.argv.slice(2);
 
 if (caseName === "prepare") {
+  let failed = 0;
   for (const [name, measured] of Object.entries(cases)) {
     const prepared = prepareCase(name, measured.source, patches, cache);
-    console.log(prepared.outcome === "prepared" ? `${name} ${prepared.head}` : `${name} ${prepared.reason}`);
+    if (prepared.outcome === "prepared") {
+      console.log(`${name} ${prepared.head}`);
+    } else {
+      failed += 1;
+      console.error(prepared.reason);
+    }
   }
-  process.exit(0);
+  process.exit(failed === 0 ? 0 : 1);
 }
 
 const measured = caseName === undefined ? undefined : cases[caseName];
@@ -86,27 +94,17 @@ const own = join(out, "round");
 const stream = join(out, "stream.jsonl");
 mkdirSync(join(own, "session"), { recursive: true });
 
-// The CLI ahead of the real one on PATH, asking for its JSON events and copying
-// them to a file so that the tool calls and their answers can be read back.
-// Appended, so a retried attempt keeps the first.
 const bin = join(out, "bin");
 mkdirSync(bin, { recursive: true });
-const real = execFileSync("which", [reviewer.cli], { encoding: "utf8" }).trim();
 const model = process.env["MEASURE_MODEL"];
-const flags = [...reviewer.jsonFlags, ...(model === undefined ? [] : ["--model", model])].map((flag) => `'${flag}'`);
-// It also records the command line and the round's variable, which show the
-// grant and whether the `deep` tools were handed a round to run in.
-const granted = join(out, "granted.txt");
 writeFileSync(
   join(bin, reviewer.cli),
-  [
-    "#!/bin/bash",
-    "set -o pipefail",
-    `printf '%s\\n' "$@" >> "${granted}"`,
-    `printf 'SQUIZ_ROUND=%s\\n' "$SQUIZ_ROUND" >> "${granted}"`,
-    `"${real}" ${flags.join(" ")} "$@" | tee -a "${stream}"`,
-    "",
-  ].join("\n"),
+  shimScript({
+    real: execFileSync("which", [reviewer.cli], { encoding: "utf8" }).trim(),
+    flags: [...reviewer.jsonFlags, ...(model === undefined ? [] : ["--model", model])],
+    granted: join(out, "granted.txt"),
+    stream,
+  }),
 );
 chmodSync(join(bin, reviewer.cli), 0o755);
 writeFileSync(stream, "");

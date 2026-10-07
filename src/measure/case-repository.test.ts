@@ -76,3 +76,18 @@ test("a patch that does not apply is a reason, not a throw", () => {
   const prepared = prepareCase("bad", { kind: "upstream", url, commit, patch: "bad.patch" }, patches, cache);
   assert.equal(prepared.outcome, "failed");
 });
+
+test("a patch edited after a case was prepared gives the case a new head", () => {
+  const { url, commit, patches } = upstream();
+  const cache = mkdtempSync(join(tmpdir(), "measure-cache-"));
+  const source = { kind: "upstream", url, commit, patch: "two.patch" } as const;
+  const first = prepareCase("two", source, patches, cache);
+  writeFileSync(
+    join(patches, "two.patch"),
+    "diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-module.exports = 1;\n+module.exports = 3;\n",
+  );
+  const second = prepareCase("two", source, patches, cache);
+  assert.equal(second.outcome, "prepared");
+  assert.ok(first.outcome === "prepared" && second.outcome === "prepared" && first.head !== second.head);
+  assert.match(second.outcome === "prepared" ? second.diff : "", /^\+module\.exports = 3;$/mu);
+});
