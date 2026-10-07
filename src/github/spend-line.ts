@@ -112,6 +112,6 @@ function inPlaces(amount: number, units: number): string {
 
 // The digits are grouped here rather than by a locale, so that the line a person
 // reads does not depend on the locale data the runtime happens to carry.
-function grouped(count: number): string {
+export function grouped(count: number): string {
   return String(count).replace(/\B(?=(?:\d{3})+$)/gu, ",");
 }

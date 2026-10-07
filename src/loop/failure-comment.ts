@@ -11,7 +11,7 @@
  * about what the round concluded.
  */
 
-import { renderFailure, type FailureReport } from "../github/failure-body.ts";
+import { renderFailure, type ClosedBy, type FailureReport } from "../github/failure-body.ts";
 import type { GhCall } from "../github/gh.ts";
 import { postIssueComment, type CommentPosting } from "../github/summary.ts";
 import { unthreadedNotes, worktreeNotes } from "../github/summary-body.ts";
@@ -25,6 +25,8 @@ export type FailedRound = {
   readonly confinement?: RoundConfinement;
   /** What the round put on the pull request, absent where it salvaged nothing. */
   readonly salvaged?: { readonly findings: PostedFindings };
+  /** The bound that leaves the episode no round after this one, absent where one remains. */
+  readonly closed?: ClosedBy;
 };
 
 /**
@@ -47,6 +49,7 @@ export function failureReport(round: FailedRound): FailureReport {
   return {
     reason: round.reason.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim(),
     established: worktreeNotes(evidence),
+    ...(round.closed === undefined ? {} : { closed: round.closed }),
     ...(outcomes.length === 0
       ? {}
       : {

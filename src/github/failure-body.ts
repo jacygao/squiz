@@ -7,6 +7,8 @@
  * renders the report's own strings and rewords none of them.
  */
 
+import { grouped } from "./spend-line.ts";
+
 /** What a failed round established, which is everything its comment says. */
 export type FailureReport = {
   /** Why the round failed, as one line. */
@@ -25,7 +27,20 @@ export type FailureReport = {
    * where the round salvaged no findings, which leaves nothing to count.
    */
   readonly salvaged?: { readonly threaded: number; readonly reported: number };
+  /**
+   * The bound that leaves the episode no round after this one. Absent where a
+   * round remains, which is the only case a new commit or reply retries.
+   */
+  readonly closed?: ClosedBy;
 };
+
+/**
+ * Why no round runs after the failed one. `roundsRun` counts the episode's
+ * rounds, this one included where it was a round.
+ */
+export type ClosedBy =
+  | { readonly bound: "round-cap"; readonly roundsRun: number; readonly cap: number }
+  | { readonly bound: "token-bound"; readonly tokens: number; readonly roundsRun: number };
 
 /**
  * The marker the comment opens with. The dash is part of it: `**Squiz review`
@@ -36,19 +51,33 @@ const marker = "**Squiz review failed — ";
 /** The comment's body for `report`, with no trailing newline. */
 export function renderFailure(report: FailureReport): string {
   const counted = report.salvaged === undefined ? [] : [howManyLanded(report.salvaged)];
-  const blocks = [
-    `${marker}${report.reason}**`,
-    [
-      ...counted,
-      "The review is still open.",
-      "A new commit or reply, or running `squiz review` again, retries it.",
-    ].join(" "),
-  ];
+  const next =
+    report.closed === undefined
+      ? ["The review is still open.", "A new commit or reply, or running `squiz review` again, retries it."]
+      : closedLines(report.closed);
+  const blocks = [`${marker}${report.reason}**`, [...counted, ...next].join(" ")];
   // The findings come first and the worktree after, the order the summary's
   // Notes keep.
   const items = [...(report.unthreaded ?? []), ...report.established];
   if (items.length > 0) blocks.push(items.map((item) => `- ${item}`).join("\n"));
   return blocks.join("\n\n");
+}
+
+/**
+ * What a closed episode's comment says in place of the retry.
+ *
+ * The next firing finds the bound spent and closes the episode without a
+ * reviewer, posting the summary. An episode that ran no round may have no thread
+ * for a summary to count, so it is promised none.
+ */
+function closedLines(closed: ClosedBy): string[] {
+  const why =
+    closed.bound === "round-cap"
+      ? `it has run ${closed.roundsRun} ${closed.roundsRun === 1 ? "round" : "rounds"}, and the round cap allows ${closed.cap}`
+      : `it reached the token bound of ${grouped(closed.tokens)} tokens`;
+  const summary =
+    closed.roundsRun === 0 ? [] : ["A new commit or reply, or running `squiz review`, posts its summary."];
+  return [`The review is closed: ${why}.`, "No round runs again.", ...summary];
 }
 
 /** How many of the salvaged findings are threads on the pull request, as a sentence. */
