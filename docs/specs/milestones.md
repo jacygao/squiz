@@ -1,6 +1,6 @@
 # Milestones
 
-**Version:** 0.36 (draft)
+**Version:** 0.37 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -24,7 +24,7 @@ something that can be run or seen, never in a module written.
 | 11 | M13 — Copilot as a coding agent | Done |
 | 12 | M11 — One review level | Done |
 | 13 | M8 — Episode boundaries | Done |
-| 14 | M9 — Install and dogfood | |
+| 14 | M9 — Install and dogfood | Done |
 
 **A milestone's number names it, and the table places it.** M10, M12, M13 and
 M11 come before M8 and M9 in the order.
@@ -259,38 +259,33 @@ It left these held, with `milestone:M9`:
 
 ## M9 — Install and dogfood
 
-The marketplace manifest, a README carrying the getting-started steps,
-`squiz doctor`, and `docs/notes/` consolidated.
+**Done.** Its criteria are in #652.
 
-### Acceptance criteria
+Made squiz something a person installs and checks. `.claude-plugin/marketplace.json`
+names the marketplace `squiz`, and Claude Code and Copilot both install from it
+(#661, #671). The README carries the getting-started steps for both (#679).
 
-- [ ] `/plugin marketplace add` followed by `/plugin install` works into a fresh
-      host project. *Changed by Copilot as a coding agent: so does the plugin
-      loaded into Copilot, with `copilot plugin install` or `--plugin-dir`, with
-      Copilot's experimental features on as the harness specification's § 9
-      says (#602).*
-- [ ] `squiz doctor` reports `git`, `gh` and its authentication, `pi`, Claude
-      Code, and the Node version, naming whatever is missing. *Changed by
-      detached sessions: it also reports whether tmux or Herdr is present.
-      Neither is required.* It reports whether `squiz init`'s link puts this
-      squiz on `PATH`. *Changed by Copilot as the reviewer and as a coding
-      agent: in place of `pi`, it reports the reviewer `.squiz.json` names, and
-      that reviewer's model (#512). It reports the Copilot CLI wherever Copilot
-      is the reviewer or a coding agent, and, for a Copilot coding agent,
-      whether Copilot's experimental features are on.* *Changed by planning
-      M9: the check is `squiz doctor`, a subcommand run from a shell, and
-      squiz ships no slash command (#653).*
-- [ ] A subagent there produces a reviewed pull request end to end. *Changed by
-      detached sessions: a main session does too, woken by a note. Changed by
-      Copilot as a coding agent: so does a Copilot session, woken through the
-      plugin's extension.*
-- [ ] Squiz reviews its own pull requests in this repository. *This has held
-      all through M11 and M8.*
+`squiz doctor` is a subcommand, run from a shell or after `!` in Claude Code, and
+squiz ships no slash command. It reports:
 
-### Issues
+- `git`, `gh` and its sign-in, Node, and tmux or Herdr (#663)
+- Claude Code, and Copilot with its experimental features, either one enough as
+  the coding agent (#684)
+- the `squiz init` link (#672), and Copilot's copy of squiz where its version
+  differs (#690)
+- the reviewer `.squiz.json` names, its model (#676) and, for Copilot, its
+  sign-in, checked with one request (#693)
+- the project's `pi` settings a review does not use (#685)
 
-- #259, have `squiz doctor` name the reviewer settings squiz overrides in this
-  project
-- #271, name the reviewer and its model in the summary comment
-- #274, look once at whether an interactive session shows a hook's stderr when
-  it exits 0
+Live runs set up from the README alone reviewed a Copilot session (#688), and a
+Claude Code subagent and main session (#697), each woken by its note.
+`docs/notes/` was reconciled with the design that dropped `deep` (#669).
+
+It also changed the loop. A round replies on every thread it closes, and the
+summary lists the rounds and names the reviewer and its model (#670, #668). A
+fix pushed after the round cap gets one closing round (#667). A close counts
+each thread by its recorded ruling (#666). `squiz review` queues a pushed commit
+GitHub had not yet reported as the head (#664).
+
+It left #274 and #695 open, each needing a person, and the issues held with
+`milestone:M9`.
