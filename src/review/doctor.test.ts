@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { standIn } from "../testing/stand-in.ts";
-import { CHECKS, squizDoctor, type Check, type DoctorContext } from "./doctor.ts";
+import { CHECKS, pathLink, squizDoctor, type Check, type DoctorContext } from "./doctor.ts";
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "squiz-653-doctor-")));
 after(() => {
@@ -68,6 +68,7 @@ test("every dependency present prints a line each and exits 0", () => {
       "Node 24.6.0",
       "tmux 3.7b",
       "Herdr 0.9.3",
+      NO_LINK,
       "",
     ].join("\n"),
   );
@@ -87,6 +88,7 @@ test("nothing on PATH names every required dependency as not found and exits 1",
       "Node 24.6.0",
       "tmux: not found. Not required: without tmux or Herdr, reviews run detached",
       "Herdr: not found. Not required: without tmux or Herdr, reviews run detached",
+      NO_LINK,
       "",
     ].join("\n"),
   );
@@ -188,7 +190,7 @@ test("a row a later check adds prints after the others, and only a failed one ch
   const warning = squizDoctor(context(EVERY_FAKE), [...CHECKS, warned]);
   const failure = squizDoctor(context(EVERY_FAKE), [...CHECKS, failed]);
 
-  assert.match(warning.stdout, /Herdr 0\.9\.3\nCopilot: warning: its experimental features are off\n$/u);
+  assert.match(warning.stdout, /\nCopilot: warning: its experimental features are off\n$/u);
   assert.equal(warning.exit, 0, "a warning never changes the exit status");
   assert.match(failure.stdout, /\npi: not found\n$/u);
   assert.equal(failure.exit, 1);
@@ -231,3 +233,141 @@ test("squiz doctor through the binary exits as its rows say and writes nothing i
 
   assert.deepEqual(snapshot(repository), before, "squiz doctor must write nothing where it is run");
 });
+
+/** A copy of squiz's plugin layout under `root`: a manifest naming squiz, and a bin/squiz. */
+function squizCopy(root: string): string {
+  mkdirSync(join(root, ".claude-plugin"), { recursive: true });
+  writeFileSync(join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "squiz" }), "utf8");
+  mkdirSync(join(root, "bin"), { recursive: true });
+  const binary = join(root, "bin", "squiz");
+  writeFileSync(binary, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  return binary;
+}
+
+/** A fresh directory under the scratch space, standing in for a directory on `PATH`. */
+function directoryOnPath(name: string): string {
+  made += 1;
+  const path = join(scratch, `${made}-${name}`);
+  mkdirSync(path, { recursive: true });
+  return path;
+}
+
+/** The PATH-link row for `target`, with `path` as the whole of `PATH`. */
+function linkRow(target: string, path: string) {
+  return pathLink(
+    () => target,
+    () => scratch,
+  )({ environment: { PATH: path, HOME: scratch }, nodeVersion: "24.6.0", boundMs: 10_000 });
+}
+
+const NO_LINK =
+  "squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init";
+
+test("no squiz on PATH is no link, which Claude Code alone does not need, so it is not a failure", () => {
+  const target = squizCopy(directoryOnPath("this-squiz"));
+
+  assert.deepEqual(linkRow(target, directoryOnPath("empty")), { level: "present", line: NO_LINK });
+});
+
+test("this squiz's own bin/ on PATH, as Claude Code's shell has it, is not read as the link other agents need", () => {
+  const target = squizCopy(directoryOnPath("this-squiz"));
+
+  const row = linkRow(target, `${dirname(target)}:${directoryOnPath("empty")}`);
+
+  assert.deepEqual(row, { level: "present", line: NO_LINK }, "Claude Code's own PATH says nothing about another agent's");
+});
+
+test("a link to this squiz is named, as squiz init names it", () => {
+  const target = squizCopy(directoryOnPath("this-squiz"));
+  const localBin = directoryOnPath("local-bin");
+  symlinkSync(target, join(localBin, "squiz"));
+
+  assert.deepEqual(linkRow(target, `${dirname(target)}:${localBin}`), {
+    level: "present",
+    line: `squiz link: ${join(localBin, "squiz")} already links to this squiz`,
+  });
+});
+
+test("a link to an earlier version of the same plugin-cache install is a warning saying to run squiz init", () => {
+  const install = join(directoryOnPath("claude"), "plugins", "cache", "squiz-marketplace", "squiz");
+  const earlier = squizCopy(join(install, "0.1.0"));
+  const target = squizCopy(join(install, "0.2.0"));
+  const localBin = directoryOnPath("local-bin");
+  symlinkSync(earlier, join(localBin, "squiz"));
+
+  assert.deepEqual(linkRow(target, localBin), {
+    level: "warning",
+    line: `squiz link: warning: ${join(localBin, "squiz")} links to ${earlier}, an earlier version of this install. Run squiz init to move it to this one`,
+  });
+});
+
+test("a link to another squiz is a warning, named with squiz init's own words", () => {
+  const target = squizCopy(directoryOnPath("this-squiz"));
+  const other = squizCopy(directoryOnPath("other-checkout"));
+  const localBin = directoryOnPath("local-bin");
+  const link = join(localBin, "squiz");
+  symlinkSync(other, link);
+
+  assert.deepEqual(linkRow(target, localBin), {
+    level: "warning",
+    line: `squiz link: warning: ${link} links to another squiz, ${other}. To use this one instead, remove ${link} and run squiz init again`,
+  });
+});
+
+test("another squiz's own bin/ on PATH is a warning, even ahead of a link to this squiz", () => {
+  const target = squizCopy(directoryOnPath("this-squiz"));
+  const other = squizCopy(directoryOnPath("other-plugin"));
+  const localBin = directoryOnPath("local-bin");
+  symlinkSync(target, join(localBin, "squiz"));
+
+  const row = linkRow(target, `${dirname(other)}:${localBin}`);
+
+  assert.equal(row.level, "warning");
+  assert.equal(
+    row.line,
+    `squiz link: warning: ${dirname(other)} is another squiz's bin/ on PATH, the way Claude Code puts an enabled plugin's there. Run squiz init by name in that session, so the link points at the squiz it uses`,
+  );
+});
+
+test("something named squiz that is not squiz, or a link to nothing, is a warning", () => {
+  const target = squizCopy(directoryOnPath("this-squiz"));
+  const unrelated = directoryOnPath("unrelated");
+  writeFileSync(join(unrelated, "squiz"), "#!/bin/sh\n", { mode: 0o755 });
+  const dangling = directoryOnPath("dangling");
+  symlinkSync(join(scratch, "gone", "squiz"), join(dangling, "squiz"));
+
+  assert.deepEqual(linkRow(target, unrelated), {
+    level: "warning",
+    line: `squiz link: warning: ${join(unrelated, "squiz")} is not squiz, and squiz leaves it alone. Move it off PATH, then run squiz init again`,
+  });
+  assert.deepEqual(linkRow(target, dangling), {
+    level: "warning",
+    line: `squiz link: warning: ${join(dangling, "squiz")} links to ${join(scratch, "gone", "squiz")}, which does not exist. Remove ${join(dangling, "squiz")}, then run squiz init again`,
+  });
+});
+
+test("squiz doctor run through squiz init's link identifies the squiz it runs as this one", () => {
+  const shimNeeds = directoryOnPath("shim-needs");
+  symlinkSync(process.execPath, join(shimNeeds, "node"));
+  for (const tool of ["dirname", "readlink"]) symlinkSync(join("/usr/bin", tool), join(shimNeeds, tool));
+  const shim = fileURLToPath(new URL("../../bin/squiz", import.meta.url));
+  const fakes = String(context(EVERY_FAKE).environment.PATH);
+  const run = (path: string) =>
+    spawnSync("squiz", ["doctor"], { cwd: scratch, encoding: "utf8", env: { PATH: path, HOME: scratch } });
+
+  const localBin = directoryOnPath("local-bin");
+  const link = join(localBin, "squiz");
+  symlinkSync(shim, link);
+  const throughLink = run(`${localBin}:${fakes}:${shimNeeds}`);
+  assert.equal(throughLink.status, 0, throughLink.stdout + throughLink.stderr);
+  assert.match(throughLink.stdout, new RegExp(`^squiz link: ${escaped(link)} already links to this squiz$`, "mu"));
+
+  // As Claude Code's Bash tool runs it: this checkout's own bin/ on PATH, and no link.
+  const asClaudeCode = run(`${dirname(shim)}:${fakes}:${shimNeeds}`);
+  assert.equal(asClaudeCode.status, 0, asClaudeCode.stdout + asClaudeCode.stderr);
+  assert.match(asClaudeCode.stdout, new RegExp(`^${escaped(NO_LINK)}$`, "mu"));
+});
+
+function escaped(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
