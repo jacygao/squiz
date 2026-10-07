@@ -7,8 +7,9 @@
 
 `docs/specs/` holds design documents, as Markdown.
 
-**A spec's version number tracks commits.** A committed change bumps it; edits
-sitting in the working tree do not.
+**A spec's version number tracks milestones.** The pull request that records a
+milestone as done bumps it once. Pull requests inside a milestone leave it
+alone, so that two of them never conflict on the version line.
 
 ## Notes
 
