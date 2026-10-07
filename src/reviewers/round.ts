@@ -456,30 +456,6 @@ async function attempt(
     // The caller's record of the reviewer is not the reviewer, which runs on.
   }
 
-  // A startup failure never reaches the report file: the process exits non-zero
-  // having written nothing, and a child's only account of itself is its stderr.
-  // Both pipes are read as they arrive, because a pipe nobody drains fills and
-  // stops the process writing to it. A reviewer in a pane writes to the pane.
-  const complaint = child === undefined ? (): string => "" : drain(child.stderr);
-  if (child !== undefined) discard(child.stdout);
-  const watching = new AbortController();
-  const exited = child === undefined ? exitOf(place.identity.pid, watching.signal) : exitOfChild(child);
-  // The process has written everything it will once it has exited, so the file
-  // is read once more then and that read is the last.
-  const closing = child === undefined ? exited : ending(child);
-  const abandoned = new AbortController();
-
-  // The last the parse reported is the whole of what a killed round has, so it
-  // is tracked here rather than taken from the parse's return, which a killed
-  // attempt may not reach.
-  let progress: RoundProgress = {
-    cost: adapter.costAtExit === true ? undefined : unspent,
-    refusals: 0,
-    finished: false,
-    broken: undefined,
-    ...nothingReported,
-  };
-
   // The reviewer leads its group, in a pane as with no terminal, so its
   // identifier names the group. What the round owns is the group rather than the
   // one process in it that it started.
@@ -494,37 +470,61 @@ async function attempt(
     space: invocation.roundSpace,
   };
 
-  const reports = follow(invocation.reportsFile, {
-    ended: exited,
-    pollMs: FOLLOW_MS,
-    abandoned: abandoned.signal,
-  });
-  const parsing = read(adapter, reports, (reached) => {
-    progress = reached;
-  }).then(
-    (run): Attempt => ({
-      cost: run.cost,
-      refusals: progress.refusals,
-      reported: reportedIn(progress),
-      ...run.result,
-    }),
-    // A read that failed left the rest of the file uncounted. A cost reported at
-    // exit is the file's last line, so one that was read is whole.
-    (cause): Attempt => ({
-      cost: adapter.costAtExit === true ? progress.cost : atLeast(progress.cost),
-      refusals: progress.refusals,
-      reported: reportedIn(progress),
-      kind: "unparsed",
-      reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
-    }),
-  );
-
-  let cancel = (): void => {};
-  const expiry = new Promise<"expired">((settle) => {
-    cancel = bound.whenPassed(() => settle("expired"));
-  });
-
+  const watching = new AbortController();
   try {
+    // A startup failure never reaches the report file: the process exits non-zero
+    // having written nothing, and a child's only account of itself is its stderr.
+    // Both pipes are read as they arrive, because a pipe nobody drains fills and
+    // stops the process writing to it. A reviewer in a pane writes to the pane.
+    const complaint = child === undefined ? (): string => "" : drain(child.stderr);
+    if (child !== undefined) discard(child.stdout);
+    const exited = child === undefined ? exitOf(place.identity.pid, watching.signal) : exitOfChild(child);
+    // The process has written everything it will once it has exited, so the file
+    // is read once more then and that read is the last.
+    const closing = child === undefined ? exited : ending(child);
+    const abandoned = new AbortController();
+
+    // The last the parse reported is the whole of what a killed round has, so it
+    // is tracked here rather than taken from the parse's return, which a killed
+    // attempt may not reach.
+    let progress: RoundProgress = {
+      cost: adapter.costAtExit === true ? undefined : unspent,
+      refusals: 0,
+      finished: false,
+      broken: undefined,
+      ...nothingReported,
+    };
+
+    const reports = follow(invocation.reportsFile, {
+      ended: exited,
+      pollMs: FOLLOW_MS,
+      abandoned: abandoned.signal,
+    });
+    const parsing = read(adapter, reports, (reached) => {
+      progress = reached;
+    }).then(
+      (run): Attempt => ({
+        cost: run.cost,
+        refusals: progress.refusals,
+        reported: reportedIn(progress),
+        ...run.result,
+      }),
+      // A read that failed left the rest of the file uncounted. A cost reported at
+      // exit is the file's last line, so one that was read is whole.
+      (cause): Attempt => ({
+        cost: adapter.costAtExit === true ? progress.cost : atLeast(progress.cost),
+        refusals: progress.refusals,
+        reported: reportedIn(progress),
+        kind: "unparsed",
+        reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
+      }),
+    );
+
+    let cancel = (): void => {};
+    const expiry = new Promise<"expired">((settle) => {
+      cancel = bound.whenPassed(() => settle("expired"));
+    });
+
     const ended = await Promise.race([parsing, expiry]);
     cancel();
 
@@ -557,9 +557,14 @@ async function attempt(
       ...ended,
       reason: `${ended.reason}: ${endedAs(detached.command, child)}, and said: ${said}`,
     };
+  } catch (cause) {
+    // Nothing after this attempt stops the reviewer, and the caller reads what it
+    // spent from a file it would otherwise still be writing.
+    await stopReviewer(owned);
+    throw cause;
   } finally {
     watching.abort();
-    // The reviewer and its groups are stopped by now. Closing the pane takes it
+    // The reviewer is stopped by now. Closing the pane takes it
     // off the person's screen, and is not relied on to stop anything.
     const left = closePlace(place, sessions.environment);
     if (left !== undefined) {

@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.06 (draft)
+**Version:** 1.07 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2928,13 +2928,15 @@ ended.** Two attempts end with no read of the file to its end:
   command as it opens, and a child whose identity could not be read ran until it
   was stopped. A Herdr pane runs nothing until its start succeeds, so its failed
   start spends nothing.
-- **An attempt the harness threw out of** after the reviewer started.
+- **An attempt the harness threw out of** after the reviewer started. The
+  reviewer's process group is stopped and its pane closed before the attempt
+  returns.
 
-The file is read once the start has failed or the throw is caught, and what it
-says is a floor, because a request in flight was spent and never reported. A
-Copilot usage line is Copilot's own total and is kept as it is. A reviewer that
-ran and whose file reports no spend is charged a floor of zero, so the ledger
-reads as a floor rather than as a known zero.
+The file is read once the reviewer is stopped, so it holds all the reviewer will
+write. What it says is a floor, because a request in flight was spent and never
+reported. A Copilot usage line is Copilot's own total and is kept as it is. A
+reviewer that ran and whose file reports no spend is charged a floor of zero, so
+the ledger reads as a floor rather than as a known zero.
 
 The bound is read before a round starts, and again when a round records what it
 spent. It stops the next round rather than the running one, because a round
