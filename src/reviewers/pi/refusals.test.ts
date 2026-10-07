@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { grants } from "./argv.ts";
-import { refuse, refusedTools } from "./refusals.ts";
+import { grantIn, refuse } from "./refusals.ts";
 
 /** One tool call, in the shape `pi` emits it: the fields the handler never reads included. */
 function called(toolName: string, input: unknown): { toolName: string; input: unknown } {
@@ -24,45 +24,60 @@ function called(toolName: string, input: unknown): { toolName: string; input: un
 }
 
 /** What the reviewer is told in place of the call, which is the point of refusing it. */
-function reasonFor(call: { toolName: string; input: unknown }): string {
-  const refused = refuse(call);
+function reasonFor(call: { toolName: string; input: unknown }, grant: readonly string[]): string {
+  const refused = refuse(call, grant);
   assert.ok(refused !== undefined, `the call was let through: ${JSON.stringify(call)}`);
   assert.equal(refused.block, true, "a refusal that does not block runs the tool anyway");
   return refused.reason;
 }
 
-test("the tools a review has no use for are refused by name", () => {
-  assert.deepEqual([...refusedTools], ["edit", "write"]);
-  for (const tool of refusedTools) {
-    const reason = reasonFor(called(tool, { path: "src/threads.ts", content: "anything" }));
-    assert.match(reason, /^squiz refused this call: /u);
-    assert.match(reason, new RegExp(`\`${tool}\``, "u"), `the refusal of ${tool} does not name it`);
+/** `pi`'s own default set, which it falls back to where no `--tools` reaches it, and a name nothing serves. */
+const ungranted = ["bash", "edit", "write", "delete_everything"];
+
+test("a tool the grant does not name is refused, and the reviewer is told so", () => {
+  for (const grant of Object.values(grants)) {
+    for (const tool of ungranted) {
+      assert.equal(
+        reasonFor(called(tool, { path: "src/threads.ts" }), grant),
+        `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
+      );
+    }
   }
+});
+
+test("every tool the grant names is left alone", () => {
+  for (const grant of Object.values(grants)) {
+    for (const tool of grant) {
+      assert.equal(refuse(called(tool, { path: "src/threads.ts" }), grant), undefined, tool);
+    }
+  }
+});
+
+/** The allow-list is the grant handed over, so a tool one grant carries is refused under one that does not. */
+test("a tool is refused under a grant that leaves it out", () => {
+  assert.equal(refuse(called("git_show", { commit: "HEAD" }), ["read", "git_show"]), undefined);
+  assert.equal(refuse(called("git_show", { commit: "HEAD" }), ["read"])?.block, true);
 });
 
 /** The name is the whole of it: nothing is read out of what the call was given. */
 test("a refused tool is refused whatever it was given, including nothing", () => {
-  for (const tool of refusedTools) {
-    assert.equal(refuse(called(tool, undefined))?.block, true);
-    assert.equal(refuse(called(tool, {}))?.block, true);
+  for (const input of [undefined, {}, { command: "git status" }]) {
+    assert.equal(refuse(called("bash", input), grants.read)?.block, true, JSON.stringify(input));
   }
 });
 
-test("the tools the deep grant carries are left alone", () => {
+test("with no grant handed over, every call is refused", () => {
+  assert.deepEqual(grantIn(undefined), []);
+  assert.deepEqual(grantIn(""), []);
   for (const tool of grants.deep) {
-    assert.equal(refuse(called(tool, { path: "src/threads.ts" })), undefined);
+    assert.equal(refuse(called(tool, {}), grantIn(undefined))?.block, true, tool);
   }
 });
 
-/** No depth grants a shell, so a command line is never read, whatever it would do. */
-test("a shell call is not read for what its command would do", () => {
-  for (const input of [{ command: "git commit -m x" }, { command: "git push" }, undefined]) {
-    assert.equal(refuse(called("bash", input)), undefined, JSON.stringify(input));
+test("the grant is read back as the names it was handed over as", () => {
+  for (const grant of Object.values(grants)) {
+    assert.deepEqual(grantIn(grant.join(",")), grant);
   }
-});
-
-test("the reason tells the reviewer what to do instead", () => {
-  assert.match(reasonFor(called("write", {})), /Report what is wrong with the change/u);
 });
 
 /**
@@ -73,14 +88,10 @@ test("the handler answers rather than throwing, whatever the call carries", () =
   const hostile: readonly unknown[] = [
     { toolName: "edit", input: null },
     { toolName: "", input: undefined },
+    { toolName: undefined, input: undefined },
     { toolName: "read", input: Object.create(null) as unknown },
   ];
   for (const call of hostile) {
-    assert.doesNotThrow(() => refuse(call as { toolName: string; input: unknown }));
+    assert.doesNotThrow(() => refuse(call as { toolName: string; input: unknown }, grants.read));
   }
-});
-
-/** The list holds against a caller that would add to it at runtime. */
-test("the list cannot be added to", () => {
-  assert.throws(() => (refusedTools as string[]).push("read"));
 });

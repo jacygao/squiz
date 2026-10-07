@@ -1,20 +1,23 @@
 /**
- * A round whose reviewer reaches for the tools that write, driven over a real
- * git repository with a stand-in for `pi`.
+ * A round whose reviewer reaches for tools outside the grant, and for a read
+ * outside the snapshot, driven over a real git repository with a stand-in for
+ * `pi`. Each call outside the grant stands for a round whose `--tools` was
+ * lost, where `pi` falls back to its own default set, a shell among it.
  *
  * **The stand-in loads the extension the way `pi` loads it** — from the path on
- * the command line, through the same default export — and dispatches each call
- * the way `pi` dispatches it: the handler first, an error result carrying its
- * reason where it blocks, and the tool itself where it does not. The types the
- * extension is written against are structural, so a shape that drifted from
- * `pi`'s would compile and fail only in a round. This is what puts the real
- * event shape through the real handler.
+ * the command line, through the same default export, with the environment the
+ * adapter gives it — and dispatches each call the way `pi` dispatches it: the
+ * handler first, an error result carrying its reason where it blocks, and the
+ * tool itself where it does not. The types the extension is written against are
+ * structural, so a shape that drifted from `pi`'s would compile and fail only
+ * in a round. This is what puts the real event shape through the real handler.
  *
  * **A call the handler lets through is really made.** The stand-in writes, and
  * the repository is read afterwards. A round that came back clean because
  * nothing was attempted and a round that came back clean because everything was
  * refused are the same round from outside, so the count and the repository are
- * both read, and a round where the reviewer tries nothing is run beside it.
+ * both read, a granted read and a history tool are seen to run, and a round
+ * where the reviewer tries nothing is run beside it.
  *
  * The stand-in refuses to review at all where the extension subscribed no
  * handler. `pi` skips the event entirely when nothing subscribed to it, and a
@@ -44,8 +47,14 @@ export function lastSaid(comments: readonly string[]): string | undefined {
 }
 `;
 
-/** The calls the stand-in reaches for, every one of which must be refused. */
-const ATTEMPTS = 2;
+/** The file beside the tree, outside the snapshot, which the stand-in tries to read. */
+const outsideFile = "../outside.txt";
+
+/** The tools outside every grant the stand-in calls: `pi`'s fallback set beyond `read`, and a name nothing serves. */
+const UNGRANTED: readonly string[] = ["edit", "write", "bash", "delete_everything"];
+
+/** The calls that must be refused: every ungranted tool, and the read outside the snapshot. */
+const ATTEMPTS = UNGRANTED.length + 1;
 
 const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url));
 
@@ -55,7 +64,7 @@ const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url
  */
 const BOUND_SECONDS = 60;
 
-test("the tools that write are refused, and the round counts them", async () => {
+test("every call outside the grant is refused, and the round counts them", async () => {
   await inTheFixture(async (tree) => {
     const round = await runRound(pi, invocationIn(tree), BOUND_SECONDS);
 
@@ -80,14 +89,27 @@ test("the tools that write are refused, and the round counts them", async () => 
  */
 test("the reviewer is told why, in the refused call's own error", async () => {
   await inTheFixture(async (tree) => {
-    const round = await runRound(pi, invocationIn(tree), BOUND_SECONDS);
-    assert.equal(round.outcome, "reviewed", `the round came back as ${JSON.stringify(round)}`);
+    const told = toldIn(await runRound(pi, invocationIn(tree), BOUND_SECONDS));
+    for (const tool of UNGRANTED) {
+      assert.equal(
+        told.get(`${tool} refused`),
+        `squiz refused this call: \`${tool}\` is not a tool this review grants.`,
+        `the reviewer was told: ${JSON.stringify([...told])}`,
+      );
+    }
+    assert.match(
+      told.get("read outside refused") ?? "",
+      /^squiz refused this call: .* is outside the code under review/u,
+      `the reviewer was told: ${JSON.stringify([...told])}`,
+    );
+  });
+});
 
-    const [finding] = round.findings;
-    assert.ok(finding !== undefined, "the stand-in reports what it was told, and reported nothing");
-    const told = finding.reference ?? "";
-    assert.match(told, /^squiz refused this call: /u, `the reviewer read back: ${told}`);
-    assert.match(told, /changes the code you are reviewing/u);
+test("a granted read and a history tool still run", async () => {
+  await inTheFixture(async (tree) => {
+    const told = toldIn(await runRound(pi, invocationIn(tree), BOUND_SECONDS));
+    assert.equal(told.get("read inside ran"), reviewedContent, JSON.stringify([...told]));
+    assert.match(told.get("git_log_search ran") ?? "", /Add lastSaid/u, JSON.stringify([...told]));
   });
 });
 
@@ -103,6 +125,12 @@ test("a round whose reviewer reaches for none of them refuses nothing", async ()
     assert.equal(git(["status", "--porcelain"], tree), "");
   });
 });
+
+/** What the reviewer was told back for each call, by the headline the stand-in reported it under. */
+function toldIn(round: Awaited<ReturnType<typeof runRound>>): ReadonlyMap<string, string> {
+  assert.equal(round.outcome, "reviewed", `the round came back as ${JSON.stringify(round)}`);
+  return new Map(round.findings.map((finding) => [finding.headline, finding.reference ?? ""]));
+}
 
 /** The prompt that tells the stand-in to review without reaching for anything. */
 const TRIES_NOTHING = "# Review pull request #1\n\nReach for nothing.";
@@ -130,8 +158,9 @@ function invocationIn(tree: string): Invocation {
 }
 
 /**
- * A git repository with the reviewed file committed, and the stand-in on `PATH`
- * as `pi`, so a write that escaped shows in `git status`.
+ * A git repository with the reviewed file committed, a file beside it outside
+ * the tree, and the stand-in on `PATH` as `pi`, so a write that escaped shows in
+ * `git status`.
  */
 async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void> {
   const under = mkdtempSync(join(tmpdir(), "squiz-refused-"));
@@ -139,6 +168,7 @@ async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void>
   const wasOnPath = process.env["PATH"] ?? "";
   try {
     mkdirSync(join(tree, dirname(reviewedFile)), { recursive: true });
+    writeFileSync(join(tree, outsideFile), "decoy\n");
     writeFileSync(join(tree, ".gitignore"), ".squiz/\n");
     writeFileSync(join(tree, reviewedFile), reviewedContent);
     git(["init", "--quiet"], tree);
@@ -184,8 +214,9 @@ function piIn(under: string): string {
  *
  * The dispatch is `pi`'s own: the first handler that blocks wins, a handler that
  * throws blocks as well, and a blocked call is answered with an error result
- * carrying the reason. What it reports as a finding is the first refusal it was
- * given, so the round can be read for what the reviewer was actually told.
+ * carrying the reason. It reports one finding per call, headed with the call and
+ * whether it ran, carrying what it was told back, so the round can be read for
+ * what the reviewer was actually told.
  *
  * Plain CommonJS, because it is written to a file and run by a fresh process
  * rather than type-stripped and imported.
@@ -217,8 +248,6 @@ const blocked = (reason) => ({
 async function review() {
   const extension = after("--extension");
   if (extension === undefined) give("the command line carries no extension");
-  // No depth grants a writer, so every call below stands for a
-  // grant that stopped being passed, which is what the refusal is there for.
 
   const tools = new Map();
   const handlers = [];
@@ -236,8 +265,8 @@ async function review() {
   }
 
   let calls = 0;
-  const refused = [];
-  const attempt = (toolName, input, perform) => {
+  const told = [];
+  const attempt = async (label, toolName, input, perform) => {
     calls += 1;
     const toolCallId = String(calls);
     say({ type: "tool_execution_start", toolCallId, toolName, args: input });
@@ -255,42 +284,62 @@ async function review() {
     }
     if (stopped) {
       const result = blocked(stopped.reason);
-      refused.push(result.content[0].text);
+      told.push([label + " refused", result.content[0].text]);
       say({ type: "tool_execution_end", toolCallId, toolName, isError: true, result });
       return;
     }
-    const ran = perform();
+    const ran = String(await perform());
+    told.push([label + " ran", ran]);
     say({
       type: "tool_execution_end",
       toolCallId,
       toolName,
       isError: false,
-      result: { content: [{ type: "text", text: String(ran) }] },
+      result: { content: [{ type: "text", text: ran }] },
     });
   };
 
   // pi reads the file an @ argument names as the first message.
   const named = args[args.length - 1] ?? "";
   const prompt = named.startsWith("@") ? fs.readFileSync(named.slice(1), "utf8") : undefined;
+  const reviewed = path.join(process.cwd(), ${JSON.stringify(reviewedFile)});
   if (prompt !== triesNothing) {
-    attempt("edit", { path: ${JSON.stringify(reviewedFile)}, oldText: "length]", newText: "length - 1]" }, () => {
-      fs.writeFileSync(path.join(process.cwd(), ${JSON.stringify(reviewedFile)}), "edited\\n");
+    await attempt("edit", "edit", { path: ${JSON.stringify(reviewedFile)}, oldText: "length]", newText: "length - 1]" }, () => {
+      fs.writeFileSync(reviewed, "edited\\n");
       return "edited";
     });
-    attempt("write", { path: ${JSON.stringify(reviewedFile)}, content: "escaped" }, () => {
-      fs.writeFileSync(path.join(process.cwd(), ${JSON.stringify(reviewedFile)}), "escaped\\n");
+    await attempt("write", "write", { path: ${JSON.stringify(reviewedFile)}, content: "escaped" }, () => {
+      fs.writeFileSync(reviewed, "escaped\\n");
       return "written";
+    });
+    await attempt("bash", "bash", { command: "touch escaped" }, () => {
+      fs.writeFileSync(path.join(process.cwd(), "escaped"), "");
+      return "ran";
+    });
+    await attempt("delete_everything", "delete_everything", {}, () => {
+      fs.rmSync(reviewed);
+      return "deleted";
+    });
+    await attempt("read outside", "read", { path: ${JSON.stringify(outsideFile)} }, () =>
+      fs.readFileSync(path.join(process.cwd(), ${JSON.stringify(outsideFile)}), "utf8"),
+    );
+    await attempt("read inside", "read", { path: ${JSON.stringify(reviewedFile)} }, () =>
+      fs.readFileSync(reviewed, "utf8"),
+    );
+    await attempt("git_log_search", "git_log_search", { term: "lastSaid" }, async () => {
+      const answer = await tools.get("git_log_search").execute("g1", { term: "lastSaid" });
+      return answer.content[0].text;
     });
   }
 
-  const finding = {
+  const findings = told.map(([headline, reference]) => ({
     scope: "change",
     severity: "low",
-    headline: "The reviewer reached for the calls it was given",
+    headline,
     reasoning: ["What came back is in the reference."],
     suggestedFix: "Nothing.",
-    reference: refused[0] || "the reviewer was refused nothing",
-  };
+    reference: reference || "nothing came back",
+  }));
 
   const message = {
     type: "message_end",
@@ -310,8 +359,8 @@ async function review() {
     },
   };
   for (const handler of ended) handler(message);
-  await tools.get("report_finding").execute("f1", finding);
-  await tools.get("finish_review").execute("f2", {});
+  for (const [at, finding] of findings.entries()) await tools.get("report_finding").execute("f" + at, finding);
+  await tools.get("finish_review").execute("finish", {});
   // The message the reviewer closes its run with, after the finish.
   for (const handler of ended) handler(message);
 }

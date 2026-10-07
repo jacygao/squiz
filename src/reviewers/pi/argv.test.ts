@@ -8,7 +8,7 @@ import { deepToolNames } from "../deep-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
 import { argv, extensionFile, grants } from "./argv.ts";
-import { refusedTools } from "./refusals.ts";
+import { GRANT_VARIABLE, grantIn } from "./refusals.ts";
 
 /**
  * An invocation whose paths and prompt spell no tool name, so the only place a
@@ -77,7 +77,10 @@ test("the command line is the one the specification gives", () => {
     command: "pi",
     directory: "/tmp/squiz/worktree",
     stdin: "/dev/null",
-    environment: { SQUIZ_REPORTS: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl" },
+    environment: {
+      SQUIZ_REPORTS: "/tmp/squiz/worktree/.squiz/7/rounds/1/reports.jsonl",
+      SQUIZ_GRANT: "read,grep,find,ls,report_finding,report_verdict,finish_review",
+    },
     args: [
       "--print",
       "--session-dir",
@@ -205,6 +208,17 @@ test("the grant and --tools name the same tools, at each depth", () => {
   }
 });
 
+// The extension refuses whatever the variable leaves out, so a variable that
+// differed from --tools would refuse a granted tool or allow an ungranted one.
+test("the extension is handed the grant --tools carries, at each depth and on every backend", () => {
+  for (const terminal of ["pane", "none"] as const) {
+    for (const depth of depths) {
+      const line = argv({ ...invocation, depth, terminal });
+      assert.deepEqual(grantIn(line.environment[GRANT_VARIABLE]), toolsAt(depth), `${terminal}, ${depth}`);
+    }
+  }
+});
+
 test("no depth grants a shell", () => {
   for (const depth of depths) {
     assert.ok(!toolsAt(depth).includes("bash"), `depth ${depth} passes bash on --tools`);
@@ -304,7 +318,7 @@ test("edit and write appear in no command line, at either depth", () => {
  * while the grant carries none of them.
  */
 test("the read grant carries nothing the refusal would have to catch", () => {
-  for (const name of [...refusedTools, "bash"]) {
+  for (const name of ["edit", "write", "bash"]) {
     assert.ok(
       !grants.read.includes(name),
       `depth read grants ${name}, so a round at read that refused nothing says nothing about the handler`,
