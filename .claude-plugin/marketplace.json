@@ -1,0 +1,17 @@
+{
+  "name": "squiz",
+  "owner": {
+    "name": "Jacy Gao"
+  },
+  "metadata": {
+    "description": "Squiz, the local review loop that lives on the pull request."
+  },
+  "plugins": [
+    {
+      "name": "squiz",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "A local review loop that lives on the pull request. When a coding agent finishes its work, a reviewer reviews the change in a session of its own, posts its findings as threads on the pull request, and tells the session that owns the work."
+    }
+  ]
+}
