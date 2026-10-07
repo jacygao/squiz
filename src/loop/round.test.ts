@@ -2278,6 +2278,27 @@ test("#627: a close before the review counts a thread an earlier round withdrew 
 });
 
 /**
+ * The round's rulings go into the state before anything is posted. Written
+ * after the posting, a write that failed there left the earlier `fixed` on
+ * record for a thread GitHub had just closed as withdrawn.
+ */
+test("#627: a round's rulings are on record before its verdicts reach the pull request", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 3 },
+    stateSource: JSON.stringify({ rounds: [ANSWER_COST], spentOutsideRounds: unspent, rulings: { PRRT_argued: "fixed" } }),
+    answers: { ...POSTING, threads: listed([{ id: "PRRT_argued", isResolved: true }]), resolve: RESOLVED },
+    lockStateAfter: "resolve",
+    reviewer: reviews({
+      findings: [finding("The flag is never read")],
+      verdicts: [{ thread: "PRRT_argued", verdict: "withdrawn" }],
+    }),
+  });
+
+  assert.ok(ran.kinds.includes("resolve"), `the withdrawal was never sent: ${ran.kinds.join(", ")}`);
+  assert.deepEqual(ran.state?.rulings, { PRRT_argued: "withdrawn" });
+});
+
+/**
  * A resolved thread the state holds no ruling for was resolved by a person, or
  * in an episode whose state this worktree does not have. Neither says it was
  * fixed. A thread last ruled open and resolved since is the same.

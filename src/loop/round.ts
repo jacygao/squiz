@@ -27,7 +27,6 @@ import { join, relative } from "node:path";
 
 import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
-import { defaultVerdict } from "../findings/status.ts";
 import { readThread } from "../findings/thread.ts";
 import type { GhCall } from "../github/gh.ts";
 import type { ClosedBy } from "../github/failure-body.ts";
@@ -76,7 +75,7 @@ import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } fr
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { closedBeforeAnyRound, postEpisodeSummary, type EpisodeSummary } from "./post-summary.ts";
 import { tokenBoundIsReached, type ClosingReason, type EpisodeBounds } from "./round-decision.ts";
-import { applyVerdicts, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
+import { applyVerdicts, rulingsOn, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 
 // Each `ps` run that tells whether a lock's holder is still running. Its own
 // bound rather than the round's, because a round that cannot tell runs nothing.
@@ -167,12 +166,6 @@ export type RoundSetup = {
   readonly snapshotLeft?: (reason: string) => void;
   /** Told why the round's posting time could not be written. The round's result stands. */
   readonly postingTimeUnwritten?: (reason: string) => void;
-  /**
-   * Told why the reviewer's rulings could not be written. The round's result
-   * stands, and a later close that runs no reviewer counts those threads as
-   * having no ruling on record.
-   */
-  readonly rulingsUnwritten?: (reason: string) => void;
   /** Told why the round's resume command could not be written. The round's result stands. */
   readonly resumeUnwritten?: (reason: string) => void;
 };
@@ -431,7 +424,6 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
             ),
           },
         };
-  keepRulings(episode, concluded, setup.rulingsUnwritten);
   keepPostingTime(episode, stopwatch, setup.postingTimeUnwritten);
   return reported;
 }
@@ -494,38 +486,6 @@ function keepPostingTime(episode: Episode, stopwatch: Stopwatch, unwritten?: (re
     until: deadlineIn(STATE_LOCK_WAIT_MS),
   });
   if (kept.outcome === "failed") unwritten?.(kept.reason);
-}
-
-/**
- * Write the reviewer's ruling on each thread the round applied one to, a failed
- * round's salvaged rulings included.
- *
- * Written whether or not GitHub took the ruling. The thread's resolved state
- * still says whether it is closed, and the ruling says which verdict the
- * reviewer gave. A write that fails is told to `unwritten` and fails nothing.
- */
-function keepRulings(episode: Episode, concluded: RoundConclusion, unwritten?: (reason: string) => void): void {
-  const applied = appliedIn(concluded);
-  if (applied.length === 0) return;
-  const rulings = Object.fromEntries(applied.map((one) => [one.thread, one.ruled ?? defaultVerdict]));
-  const kept = updateState(episode, (current) => recordRulings(current, rulings), {
-    until: deadlineIn(STATE_LOCK_WAIT_MS),
-  });
-  if (kept.outcome === "failed") unwritten?.(kept.reason);
-}
-
-/** The verdicts a round applied to its threads, whatever it concluded. */
-function appliedIn(concluded: RoundConclusion): readonly AppliedVerdict[] {
-  switch (concluded.outcome) {
-    case "block":
-    case "clean, episode open":
-    case "close":
-      return concluded.verdicts.threads;
-    case "failed":
-      return concluded.salvaged?.verdicts.threads ?? [];
-    default:
-      return [];
-  }
 }
 
 /** The calls before the review, under the one deadline the snapshot's add runs under too. */
@@ -639,7 +599,11 @@ async function reviewOn(
   // starts as the review ends.
   const reserve = startPosting(reviewStarted + seconds * 1_000);
 
-  const recording = keepCost(episode, state, review, elapsedSeconds);
+  const rulings = rulingsOn(
+    review.outcome === "reviewed" ? handedOver : ruledOn(handedOver, review.verdicts),
+    review.verdicts,
+  );
+  const recording = keepCost(episode, state, review, elapsedSeconds, rulings);
   if ("ended" in recording) return recording.ended;
   const recorded = recording.step;
   if (isRound(review)) stopwatch.round = recorded.rounds.length;
@@ -979,21 +943,30 @@ function makeSessionDirectory(directory: string): string | null {
  * reviewer reported before it was stopped is what there is.
  *
  * A setup problem records what it spent without recording a round.
+ *
+ * The reviewer's `rulings` go in the same update. Written after the posting, a
+ * write that failed there would leave a thread's earlier ruling on record once
+ * GitHub had taken the new one.
  */
 function keepCost(
   episode: Episode,
   state: EpisodeState,
   review: Review,
   elapsedSeconds: number,
+  rulings: Rulings,
 ): Step<EpisodeState> {
-  // Nothing was spent and no round ran, so there is nothing to keep. Writing
-  // anyway would put a write that could fail in front of the reason the reviewer
-  // gave, and report the wrong failure.
-  if (withSpend(state, review, elapsedSeconds) === null) return { step: state };
+  const ruled = Object.keys(rulings).length > 0;
+  // Nothing was spent, no round ran and nothing was ruled, so there is nothing
+  // to keep. Writing anyway would put a write that could fail in front of the
+  // reason the reviewer gave, and report the wrong failure.
+  if (withSpend(state, review, elapsedSeconds) === null && !ruled) return { step: state };
 
   const written = updateState(
     episode,
-    (current) => withSpend(current, review, elapsedSeconds) ?? current,
+    (current) => {
+      const spent = withSpend(current, review, elapsedSeconds) ?? current;
+      return ruled ? recordRulings(spent, rulings) : spent;
+    },
     // Its own wait rather than what the reserve has left. A reserve the stop has
     // nearly spent would leave too little to take the lock, and the cost is what
     // the round cap and the token bound count.

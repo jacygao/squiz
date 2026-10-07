@@ -366,14 +366,15 @@ result is no round and spends nothing.
 **The state file keeps the reviewer's last ruling on each thread it ruled on**,
 by the thread's node id: `fixed`, `withdrawn` or `open`. GitHub's resolved state
 says a thread is closed and not which verdict closed it, and a close that runs no
-reviewer counts the thread by this ruling (§ 5). A round writes its rulings once
-its posting ends, each in place of the one its thread held before. A thread a
-finished review gave no verdict is kept as `open`, which is the verdict it was
-treated as. A failed round writes the rulings it salvaged, and leaves every
-other thread's alone. A ruling is kept whether or not GitHub took it, because
-the thread's resolved state still says whether it is closed. A ruling that
-cannot be written ends nothing: the round's result stands, and `host.log` names
-the failure. A state file with no rulings holds none.
+reviewer counts the thread by this ruling (§ 5). A round writes its rulings in
+the update that records its cost, before it posts anything, each in place of the
+one its thread held before. A state file that will not take that update fails
+the round with nothing posted, so no verdict reaches a thread unless its ruling
+is on record. A thread a finished review gave no verdict is kept as `open`,
+which is the verdict it is treated as. A failed round writes the rulings it
+salvaged, and leaves every other thread's alone. A ruling is kept whether or not
+GitHub then takes it, because the thread's resolved state still says whether it
+is closed. A state file with no rulings holds none.
 
 **A closed episode stays closed in its worktree.** A second episode on the same
 pull request starts in another worktree on the same branch, which holds no state

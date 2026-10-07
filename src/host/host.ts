@@ -217,7 +217,6 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       paneLeftOpen: (reason) => log(`round ${round.number}: the reviewer's pane was left open: ${reason}`),
       snapshotLeft: (reason) => log(`round ${round.number}: ${reason}; it stays on disk until it is deleted`),
       postingTimeUnwritten: (reason) => log(`round ${round.number}: its posting time could not be written: ${reason}`),
-      rulingsUnwritten: (reason) => log(`round ${round.number}: the reviewer's rulings could not be written: ${reason}`),
       resumeUnwritten: (reason) => log(`round ${round.number}: its resume command could not be written: ${reason}`),
       endsOn: (tally, queued) => {
         ended = endsOn(tally, queued);
