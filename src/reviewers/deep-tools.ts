@@ -3,9 +3,9 @@
  * carries the round's own values to wherever they run.
  *
  * The tools run inside the reviewer's CLI, in a process the round did not start
- * and cannot hand arguments to. So the round puts the snapshot and the moment
- * the round ends into one variable on the reviewer's environment, and the tools
- * read them from there rather than from the directory they happen to run in.
+ * and cannot hand arguments to. So the round puts the snapshot into one variable
+ * on the reviewer's environment, and the tools read it from there rather than
+ * from the directory they happen to run in.
  *
  * **A round that handed nothing over gets tools that run nothing.** A tool with
  * no snapshot would read whatever directory it runs in, so every tool answers
@@ -23,8 +23,6 @@ export const ROUND_VARIABLE = "SQUIZ_ROUND";
 export type DeepRound = {
   /** The root of the round's snapshot of the head commit. */
   readonly snapshot: string;
-  /** The moment the round ends, in milliseconds since the epoch. */
-  readonly endsAt: number;
 };
 
 /** What a call answers with. `failed` marks `text` as the call's error rather than its result. */
@@ -64,17 +62,15 @@ export function deepTools(environment: Readonly<Record<string, string | undefine
 
 /** The round the variable names, or why there is none to read. */
 function roundIn(value: string | undefined): DeepRound | string {
-  if (value === undefined || value === "") return `the round set no ${ROUND_VARIABLE}, so it has no snapshot or deadline to run in`;
+  if (value === undefined || value === "") return `the round set no ${ROUND_VARIABLE}, so it has no snapshot to run in`;
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    return `${ROUND_VARIABLE} is not JSON, so the round's snapshot and deadline cannot be read`;
+    return `${ROUND_VARIABLE} is not JSON, so the round's snapshot cannot be read`;
   }
   const fields = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  const { snapshot, endsAt } = fields;
-  if (typeof snapshot !== "string" || typeof endsAt !== "number" || !Number.isFinite(endsAt)) {
-    return `${ROUND_VARIABLE} does not carry a snapshot and a deadline`;
-  }
-  return { snapshot, endsAt };
+  const { snapshot } = fields;
+  if (typeof snapshot !== "string") return `${ROUND_VARIABLE} does not carry a snapshot`;
+  return { snapshot };
 }

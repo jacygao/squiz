@@ -33,7 +33,6 @@ function fixture(t: TestContext): Fixture {
     depth: "read",
     thinking: "medium",
     model: null,
-    roundSpace: undefined,
     terminal: "none",
   };
   return { invocation, home, session: join(tree, ".squiz/7/rounds/1/session") };

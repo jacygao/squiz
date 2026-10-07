@@ -403,14 +403,13 @@ function deepPlace(t: { after: (fn: () => void) => void }): Deep {
 
 /**
  * The server as Copilot starts it at `deep`: in the reviewer's environment,
- * which carries the round's variable. The round ends two minutes from now
- * unless `endsAt` says otherwise.
+ * which carries the round's variable.
  */
 function startedDeep(
   t: { after: (fn: () => void) => void },
   place: Deep,
 ): Running {
-  return started(t, place.scratch, roundVariable({ snapshot: place.snapshot, endsAt: Date.now() + 120_000 }));
+  return started(t, place.scratch, roundVariable({ snapshot: place.snapshot }));
 }
 
 test("at deep the server lists the three deep tools after the reporting calls, with their own schemas", async (t) => {

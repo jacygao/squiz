@@ -13,7 +13,6 @@
 import type { Depth, Thinking } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import type { Verdict } from "../findings/status.ts";
-import type { RoundSpace } from "./groups.ts";
 
 /** What the harness hands the reviewer for one round. */
 export type Invocation = {
@@ -67,14 +66,6 @@ export type Invocation = {
    * the CLI on its own default, with the command line it has without one.
    */
   readonly model: string | null;
-  /**
-   * The round's own space: where each run of the test command records the
-   * group it leads.
-   *
-   * `undefined` at `read`, where nothing runs the test command and there is
-   * nothing to record and nothing to reach.
-   */
-  readonly roundSpace: RoundSpace | undefined;
   /**
    * Where the reviewer runs: in a pane a person can watch and type into, or
    * with no terminal at all. The round host decides it, and the adapter builds

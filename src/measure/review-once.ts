@@ -31,7 +31,6 @@ import { fileURLToPath } from "node:url";
 import type { Reviewer } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound } from "../reviewers/round.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
@@ -121,13 +120,6 @@ if (snapshot.outcome === "failed") {
 }
 const tree = snapshot.path;
 
-const space = depth === "deep" ? makeRoundSpace(own) : undefined;
-if (space !== undefined && space.outcome === "failed") {
-  console.error(space.reason);
-  process.exit(1);
-}
-const roundSpace = space?.space;
-
 const pullRequest = {
   number: measured.number,
   nodeId: "PR_measure",
@@ -152,14 +144,12 @@ const round = await runRound(
     depth,
     model: model ?? null,
     thinking: "medium",
-    roundSpace,
     terminal: "none",
   },
   SECONDS,
   { name: `measure-${basename(out)}` },
 );
 const run: Run = { label: basename(out), tree, seconds: (Date.now() - started) / 1_000, round };
-if (roundSpace !== undefined) discardRoundSpace(roundSpace);
 
 const summary = {
   case: caseName,

@@ -42,7 +42,6 @@ import {
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
-import { discardRoundSpace, makeRoundSpace } from "../reviewers/groups.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import type { Backends, SessionPlace } from "../sessions/session.ts";
@@ -562,56 +561,39 @@ async function reviewOn(
 
   const around = readBeforeReviewer(tree, preReview.until);
 
-  // Only `deep` grants a shell, and only a shell detaches, so at `read` there is
-  // nothing for a round to record and nothing for it to reach. One value says
-  // so, and the reviewer's round and the adapter both read it.
-  const space = config.depth === "deep" ? makeRoundSpace(episode.directory) : undefined;
-  if (space !== undefined && space.outcome === "failed") {
-    return failed("harness", `no review ran: ${space.reason}`);
-  }
-  const roundSpace = space === undefined ? undefined : space.space;
-
-  let review: Review;
   const clock = stopwatch.now;
   const seconds = config.timeout;
   const reviewStarted = clock();
-  try {
-    review = await runReview(
-      setup.adapter,
-      {
-        directory: tree,
-        charterFile: setup.charterFile,
-        prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }, config.depth),
-        sessionDirectory,
-        promptFile: join(ownDirectory, "prompt.md"),
-        reportsFile: join(ownDirectory, "reports.jsonl"),
-        scratchDirectory: episode.scratchDirectory,
-        githubConfigDirectory: join(ownDirectory, "gh"),
-        thinking: config.thinking,
-        model: config.model,
-        depth: config.depth,
-        roundSpace,
-        // Whatever this says, each attempt asks the adapter for a line for every
-        // place the reviewer may run.
-        terminal: "none",
-      },
-      seconds,
-      {
-        ...(setup.sessionEnvironment === undefined ? {} : { environment: setup.sessionEnvironment }),
-        ...(setup.sessionBackends === undefined ? {} : { backends: setup.sessionBackends }),
-        ...(setup.workspace === undefined ? {} : { workspace: setup.workspace }),
-        name: `squiz-${pullRequest.number}-r${ordinal}`,
-        started: (place, boundEndsAt) =>
-          setup.reviewerStarted?.({ ...placeOf(place), process: place.identity, boundEndsAt, snapshot: tree }),
-        ...(setup.paneLeftOpen === undefined ? {} : { paneLeftOpen: setup.paneLeftOpen }),
-      },
-      clock,
-    );
-  } finally {
-    // Whatever the round became, what it wrote for itself is this round's alone
-    // and nothing reads it again.
-    if (roundSpace !== undefined) discardRoundSpace(roundSpace);
-  }
+  const review: Review = await runReview(
+    setup.adapter,
+    {
+      directory: tree,
+      charterFile: setup.charterFile,
+      prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }, config.depth),
+      sessionDirectory,
+      promptFile: join(ownDirectory, "prompt.md"),
+      reportsFile: join(ownDirectory, "reports.jsonl"),
+      scratchDirectory: episode.scratchDirectory,
+      githubConfigDirectory: join(ownDirectory, "gh"),
+      thinking: config.thinking,
+      model: config.model,
+      depth: config.depth,
+      // Whatever this says, each attempt asks the adapter for a line for every
+      // place the reviewer may run.
+      terminal: "none",
+    },
+    seconds,
+    {
+      ...(setup.sessionEnvironment === undefined ? {} : { environment: setup.sessionEnvironment }),
+      ...(setup.sessionBackends === undefined ? {} : { backends: setup.sessionBackends }),
+      ...(setup.workspace === undefined ? {} : { workspace: setup.workspace }),
+      name: `squiz-${pullRequest.number}-r${ordinal}`,
+      started: (place, boundEndsAt) =>
+        setup.reviewerStarted?.({ ...placeOf(place), process: place.identity, boundEndsAt, snapshot: tree }),
+      ...(setup.paneLeftOpen === undefined ? {} : { paneLeftOpen: setup.paneLeftOpen }),
+    },
+    clock,
+  );
   const elapsedSeconds = Math.round((clock() - reviewStarted) / 100) / 10;
   writeResume(setup.adapter, sessionDirectory, directory, join(ownDirectory, "resume.txt"));
 

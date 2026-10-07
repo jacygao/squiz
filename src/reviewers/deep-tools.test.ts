@@ -37,7 +37,7 @@ test("with no round handed over, every tool fails and nothing runs", async () =>
 
 test("a history tool reads the round's snapshot, not the directory it runs in", async () => {
   await inARepository(async (snapshot) => {
-    const tool = deepTools(roundVariable({ snapshot, endsAt: Date.now() + 60_000 })).find(
+    const tool = deepTools(roundVariable({ snapshot })).find(
       (each) => each.name === "git_show",
     );
     assert.ok(tool !== undefined);

@@ -60,7 +60,6 @@ function invocationIn(tree: string): Invocation {
     depth: "deep",
     thinking: "medium",
     model: null,
-    roundSpace: undefined,
     terminal: "none",
   };
 }
