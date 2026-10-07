@@ -34,6 +34,8 @@ import {
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
 import { composeReview } from "../review/output.ts";
+import { startChild } from "../sessions/child.ts";
+import type { Backends } from "../sessions/session.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { snapshotPath } from "../worktree/snapshot.ts";
 import { headMovedIn } from "./confinement.ts";
@@ -152,6 +154,8 @@ type Setup = {
    * as two subagents stopping at once in one worktree start them.
    */
   readonly overlapping?: number;
+  /** What starts the reviewer, where it is not the real backends. */
+  readonly sessionBackends?: Backends;
 };
 
 /** One round after the first: what happened before it, and the reviewer it runs. */
@@ -583,6 +587,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
       ...(setup.clock === undefined ? {} : { now: setup.clock.now }),
       ...(held === undefined ? {} : { held: { pullRequest: PULL_REQUEST, lock: held } }),
+      ...(setup.sessionBackends === undefined ? {} : { sessionBackends: setup.sessionBackends }),
     };
     if (setup.overlapping !== undefined) {
       const together = Array.from({ length: setup.overlapping }, () => runRound(roundSetup));
@@ -2603,6 +2608,121 @@ test("a paid attempt that ended as a setup problem is what stops the next round"
     "410,000 tokens against a 400,000-token bound buys no further reviewer, and forgetting them is what buys a reviewer that burned the bound and reported nothing another try at it",
   );
 });
+
+test("a reviewer that ran before its start failed spends the tokens that stop the next round", async () => {
+  const paid: RoundCost = { dollars: 0.04, tokens: 410_000, messages: 1 };
+  const bounds = { rounds: 8, tokens: 400_000 };
+
+  const first = await runInFixture({
+    config: bounds,
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
+    reviewer: attempts({ cost: paid, result: { kind: "unparsed", reason: "the review was not finished" } }),
+    sessionBackends: startsThenFails(),
+  });
+
+  assert.ok(first.conclusion.outcome === "failed");
+  assert.equal(first.conclusion.failure, "setup");
+  assert.deepEqual(first.state?.rounds, [], "a start that failed spends no round");
+  assert.deepEqual(
+    first.state?.spentOutsideRounds,
+    { ...paid, floor: true },
+    "the reviewer completed a paid response before its start was given up on",
+  );
+
+  const next = await runInFixture({
+    config: bounds,
+    rounds: first.state?.rounds ?? [],
+    ...(first.state === null ? {} : { outsideRounds: first.state.spentOutsideRounds }),
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(next.conclusion.outcome === "close");
+  assert.equal(next.conclusion.because, "token-bound");
+  assert.equal(next.invocations.length, 0, "the tokens the failed start spent buy no further reviewer");
+});
+
+test("an attempt the harness threw out of spends the tokens that stop the next round", async () => {
+  const paid: RoundCost = { dollars: 0.04, tokens: 410_000, messages: 1 };
+  const bounds = { rounds: 8, tokens: 400_000 };
+
+  const first = await runInFixture({
+    config: bounds,
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
+    reviewer: attempts({ cost: paid, result: { kind: "unparsed", reason: "the review was not finished" } }),
+    sessionBackends: startsBroken(),
+  });
+
+  assert.ok(first.conclusion.outcome === "failed");
+  assert.equal(first.conclusion.failure, "setup");
+  assert.deepEqual(first.state?.rounds, [], "an attempt the harness threw out of spends no round");
+  assert.deepEqual(first.state?.spentOutsideRounds, { ...paid, floor: true });
+
+  const next = await runInFixture({
+    config: bounds,
+    rounds: first.state?.rounds ?? [],
+    ...(first.state === null ? {} : { outsideRounds: first.state.spentOutsideRounds }),
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(next.conclusion.outcome === "close");
+  assert.equal(next.conclusion.because, "token-bound");
+  assert.equal(next.invocations.length, 0, "the tokens the thrown attempt spent buy no further reviewer");
+});
+
+test("a reviewer that ran before its start failed and reported no cost leaves its spend marked unknown", async () => {
+  const first = await runInFixture({
+    answers: { prlist: PR_LIST, diff: DIFF, threads: listed([]) },
+    reviewer: attempts({ cost: undefined, result: { kind: "incomplete", reason: "no usage line" } }),
+    sessionBackends: startsThenFails(),
+  });
+
+  assert.ok(first.conclusion.outcome === "failed");
+  assert.deepEqual(
+    first.state?.spentOutsideRounds,
+    { dollars: 0, tokens: 0, messages: 0, floor: true },
+    "a reviewer that ran may have spent what it never reported, and a bare zero says it spent nothing",
+  );
+});
+
+/**
+ * Backends that run the reviewer with no terminal to its end, and then report
+ * the start failed, as one does whose reading of the reviewer's identity failed
+ * after the reviewer ran.
+ */
+function startsThenFails(): Backends {
+  return {
+    herdr: () => ({ outcome: "refused", reason: "not asked" }),
+    tmux: () => ({ outcome: "refused", reason: "not asked" }),
+    child: async (command, environment, boundMs) => {
+      const started = await startChild(command, environment, boundMs);
+      if (started.outcome !== "started") return started;
+      await new Promise((settle) => started.child.once("exit", settle));
+      return { outcome: "failed", reason: "ps could not be run: a stand-in for ps failing", ran: true };
+    },
+  };
+}
+
+/**
+ * Backends that run the reviewer to its end and then hand the round a process
+ * with no stderr, which the round throws reading.
+ */
+function startsBroken(): Backends {
+  return {
+    herdr: () => ({ outcome: "refused", reason: "not asked" }),
+    tmux: () => ({ outcome: "refused", reason: "not asked" }),
+    child: async (command, environment, boundMs) => {
+      const started = await startChild(command, environment, boundMs);
+      if (started.outcome !== "started") return started;
+      await new Promise((settle) => started.child.once("exit", settle));
+      const broken = new Proxy(started.child, {
+        get: (target, property) => (property === "stderr" ? undefined : Reflect.get(target, property)),
+      });
+      return { ...started, child: broken };
+    },
+  };
+}
 
 /**
  * A reviewer at `deep` can write to the tree through its shell, and two readings

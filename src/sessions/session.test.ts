@@ -206,14 +206,16 @@ test("tmux failing is returned with its window, and no child is started", async 
     backend: "tmux",
     reason: "identity unreadable",
     leftOpen: { backend: "tmux", window: { id: "@8", name: "worker-1" } },
+    mayHaveRun: true,
   });
   assert.deepEqual(backendsCalled(calls), ["herdr", "tmux"]);
 });
 
+// tmux runs the command as the window opens, so any window it may have opened may have run it.
 test("tmux failing with no window known is returned without one", async () => {
   const { backends } = fakes({ tmux: { outcome: "failed", reason: "tmux did not answer" } });
   const started = await startSession(request, { environment: insideTmux, boundMs: BOUND_MS }, backends);
-  assert.deepEqual(started, { outcome: "failed", backend: "tmux", reason: "tmux did not answer" });
+  assert.deepEqual(started, { outcome: "failed", backend: "tmux", reason: "tmux did not answer", mayHaveRun: true });
 });
 
 test("the variables given reach the command on every backend", async () => {
@@ -233,4 +235,10 @@ test("a child that cannot be started is returned as a failure", async () => {
   const { backends } = fakes({ child: { outcome: "failed", reason: "agent could not be started" } });
   const started = await startSession(request, { environment: {}, boundMs: BOUND_MS }, backends);
   assert.deepEqual(started, { outcome: "failed", backend: "child", reason: "agent could not be started" });
+});
+
+test("a child that ran before its start failed is returned as one that may have run", async () => {
+  const { backends } = fakes({ child: { outcome: "failed", reason: "agent was stopped", ran: true } });
+  const started = await startSession(request, { environment: {}, boundMs: BOUND_MS }, backends);
+  assert.deepEqual(started, { outcome: "failed", backend: "child", reason: "agent was stopped", mayHaveRun: true });
 });

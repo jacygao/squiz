@@ -76,6 +76,12 @@ export type SessionStart =
       readonly backend: SessionPlace["backend"];
       readonly reason: string;
       readonly leftOpen?: LeftOpen;
+      /**
+       * There where the command may have run before the start failed. Absent
+       * where it cannot have: a Herdr pane runs it only once its gate opens,
+       * which is the last step of a start that succeeded.
+       */
+      readonly mayHaveRun?: true;
     };
 
 const BACKENDS: Backends = { herdr: startInHerdrPane, tmux: openWindow, child: startChild };
@@ -113,7 +119,7 @@ export async function startSession(
     if (pane.outcome === "failed") {
       const leftOpen: LeftOpen | undefined =
         pane.paneLeftOpen === undefined ? undefined : { backend: "herdr", pane: pane.paneLeftOpen };
-      return failure("herdr", pane.reason, leftOpen);
+      return failure("herdr", pane.reason, leftOpen, false);
     }
     refusals.push({ backend: "herdr", reason: pane.reason });
   }
@@ -134,7 +140,8 @@ export async function startSession(
     if (window.outcome === "failed") {
       const leftOpen: LeftOpen | undefined =
         window.window === undefined ? undefined : { backend: "tmux", window: window.window };
-      return failure("tmux", window.reason, leftOpen);
+      // tmux runs the command as it opens the window, so a window that may be open may have run it.
+      return failure("tmux", window.reason, leftOpen, true);
     }
     refusals.push({ backend: "tmux", reason: window.reason });
   }
@@ -145,13 +152,23 @@ export async function startSession(
     { ...environment, ...request.variables },
     boundMs,
   );
-  if (child.outcome === "failed") return failure("child", child.reason, undefined);
+  if (child.outcome === "failed") return failure("child", child.reason, undefined, child.ran === true);
   return { outcome: "started", place: { backend: "child", identity: child.identity }, child: child.child, refusals };
 }
 
-function failure(backend: SessionPlace["backend"], reason: string, leftOpen: LeftOpen | undefined): SessionStart {
-  if (leftOpen === undefined) return { outcome: "failed", backend, reason };
-  return { outcome: "failed", backend, reason, leftOpen };
+function failure(
+  backend: SessionPlace["backend"],
+  reason: string,
+  leftOpen: LeftOpen | undefined,
+  mayHaveRun: boolean,
+): SessionStart {
+  return {
+    outcome: "failed",
+    backend,
+    reason,
+    ...(leftOpen === undefined ? {} : { leftOpen }),
+    ...(mayHaveRun ? { mayHaveRun: true } : {}),
+  };
 }
 
 function insideTmux(environment: Environment): boolean {

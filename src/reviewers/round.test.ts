@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
+import { startChild, type ChildProcessHandle } from "../sessions/child.ts";
+import type { Backends } from "../sessions/session.ts";
+
 import { type Adapter, type Confinement, type Invocation, type ParsedRun, unspent } from "./adapter.ts";
 import { copilot } from "./copilot/adapter.ts";
 import { ROUND_VARIABLE } from "./deep-tools.ts";
@@ -1195,6 +1198,137 @@ test("an attempt whose report file could not be read has a cost that is a floor"
     assert.equal(round.cost?.floor, true, `the cost read as a total: ${JSON.stringify(round.cost)}`);
   });
 });
+
+// The reviewer runs to its end before the start reports itself failed, as one
+// does whose identity `ps` could not read in time.
+test("a reviewer that ran before its start failed is charged what it reported spending", async () => {
+  await inATree(async (tree) => {
+    const ran = writing(reportingMessage + called(REPORT_FINDING, review.findings[0]));
+    const round = await runRound(reviewer(ran).adapter, at(tree), 10, {
+      name: "squiz-reviewer",
+      backends: failingAfterItRan(),
+    });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.cost, { ...spentOnce, floor: true }, "the start failed, and the message it completed was paid for");
+  });
+});
+
+// Copilot writes its usage line only once it has exited by itself, so the line is its whole cost.
+test("a Copilot reviewer that ran to its end before its start failed is charged its own total", async () => {
+  await inATree(async (tree) => {
+    const usage = {
+      type: "usage",
+      usage: {
+        totalNanoAiu: 360_000_000,
+        modelMetrics: { "gpt-5-mini": { requests: { count: 5 }, usage: { inputTokens: 18_000, outputTokens: 200 } } },
+      },
+    };
+    const ran = writing(`${JSON.stringify(usage)}\n`);
+    const round = await runRound(asCopilot(reviewer(ran).adapter), at(tree), 10, {
+      name: "squiz-reviewer",
+      backends: failingAfterItRan(),
+    });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0, tokens: 18_200, messages: 5, credits: 0.36 });
+  });
+});
+
+test("a Copilot reviewer that ran before its start failed and left no usage has a cost not known, not a zero", async () => {
+  await inATree(async (tree) => {
+    const round = await runRound(asCopilot(reviewer(sayingNothing).adapter), at(tree), 10, {
+      name: "squiz-reviewer",
+      backends: failingAfterItRan(),
+    });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.cost, { ...unspent, floor: true }, "a reviewer that ran may have spent what it never reported");
+  });
+});
+
+test("a start that failed before the reviewer ran spends nothing", async () => {
+  await inATree(async (tree) => {
+    const backends: Backends = {
+      herdr: () => ({ outcome: "refused", reason: "not asked" }),
+      tmux: () => ({ outcome: "refused", reason: "not asked" }),
+      child: async () => ({ outcome: "failed", reason: "the reviewer could not be spawned" }),
+    };
+    const round = await runRound(reviewer(reviewing).adapter, at(tree), 10, { name: "squiz-reviewer", backends });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.cost, unspent);
+  });
+});
+
+test("an attempt the harness threw out of is charged what its reviewer reported spending", async () => {
+  await inATree(async (tree) => {
+    const ran = writing(reportingMessage + called(REPORT_FINDING, review.findings[0]));
+    const round = await runRound(reviewer(ran).adapter, at(tree), 10, {
+      name: "squiz-reviewer",
+      backends: breakingAfterItRan(1),
+    });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.match(round.outcome === "setup" ? round.reason : "", /could not be run/u);
+    assert.deepEqual(round.cost, { ...spentOnce, floor: true }, "the attempt's reviewer completed a paid message");
+  });
+});
+
+test("an attempt the harness threw out of is charged beside the attempt before it", async () => {
+  await inATree(async (tree) => {
+    const second = writing(reportingMessage);
+    const round = await runRound(reviewer(prose, second).adapter, at(tree), 10, {
+      name: "squiz-reviewer",
+      backends: breakingAfterItRan(2),
+    });
+    assert.equal(round.outcome, "setup", accountOf(round));
+    assert.deepEqual(round.cost, { dollars: 0.005, tokens: 200, messages: 2, floor: true });
+  });
+});
+
+/** Resolves once the child has exited. */
+function exited(child: ChildProcessHandle): Promise<void> {
+  return new Promise((settle) => {
+    if (child.exitCode !== null || child.signalCode !== null) settle();
+    child.once("exit", () => settle());
+  });
+}
+
+/**
+ * Backends that start the reviewer with no terminal, let it run to its end, and
+ * then report the start failed, as one does whose reading of the reviewer's
+ * identity failed after the reviewer ran.
+ */
+function failingAfterItRan(): Backends {
+  return {
+    herdr: () => ({ outcome: "refused", reason: "not asked" }),
+    tmux: () => ({ outcome: "refused", reason: "not asked" }),
+    child: async (command, environment, boundMs) => {
+      const started = await startChild(command, environment, boundMs);
+      if (started.outcome !== "started") return started;
+      await exited(started.child);
+      return { outcome: "failed", reason: "ps could not be run: a stand-in for ps failing", ran: true };
+    },
+  };
+}
+
+/**
+ * Backends whose `attempt`th start lets the reviewer run to its end and then
+ * hands the round a process with no stderr, which the round throws reading.
+ */
+function breakingAfterItRan(attempt: number): Backends {
+  let starts = 0;
+  return {
+    herdr: () => ({ outcome: "refused", reason: "not asked" }),
+    tmux: () => ({ outcome: "refused", reason: "not asked" }),
+    child: async (command, environment, boundMs) => {
+      starts += 1;
+      const started = await startChild(command, environment, boundMs);
+      if (started.outcome !== "started" || starts !== attempt) return started;
+      await exited(started.child);
+      const broken = new Proxy(started.child, {
+        get: (target, property) => (property === "stderr" ? undefined : Reflect.get(target, property)),
+      });
+      return { ...started, child: broken };
+    },
+  };
+}
 
 /** The identifier of the reviewer itself, as the reviewer recorded it. */
 function reviewerIn(tree: string): number {

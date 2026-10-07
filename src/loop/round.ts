@@ -1005,8 +1005,10 @@ function lockWait(until: Deadline): Deadline {
  * episode that forgot those tokens would hand another reviewer a bound it had
  * already reached.
  *
- * An attempt that spent nothing and was no round writes nothing at all, what its
- * readings found about the worktree included.
+ * An attempt that was no round and is known to have spent nothing writes nothing
+ * at all, what its readings found about the worktree included. A floor of zero is
+ * not known to be nothing: it is a reviewer that ran and reported no spend, and
+ * it is written so the episode's spend reads as a floor.
  */
 function withSpend(
   state: EpisodeState,
@@ -1025,7 +1027,7 @@ function withSpend(
     );
   }
   // An attempt with no cost has no figure to add to the episode's spend.
-  if (review.cost === undefined || nothingSpent(review.cost)) return null;
+  if (review.cost === undefined || (nothingSpent(review.cost) && review.cost.floor !== true)) return null;
   return recordSpendOutsideRounds(kept, review.cost);
 }
 
