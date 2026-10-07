@@ -168,8 +168,10 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
       return finish(settled, listed.threads);
     }
     // A host that may not have started is waited on once a live one holds the
-    // lock, and reported once its time to take the lock has passed.
-    if (startUnknown !== undefined && hostRunning(episode.directory, request.presence ?? stillRunning, until)) {
+    // lock, and reported once its time to take the lock has passed. A `ps` that
+    // hangs is cut off with that time, so it cannot spend the run's deadline.
+    const window = Math.min(startBy.remaining(), until.remaining());
+    if (startUnknown !== undefined && hostRunning(episode.directory, request.presence ?? stillRunning, window)) {
       startUnknown = undefined;
     }
     if (startUnknown !== undefined && (startBy.passed() || until.passed())) {
@@ -181,18 +183,19 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
       });
     }
     if (until.passed()) return print(stillReviewing(context, state.records ?? []));
-    await sleep(Math.max(1, Math.min(pollMs, until.remaining())));
+    const pause = Math.min(pollMs, startUnknown === undefined ? until.remaining() : Math.min(startBy.remaining(), until.remaining()));
+    await sleep(Math.max(1, pause));
   }
 }
 
-/** Whether a live process holds the episode's host lock. One nobody can tell running is not. */
+/** Whether a live process holds the episode's host lock, asked within `boundMs`. One nobody can tell running is not. */
 function hostRunning(
   directory: string,
   presence: (identity: ProcessIdentity, boundMs: number) => Presence,
-  until: Deadline,
+  boundMs: number,
 ): boolean {
   const holder = lockHolder(directory, "host.lock");
-  return holder.outcome === "named" && presence(holder.holder, Math.max(1, until.remaining())).outcome === "running";
+  return holder.outcome === "named" && presence(holder.holder, Math.max(1, boundMs)).outcome === "running";
 }
 
 type Context = { readonly pullRequest: number; readonly cap: number; readonly own: StateKey };

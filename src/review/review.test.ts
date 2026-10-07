@@ -478,6 +478,28 @@ test("a round host whose start is unknown, and which holds the lock, is waited o
   });
 });
 
+test("a round host whose start is unknown is checked within its start window, never the run's whole deadline", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [queued(OWN)]);
+    mkdirSync(fixture.episode.directory, { recursive: true });
+    writeFileSync(join(fixture.episode.directory, "host.lock"), `${JSON.stringify({ pid: 4242, startedAt: 1 })}\n`);
+    const bounds: number[] = [];
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: startedUnknown(fixture), until: deadlineIn(10_000) }),
+      hostStartMs: 200,
+      presence: (_identity, boundMs) => {
+        bounds.push(boundMs);
+        return { outcome: "gone" };
+      },
+    });
+
+    assert.equal(printed.exit, 1);
+    assert.ok(bounds.length > 0);
+    assert.ok(bounds.every((bound) => bound <= 200), `each ps must be bounded by the start window: ${bounds.join(", ")}`);
+  });
+});
+
 test("a round host whose start is unknown, with the deadline passed and no host on the lock, exits 1 rather than 4", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [queued(OWN)]);
