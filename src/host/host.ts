@@ -237,9 +237,11 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     });
     if (recorded.outcome === "failed") {
       log(`round ${round.number}: ${result.line}, and could not be recorded: ${recorded.reason}`);
+      for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
       return { outcome: "state unwritable", reason: recorded.reason };
     }
     log(`round ${round.number}: ${result.line}`);
+    for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
     await noteOwners(episode, written, log);
   }
 }
@@ -301,8 +303,15 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
 /** When a round started and ended, and its number. */
 type Timing = { readonly number: number; readonly startedAt: number; readonly endedAt: number };
 
-/** The records a round's conclusion writes into the state it finds, and the line host.log says it in. */
-type Result = { readonly records: (state: EpisodeState) => readonly Recorded[]; readonly line: string };
+/**
+ * The records a round's conclusion writes into the state it finds, the line
+ * host.log says it in, and a line each for what failed beside the result.
+ */
+type Result = {
+  readonly records: (state: EpisodeState) => readonly Recorded[];
+  readonly line: string;
+  readonly problems: readonly string[];
+};
 
 /**
  * The records a round's conclusion leaves, for its own state and for the states
@@ -329,11 +338,16 @@ function resultOf(
       if (ended === undefined) {
         // A round that reviewed always asks for its end, so only a defect reaches this.
         const reason = "the round reviewed and reached no end";
-        return { records: () => inOrder([{ ...failedRecord(key, reason), round: timing }]), line: `${named(taken)} failed: ${reason}` };
+        return {
+          records: () => inOrder([{ ...failedRecord(key, reason), round: timing }]),
+          line: `${named(taken)} failed: ${reason}`,
+          problems: [],
+        };
       }
       const round = { ...timing, reviewer: reviewer ?? UNREPORTED };
+      const report = reportOf(conclusion, ended);
       const reviewed: Recorded = {
-        record: { ...ended.record, round, ...reportOf(conclusion, ended) },
+        record: { ...ended.record, round, ...report },
         name: taken.head.slice(0, 7),
       };
       const left = ended.outcome === "closed" ? ended.leftNotReviewed : null;
@@ -341,18 +355,20 @@ function resultOf(
       return {
         records: () => [reviewed, ...behind],
         line: `${named(taken)} ${endedLine(ended)}`,
+        problems: report.problems ?? [],
       };
     }
     case "superseded": {
       const reason = `superseded by ${supersededBy(taken, conclusion.by)}`;
       const by = { head: conclusion.by.head, activity: conclusion.by.activity };
       const record = { ...notReviewed(key, reason), supersededBy: by };
-      return { records: () => inOrder([record]), line: `${named(taken)} not reviewed: ${reason}` };
+      return { records: () => inOrder([record]), line: `${named(taken)} not reviewed: ${reason}`, problems: [] };
     }
     case "episode-over":
       return {
         records: (state) => inOrder([key, ...queuedIn(state).map(keyOf)].map((left) => notReviewed(left, ALREADY_CLOSED))),
         line: `${named(taken)} not reviewed: ${ALREADY_CLOSED}`,
+        problems: [],
       };
     case "failed":
     case "no-pull-request":
@@ -365,6 +381,7 @@ function resultOf(
       return {
         records: () => inOrder([failed]).map((written) => (closed === undefined ? written : { ...written, closed })),
         line: `${named(taken)} failed: ${reason}`,
+        problems: [],
       };
     }
   }
@@ -394,6 +411,7 @@ function closedUnreviewed(
       return inOrder([{ ...notReviewed(keyOf(taken), reason), closed }, ...behind], lastReviewed(state.records ?? []));
     },
     line: `${named(taken)} not reviewed: ${reason}`,
+    problems,
   };
 }
 
