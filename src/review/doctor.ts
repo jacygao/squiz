@@ -9,11 +9,12 @@
  * It starts each tool once to ask its version, `gh` a second time for its
  * sign-in, and `git` a second time for the repository whose `.squiz.json`
  * names the reviewer, which every row that reads the repository shares. It
- * reads settings files and writes nothing anywhere.
+ * reads settings files and plugin manifests, and writes nothing anywhere.
  */
 
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
@@ -321,6 +322,161 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
 }
 
 /**
+ * Each copy of squiz Copilot keeps, against this squiz's version, where
+ * `copilot` is on `PATH`.
+ *
+ * Copilot's hook runs its own copy, so two versions write one state file
+ * wherever the two differ. A difference, or a version that cannot be read, is a
+ * warning. Nothing prints where Copilot has no copy.
+ */
+export function copilotCopies(target: () => string = thisSquiz): Check {
+  return (context) => {
+    if (versionOf("copilot", ["--version"], context).outcome === "absent") return [];
+    const plugins = join(copilotHome(context.environment), "installed-plugins");
+    let copies: string[];
+    const unlisted: Row[] = [];
+    try {
+      copies = copiesIn(plugins, (directory, error) =>
+        unlisted.push({ level: "warning", line: `Copilot's squiz: warning: ${directory} could not be read: ${describe(error)}` }),
+      );
+    } catch (error) {
+      if (codeOf(error) === "ENOENT") return [];
+      return { level: "warning", line: `Copilot's squiz: warning: ${plugins} could not be read: ${describe(error)}` };
+    }
+    if (copies.length === 0) return unlisted;
+    let root: string;
+    try {
+      root = dirname(dirname(target()));
+    } catch (error) {
+      return { level: "warning", line: `Copilot's squiz: warning: this squiz could not be found: ${describe(error)}` };
+    }
+    const ours = manifestOf(root);
+    return [...unlisted, ...copies.flatMap((copy) => compared(copy, manifestOf(copy), root, ours))];
+  };
+}
+
+/**
+ * Every directory under `plugins` that may be squiz, sorted.
+ *
+ * A marketplace install is `<marketplace>/squiz`, and a direct one is
+ * `_direct/<name>`, named for its source. A direct copy counts where its
+ * manifest names squiz, or where it has no readable manifest and holds
+ * `bin/squiz`, so that a broken copy is reported rather than passed over.
+ *
+ * Throws where `plugins` itself cannot be listed. A `_direct` that cannot be
+ * listed goes to `unlisted`, and the marketplace copies are still returned.
+ */
+function copiesIn(plugins: string, unlisted: (directory: string, error: unknown) => void): string[] {
+  const candidates: string[] = [];
+  for (const entry of readdirSync(plugins, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name !== "_direct") {
+      const copy = join(plugins, entry.name, "squiz");
+      if (mayExist(copy)) candidates.push(copy);
+      continue;
+    }
+    const directory = join(plugins, entry.name);
+    let directs;
+    try {
+      directs = readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      unlisted(directory, error);
+      continue;
+    }
+    for (const direct of directs) {
+      if (!direct.isDirectory()) continue;
+      const copy = join(plugins, entry.name, direct.name);
+      const manifest = manifestOf(copy);
+      if (manifest.outcome === "read" || (manifest.outcome === "unreadable" && mayExist(join(copy, "bin", "squiz")))) {
+        candidates.push(copy);
+      }
+    }
+  }
+  return candidates.sort();
+}
+
+// Only a path the system says is missing is absent. One it refuses to look at may be a copy, and is reported as one.
+function mayExist(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    const code = codeOf(error);
+    return code !== "ENOENT" && code !== "ENOTDIR";
+  }
+}
+
+/** What a plugin's `.claude-plugin/plugin.json` says: squiz's version, another plugin, or why it could not be read. */
+type Manifest =
+  | { readonly outcome: "read"; readonly version: string }
+  | { readonly outcome: "other" }
+  | { readonly outcome: "unreadable"; readonly reason: string };
+
+function manifestOf(root: string): Manifest {
+  const file = join(root, ".claude-plugin", "plugin.json");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError) return { outcome: "unreadable", reason: `${file} is not JSON: ${error.message}` };
+    return { outcome: "unreadable", reason: `${file} could not be read: ${describe(error)}` };
+  }
+  if (!isRecord(parsed)) return { outcome: "unreadable", reason: `${file} is not an object` };
+  const name = parsed["name"];
+  if (typeof name !== "string" || name.trim() === "") return { outcome: "unreadable", reason: `${file} names no plugin` };
+  if (name !== "squiz") return { outcome: "other" };
+  const version = parsed["version"];
+  if (typeof version !== "string" || version.trim() === "") return { outcome: "unreadable", reason: `${file} names no version` };
+  return { outcome: "read", version };
+}
+
+function compared(copy: string, theirs: Manifest, root: string, ours: Manifest): Row[] {
+  if (theirs.outcome === "other") return [];
+  if (theirs.outcome === "unreadable") {
+    return [{ level: "warning", line: `Copilot's squiz: warning: the version of ${copy} could not be read: ${theirs.reason}` }];
+  }
+  if (ours.outcome !== "read") {
+    const reason = ours.outcome === "unreadable" ? ours.reason : `${root} is not squiz`;
+    return [
+      {
+        level: "warning",
+        line: `Copilot's squiz: warning: ${copy} is ${theirs.version}, and the version of this squiz at ${root} could not be read: ${reason}`,
+      },
+    ];
+  }
+  if (theirs.version === ours.version) {
+    return [{ level: "present", line: `Copilot's squiz: ${copy} is ${theirs.version}, as this squiz is` }];
+  }
+  const older = olderOf(theirs.version, ours.version);
+  const update =
+    older === "first" ? "Update Copilot's copy, which is older" : older === "second" ? "Update this squiz, which is older" : "Update the older one";
+  return [
+    {
+      level: "warning",
+      line: `Copilot's squiz: warning: ${copy} is ${theirs.version}, and this squiz at ${root} is ${ours.version}. Copilot's hook runs its own copy, so two versions write one state file. ${update}`,
+    },
+  ];
+}
+
+const DOTTED = /^\d+(?:\.\d+)*$/u;
+
+/** Which of two different versions is older, or `undefined` where either is more than dotted numbers. */
+function olderOf(first: string, second: string): "first" | "second" | undefined {
+  if (!DOTTED.test(first) || !DOTTED.test(second)) return undefined;
+  const a = first.split(".").map(Number);
+  const b = second.split(".").map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference < 0 ? "first" : "second";
+  }
+  return undefined;
+}
+
+function codeOf(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+}
+
+/**
  * The reviewer `.squiz.json` names, whether it is installed, and the model it
  * runs on.
  *
@@ -449,6 +605,7 @@ export const CHECKS: readonly Check[] = [
   optional("tmux", "tmux", ["-V"], MULTIPLEXER_OPTIONAL),
   optional("Herdr", "herdr", ["--version"], MULTIPLEXER_OPTIONAL),
   pathLink(),
+  copilotCopies(),
   reviewer,
   projectSettings,
 ];

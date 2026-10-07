@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.28 (draft)
+**Version:** 1.29 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2985,6 +2985,7 @@ The rows, in the order they print:
 | tmux | No | `tmux -V` |
 | Herdr | No | `herdr --version` |
 | The `squiz` link | No | What `squiz init` finds on `PATH` |
+| Copilot's copies of squiz | No, and printed only where `copilot` is on `PATH` and has squiz installed | `.claude-plugin/plugin.json` in each copy under `<COPILOT_HOME>/installed-plugins/` |
 | The reviewer, and its model | Yes | `.squiz.json`, then `pi --version` or `copilot --version`, then the reviewer CLI's own settings |
 | The project's `pi` settings a review does not use | No | The repository's root, where the reviewer is `pi` |
 
@@ -3047,6 +3048,38 @@ This squiz's own `bin/` on `PATH`, which Claude Code's Bash tool has, is no
 link: another agent's shell does not have it. The squiz that is running is the
 real path of its `bin/squiz`, so `squiz doctor` run through the link still
 finds the link pointing at itself.
+
+**Each copy of squiz that Copilot keeps is compared with the squiz that is
+running.** Copilot's hook runs its own copy (§ 9 Installing), and `squiz review`
+run by name runs the one `squiz init` linked. Where the two are different
+versions, both write one `.squiz/<number>/state.json`. The row prints one line
+per copy, and nothing where `copilot` is not on `PATH` or Copilot has no copy.
+None of its lines changes the exit status.
+
+The copies are the directories under `<COPILOT_HOME>/installed-plugins/`, with
+`COPILOT_HOME` read as for experimental features:
+
+- `<marketplace>/squiz`, for each marketplace squiz was installed from
+- `_direct/<name>`, for a direct install, where its `plugin.json` names squiz,
+  or where it has no readable `plugin.json` and holds `bin/squiz`
+
+A copy's version is `version` in its `.claude-plugin/plugin.json`, and this
+squiz's is the same field in its own. A directory whose `plugin.json` names
+another plugin is not a copy. A plugin installed from a local marketplace is
+loaded from that directory and has no copy, so it is not compared.
+
+| Found | Level | The line |
+|---|---|---|
+| The same version | present | `Copilot's squiz: /Users/ana/.copilot/installed-plugins/squiz/squiz is 0.2.0, as this squiz is` |
+| A different version | warning | `Copilot's squiz: warning: /Users/ana/.copilot/installed-plugins/squiz/squiz is 0.1.0, and this squiz at /Users/ana/.claude/plugins/cache/squiz/squiz/0.2.0 is 0.2.0. Copilot's hook runs its own copy, so two versions write one state file. Update Copilot's copy, which is older` |
+| A `plugin.json` that cannot be read, is not JSON, is not an object, or names no plugin or no version | warning | `Copilot's squiz: warning: the version of /Users/ana/.copilot/installed-plugins/squiz/squiz could not be read: /Users/ana/.copilot/installed-plugins/squiz/squiz/.claude-plugin/plugin.json is not JSON: Unexpected token` |
+| This squiz's own version that cannot be read | warning | `Copilot's squiz: warning: /Users/ana/.copilot/installed-plugins/squiz/squiz is 0.1.0, and the version of this squiz at /Users/ana/dev/squiz could not be read: /Users/ana/dev/squiz/.claude-plugin/plugin.json names no version` |
+| An `installed-plugins`, or a `_direct` in it, that exists and cannot be listed. The marketplace copies are still compared where only `_direct` cannot be | warning | `Copilot's squiz: warning: /Users/ana/.copilot/installed-plugins could not be read: EACCES: permission denied, scandir '/Users/ana/.copilot/installed-plugins'` |
+
+The older version is the one whose dotted numbers are lower, read as numbers,
+so `0.9.0` is older than `0.10.0`. The line ends `Update this squiz, which is
+older` where this squiz is. Where either version is more than dotted numbers,
+such as `0.2.0-beta.1`, it ends `Update the older one`.
 
 **The reviewer is the one `reviewer` names in `.squiz.json`** at the root of the
 repository the check is run in, which `git rev-parse --show-toplevel` gives.
@@ -3654,7 +3687,7 @@ Each runtime keeps a copy of its own, and runs the hooks from it:
   the copy in place, so the path does not change.
 
 A person who installs squiz into both updates both, so that the two copies are
-one version.
+one version. `squiz doctor` warns where they are not (§ 6 The setup check).
 
 `claude plugin update squiz@squiz` copies the new version into a directory of
 its own beside the old one, and Claude Code sessions started afterwards run the
