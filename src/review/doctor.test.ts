@@ -65,6 +65,7 @@ function context(fakes: Fakes, overrides: Partial<DoctorContext> = {}): DoctorCo
     directory: outside,
     nodeVersion: "24.6.0",
     boundMs: 10_000,
+    signInBoundMs: 10_000,
     platform: "darwin",
     ...overrides,
   };
@@ -363,7 +364,7 @@ test("with copilot both the reviewer and installed, the coding agent's row says 
 
   assert.deepEqual(
     printed.stdout.split("\n").filter((line) => /copilot/iu.test(line) && !/cannot listen/u.test(line)),
-    ["copilot 1.2.0, experimental features on", "Reviewer copilot 1.2.0, model gpt-6-astra, Copilot's default. Its sign-in is not checked"],
+    ["copilot 1.2.0, experimental features on", "Reviewer copilot 1.2.0, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini"],
   );
 });
 
@@ -457,13 +458,13 @@ test("a pi that is not installed fails the row and names pi", () => {
   assert.equal(row.exit, 1);
 });
 
-test("with copilot as the reviewer, the row names Copilot and its default model, and says its sign-in is not checked", () => {
+test("with copilot as the reviewer, the row names Copilot and its default model, and that it is signed in", () => {
   const base = context({ ...EVERY_FAKE, copilot: COPILOT });
   settingsAt(String(base.environment.HOME), ".copilot/settings.json", '// Managed by Copilot\n{"model":"gpt-6-astra"}');
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
 
-  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-6-astra, Copilot's default\. Its sign-in is not checked$/mu);
+  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-6-astra, Copilot's default\. Signed in; the check spent one request on gpt-5-mini$/mu);
   assert.doesNotMatch(printed.stdout, /^Reviewer pi/mu);
   assert.equal(printed.exit, 0);
 });
@@ -471,7 +472,7 @@ test("with copilot as the reviewer, the row names Copilot and its default model,
 test("Copilot's default is COPILOT_MODEL where the environment sets it", () => {
   const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, repository('{"reviewer":"copilot"}'), { COPILOT_MODEL: "claude-sonnet-5" });
 
-  assert.equal(row.line, "Reviewer copilot 1.0.92, model claude-sonnet-5, Copilot's default. Its sign-in is not checked");
+  assert.equal(row.line, "Reviewer copilot 1.0.92, model claude-sonnet-5, Copilot's default. Signed in; the check spent one request on gpt-5-mini");
 });
 
 test("with copilot as the reviewer and no model anywhere, the model is unknown", () => {
@@ -479,7 +480,7 @@ test("with copilot as the reviewer and no model anywhere, the model is unknown",
 
   assert.equal(
     row.line,
-    "Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Its sign-in is not checked",
+    "Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Signed in; the check spent one request on gpt-5-mini",
   );
 });
 
@@ -499,7 +500,7 @@ test("a model .squiz.json names leaves Copilot's own settings unread, as a round
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot","model":"gpt-5-mini"}') });
 
-  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-5-mini, from \.squiz\.json\. Its sign-in is not checked$/mu);
+  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-5-mini, from \.squiz\.json\. Signed in; the check spent one request on gpt-5-mini$/mu);
   assert.equal(printed.exit, 0);
 });
 
@@ -508,6 +509,180 @@ test("a Copilot that is not installed fails the row and names copilot, though pi
 
   assert.equal(row.line, "Reviewer copilot: not found");
   assert.equal(row.exit, 1);
+});
+
+// Copilot's sign-in, read from one real request.
+
+const ROUND_VARIABLES = [
+  "COPILOT_HOME",
+  "COPILOT_ALLOW_ALL",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GH_CONFIG_DIR",
+] as const;
+
+/**
+ * A `copilot` that prints its version, and answers anything else by running
+ * `answer`. Before answering, it appends to `record` its arguments, its
+ * directory, and each variable a round sets, as `name=value` lines, or
+ * `name unset` where the variable is absent.
+ */
+function copilotSigningIn(record: string, answer: string): string {
+  return [
+    'if [ "$1" = "--version" ]; then echo "GitHub Copilot CLI 1.0.93."; exit 0; fi',
+    "{",
+    '  for argument in "$@"; do echo "argument=$argument"; done',
+    '  echo "directory=$(pwd -P)"',
+    ...ROUND_VARIABLES.map((name) => `  if [ -n "\${${name}+set}" ]; then echo "${name}=\${${name}}"; else echo "${name} unset"; fi`),
+    '  if [ -d "$COPILOT_HOME" ]; then echo "home exists"; fi',
+    '  if [ -d "$GH_CONFIG_DIR" ]; then echo "github exists"; fi',
+    `} >> '${record}'`,
+    answer,
+  ].join("\n");
+}
+
+type SignIn = { readonly line: string; readonly exit: number; readonly started: string[]; readonly directory: string };
+
+/**
+ * The reviewer's line where `.squiz.json` names Copilot and `copilot` answers a
+ * prompt with `answer`, and what that `copilot` was started with. The user's
+ * own environment carries a token and a `gh` configuration, which the check
+ * must not pass on.
+ */
+function signInRow(answer: string, overrides: Partial<DoctorContext> = {}): SignIn {
+  made += 1;
+  const record = join(scratch, `copilot-record-${made}`);
+  const base = context({ ...EVERY_FAKE, copilot: copilotSigningIn(record, answer) }, overrides);
+  const directory = repository('{"reviewer":"copilot","model":"gpt-6-astra"}');
+  const environment = { ...base.environment, GH_TOKEN: "gho_users_own", GH_CONFIG_DIR: join(scratch, "users-gh") };
+  const printed = squizDoctor({ ...base, directory, environment });
+  const line = printed.stdout.split("\n").find((row) => row.startsWith("Reviewer")) ?? "no reviewer line";
+  let started: string[] = [];
+  try {
+    started = readFileSync(record, "utf8").trim().split("\n");
+  } catch {
+    started = [];
+  }
+  return { line, exit: printed.exit, started, directory };
+}
+
+function valueOf(started: readonly string[], name: string): string | undefined {
+  const prefix = `${name}=`;
+  return started.find((line) => line.startsWith(prefix))?.slice(prefix.length);
+}
+
+/** A `copilot` answer that prints `said` on stderr and exits 1. */
+function failingWith(said: string): string {
+  made += 1;
+  const file = join(scratch, `copilot-said-${made}`);
+  writeFileSync(file, `${said}\n`, "utf8");
+  return `/bin/cat '${file}' >&2\nexit 1`;
+}
+
+// What Copilot CLI 1.0.93 printed with no login reachable: gh off PATH and no token variable.
+const SIGNED_OUT = `Error: No authentication information found.
+
+Copilot can be authenticated with GitHub using an OAuth Token or a Fine-Grained Personal Access Token.
+
+To authenticate, you can use any of the following methods:
+  • Start 'copilot' and run the '/login' command
+  • Set the COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN environment variable
+  • Run 'gh auth login' to authenticate with the GitHub CLI`;
+
+// What it printed with gh off PATH and a made-up fine-grained token in COPILOT_GITHUB_TOKEN.
+const NOT_VALIDATED = `Error: Authentication token found but could not be validated.
+
+  Failed to fetch PAT user login (401): GitHub returned: Bad credentials
+
+Your token may still be valid. Check your network connection and try again.
+
+To authenticate, you can use any of the following methods:
+  • Start 'copilot' and run the '/login' command`;
+
+test("a Copilot that answers the prompt is signed in, and the line says the check spent a request", () => {
+  const row = signInRow("echo OK");
+
+  assert.equal(row.line, "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini");
+  assert.equal(row.exit, 0);
+});
+
+test("the sign-in is checked with one prompt on gpt-5-mini, whatever model the project configures", () => {
+  const row = signInRow("echo OK");
+
+  assert.deepEqual(
+    row.started.filter((line) => line.startsWith("argument=")),
+    ["argument=-p", "argument=Reply with the single word OK.", "argument=--model", "argument=gpt-5-mini", "argument=--no-ask-user"],
+  );
+});
+
+test("the sign-in check runs under a COPILOT_HOME and gh configuration of its own, with the token variables empty, as a round does", () => {
+  const row = signInRow("echo OK");
+
+  const home = valueOf(row.started, "COPILOT_HOME");
+  const github = valueOf(row.started, "GH_CONFIG_DIR");
+  assert.ok(home !== undefined && github !== undefined, row.started.join("\n"));
+  assert.ok(row.started.includes("home exists") && row.started.includes("github exists"), row.started.join("\n"));
+  assert.notEqual(home, join(String(context({}).environment.HOME), ".copilot"));
+  assert.notEqual(github, join(scratch, "users-gh"), "the user's own gh configuration reached the check");
+  for (const name of ["COPILOT_ALLOW_ALL", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
+    assert.equal(valueOf(row.started, name), "", `${name} was not set empty`);
+  }
+});
+
+test("the sign-in prompt runs outside the repository, so none of its files reach Copilot", () => {
+  const row = signInRow("echo OK");
+
+  const directory = valueOf(row.started, "directory") ?? "";
+  assert.notEqual(directory, "");
+  assert.ok(!directory.startsWith(realpathSync(row.directory)), `the prompt ran in ${directory}`);
+});
+
+test("the sign-in check's scratch directory is gone once the row is printed", () => {
+  const row = signInRow("echo OK");
+
+  const home = valueOf(row.started, "COPILOT_HOME") ?? "";
+  const directory = valueOf(row.started, "directory") ?? "";
+  assert.notEqual(home, "");
+  assert.throws(() => statSync(home), { code: "ENOENT" }, `${home} was left behind`);
+  assert.throws(() => statSync(directory), { code: "ENOENT" }, `${directory} was left behind`);
+});
+
+test("a Copilot with no login fails the row with the first line it printed", () => {
+  const row = signInRow(failingWith(SIGNED_OUT));
+
+  assert.equal(
+    row.line,
+    "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: No authentication information found.",
+  );
+  assert.equal(row.exit, 1);
+});
+
+test("a token Copilot could not validate fails the row with the reason GitHub gave", () => {
+  const row = signInRow(failingWith(NOT_VALIDATED));
+
+  assert.equal(
+    row.line,
+    "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: Authentication token found but could not be validated. Failed to fetch PAT user login (401): GitHub returned: Bad credentials",
+  );
+  assert.equal(row.exit, 1);
+});
+
+test("a sign-in check that outlasts its bound fails the row, and leaves no scratch directory", () => {
+  const row = signInRow("/bin/sleep 5", { signInBoundMs: 300 });
+
+  assert.equal(row.line, "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot did not answer within 0.3 seconds");
+  assert.equal(row.exit, 1);
+  const home = valueOf(row.started, "COPILOT_HOME") ?? "";
+  assert.notEqual(home, "");
+  assert.throws(() => statSync(home), { code: "ENOENT" }, `${home} was left behind`);
+});
+
+test("the sign-in check is bounded by its own bound, not a version probe's", () => {
+  const row = signInRow("/bin/sleep 1\necho OK", { boundMs: 300 });
+
+  assert.equal(row.line, "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini");
 });
 
 test("a .squiz.json the configuration refuses is reported as refused, naming the setting, and is not checked as pi", () => {
@@ -707,7 +882,7 @@ function linkRow(target: string, path: string) {
   return pathLink(
     () => target,
     () => scratch,
-  )({ environment: { PATH: path, HOME: scratch }, directory: scratch, nodeVersion: "24.6.0", boundMs: 10_000, platform: "darwin" });
+  )({ environment: { PATH: path, HOME: scratch }, directory: scratch, nodeVersion: "24.6.0", boundMs: 10_000, signInBoundMs: 10_000, platform: "darwin" });
 }
 
 const NO_LINK =

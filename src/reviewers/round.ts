@@ -283,7 +283,7 @@ const nothingReported: RoundOutput = Object.freeze({ findings: [], verdicts: [] 
  * `GH_CONFIG_DIR` names `github`, which the round has emptied. They come after
  * the confinement's, so no adapter puts a token back.
  */
-function variablesOf(
+export function variablesOf(
   github: string,
   confinement: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
