@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,7 +14,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { renderComment } from "../findings/comment.ts";
 import type { ReviewThread } from "../github/threads.ts";
-import type { Triggered, TriggerRequest } from "../host/trigger.ts";
+import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
 import { writeState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { StateKey, StateRecord } from "../loop/state-record.ts";
@@ -72,7 +72,12 @@ function records(fixture: Fixture, held: readonly StateRecord[], more: Partial<E
   assert.equal(written.outcome, "written", "the fixture's state file must be written");
 }
 
-function decided(fixture: Fixture, decision: TriggerDecision, threads: readonly ReviewThread[] = []): Triggered {
+function decided(
+  fixture: Fixture,
+  decision: TriggerDecision,
+  threads: readonly ReviewThread[] = [],
+  host: HostStart = { outcome: "not started" },
+): Triggered {
   return {
     outcome: "decided",
     pullRequest: {
@@ -88,7 +93,7 @@ function decided(fixture: Fixture, decision: TriggerDecision, threads: readonly 
     threads,
     decision,
     queued: decision.outcome === "queue",
-    host: { outcome: "not started" },
+    host,
   };
 }
 
@@ -417,5 +422,91 @@ test("a gate that stops the trigger exits 1 with its reason and nothing on stdou
       "squiz: no review ran: no open pull request has \"feature-a\" as its head\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
     );
+  });
+});
+
+const UNKNOWN_START = "the intermediate process exited 1: spawn failed";
+
+function startedUnknown(fixture: Fixture): Triggered {
+  return decided(fixture, { outcome: "queue", startHost: true }, [], { outcome: "unknown", reason: UNKNOWN_START });
+}
+
+test("a round host whose start is unknown, and which never takes the lock, exits 1 naming squiz status and host.log", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [queued(OWN)]);
+    const started = Date.now();
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: startedUnknown(fixture), until: deadlineIn(10_000) }),
+      hostStartMs: 200,
+      presence: () => ({ outcome: "running" }),
+    });
+
+    assert.ok(Date.now() - started < 5_000, "the run must not wait out its deadline on a host that never started");
+    assert.equal(printed.exit, 1);
+    assert.equal(printed.stdout, "");
+    assert.equal(
+      printed.stderr,
+      `squiz: no review ran: whether the round host for PR #41 started could not be told, and none has taken the review since: ${UNKNOWN_START}\n` +
+        "squiz: `squiz status 41` shows whether one takes it later, and .squiz/41/host.log holds what the host wrote\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
+test("a round host whose start is unknown, and which holds the lock, is waited on for its result", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [queued(OWN)]);
+    mkdirSync(fixture.episode.directory, { recursive: true });
+    writeFileSync(join(fixture.episode.directory, "host.lock"), `${JSON.stringify({ pid: 4242, startedAt: 1 })}\n`);
+    const finished = (async () => {
+      await sleep(400);
+      records(fixture, [
+        { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
+      ], { rounds: [NO_COST] });
+    })();
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: startedUnknown(fixture), threads: [OPEN_THREAD] }),
+      hostStartMs: 100,
+      presence: (identity) => (identity.pid === 4242 ? { outcome: "running" } : { outcome: "gone" }),
+    });
+    await finished;
+
+    assert.equal(printed.exit, 2, printed.stderr);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, 1 new finding.");
+  });
+});
+
+test("a round host whose start is unknown is checked within its start window, never the run's whole deadline", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [queued(OWN)]);
+    mkdirSync(fixture.episode.directory, { recursive: true });
+    writeFileSync(join(fixture.episode.directory, "host.lock"), `${JSON.stringify({ pid: 4242, startedAt: 1 })}\n`);
+    const bounds: number[] = [];
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: startedUnknown(fixture), until: deadlineIn(10_000) }),
+      hostStartMs: 200,
+      presence: (_identity, boundMs) => {
+        bounds.push(boundMs);
+        return { outcome: "gone" };
+      },
+    });
+
+    assert.equal(printed.exit, 1);
+    assert.ok(bounds.length > 0);
+    assert.ok(bounds.every((bound) => bound <= 200), `each ps must be bounded by the start window: ${bounds.join(", ")}`);
+  });
+});
+
+test("a round host whose start is unknown, with the deadline passed and no host on the lock, exits 1 rather than 4", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [queued(OWN)]);
+
+    const printed = await runReview(request(fixture, { triggered: startedUnknown(fixture), until: deadlineIn(500) }));
+
+    assert.equal(printed.exit, 1);
+    assert.match(printed.stderr, /could not be told, and none has taken the review since/u);
   });
 });

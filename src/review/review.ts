@@ -2,7 +2,7 @@
  * `squiz review <number>`: trigger a review of the pull request's state, then
  * wait for that state's round and print what it reached.
  *
- * Three things here fail silently when wrong:
+ * Four things here fail silently when wrong:
  *
  * - The result of another state. The run waits on the record for the state its
  *   trigger read, its head and its activity, and never on the newest record. The
@@ -12,6 +12,8 @@
  *   is queued or under review exits 4, and the round goes on in its host.
  * - A wait that spins. The state file is read without the lock, because every
  *   write replaces it whole, and read again only after a pause.
+ * - A host whose start was unknown. It may never have started, and then nothing
+ *   takes the state, so the run waits on it only once a live host holds the lock.
  *
  * Stopping the command ends only the wait: the round host was started in a
  * session of its own, and nothing here signals it.
@@ -28,7 +30,8 @@ import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { namedStates } from "../loop/round-end.ts";
 import { recordFor, sameState, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
-import type { Presence, ProcessIdentity } from "../sessions/process.ts";
+import { lockHolder } from "../sessions/lock-file.ts";
+import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
 import { printReview, unprinted, type Printed, type ReviewResult } from "./output.ts";
 
@@ -42,6 +45,9 @@ const POLL_MS = 1_000;
 // rather than becoming exit 4 for want of a listing.
 const READ_BACK_FLOOR_MS = 10_000;
 
+// A host that started takes its lock within a second or two of starting.
+const HOST_START_MS = 10_000;
+
 export type ReviewRequest = {
   /** Where the command ran. */
   readonly directory: string;
@@ -52,6 +58,8 @@ export type ReviewRequest = {
   readonly until?: Deadline;
   /** The pause between readings of the state file. */
   readonly pollMs?: number;
+  /** How long a host whose start was unknown has to take its lock. 10 seconds where not given. */
+  readonly hostStartMs?: number;
   /** `trigger` where not given. */
   readonly trigger?: (request: TriggerRequest) => Triggered;
   /** `listReviewThreads` where not given. */
@@ -143,6 +151,8 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
 
   const waiting = { ...context, recorded: false };
   const pollMs = request.pollMs ?? POLL_MS;
+  let startUnknown = triggered.host.outcome === "unknown" ? triggered.host.reason : undefined;
+  const startBy = deadlineIn(request.hostStartMs ?? HOST_START_MS);
   for (;;) {
     const state = read();
     if (typeof state === "string") return notRun(state);
@@ -157,9 +167,35 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
       }
       return finish(settled, listed.threads);
     }
+    // A host that may not have started is waited on once a live one holds the
+    // lock, and reported once its time to take the lock has passed. A `ps` that
+    // hangs is cut off with that time, so it cannot spend the run's deadline.
+    const window = Math.min(startBy.remaining(), until.remaining());
+    if (startUnknown !== undefined && hostRunning(episode.directory, request.presence ?? stillRunning, window)) {
+      startUnknown = undefined;
+    }
+    if (startUnknown !== undefined && (startBy.passed() || until.passed())) {
+      return print({
+        outcome: "not run",
+        pullRequest,
+        reason: `whether the round host for PR #${pullRequest} started could not be told, and none has taken the review since: ${startUnknown}`,
+        problems: [`\`squiz status ${pullRequest}\` shows whether one takes it later, and .squiz/${pullRequest}/host.log holds what the host wrote`],
+      });
+    }
     if (until.passed()) return print(stillReviewing(context, state.records ?? []));
-    await sleep(Math.max(1, Math.min(pollMs, until.remaining())));
+    const pause = Math.min(pollMs, startUnknown === undefined ? until.remaining() : Math.min(startBy.remaining(), until.remaining()));
+    await sleep(Math.max(1, pause));
   }
+}
+
+/** Whether a live process holds the episode's host lock, asked within `boundMs`. One nobody can tell running is not. */
+function hostRunning(
+  directory: string,
+  presence: (identity: ProcessIdentity, boundMs: number) => Presence,
+  boundMs: number,
+): boolean {
+  const holder = lockHolder(directory, "host.lock");
+  return holder.outcome === "named" && presence(holder.holder, Math.max(1, boundMs)).outcome === "running";
 }
 
 type Context = { readonly pullRequest: number; readonly cap: number; readonly own: StateKey };
