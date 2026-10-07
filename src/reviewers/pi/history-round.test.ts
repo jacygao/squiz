@@ -7,7 +7,7 @@
  * `--tools` grants, as `pi` filters it. So a tool reaches the reviewer only
  * where the command line and the extension both carry it, and it runs with the
  * environment the round gave the reviewer. What each call answered is written
- * to the scratch space, where the test reads it back.
+ * to the session directory, where the test reads it back.
  */
 
 import assert from "node:assert/strict";
@@ -25,8 +25,8 @@ import { type Round, runRound } from "../round.ts";
 import { pi } from "./adapter.ts";
 
 const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url));
-/** The scratch space, absolute and outside the snapshot, where the round host puts it. */
-const scratchIn = (tree: string): string => join(tree, "..", "worktree", ".squiz", "1", "scratch");
+/** The session directory, absolute and outside the snapshot, where the round host puts it. */
+const sessionIn = (tree: string): string => join(tree, "..", "worktree", ".squiz", "1", "rounds", "1", "session");
 
 /** What one call answered: its text, and whether `pi` would read it as an error. */
 type Answered = { readonly text: string; readonly failed: boolean };
@@ -52,10 +52,9 @@ function invocationIn(tree: string): Invocation {
     directory: tree,
     charterFile,
     prompt: "# Review pull request #1\n\nCall each history tool once.",
-    sessionDirectory: ".squiz/agent-1/session",
+    sessionDirectory: sessionIn(tree),
     promptFile: ".squiz/1/rounds/1/prompt.md",
     reportsFile: ".squiz/1/rounds/1/reports.jsonl",
-    scratchDirectory: scratchIn(tree),
     githubConfigDirectory: ".squiz/1/rounds/1/gh",
     thinking: "medium",
     model: null,
@@ -64,7 +63,7 @@ function invocationIn(tree: string): Invocation {
 }
 
 function answeredIn(tree: string): Readonly<Record<string, Answered>> {
-  return JSON.parse(readFileSync(join(scratchIn(tree), "answered.json"), "utf8")) as Record<
+  return JSON.parse(readFileSync(join(sessionIn(tree), "answered.json"), "utf8")) as Record<
     string,
     Answered
   >;
@@ -131,7 +130,7 @@ function git(args: readonly string[], tree: string): string {
 /**
  * The stand-in for `pi`: it loads the extension, keeps the tools `--tools`
  * grants, calls each history tool once, and writes what each answered to the
- * scratch space. A call that throws is an error, as `pi` reads one.
+ * session directory. A call that throws is an error, as `pi` reads one.
  *
  * Plain CommonJS, because it is written to a file and run by a fresh process
  * rather than type-stripped and imported.
@@ -183,7 +182,9 @@ async function review() {
       answered[name] = { text: cause instanceof Error ? cause.message : String(cause), failed: true };
     }
   }
-  fs.writeFileSync(path.join(process.env.TMPDIR, "answered.json"), JSON.stringify(answered));
+  const session = after("--session-dir");
+  fs.mkdirSync(session, { recursive: true });
+  fs.writeFileSync(path.join(session, "answered.json"), JSON.stringify(answered));
 
   const message = {
     type: "message_end",

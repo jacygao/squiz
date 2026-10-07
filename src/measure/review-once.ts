@@ -137,7 +137,6 @@ const round = await runRound(
     sessionDirectory: join(own, "session"),
     promptFile: join(own, "prompt.md"),
     reportsFile: join(own, "reports.jsonl"),
-    scratchDirectory: join(own, "scratch"),
     githubConfigDirectory: join(own, "gh"),
     model: model ?? null,
     thinking: "medium",

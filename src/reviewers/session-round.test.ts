@@ -200,7 +200,6 @@ function invocationIn(tree: string): Invocation {
     sessionDirectory: join(tree, ".squiz/142/rounds/1/session"),
     promptFile: join(tree, ".squiz/142/rounds/1/prompt.md"),
     reportsFile: join(tree, ".squiz/142/rounds/1/reports.jsonl"),
-    scratchDirectory: join(tree, ".squiz/142/scratch"),
     githubConfigDirectory: join(tree, ".squiz/142/rounds/1/gh"),
     thinking: "medium",
     model: null,

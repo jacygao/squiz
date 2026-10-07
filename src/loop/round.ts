@@ -92,7 +92,7 @@ export type RoundSetup = {
   /**
    * The coding agent's git work tree: where git and `gh` are asked from, and where
    * the episode of the pull request it finds keeps the round's state, its
-   * snapshot, the reviewer's session and its scratch space.
+   * snapshot and the reviewer's session.
    */
   readonly worktree: string;
   readonly config: Config;
@@ -534,7 +534,7 @@ async function reviewOn(
   const ordinal = state.rounds.length + 1;
   const ownDirectory = roundDirectory(episode, ordinal);
   const sessionDirectory = join(ownDirectory, "session");
-  const unmade = makeDirectories([sessionDirectory, episode.scratchDirectory]);
+  const unmade = makeSessionDirectory(sessionDirectory);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
   // The coding agent may edit its worktree while the review runs, so the reviewer
@@ -563,7 +563,6 @@ async function reviewOn(
       sessionDirectory,
       promptFile: join(ownDirectory, "prompt.md"),
       reportsFile: join(ownDirectory, "reports.jsonl"),
-      scratchDirectory: episode.scratchDirectory,
       githubConfigDirectory: join(ownDirectory, "gh"),
       thinking: config.thinking,
       model: config.model,
@@ -906,22 +905,18 @@ function writeResume(
 }
 
 /**
- * The directories made, or why one could not be.
+ * The reviewer's session directory made, or why it could not be.
  *
- * The reviewer's session directory and its scratch space are made here because
- * the reviewer is started here: its CLI is told to write into both and creates
- * neither, and a scratch space that does not exist leaves the reviewer's
- * temporary files landing in the tree under review.
+ * It is made here because the reviewer is started here, and its CLI is told to
+ * write into it and does not create it.
  */
-function makeDirectories(directories: readonly string[]): string | null {
-  for (const directory of directories) {
-    try {
-      mkdirSync(directory, { recursive: true });
-    } catch (cause) {
-      return `${directory} could not be made: ${reasonFor(cause)}`;
-    }
+function makeSessionDirectory(directory: string): string | null {
+  try {
+    mkdirSync(directory, { recursive: true });
+    return null;
+  } catch (cause) {
+    return `${directory} could not be made: ${reasonFor(cause)}`;
   }
-  return null;
 }
 
 /**

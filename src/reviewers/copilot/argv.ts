@@ -83,7 +83,8 @@ export function argv(invocation: Invocation): CommandLine {
     "--no-ask-user --allow-all-tools",
     `--available-tools=${grants.join(",")}`,
     // Copilot refuses a path outside the snapshot, symlinks resolved, except
-    // in the temporary directory, which is the round's scratch space.
+    // in the system's temporary directory, where every snapshot is made. This
+    // closes that directory, leaving the reviewer its own snapshot only.
     "--disallow-temp-dir",
     "--no-custom-instructions",
     "--disable-builtin-mcps",

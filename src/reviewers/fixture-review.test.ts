@@ -12,8 +12,8 @@
  * writes the lines the extension would write to the report file it was named.
  *
  * What that establishes is the composition. The prompt reaches the reviewer, the
- * command line runs, the working directory is the tree handed over, the scratch
- * space holds what the reviewer writes, the tree is as it was afterwards, and
+ * command line runs, the working directory is the tree handed over, the session
+ * directory holds what the reviewer writes, the tree is as it was afterwards, and
  * the findings come back in the contract's shape anchored to a real line of a
  * real file, read out of the report file. It does not establish that a model finds the defect, which takes a
  * credential and a live run.
@@ -136,8 +136,7 @@ const head: Tree = {
 /** Where the defect sits in the file the reviewer reads, counting from 1. */
 const defectLine = headModule.split("\n").indexOf(defect) + 1;
 
-/** The scratch space and the session directory, named as the harness names them. */
-const scratchDirectory = ".squiz/agent-104/scratch";
+/** The session directory, named as the harness names it. */
 const sessionDirectory = ".squiz/agent-104/session";
 const reportsFile = ".squiz/104/rounds/1/reports.jsonl";
 
@@ -230,7 +229,7 @@ test("the adapter returns the seeded defect as a finding in the contract's shape
 
 /**
  * What the reviewer was handed, read back off the note the stand-in left in its
- * scratch space. A round that reviewed says every input arrived; this says what
+ * session directory. A round that reviewed says every input arrived; this says what
  * each one was.
  */
 test("the prompt, the grant, the charter and the tree all reach the reviewer", async () => {
@@ -268,11 +267,11 @@ test("the round leaves the fixture tree as it found it", async () => {
       "the reviewer changed the tree the coding agent is about to commit",
     );
 
-    // The scratch space is inside the tree and ignored, so what the reviewer
-    // wrote is there and `git status` is still silent about it.
+    // The session directory is inside the tree and ignored, so what the
+    // reviewer wrote is there and `git status` is still silent about it.
     assert.ok(
-      existsSync(join(tree, scratchDirectory, "handed.json")),
-      "the reviewer wrote nothing to its scratch space, so nothing here was confined",
+      existsSync(join(tree, sessionDirectory, "handed.json")),
+      "the reviewer wrote nothing to its session directory, so nothing here was confined",
     );
 
     writeFileSync(join(tree, "src/left-behind.ts"), "export const dirt = 1;\n");
@@ -293,7 +292,6 @@ function invocationIn(tree: string): Invocation {
     sessionDirectory,
     promptFile: ".squiz/104/rounds/1/prompt.md",
     reportsFile,
-    scratchDirectory,
     githubConfigDirectory: ".squiz/104/rounds/1/gh",
     thinking: "medium",
     model: null,
@@ -303,7 +301,7 @@ function invocationIn(tree: string): Invocation {
 
 /** The note the stand-in left, read as the fields it wrote. */
 function handedTo(tree: string): Readonly<Record<string, unknown>> {
-  const left = join(tree, scratchDirectory, "handed.json");
+  const left = join(tree, sessionDirectory, "handed.json");
   const note: unknown = JSON.parse(readFileSync(left, "utf8"));
   assert.ok(typeof note === "object" && note !== null, "the reviewer left no note of its inputs");
   return note as Readonly<Record<string, unknown>>;
@@ -513,16 +511,14 @@ function review() {
   if (ruled === null) refuse("the prompt carries no thread to rule on");
   if (!prompt.includes(defect)) refuse("the prompt carries no diff of the defect");
 
-  const scratch = process.env.TMPDIR;
-  if (scratch === undefined) refuse("no scratch space was named");
-
   const read = path.join(process.cwd(), reviewedFile);
   const lines = fs.readFileSync(read, "utf8").split("\\n");
   const at = lines.indexOf(defect) + 1;
   if (at === 0) refuse("nothing in " + read + " looks like the seeded defect");
 
+  fs.mkdirSync(sessionDirectory, { recursive: true });
   fs.writeFileSync(
-    path.join(scratch, "handed.json"),
+    path.join(sessionDirectory, "handed.json"),
     JSON.stringify({
       cwd: process.cwd(),
       tools,

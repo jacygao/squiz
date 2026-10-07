@@ -1,7 +1,7 @@
 ---
-settles: "§ 4 — what confines the reviewer's reading tools to the snapshot, for each adapter and at both depths"
-issue: 576
-recorded: 2026-10-06
+settles: "§ 4 — what confines the reviewer's reading tools to the snapshot, for each adapter"
+issue: [576, 620]
+recorded: 2026-10-07
 versions: { pi: 0.85.1, copilot: 1.0.92, models: "deepseek-v4-pro, gpt-6-astra", macos: 26.6.2 }
 recheck-when: pi upgrades or changes how a tool resolves its path; Copilot upgrades or changes its path permissions
 ---
@@ -27,8 +27,8 @@ recheck-when: pi upgrades or changes how a tool resolves its path; Copilot upgra
 - **Leave Copilot's own path check on, and pass `--disallow-temp-dir`.**
   Copilot refused every way out, links included, without being asked. The one
   directory outside the snapshot it still opened was the system's temporary
-  directory, which for the reviewer is the round's scratch space. The flag
-  closes it, and reads inside the snapshot are unchanged.
+  directory, which holds every round's snapshot. The flag closes it, and the
+  snapshot inside it stays readable, because it is Copilot's working directory.
 - **Allow nothing outside the snapshot.** Neither adapter's tools read anything
   outside it on purpose. `pi` reads the charter and the prompt file itself, from
   the command line, and Copilot reads its agent file from `COPILOT_HOME`.
@@ -41,7 +41,9 @@ Nothing.
 ## Reference
 
 What each call returned, run from the snapshot with a decoy file in a sibling
-directory and a second one outside `TMPDIR` altogether.
+directory and a second one outside `TMPDIR` altogether. The reviewer's `TMPDIR`
+is the system's, so the snapshot itself sits inside it, as do the sibling
+directory and every other round's snapshot.
 
 | Way out | `pi` before | `pi` with the extension | Copilot, default | Copilot, `--disallow-temp-dir` |
 |---|---|---|---|---|
@@ -51,6 +53,7 @@ directory and a second one outside `TMPDIR` altogether.
 | Link to the directory, then the file | read | refused | refused | refused |
 | `grep` / `find` / `ls`, or `rg` / `glob`, rooted outside | read | refused | refused | refused |
 | A file in the reviewer's `TMPDIR` | as any absolute path | as any absolute path | **read** | refused |
+| Another round's snapshot, under `TMPDIR/squiz-<uid>/` | as any absolute path | as any absolute path | **read** | refused |
 
 Copilot's refusal text, the same for every tool and every way out:
 
@@ -91,10 +94,10 @@ and was not refused.
 ## Limits
 
 - **The check and the read are two moments.** A link created between them is
-  not seen. Only the test command at `deep` can create one, and it is not
-  confined anyway.
+  not seen. No tool the reviewer is granted writes, so nothing in a round can
+  create one.
 - **A hard link is not a link to resolve.** git cannot record one, so the code
-  under review cannot carry one. The test command could make one.
+  under review cannot carry one.
 - **A spelling `pi` comes to expand that the check does not** is a way out the
   check does not see. The list above is `pi` 0.85.1's.
 - **The reviewer in a whole Copilot round declined to try.** Asked to read the

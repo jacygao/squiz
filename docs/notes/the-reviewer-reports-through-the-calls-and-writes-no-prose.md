@@ -82,12 +82,12 @@ recheck-when: pi upgrades, pi's default model changes, or the charter's reportin
   ls-files -s` was identical to the reading taken before the first round.
 - **Put nothing in the extension or in what it imports that the reviewer must
   not read.** `pi` compiles the extension and every module it imports with
-  `jiti` into `TMPDIR`, which is the scratch space inside the tree under review,
-  and one round opened the compiled finding validator there and read it. The same
-  round read the repository's git directory, including the metadata naming the
-  harness's own worktree. The scratch space stays inside the tree: neither
-  compiled file holds anything secret, and a scratch directory that is gitignored
-  and goes with the worktree is cleaned up with it.
+  `jiti` into `TMPDIR`. When this was recorded `TMPDIR` was a scratch space
+  inside the tree under review, and one round opened the compiled finding
+  validator there and read it. The same round read the repository's git
+  directory, including the metadata naming the harness's own worktree. `TMPDIR`
+  is now the system's, outside the snapshot, but the rule stands for anything
+  the reviewer can reach.
 - **Hand the reviewer the tree's own `charter.md` like any other file it may
   read.** A charter is not expected to change, so the copy in the tree and the
   copy in the system prompt are the same text in all but the run that changes
@@ -145,7 +145,7 @@ No reporting call was refused in any round. The four refusals across the three
 rounds were read tools: `ls` and `read` on `.git`, which is a file rather than a
 directory in a worktree, and `ls` on a path that did not exist.
 
-The files `pi` writes into the scratch space, one set per round:
+The files `pi` writes into `TMPDIR`, one set per round:
 `jiti/pi-extension.3ffe37ba.mjs`, `jiti/findings-reported.e5960af2.mjs` and
 `jiti/pi-reporting.a0aa6585.mjs`.
 
