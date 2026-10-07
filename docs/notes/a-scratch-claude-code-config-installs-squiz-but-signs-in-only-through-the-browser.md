@@ -29,7 +29,8 @@ for were therefore not made.
   A fresh `CLAUDE_CONFIG_DIR` is signed out, and `claude auth login` and
   `claude setup-token` both wait for a code from a browser sign-in. An agent
   given no API key cannot start a session there, and the only other config is
-  the owner's own. #681 holds what the owner must run.
+  the owner's own. The commands are under Signing in below, and #681 tracks
+  running them.
 - **Install with the README's two shell commands; they need no session and no
   sign-in.** Both exited 0 in the signed-out config, and the plugin they
   installed is the commit `main` was on.
@@ -39,8 +40,9 @@ for were therefore not made.
 
 ## Needs your input
 
-- **#681: sign the scratch config in.** Recommended: run the two commands it
-  gives, then pick #658 up again from the install, which takes a minute.
+- **#681: sign the scratch config in.** Recommended: run the commands under
+  Signing in below, then pick #658 up again from the install, which takes a
+  minute.
 
 ## Reference
 
@@ -55,6 +57,19 @@ variable of the calling session unset:
   is `https://platform.claude.com/oauth/code/callback`, and
   `Paste code here if prompted >`, then waited.
 - No `ANTHROPIC_API_KEY` was set.
+
+What the owner runs, in a plain terminal rather than after `!` in a session,
+which would pass that session's `CLAUDE*` variables down:
+
+```sh
+mkdir -p ~/Documents/Dev/squiz-e2e/claude-config
+CLAUDE_CONFIG_DIR=~/Documents/Dev/squiz-e2e/claude-config claude auth login
+CLAUDE_CONFIG_DIR=~/Documents/Dev/squiz-e2e/claude-config claude auth status
+```
+
+The login is approved in the browser, with the code pasted back if it asks for
+one. The status should then print `"loggedIn": true`. The live run uses that
+path as its `CLAUDE_CONFIG_DIR` and installs squiz into it itself.
 
 ### The install
 
