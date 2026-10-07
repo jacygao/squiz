@@ -2,7 +2,7 @@
  * `squiz review <number>`: trigger a review of the pull request's state, then
  * wait for that state's round and print what it reached.
  *
- * Four things here fail silently when wrong:
+ * Five things here fail silently when wrong:
  *
  * - The result of another state. The run waits on the record for the state its
  *   trigger read, its head and its activity, and never on the newest record. The
@@ -12,6 +12,10 @@
  *   is queued or under review exits 4, and the round goes on in its host.
  * - A wait that spins. The state file is read without the lock, because every
  *   write replaces it whole, and read again only after a pause.
+ * - A newer state nobody queued. The round host can be the first to read one,
+ *   when GitHub answered the trigger with the head from before a push, and a
+ *   run waiting on the state it superseded would wait out its deadline with no
+ *   round running. The run triggers again, which queues it.
  * - A host whose start was unknown. It may never have started, and then nothing
  *   takes the state, so the run waits on it only once a live host holds the lock.
  *
@@ -84,88 +88,113 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     return notRun(cause instanceof Error ? cause.message : String(cause));
   }
 
-  const triggered = (request.trigger ?? triggerReview)({
-    directory,
-    trigger: "review",
-    pullRequest,
-    environment: request.environment,
-    until,
-    ...(request.presence === undefined ? {} : { presence: request.presence }),
-    ...(request.host === undefined ? {} : { host: request.host }),
-  });
-  if (triggered.outcome !== "decided") return notRun(triggered.reason);
+  const triggerNow = (): Triggered =>
+    (request.trigger ?? triggerReview)({
+      directory,
+      trigger: "review",
+      pullRequest,
+      environment: request.environment,
+      until,
+      ...(request.presence === undefined ? {} : { presence: request.presence }),
+      ...(request.host === undefined ? {} : { host: request.host }),
+    });
+  const first = triggerNow();
+  if (first.outcome !== "decided") return notRun(first.reason);
 
-  const { episode, decision, state: own } = triggered;
+  const { episode } = first;
+  let triggered = first;
+  let context: Context = { pullRequest, cap, own: first.state };
   const print = (result: ReviewResult): Printed => printReview(result, episode.worktree);
   const read = (): EpisodeState | string => {
     const found = readState(episode);
     if (found.outcome === "unreadable") return found.reason;
     return found.outcome === "read" ? found.state : { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 } };
   };
-  const context: Context = { pullRequest, cap, own };
   const finish = (settled: Settled, threads: readonly ReviewThread[]): Printed =>
     print(settled.kind === "result" ? settled.result : settled.compose(threads));
   const hostNamed = (): string => {
     const state = read();
-    const record = typeof state === "string" ? undefined : recordFor(state.records ?? [], own);
+    const record = typeof state === "string" ? undefined : recordFor(state.records ?? [], context.own);
     return record?.status === "reviewing" ? `round host ${record.host.pid}` : "the round host";
   };
 
-  switch (decision.outcome) {
-    case "closed": {
-      const state = read();
-      if (typeof state === "string") return notRun(state);
-      return print(closedResult(context, state, triggered.threads));
-    }
-    case "host-unknown":
-      return notRun(`whether ${hostNamed()} for PR #${pullRequest} is still running could not be told: ${decision.reason}`);
-    case "recover":
-      // Nothing here recovers the round, so the run reports it killed, which is
-      // what its record reads as. A new commit or reply is a state it never held.
-      return print({
-        outcome: "failed",
-        pullRequest,
-        reason: `${hostNamed()} for PR #${pullRequest} stopped before its round ended`,
-        items: [],
-      });
-    case "result": {
-      const state = read();
-      if (typeof state === "string") return notRun(state);
-      const settled = settle({ ...context, recorded: true }, state);
-      if (settled !== undefined) return finish(settled, triggered.threads);
-      break;
-    }
-    case "queue":
-    case "start-host":
-    case "in-hand":
-    case "left-failed":
-      if (triggered.host.outcome === "failed") return notRun(`the round host could not be started: ${triggered.host.reason}`);
-      // A queue another writer's close stopped leaves the state's old record.
-      if (decision.outcome === "queue" && !triggered.queued) {
+  /** What the run prints from the latest trigger's decision alone, or `undefined` where it waits. */
+  const decided = (): Printed | undefined => {
+    const { decision, threads, host } = triggered;
+    switch (decision.outcome) {
+      case "closed": {
         const state = read();
         if (typeof state === "string") return notRun(state);
-        if (state.closeReported === true) return print(closedResult(context, state, triggered.threads));
+        return print(closedResult(context, state, threads));
       }
-      break;
-  }
+      case "host-unknown":
+        return notRun(`whether ${hostNamed()} for PR #${pullRequest} is still running could not be told: ${decision.reason}`);
+      case "recover":
+        // Nothing here recovers the round, so the run reports it killed, which is
+        // what its record reads as. A new commit or reply is a state it never held.
+        return print({
+          outcome: "failed",
+          pullRequest,
+          reason: `${hostNamed()} for PR #${pullRequest} stopped before its round ended`,
+          items: [],
+        });
+      case "result": {
+        const state = read();
+        if (typeof state === "string") return notRun(state);
+        const settled = settle({ ...context, recorded: true }, state);
+        return settled === undefined ? undefined : finish(settled, threads);
+      }
+      case "queue":
+      case "start-host":
+      case "in-hand":
+      case "left-failed":
+        if (host.outcome === "failed") return notRun(`the round host could not be started: ${host.reason}`);
+        // A queue another writer's close stopped leaves the state's old record.
+        if (decision.outcome === "queue" && !triggered.queued) {
+          const state = read();
+          if (typeof state === "string") return notRun(state);
+          if (state.closeReported === true) return print(closedResult(context, state, threads));
+        }
+        return undefined;
+    }
+  };
 
-  const waiting = { ...context, recorded: false };
+  const now = decided();
+  if (now !== undefined) return now;
+
   const pollMs = request.pollMs ?? POLL_MS;
   let startUnknown = triggered.host.outcome === "unknown" ? triggered.host.reason : undefined;
-  const startBy = deadlineIn(request.hostStartMs ?? HOST_START_MS);
+  let startBy = deadlineIn(request.hostStartMs ?? HOST_START_MS);
   for (;;) {
     const state = read();
     if (typeof state === "string") return notRun(state);
-    const settled = settle(waiting, state);
+    const settled = settle({ ...context, recorded: false }, state);
     if (settled !== undefined) {
       if (settled.kind === "result") return print(settled.result);
       const call = { directory, until: until.remaining() < READ_BACK_FLOOR_MS ? deadlineIn(READ_BACK_FLOOR_MS) : until };
       const listed = (request.listThreads ?? listReviewThreads)(triggered.pullRequest.nodeId, call);
       if (listed.outcome !== "listed") {
-        const reason = `the threads on PR #${pullRequest} could not all be listed to print the review of ${own.head.slice(0, 7)}: ${listed.reason}`;
+        const reason = `the threads on PR #${pullRequest} could not all be listed to print the review of ${context.own.head.slice(0, 7)}: ${listed.reason}`;
         return unprinted(reason);
       }
       return finish(settled, listed.threads);
+    }
+    const unqueued = unqueuedSuccessor(state, context.own);
+    if (unqueued !== undefined && !until.passed()) {
+      const again = triggerNow();
+      if (again.outcome !== "decided") {
+        // A trigger the run's own deadline cut off is the deadline arriving, not a review that could not run.
+        return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
+      }
+      triggered = again;
+      // A trigger that read a state other than the one the record names waits on what it read.
+      if (!sameState(again.state, unqueued)) context = { ...context, own: again.state };
+      const acted = decided();
+      if (acted !== undefined) return acted;
+      if (again.host.outcome === "unknown") {
+        startUnknown = again.host.reason;
+        startBy = deadlineIn(request.hostStartMs ?? HOST_START_MS);
+      }
     }
     // A host that may not have started is waited on once a live one holds the
     // lock, and reported once its time to take the lock has passed. A `ps` that
@@ -186,6 +215,23 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     const pause = Math.min(pollMs, startUnknown === undefined ? until.remaining() : Math.min(startBy.remaining(), until.remaining()));
     await sleep(Math.max(1, pause));
   }
+}
+
+/**
+ * The state `own` was superseded by, followed to the last one, where no record
+ * for it has been written. `undefined` once the episode has closed.
+ */
+function unqueuedSuccessor(state: EpisodeState, own: StateKey): StateKey | undefined {
+  if (state.closeReported === true) return undefined;
+  const records = state.records ?? [];
+  let record = recordFor(records, own);
+  // The count of records ends a loop of states superseding each other.
+  for (let hops = 0; hops <= records.length && record?.status === "not reviewed" && record.supersededBy !== undefined; hops += 1) {
+    const newer = recordFor(records, record.supersededBy);
+    if (newer === undefined) return record.supersededBy;
+    record = newer;
+  }
+  return undefined;
 }
 
 /** Whether a live process holds the episode's host lock, asked within `boundMs`. One nobody can tell running is not. */

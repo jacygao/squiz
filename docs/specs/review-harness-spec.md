@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.16 (draft)
+**Version:** 1.17 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -307,9 +307,15 @@ superseded by 8d21a4f
 superseded by 3f9c2e0 with different replies
 ```
 
-The newer state is queued by the trigger that read it, and reviewed in its turn.
-The state a round reviews is the one its result is recorded against: the reviewer
-reads a snapshot of that state's head commit (§ 4 The snapshot).
+The newer state is queued by a trigger, and reviewed in its turn. The round host
+queues nothing. Usually the trigger that read the newer state queues it. The host
+can be the first to read it, though: GitHub can answer a trigger run straight
+after a push with the head from before the push, and answer the host a moment
+later with the pushed one. A run of `squiz review` waiting on the superseded
+state then queues the newer one, as below. A hook does not wait, so a state
+superseded after a hook queued it is queued by the next trigger. The state a
+round reviews is the one its result is recorded against: the reviewer reads a
+snapshot of that state's head commit (§ 4 The snapshot).
 
 The record also holds the head commit and latest activity of the state that
 superseded it, because the reason names that state only by its short commit, and
@@ -317,9 +323,12 @@ other states can share a commit.
 
 A run of `squiz review` whose own state was superseded goes on waiting, for the
 state with that head and activity, and returns that state's result. Where that
-state was superseded in turn, the run follows it to the next. It exits 4 where
-its wait runs out first, or where no record for that state has been written yet,
-as § 6 shows.
+state was superseded in turn, the run follows it to the next. Where the state it
+follows has no record, the run triggers again: it reads the pull request's state
+afresh and acts on its record as any trigger does, which queues a state with no
+record and starts a round host. Where it read the state it was following, it goes
+on following it. Where it read another, it waits on that one instead. It exits 4
+where its wait runs out first, as § 6 shows.
 
 **A round decides its close and records it in one step.** It reads the queue
 under `state.lock`, decides from it as the table above sets out, and writes the

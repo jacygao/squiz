@@ -416,6 +416,64 @@ test("a state superseded by a reply not yet queued waits for that reply's state,
   });
 });
 
+test("a state superseded by one no trigger has queued triggers again, and returns the round of the state that trigger queued (#588)", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }]);
+    const handed: TriggerRequest[] = [];
+    const later = { ...decided(fixture, { outcome: "queue", startHost: true }), state: LATER };
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }), threads: [OPEN_THREAD] }),
+      trigger: (asked) => {
+        handed.push(asked);
+        if (handed.length === 1) return decided(fixture, { outcome: "result" });
+        records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }, queued(LATER)]);
+        return later;
+      },
+    };
+    const finished = (async () => {
+      for (let waited = 0; handed.length < 2 && waited < 200; waited += 1) await sleep(POLL_MS);
+      records(fixture, [
+        { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER },
+        { ...LATER, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
+      ], { rounds: [NO_COST] });
+    })();
+
+    const printed = await runReview(run);
+    await finished;
+
+    assert.equal(handed.length, 2, "the run did not trigger again for the state nothing had queued");
+    assert.equal(printed.exit, 2, printed.stdout + printed.stderr);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz reviewed PR #41 at 8d21a4f: round 1 of 3, 1 new finding.");
+  });
+});
+
+test("a trigger again that the run's deadline cuts off exits 4, not 1 (#588)", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }]);
+    let spent = false;
+    const until: Deadline = { ...deadlineIn(10_000), passed: () => spent, remaining: () => (spent ? 0 : 10_000) };
+    const handed: TriggerRequest[] = [];
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }), until }),
+      trigger: (asked) => {
+        handed.push(asked);
+        if (handed.length === 1) return decided(fixture, { outcome: "result" });
+        spent = true;
+        return { outcome: "failed", reason: "the time left for GitHub ran out before this call was made" };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(handed.length, 2, "the run did not trigger again");
+    assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
 test("a superseded state whose wait runs out before the newer state's round ends exits 4, naming both", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }, reviewing(LATER)]);
