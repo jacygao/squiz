@@ -2706,6 +2706,15 @@ finds the link pointing at itself.
 **The reviewer is the one `reviewer` names in `.squiz.json`** at the root of the
 repository the check is run in, which `git rev-parse --show-toplevel` gives.
 Outside a repository, or in one with no `.squiz.json`, it is the default, `pi`.
+It is outside a repository only where git says `not a git repository`, read
+with `LC_ALL=C` so the message is not translated. Where git is missing, or
+refuses for any other reason, the row fails with that reason, because a round
+would stop on it too:
+
+```
+Reviewer: the repository could not be found: git exited 128: fatal: detected dubious ownership in repository at '/work/app'
+```
+
 The file is read as a round reads it (§ 9 Configuration). A file that reading
 refuses fails the row, with the reason it was refused:
 

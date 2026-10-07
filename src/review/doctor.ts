@@ -242,13 +242,14 @@ export function pathLink(target: () => string = thisSquiz, directory: () => stri
  *
  * Outside a repository, or in one without the file, the reviewer is the
  * default. A file the configuration refuses fails the row, because no round
- * starts under it.
+ * starts under it, and so does a git that cannot name the repository.
  */
 const reviewer: Check = (context) => {
   const root = repositoryRoot(context);
+  if (root.outcome === "failed") return { level: "failed", line: `Reviewer: the repository could not be found: ${root.reason}` };
   let config: Config;
   try {
-    config = root === undefined ? { ...defaultConfig } : loadConfig(root);
+    config = root.outcome === "outside" ? { ...defaultConfig } : loadConfig(root.path);
   } catch (cause) {
     return { level: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
   }
@@ -274,12 +275,28 @@ const reviewer: Check = (context) => {
   return { level: "warning", line: `${installed}: warning: model unknown: ${user.problem}` };
 };
 
-/** The root of the repository the check runs in, or `undefined` where git names none. */
-function repositoryRoot(context: DoctorContext): string | undefined {
-  const asked = probe("git", ["rev-parse", "--show-toplevel"], context);
-  if (asked.outcome !== "answered") return undefined;
+type Root =
+  | { readonly outcome: "found"; readonly path: string }
+  | { readonly outcome: "outside" }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+// Git's message is matched as text, so it is asked for untranslated.
+const NOT_A_REPOSITORY = /fatal: not a git repository/u;
+
+/**
+ * The root of the repository the check runs in. Only git saying this is no
+ * repository is `outside`; any other refusal is `failed`, because a round run
+ * here would stop on it too.
+ */
+function repositoryRoot(context: DoctorContext): Root {
+  const untranslated = { ...context, environment: { ...context.environment, LC_ALL: "C" } };
+  const asked = probe("git", ["rev-parse", "--show-toplevel"], untranslated);
+  if (asked.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
+  if (asked.outcome === "failed") {
+    return NOT_A_REPOSITORY.test(asked.reason) ? { outcome: "outside" } : { outcome: "failed", reason: asked.reason };
+  }
   const root = asked.stdout.trim();
-  return root === "" ? undefined : root;
+  return root === "" ? { outcome: "failed", reason: "git named no worktree for this directory" } : { outcome: "found", path: root };
 }
 
 function reasonFor(cause: unknown): string {

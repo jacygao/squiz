@@ -97,7 +97,7 @@ test("nothing on PATH names every required dependency as not found and exits 1",
       "tmux: not found. Not required: without tmux or Herdr, reviews run detached",
       "Herdr: not found. Not required: without tmux or Herdr, reviews run detached",
       NO_LINK,
-      "Reviewer pi: not found",
+      "Reviewer: the repository could not be found: git is not on PATH",
       "",
     ].join("\n"),
   );
@@ -377,6 +377,23 @@ test("outside a repository the reviewer is the default, whatever .squiz.json sit
 
   assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, /mu);
   assert.doesNotMatch(printed.stdout, /refused/u);
+});
+
+test("a git that cannot name the repository it runs in fails the row with its reason, rather than reading as outside one", () => {
+  const refusing = [
+    'if [ "$1" = "--version" ]; then echo "git version 2.51.0"; exit 0; fi',
+    `echo "fatal: detected dubious ownership in repository at '$PWD'" >&2`,
+    "exit 128",
+  ].join("\n");
+  const project = repository('{"reviewer":"copilot"}');
+
+  const row = reviewerRow({ ...EVERY_FAKE, git: refusing, copilot: COPILOT }, project);
+
+  assert.equal(
+    row.line,
+    `Reviewer: the repository could not be found: git exited 128: fatal: detected dubious ownership in repository at '${project}'`,
+  );
+  assert.equal(row.exit, 1);
 });
 
 test("the .squiz.json read is the one at the repository's root, from a directory below it", () => {
