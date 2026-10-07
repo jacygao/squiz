@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.17 (draft)
+**Version:** 1.18 (draft)
 **Status:** For review
 **Owner:** TBD
 
@@ -2612,6 +2612,7 @@ Claude Code 2.4.1
 Node 24.6.0
 tmux: not found. Not required: without tmux or Herdr, reviews run detached
 Herdr 0.9.3
+squiz link: /Users/ana/.local/bin/squiz already links to this squiz
 ```
 
 It exits 0 where every required dependency is usable and 1 otherwise. It writes
@@ -2637,6 +2638,7 @@ The rows:
 | Node | Yes | The Node running squiz |
 | tmux | No | `tmux -V` |
 | Herdr | No | `herdr --version` |
+| The `squiz` link | No | What `squiz init` finds on `PATH` |
 
 **Each tool is found on `PATH` and started once to ask its version.** What
 starting it came to decides the line, and only a version read from its output
@@ -2677,6 +2679,27 @@ Node 23.6.0: too old. Squiz needs Node 24 or later
 A Node too old to strip types cannot load squiz at all, and fails before the
 check prints anything.
 
+**The `squiz` link row reads `PATH` as `squiz init` reads it** (§ 6 `squiz
+init`), measured against the squiz that is running, and names what it finds in
+`squiz init`'s words. It is never a failure. Claude Code's own shell runs squiz
+with no link, so no link is present rather than missing. Anything `squiz init`
+would refuse or change is a warning, as an optional tool that cannot be run is.
+Where `PATH` holds more than one `squiz`, the row names the one `squiz init`
+would act on: the first that is not squiz or not this squiz, then the first
+other version of this install, then a link to this squiz.
+
+| Already on `PATH` | Level | The line |
+|---|---|---|
+| A link to this squiz | present | `squiz link: /Users/ana/.local/bin/squiz already links to this squiz` |
+| No link, or only this squiz's own `bin/` | present | `squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init` |
+| A link to another version of the same plugin-cache install | warning | `squiz link: warning: /Users/ana/.local/bin/squiz links to /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, another version of this install. Run squiz init to move it to this one` |
+| A link to another squiz, another squiz's own `bin/`, anything else named `squiz`, or a link to something missing | warning | `squiz link: warning: ` followed by the reason `squiz init` gives, such as `/Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again` |
+
+This squiz's own `bin/` on `PATH`, which Claude Code's Bash tool has, is no
+link: another agent's shell does not have it. The squiz that is running is the
+real path of its `bin/squiz`, so `squiz doctor` run through the link still
+finds the link pointing at itself.
+
 The rows below are each added to the list by a later change, and until then the
 check does not report them:
 
@@ -2684,9 +2707,6 @@ check does not report them:
 - the Copilot CLI wherever Copilot is the reviewer or a coding agent, and, for a
   Copilot coding agent, whether Copilot's experimental features are on, as a
   warning;
-- what `squiz init`'s link would find on `PATH`, whichever coding agent is in
-  use: no link to this squiz, a link to an earlier version, or a `squiz` that is
-  not this one, named as `squiz init` names it;
 - the reviewer settings squiz overrides in this project.
 
 ## 7. Failure modes

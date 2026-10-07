@@ -12,6 +12,8 @@
 
 import { spawnSync } from "node:child_process";
 
+import { squizzesOnPath, thisSquiz } from "./path-link.ts";
+
 /**
  * How one line bears on the exit status.
  *
@@ -194,6 +196,40 @@ const node: Check = (context) => {
   return { level: "failed", line: `Node ${context.nodeVersion}: too old. Squiz needs Node 24 or later` };
 };
 
+/**
+ * What `squiz init`'s link would find on `PATH` for `target`, the squiz that is
+ * running, with relative entries read from `directory`.
+ *
+ * No link is not a failure, because Claude Code's own shell runs squiz without
+ * one. Anything `squiz init` would refuse or change is a warning, in its words,
+ * and takes the same precedence it does.
+ */
+export function pathLink(target: () => string = thisSquiz, directory: () => string = () => process.cwd()): Check {
+  return (context) => {
+    let found;
+    try {
+      found = squizzesOnPath(target(), context.environment, directory());
+    } catch (error) {
+      return { level: "warning", line: `squiz link: warning: PATH could not be read: ${describe(error)}` };
+    }
+    const blocking = found.find((each) => each.kind === "conflict");
+    if (blocking !== undefined) return { level: "warning", line: `squiz link: warning: ${blocking.reason}` };
+    const earlier = found.find((each) => each.kind === "earlier");
+    if (earlier !== undefined) {
+      return {
+        level: "warning",
+        line: `squiz link: warning: ${earlier.entry} links to ${earlier.final}, another version of this install. Run squiz init to move it to this one`,
+      };
+    }
+    const linked = found.find((each) => each.kind === "this");
+    if (linked !== undefined) return { level: "present", line: `squiz link: ${linked.entry} already links to this squiz` };
+    return {
+      level: "present",
+      line: "squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init",
+    };
+  };
+}
+
 /** Every dependency a project needs, in the order they print. */
 export const CHECKS: readonly Check[] = [
   required("git", "git", ["--version"]),
@@ -202,6 +238,7 @@ export const CHECKS: readonly Check[] = [
   node,
   optional("tmux", "tmux", ["-V"], MULTIPLEXER_OPTIONAL),
   optional("Herdr", "herdr", ["--version"], MULTIPLEXER_OPTIONAL),
+  pathLink(),
 ];
 
 function firstLine(output: string): string {
@@ -214,4 +251,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
