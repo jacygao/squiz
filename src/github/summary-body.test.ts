@@ -563,6 +563,19 @@ test("a finding whose comment could not be posted is counted and named in Notes"
  * What GitHub said is the round's to report. It is unbounded text, and a newline
  * in it would put a line in a comment that nothing wrote.
  */
+test("a thread kept open whose reason could not be posted is named in Notes (#511)", () => {
+  const comment = renderSummary({
+    ...quiet,
+    threads: [{ ...thread("open", "src/queue.ts:134", "Retry backoff resets"), reasonUnposted: true }],
+  });
+  assert.ok(
+    comment.endsWith(
+      "**Notes**\n\n- `src/queue.ts:134` — Retry backoff resets (kept open, and the reviewer's reason could not be posted on its thread)",
+    ),
+    `the thread was not named in Notes: ${comment}`,
+  );
+});
+
 test("the reason the comment could not be posted stays out of the summary", () => {
   const comment = renderSummary({
     ...quiet,

@@ -127,6 +127,19 @@ export function renderReply(text: string): string {
 }
 
 /**
+ * The reply the reviewer posts on a thread it keeps open: its marker on the
+ * first line, and `reason` beneath it as it was written.
+ *
+ * The first line carries the reviewer's marker so that the reply is read as the
+ * reviewer's. A reply read as anyone else's is activity the reviewer has not
+ * seen, and would start another round. What follows the marker names no
+ * severity, so nothing reads the reply as a finding of its own.
+ */
+export function renderOpenReason(reason: string): string {
+  return [`${reviewerMarker}still open${boldClose}`, reason.trim()].filter(nonEmpty).join("\n\n");
+}
+
+/**
  * What the comment `body` says: who wrote it, and for one the reviewer wrote,
  * the severity and the headline its first line names.
  *

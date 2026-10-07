@@ -126,7 +126,7 @@ test("the findings come back in order, and a second ruling on one thread leaves 
       findingLine,
       { type: "report", call: REPORT_FINDING, value: second },
       verdictLine,
-      { type: "report", call: REPORT_VERDICT, value: { thread: verdict.thread, verdict: "open" } },
+      { type: "report", call: REPORT_VERDICT, value: { thread: verdict.thread, verdict: "open", reason: "Still there." } },
       finish,
     ),
   );

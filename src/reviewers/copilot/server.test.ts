@@ -313,6 +313,22 @@ test("a verdict and the finish are recorded as pi's extension records them", asy
   ]);
 });
 
+test("an open verdict with no reason is refused, and Copilot's reviewer can rule again", async (t) => {
+  const directory = scratch(t);
+  const reports = join(directory, "reports.jsonl");
+  const server = started(t, directory, { [REPORTS_VARIABLE]: reports });
+
+  const bare = { thread: "PRRT_kwDOabc", verdict: "open" };
+  const refused = toolAnswer(await server.request(1, "tools/call", call(REPORT_VERDICT, bare)));
+  assert.equal(refused.isError, true);
+  assert.match(refused.text, /keeps thread PRRT_kwDOabc open and gives no reason/u);
+
+  const ruling = { ...bare, reason: "The retry is still unbounded." };
+  const ruled = toolAnswer(await server.request(2, "tools/call", call(REPORT_VERDICT, ruling)));
+  assert.deepEqual(ruled, { isError: false, text: "Ruled open on PRRT_kwDOabc" });
+  assert.deepEqual(linesIn(reports).at(-1), { type: "report", call: REPORT_VERDICT, value: ruling });
+});
+
 test("a call to a tool the server does not serve is a protocol error", async (t) => {
   const server = started(t, scratch(t));
   const answer = await server.request(1, "tools/call", call("bash", { command: "ls" }));

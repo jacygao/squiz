@@ -1070,7 +1070,9 @@ type Posting = {
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
   const call = { directory: on.directory, until: on.reserve };
-  const calls = ruleOn.length + 2 * output.findings.length;
+  // A thread takes a second call where the reviewer kept it open, for the reply.
+  const replies = output.verdicts.filter((verdict) => verdict.verdict === "open").length;
+  const calls = ruleOn.length + replies + 2 * output.findings.length;
   // Nothing to put up makes no call, and a round that made none posted nothing.
   const post = <T>(posting: () => T): T =>
     calls === 0 ? posting() : timed(on.stopwatch, on.reserve, posting);

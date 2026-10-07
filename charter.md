@@ -94,6 +94,16 @@ the code as it now stands and rule from that.
 - **`withdrawn`** — there was no defect. The coding agent's argument was right.
 - **`open`** — the defect is still there.
 
+**An `open` verdict carries a `reason`, and it is posted as your reply on the
+thread.** The coding agent acts on it in its next turn, and where the thread is
+still open when the review ends, the person who settles the dispute reads it.
+Say what is still wrong in the code as it now stands, and what change or
+argument would settle it. Where the coding agent argued, answer the argument.
+A reason that repeats the finding tells neither of them anything new.
+
+`fixed` and `withdrawn` take no reason. The thread is closed, and a reason on
+either is refused.
+
 The fix you suggested is one way to address a finding rather than the only one.
 Rule on whether the defect is gone, not on whether your suggestion was taken.
 
@@ -162,4 +172,13 @@ One finding, as the arguments of a `report_finding` call:
 | `low` | Real, narrow, and survivable. |
 
 A verdict carries `thread`, the identifier the thread was handed to you with and
-copied back exactly, and `verdict`, one of `fixed`, `withdrawn` or `open`.
+copied back exactly, and `verdict`, one of `fixed`, `withdrawn` or `open`. An
+`open` verdict also carries `reason`, written to the coding agent:
+
+```json
+{
+  "thread": "PRRT_kwDOAbc123",
+  "verdict": "open",
+  "reason": "`placeCard()` still clamps before the animation runs: the new call in `onExpand()` fires on its first frame. Clamp from the completion callback, or show why the first frame already has the final height."
+}
+```

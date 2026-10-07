@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readComment, renderComment, renderReply } from "./comment.ts";
+import { readComment, renderComment, renderOpenReason, renderReply } from "./comment.ts";
 import {
   type ChangeFinding,
   type FileFinding,
@@ -363,6 +363,20 @@ const awkwardReplies: readonly string[] = [
   "Fixed in befac71.\n\nThe clamp runs from the completion callback now.",
   "x",
 ];
+
+test("the reviewer's reason for keeping a thread open is its marker, then the reason beneath it (#511)", () => {
+  assert.equal(
+    renderOpenReason("  The clamp still runs before the animation.\n\n- Measure the card after it.  "),
+    "**Squiz reviewer · still open**\n\nThe clamp still runs before the animation.\n\n- Measure the card after it.",
+  );
+});
+
+test("the reviewer's reason is read back as the reviewer's, and names no finding", () => {
+  // Read as anyone else's, it would count as a reply the reviewer has not seen,
+  // and the reviewer's own reply would start another round.
+  const reading = readComment(renderOpenReason("Still wrong."));
+  assert.deepEqual(reading, { by: "reviewer", severity: null, headline: null });
+});
 
 test("a reply is the marker on its own line, with the text beneath it (#194)", () => {
   assert.equal(

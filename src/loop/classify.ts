@@ -61,6 +61,12 @@ export type ClassifiedThread = {
    * alone for one anchored to a file.
    */
   readonly location: string;
+  /**
+   * True where the reviewer kept the thread open in the closing round and its
+   * reply giving the reason could not be posted. The thread then shows no reason,
+   * and Notes is the only place that says one was given.
+   */
+  readonly reasonUnposted?: true;
 };
 
 /**
@@ -77,6 +83,11 @@ export type ClassifiedThread = {
  */
 export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThread[] {
   const ruled = rulings(closing.verdicts);
+  const unposted = new Set(
+    closing.verdicts.threads
+      .filter((applied) => applied.reply?.outcome === "failed")
+      .map((applied) => applied.thread),
+  );
   const classified: ClassifiedThread[] = [];
   const counted = new Set<string>();
 
@@ -93,6 +104,7 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
       }),
       headline: reading.headline,
       location: locationOf(thread),
+      ...(unposted.has(thread.id) ? { reasonUnposted: true } : {}),
     });
   }
 

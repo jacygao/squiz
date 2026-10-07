@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 import { latestActivity } from "./activity.ts";
-import { renderComment, renderReply } from "./comment.ts";
+import { renderComment, renderOpenReason, renderReply } from "./comment.ts";
 
 // Every comment is written by the renderers that post them, so a fixture keeps
 // matching the markers after either is respelled.
@@ -73,6 +73,11 @@ test("the reviewer's own reply on its thread is not activity", () => {
   const reply = comment("PRRC_reviewer", reviewerReply, "2026-09-06T07:05:00Z");
 
   assert.equal(latestActivity([thread("PRRT_a", opened, reply)]), null);
+});
+
+test("the reason the reviewer posts for keeping a thread open is not activity (#511)", () => {
+  const reason = comment("PRRC_reason", renderOpenReason("Still off-screen."), "2026-09-06T07:05:00Z");
+  assert.equal(latestActivity([thread("PRRT_a", opened, reason)]), null);
 });
 
 test("a reply after the reviewer's own still counts, and the reviewer's does not", () => {

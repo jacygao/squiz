@@ -231,6 +231,26 @@ test("a thread the reviewer answered again is not a thread the coding agent repl
   );
 });
 
+test("a thread whose reason could not be posted says so, and one whose reason landed does not (#511)", () => {
+  const lost = threadFor("PRRT_lost", onLine("src/queue.ts", 12, "Backoff resets on enqueue"));
+  const landed = threadFor("PRRT_landed", onLine("src/queue.ts", 40, "The cap is never read"));
+  const classified = classifyAtClose({
+    ...quiet,
+    handedOver: [lost, landed],
+    verdicts: {
+      threads: [
+        { thread: "PRRT_lost", ruled: "open", outcome: "left-open", reply: { outcome: "failed", reason: "HTTP 502" } },
+        { thread: "PRRT_landed", ruled: "open", outcome: "left-open", reply: { outcome: "acted" } },
+      ],
+      unapplied: [],
+    },
+  });
+  assert.deepEqual(
+    classified.map((thread) => thread.reasonUnposted === true),
+    [true, false],
+  );
+});
+
 test("a thread no marker claims is left out", () => {
   const classified = classifyAtClose({
     ...quiet,
