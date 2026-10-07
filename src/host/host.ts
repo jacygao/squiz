@@ -215,6 +215,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         if (noted.outcome === "failed") log(`round ${round.number}: the reviewer's session could not be recorded: ${noted.reason}`);
       },
       paneLeftOpen: (reason) => log(`round ${round.number}: the reviewer's pane was left open: ${reason}`),
+      snapshotLeft: (reason) => log(`round ${round.number}: ${reason}; it stays on disk until it is deleted`),
       endsOn: (tally, queued) => {
         ended = endsOn(tally, queued);
         return ended;

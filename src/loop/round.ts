@@ -163,6 +163,11 @@ export type RoundSetup = {
   readonly reviewerStarted?: (session: ReviewerSession) => void;
   /** Told why a reviewer's pane could not be confirmed closed after it ended. */
   readonly paneLeftOpen?: (reason: string) => void;
+  /**
+   * Told why the round's snapshot could not be removed. The reason names where
+   * it stands. Told once the round has its conclusion, which it never changes.
+   */
+  readonly snapshotLeft?: (reason: string) => void;
 };
 
 /** An episode's lock as its caller took it, and the pull request it was taken for. */
@@ -325,7 +330,10 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
     // Removal grows with what the reviewer left in the snapshot, so it waits for
     // the round's result. It runs under the lock, before the next round can add
     // a snapshot of its own.
-    if (opened.snapshot !== undefined) removeSnapshot(opened.snapshot);
+    if (opened.snapshot !== undefined) {
+      const removal = removeSnapshot(opened.snapshot);
+      if (removal.outcome === "failed") setup.snapshotLeft?.(removal.reason);
+    }
     // A lock this round could not remove names a process that is about to exit,
     // and the next round takes over a lock whose holder has gone.
     if (opened.held?.owned === true) opened.held.lock.release();

@@ -252,6 +252,8 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     else process.env["PATH"] = previous;
     if (previousTemporary === undefined) delete process.env["TMPDIR"];
     else process.env["TMPDIR"] = previousTemporary;
+    // A test may leave a snapshot it made unremovable, which would refuse this too.
+    spawnSync("chmod", ["-R", "u+rwx", root]);
     await rm(root, { recursive: true, force: true });
   }
 }
@@ -1268,5 +1270,21 @@ test("a note that cannot be written is reported in host.log, and changes neither
   assert.equal(record.exitStatus, 2);
   assert.deepEqual(ran.end, { outcome: "nothing queued" });
   assert.match(ran.log, /the note for 60517e1f-e1dc-49b1-8e39-6fcbe686f3fb was not written/u);
+});
+
+test("#406: a snapshot the round cannot remove is named in host.log, and the round's result stands", { skip: process.getuid?.() === 0 ? "root deletes files in a read-only directory" : false }, async () => {
+  const ran = await host({
+    records: atHead,
+    // A file in a directory nobody may write refuses the removal's unlink.
+    reviewer: "mkdir stuck && : > stuck/left && chmod 555 stuck",
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(ran.end, { outcome: "nothing queued" });
+  assert.match(
+    ran.log,
+    /round 1: the snapshot at \/\S+\/rounds\/1\/tree could not be removed: .+; it stays on disk until it is deleted\n/u,
+  );
 });
 
