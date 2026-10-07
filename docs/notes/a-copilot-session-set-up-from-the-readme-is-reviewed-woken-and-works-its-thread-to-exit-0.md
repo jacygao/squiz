@@ -65,73 +65,26 @@ model set runs on the coding session's model.
 
 ## Reference
 
-### The run
+### Telling which reviewer ran
 
-| PR | Task | Round 1 | After the wake |
-|---|---|---|---|
-| #1 | Add two functions | Nothing found, episode closed | Ran `squiz review 1`, exit 0 |
-| #2 | Add a planted defect, told to "then stop" | 1 high thread | Ran `squiz review 2`, exit 2, summarised the thread and stopped without fixing it |
-| #3 | Add a planted defect, in a fresh session | 1 high thread | Ran `squiz review 3`, exit 2; fixed it, `squiz reply`, pushed, `squiz review 3` again. Round 2 closed with nothing open, exit 0 |
+Each round in `.squiz/<number>/state.json` records `"reviewer"` and
+`"models"`, here `"copilot"` and `["claude-sonnet-5"]`. The summary comment
+says the same, as Reviewed by `copilot` on `claude-sonnet-5`.
 
-#2's session had been told to stop after opening #1, and stopped again. #3 was
-given to a new session with no such instruction. #3's summary comment read:
+### Telling a wake from a silent failure
 
-```
-Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0
-116,210 tokens over 2 rounds: 64,069, 52,141 · 9.05 AI credits
-Reviewed by `copilot` on `claude-sonnet-5`
-```
+A woken session shows, in this order, `hook.end agentStop` in its `events.jsonl`,
+`woke its owner through <COPILOT_HOME>/session-state/<id>/squiz.sock` in
+`host.log`, and a `user.message` with `"source":"system"` holding the note.
+A record whose owner has no `messagingSocket` in `state.json` is a session
+whose extension did not load, and its note waits to be pulled.
 
-Each round in `.squiz/3/state.json` recorded
-`"reviewer": "copilot"` and `"models": ["claude-sonnet-5"]`.
+### Running it from an agent without touching the owner's link
 
-### Telling it worked from a silent failure
-
-The checks #671 gives held. For #3's first round:
-
-```
-12:11:15.663Z hook.end agentStop                       events.jsonl
-12:11:46.521Z round 1: 54b1ba1 reviewed, 1 threads open  host.log
-12:11:46.526Z 54b1ba1: woke its owner through /tmp/s659/ch/session-state/467885fc-…/squiz.sock
-12:11:46.579Z user.message "Squiz reviewed PR #3 at 54b1ba1: 1 thread is open. Run `squiz review 3` to read it." source system
-```
-
-The record's owner in `state.json` carried `messagingSocket`, and the debug log
-had `Installed 1 native extension(s)` for each session. No `hook stderr` line
-was logged, which is what a hook that queued prints. After `/exit` the
-session's `squiz.sock` was gone.
-
-### What `squiz doctor` printed
-
-From the installed copy through the link `squiz init` made, in the scratch
-project with `{ "reviewer": "copilot" }`:
-
-```
-git 2.54.0
-gh 2.97.0, signed in as jacygao
-Claude Code 2.1.292
-copilot 1.0.92, experimental features on
-Node 24.15.0
-tmux 3.7b
-Herdr 0.9.3
-squiz link: /tmp/s659/home/.local/bin/squiz already links to this squiz
-Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Its sign-in is not checked
-```
-
-### How it was run
-
-- `COPILOT_HOME=/tmp/s659/ch`, signed in through the macOS keychain with no
-  step of its own, and the environment cleared of every `CLAUDE*` variable and
-  of the owner's `squiz-plugin/bin`.
-- `squiz init` ran with `HOME=/tmp/s659/home`, so its link went to
-  `/tmp/s659/home/.local/bin/squiz` and not the owner's `~/.local/bin`, which
-  is ahead of the owner's own squiz on `PATH`. The sessions' `PATH` started
-  with that directory.
-- The sessions ran in a tmux pane as `copilot --model gpt-5-mini
-  --allow-all-tools --log-dir <dir> --log-level debug`, and each round's
-  reviewer ran in a tmux window of its own.
-- The `.squiz/` line went into a fresh repository's `.gitignore`, and
-  `git status` then listed only the untracked `.squiz.json`.
+`squiz init` links into `$HOME/.local/bin`, which on the owner's machine is
+ahead of the owner's own squiz on `PATH`. Run it with `HOME` set to a scratch
+directory whose `.local/bin` exists and is first on the sessions' `PATH`, and
+the owner's link is untouched.
 
 ### Traps in a first Copilot run that are not squiz's
 
