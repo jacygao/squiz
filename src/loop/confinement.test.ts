@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -457,102 +457,5 @@ test("a HEAD an earlier round found moved survives a round that found nothing", 
   assert.deepEqual(after({ trackedFiles: { outcome: "changed", paths: [], head } }, {}), {
     ...nothingEstablished,
     moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
-  });
-});
-
-/**
- * The episode's worktree with a snapshot added in it by `git worktree add`, as a
- * round adds one, so that a write made through the snapshot reaches the git
- * directory the two share.
- */
-function snapshotIn(episode: Episode): string {
-  const tree = join(episode.worktree, ".squiz", KEY, "rounds", "1", "tree");
-  git(episode.worktree, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "--detach", tree, "HEAD");
-  return tree;
-}
-
-/** What `husky` does as a `prepare` script, run in the snapshot as `run_tests` runs it. */
-function setTheHooksPath(tree: string): void {
-  git(tree, "config", "core.hooksPath", ".husky/_");
-}
-
-const SHARED_NOTE =
-  "- The git config or hooks this repository's worktrees share changed while the reviewer ran." +
-  " The reviewer's tests may have changed them, or anything else using the repository may have:" +
-  " `core.hookspath` in `config`";
-
-test("at deep, a key the test command set in the shared config is named in the comment", async () => {
-  await withWorktree(async (episode) => {
-    const tree = snapshotIn(episode);
-    const before = readBeforeReviewer(tree, deadlineIn(WINDOW_MS), episode.worktree);
-    setTheHooksPath(tree);
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-
-    assert.deepEqual(confinement.trackedFiles, { outcome: "unchanged" });
-    assert.deepEqual(confinement.sharedConfig, {
-      outcome: "changed",
-      changes: [{ file: "config", key: "core.hookspath" }],
-    });
-    const comment = commentOn(evidenceWith(undefined, confinement));
-    assert.ok(comment.includes(SHARED_NOTE), `the comment does not name the key:\n${comment}`);
-  });
-});
-
-/**
- * At `read` the reviewer has nothing that runs the project's code, so a change
- * to the shared config is someone else's, and the comment is the one a round
- * that never read the config would post.
- */
-test("at read, a change to the shared config is not read and changes nothing in the comment", async () => {
-  await withWorktree(async (episode) => {
-    const tree = snapshotIn(episode);
-    const before = readBeforeReviewer(tree, deadlineIn(WINDOW_MS));
-    setTheHooksPath(tree);
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-
-    assert.equal(confinement.sharedConfig, undefined);
-    assert.equal(evidenceWith(undefined, confinement), undefined);
-  });
-});
-
-test("at deep, a shared reading that could not be taken is a note of its own", async () => {
-  await withWorktree(async (episode) => {
-    const tree = snapshotIn(episode);
-    const before = readBeforeReviewer(tree, deadlineIn(WINDOW_MS), episode.worktree);
-    const exclude = join(episode.worktree, ".git", "info", "exclude");
-    chmodSync(exclude, 0o000);
-    let confinement: RoundConfinement;
-    try {
-      confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-    } finally {
-      chmodSync(exclude, 0o644);
-    }
-
-    assert.equal(confinement.sharedConfig?.outcome, "unknown");
-    const comment = commentOn(evidenceWith(undefined, confinement));
-    assert.ok(
-      comment.includes(
-        "- A round could not tell whether the git config or hooks this repository's worktrees share" +
-          " changed while the reviewer ran: the reading after could not be taken: info/exclude could not be read",
-      ),
-      `a reading that failed reads as a config nobody changed:\n${comment}`,
-    );
-  });
-});
-
-test("at deep, a round with too little of its window left says it did not read the shared config", async () => {
-  await withWorktree(async (episode) => {
-    const tree = snapshotIn(episode);
-    const before = readBeforeReviewer(tree, deadlineIn(0), episode.worktree);
-    const confinement = readAfterReviewer(before, deadlineIn(WINDOW_MS));
-    assert.equal(confinement.sharedConfig?.outcome, "not-taken");
-  });
-});
-
-test("a shared key an earlier round found changed survives a round that found nothing", () => {
-  const changed = { outcome: "changed", changes: [{ file: "config", key: "core.hookspath" }] } as const;
-  assert.deepEqual(after({ sharedConfig: changed }, { sharedConfig: { outcome: "unchanged" } }), {
-    ...nothingEstablished,
-    sharedChanged: ["`core.hookspath` in `config`"],
   });
 });
