@@ -244,6 +244,15 @@ test("an open verdict with no reason is refused, and pi's reviewer can rule agai
   assert.deepEqual((await tool.execute("call_2", ruling)).details, ruling);
 });
 
+test("a withdrawn verdict with no reason is refused, and pi's reviewer can rule again (#586)", async () => {
+  const tool = toolNamed(REPORT_VERDICT);
+  const refused = await refusalOf(tool, { thread: "PRRT_kwDOAbc123", verdict: "withdrawn" });
+  assert.match(refused, /withdraws the finding on thread PRRT_kwDOAbc123 and gives no reason/u);
+
+  const ruling = { thread: "PRRT_kwDOAbc123", verdict: "withdrawn", reason: "The caller clamps first." };
+  assert.deepEqual((await tool.execute("call_2", ruling)).details, ruling);
+});
+
 test("a malformed verdict is refused with the reason", async () => {
   const refused = await refusalOf(toolNamed(REPORT_VERDICT), { verdict: "fixed" });
   assert.match(refused, /the verdict names no thread/);

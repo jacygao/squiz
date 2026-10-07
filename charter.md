@@ -101,8 +101,13 @@ Say what is still wrong in the code as it now stands, and what change or
 argument would settle it. Where the coding agent argued, answer the argument.
 A reason that repeats the finding tells neither of them anything new.
 
-`fixed` and `withdrawn` take no reason. The thread is closed, and a reason on
-either is refused.
+**A `withdrawn` verdict carries a `reason` too, and it is posted as your reply
+before the thread is closed.** Say why there was no defect: what in the code, or
+in the coding agent's argument, shows it. A person reading the closed thread
+later has only this to tell a withdrawal from a finding nobody checked.
+
+`fixed` takes no reason, and a reason on it is refused. The round replies on
+the thread itself, naming the round and the commit you confirmed the fix at.
 
 The fix you suggested is one way to address a finding rather than the only one.
 Rule on whether the defect is gone, not on whether your suggestion was taken.
@@ -173,7 +178,8 @@ One finding, as the arguments of a `report_finding` call:
 
 A verdict carries `thread`, the identifier the thread was handed to you with and
 copied back exactly, and `verdict`, one of `fixed`, `withdrawn` or `open`. An
-`open` verdict also carries `reason`, written to the coding agent:
+`open` or `withdrawn` verdict also carries `reason`. On `open` it is written to
+the coding agent:
 
 ```json
 {

@@ -1,7 +1,7 @@
 /**
  * Applying the reviewer's verdicts to the threads the round handed it: closing
- * the ones it ruled settled, re-opening the ones it ruled still wrong and
- * replying on them with its reason, leaving the rest as they are.
+ * the ones it ruled settled, re-opening the ones it ruled still wrong, replying
+ * on each it closed or kept open, and leaving the rest as they are.
  *
  * A verdict reaches its thread by the GraphQL `PRRT_` node id and by nothing
  * else. It is the only identifier the resolve mutations take, and a verdict read
@@ -12,7 +12,7 @@
  * around this has to exit 0 whatever GitHub did.
  */
 
-import { renderOpenReason } from "../findings/comment.ts";
+import { renderClosingReply, renderOpenReason, type RuledAt } from "../findings/comment.ts";
 import { defaultVerdict, type Verdict } from "../findings/status.ts";
 import type { GhCall } from "../github/gh.ts";
 import { reopenThread, replyInThread, resolveThread, type ThreadAction } from "../github/thread-actions.ts";
@@ -56,8 +56,8 @@ export type AppliedVerdict = {
    */
   readonly ruled: Verdict | null;
   /**
-   * What became of the reviewer's reply giving its reason, on a thread it ruled
-   * `open`. Absent on every other thread, which is owed no reply.
+   * What became of the reviewer's reply, on a thread it ruled `open` or closed
+   * while it was open. Absent on every other thread, which is owed no reply.
    *
    * A reply that failed leaves the verdict standing: the thread is in the state
    * it was ruled into either way.
@@ -84,11 +84,15 @@ export type AppliedVerdicts = {
  * Apply each verdict to the thread it names, and hand back what happened to
  * every thread.
  *
- * `fixed` and `withdrawn` close the thread. `open` re-opens one that was closed
- * and leaves an open one alone, then posts the reviewer's reason as a reply on
- * it. A thread the reviewer returned no verdict for takes the default, which is
- * what stops a thread it forgot from being closed by the forgetting, and is
- * replied on by nobody: the reviewer gave no reason.
+ * `fixed` and `withdrawn` close the thread, replying on it first where it was
+ * open, so the reply is there before the thread folds away. `open` re-opens one
+ * that was closed and leaves an open one alone, then posts the reviewer's reason
+ * as a reply on it. A thread the reviewer returned no verdict for takes the
+ * default, which is what stops a thread it forgot from being closed by the
+ * forgetting, and is replied on by nobody: the reviewer gave no reason.
+ *
+ * `at` is the round and commit the verdicts were ruled at, which a closing reply
+ * names.
  *
  * A verdict naming a thread that was not handed over is reported and never
  * sent.
@@ -100,11 +104,12 @@ export type AppliedVerdicts = {
 export function applyVerdicts(
   handedOver: readonly HandedOverThread[],
   verdicts: readonly ThreadVerdict[],
+  at: RuledAt,
   call: GhCall,
 ): AppliedVerdicts {
   const rulings = rulingsFor(handedOver, verdicts);
   const threads = handedOver.map((thread) =>
-    apply(thread, rulings.byThread.get(thread.id) ?? null, call),
+    apply(thread, rulings.byThread.get(thread.id) ?? null, at, call),
   );
   return { threads, unapplied: rulings.unapplied };
 }
@@ -165,16 +170,56 @@ function rulingsFor(
 
 /**
  * Put one thread into the state its verdict asks for, and reply on it where the
- * reviewer kept it open.
+ * reviewer kept it open or closed it.
  *
- * The reply goes whatever became of the state. A thread GitHub would not
- * re-open still holds a dispute, and the reason is what the coding agent acts on.
+ * Whatever became of the reply, the state is still set, and whatever became of
+ * the state, the reply is still sent. A thread GitHub would not re-open still
+ * holds a dispute, and the reason is what the coding agent acts on.
  */
-function apply(thread: HandedOverThread, ruling: ThreadVerdict | null, call: GhCall): AppliedVerdict {
+function apply(
+  thread: HandedOverThread,
+  ruling: ThreadVerdict | null,
+  at: RuledAt,
+  call: GhCall,
+): AppliedVerdict {
   const named = { thread: thread.id, ruled: ruling?.verdict ?? null };
-  const state = setState(thread, ruling?.verdict ?? defaultVerdict, call);
-  if (ruling?.verdict !== "open") return { ...named, ...state };
-  return { ...named, ...state, reply: replyInThread(thread.id, renderOpenReason(ruling.reason), call) };
+  if (ruling === null) return { ...named, ...setState(thread, defaultVerdict, call) };
+  if (!owesReply(thread, ruling)) return { ...named, ...setState(thread, ruling.verdict, call) };
+  if (ruling.verdict === "open") {
+    const state = setState(thread, ruling.verdict, call);
+    return { ...named, ...state, reply: replyInThread(thread.id, renderOpenReason(ruling.reason), call) };
+  }
+  const reply = replyInThread(thread.id, renderClosingReply(ruling, at), call);
+  return { ...named, ...setState(thread, ruling.verdict, call), reply };
+}
+
+/**
+ * Whether the round replies on `thread` for `ruling`.
+ *
+ * A closing ruling on a thread already closed gets no reply, though the resolve
+ * is still sent. The thread is handed over and ruled on again every round, and
+ * a reply each time would repeat itself.
+ */
+function owesReply(thread: HandedOverThread, ruling: ThreadVerdict): boolean {
+  return ruling.verdict === "open" || !thread.isResolved;
+}
+
+/**
+ * The rulings the round will reply on: one per thread handed over, the first
+ * the reviewer gave it, where that ruling is owed a reply.
+ *
+ * Read before anything is posted, so it counts the replies a round set out to
+ * post whatever GitHub then did with them.
+ */
+export function rulingsReplied(
+  handedOver: readonly HandedOverThread[],
+  verdicts: readonly ThreadVerdict[],
+): readonly ThreadVerdict[] {
+  const { byThread } = rulingsFor(handedOver, verdicts);
+  return handedOver.flatMap((thread) => {
+    const ruling = byThread.get(thread.id);
+    return ruling !== undefined && owesReply(thread, ruling) ? [ruling] : [];
+  });
 }
 
 /**
@@ -198,11 +243,11 @@ function setState(thread: HandedOverThread, verdict: Verdict, call: GhCall): Ver
 }
 
 /**
- * Each reply giving the reviewer's reason that could not be posted, as one line
+ * Each reply the reviewer's ruling owed that could not be posted, as one line
  * naming the thread and why.
  *
  * The verdict on each still stands, so these are what a person reads to learn
- * that a thread was kept open with no reason on it.
+ * that a thread was kept open or closed with no reply saying so.
  */
 export function unpostedReasons(verdicts: AppliedVerdicts): readonly string[] {
   return verdicts.threads.flatMap((applied) =>

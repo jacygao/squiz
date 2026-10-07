@@ -125,7 +125,7 @@ test("a scope outside the three is caught", () => {
 });
 
 test("a verdict reads as the thread it names and the ruling it gives", () => {
-  const ruling = { thread: "PRRT_kwDOAbc123", verdict: "withdrawn" };
+  const ruling = { thread: "PRRT_kwDOAbc123", verdict: "fixed" };
   assert.deepEqual(valueOf(readVerdict(ruling)), ruling);
 });
 
@@ -148,15 +148,32 @@ test("an open verdict with no reason is refused, so the reviewer is asked for on
   }
 });
 
-test("a fixed or withdrawn verdict carrying a reason is refused rather than trimmed", () => {
-  // Nothing posts a reason for either, and dropping it here would tell the
-  // reviewer a reply had landed that nobody will ever read.
-  for (const verdict of ["fixed", "withdrawn"]) {
+test("a withdrawn verdict carries the reason the reviewer gave for it (#586)", () => {
+  const ruling = {
+    thread: "PRRT_kwDOAbc123",
+    verdict: "withdrawn",
+    reason: "The caller already clamps the height, so the card never grows past the fold.",
+  };
+  assert.deepEqual(valueOf(readVerdict(ruling)), ruling);
+});
+
+test("a withdrawn verdict with no reason is refused, so the reviewer is asked for one (#586)", () => {
+  for (const reason of [undefined, "", "   ", 7]) {
     assert.match(
-      refusalOf(readVerdict({ thread: "PRRT_kwDOAbc123", verdict, reason: "Looks right now." })),
-      new RegExp(`is ${verdict} and carries a reason, which only an open verdict takes`, "u"),
+      refusalOf(readVerdict({ thread: "PRRT_kwDOAbc123", verdict: "withdrawn", reason })),
+      /withdraws the finding on thread PRRT_kwDOAbc123 and gives no reason/u,
+      `a reason of ${JSON.stringify(reason)} was accepted`,
     );
   }
+});
+
+test("a fixed verdict carrying a reason is refused rather than trimmed", () => {
+  // Nothing posts a reason for it, and dropping it here would tell the reviewer
+  // a reply had landed that nobody will ever read.
+  assert.match(
+    refusalOf(readVerdict({ thread: "PRRT_kwDOAbc123", verdict: "fixed", reason: "Looks right now." })),
+    /is fixed and carries a reason, which only an open or withdrawn verdict takes/u,
+  );
 });
 
 test("a verdict outside the three is caught", () => {

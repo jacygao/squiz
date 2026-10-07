@@ -94,7 +94,7 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
   const ruled = rulings(closing.verdicts);
   const unposted = new Set(
     closing.verdicts.threads
-      .filter((applied) => applied.reply?.outcome === "failed")
+      .filter((applied) => applied.ruled === "open" && applied.reply?.outcome === "failed")
       .map((applied) => applied.thread),
   );
   const classified: ClassifiedThread[] = [];

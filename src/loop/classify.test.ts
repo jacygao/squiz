@@ -251,6 +251,23 @@ test("a thread whose reason could not be posted says so, and one whose reason la
   );
 });
 
+test("a thread closed whose reply could not be posted is not read as one kept open with no reason (#586)", () => {
+  const classified = classifyAtClose({
+    ...quiet,
+    handedOver: [threadFor("PRRT_fixed", onLine("src/queue.ts", 12, "Backoff resets on enqueue"))],
+    verdicts: {
+      threads: [
+        { thread: "PRRT_fixed", ruled: "fixed", outcome: "closed", reply: { outcome: "failed", reason: "HTTP 502" } },
+      ],
+      unapplied: [],
+    },
+  });
+  assert.deepEqual(
+    classified.map((thread) => thread.reasonUnposted === true),
+    [false],
+  );
+});
+
 test("a thread no marker claims is left out", () => {
   const classified = classifyAtClose({
     ...quiet,

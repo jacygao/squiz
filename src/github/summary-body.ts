@@ -1,6 +1,6 @@
 /**
  * The body of the one comment an episode posts when it closes: what the review
- * counted and spent, what still needs a person, and the notes.
+ * counted and spent, what still needs a person, the rounds, and the notes.
  *
  * The comment is posted once and never edited, so anything wrong here is
  * permanent for that episode. Two things go wrong quietly. A heading with
@@ -18,7 +18,7 @@ import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import { readThread } from "../findings/thread.ts";
 import { locationOf, type ClassifiedThread, type CountedStatus } from "../loop/classify.ts";
-import { costOf, type RoundRecord } from "../loop/episode-state.ts";
+import { costOf, type RoundRecord, type RulingCounts } from "../loop/episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
 import type { ClosingReason } from "../loop/round-decision.ts";
 import { namedStates, type LeftNotReviewed, type StoppingBound } from "../loop/round-end.ts";
@@ -94,14 +94,50 @@ const alwaysCounted: ReadonlySet<CountedStatus> = new Set<ThreadStatus>(["fixed"
 /**
  * The comment's body for `episode`, with no trailing newline.
  *
- * Three blocks: what was counted and spent, what needs a person, and Notes. The
- * last is absent where there is nothing to report, and the first two are always
- * written, a review that found nothing included.
+ * Four blocks: what was counted and spent, what needs a person, the rounds, and
+ * Notes. The first two are always written, a review that found nothing
+ * included. Notes is absent where there is nothing to report, and the rounds
+ * where the state file recorded the work of none of them.
  *
  * Nothing here throws and nothing is refused. Every episode composes.
  */
 export function renderSummary(episode: ClosedEpisode): string {
-  return [tally(episode), needsAPerson(episode.threads), ...notes(episode)].join("\n\n");
+  return [tally(episode), needsAPerson(episode.threads), ...roundsList(episode.rounds), ...notes(episode)].join(
+    "\n\n",
+  );
+}
+
+/**
+ * Each round as its record has it: the commit it reviewed, how many findings it
+ * raised, and the rulings it replied with.
+ *
+ * Read from the state file and never from the pull request, so a round whose
+ * replies GitHub refused is listed all the same. A file written before the work
+ * was recorded lists no rounds at all, rather than a list of rounds it knows
+ * nothing about.
+ */
+function roundsList(rounds: readonly RoundRecord[]): readonly string[] {
+  if (rounds.every((round) => round.raised === undefined || round.ruled === undefined)) return [];
+  return [`**Rounds**\n\n${rounds.map(roundLine).join("\n")}`];
+}
+
+/** One round of the list, numbered from 1. */
+function roundLine(round: RoundRecord, index: number): string {
+  const named = `- Round ${index + 1}${round.head === undefined ? "" : ` at ${round.head.slice(0, 7)}`}`;
+  if (round.raised === undefined || round.ruled === undefined) return `${named}: not recorded`;
+  const rulings = rulingsGiven(round.ruled);
+  if (round.raised === 0 && rulings === null) return `${named}: found nothing new and ruled on nothing`;
+  const raised = round.raised === 0 ? "raised nothing" : `raised ${counted(round.raised, "finding")}`;
+  return rulings === null ? `${named}: ${raised}` : `${named}: ${raised}, and ruled ${rulings}`;
+}
+
+/** The rulings a round gave, as `2 fixed, 1 withdrawn and 1 open`, or `null` for none. */
+function rulingsGiven(ruled: RulingCounts): string | null {
+  const given = (["fixed", "withdrawn", "open"] as const)
+    .filter((verdict) => ruled[verdict] > 0)
+    .map((verdict) => `${ruled[verdict]} ${verdict}`);
+  if (given.length === 0) return null;
+  return given.length === 1 ? (given[0] ?? null) : `${given.slice(0, -1).join(", ")} and ${given.at(-1)}`;
 }
 
 /** What the review counted, what it spent, and who reviewed it, under the marker. */
@@ -194,7 +230,8 @@ function oneLine(text: string): string {
  *
  * An earlier round's findings come first, then the closing round's in the order
  * they were posted, which runs `high` severity first, then the threads kept open
- * with no reason on them, then the rulings that could not be applied. The rounds
+ * with no reason on them, then the threads closed with no reply on them, round
+ * by round, then the rulings that could not be applied. The rounds
  * the time bound cut short follow them, and the bound that closed the episode
  * comes last: the findings and the threads are each about one defect, the cuts
  * are about the rounds, and the bound is about the episode.
@@ -205,6 +242,7 @@ function notes(episode: ClosedEpisode): readonly string[] {
       ...episode.earlier,
       ...unthreadedNotes(episode.findings),
       ...unpostedReasonNotes(episode.threads),
+      ...episode.rounds.flatMap((round) => round.unpostedReplies ?? []),
       ...episode.unapplied,
     ].map((note) => `- ${note}`),
     ...cutShort(episode.rounds),
@@ -316,6 +354,28 @@ export function unappliedNotes(handedOver: readonly ReviewThread[], verdicts: Ap
     return at(thread, `ruled ${ruling.verdict} a second time, which was not applied: the first ruling stands`);
   });
   return [...refused, ...unsent];
+}
+
+/**
+ * Each reply on a thread the round closed that could not be posted, one line
+ * each and with no bullet: the thread where it sits, and what the reviewer
+ * ruled on it.
+ */
+export function unpostedReplyNotes(handedOver: readonly ReviewThread[], verdicts: AppliedVerdicts): readonly string[] {
+  const byId = new Map(handedOver.map((thread) => [thread.id, thread]));
+  return verdicts.threads.flatMap((applied) => {
+    const thread = byId.get(applied.thread);
+    const closing = applied.ruled === "fixed" || applied.ruled === "withdrawn";
+    if (!closing || applied.reply?.outcome !== "failed" || thread === undefined) return [];
+    const reading = readThread(thread);
+    return [
+      line(
+        locationOf(thread),
+        reading.raised === "finding" ? reading.headline : null,
+        `ruled ${applied.ruled}, and the reviewer's reply could not be posted on its thread`,
+      ),
+    ];
+  });
 }
 
 /** One Notes line: where the defect is, what it is, and what became of the finding. */

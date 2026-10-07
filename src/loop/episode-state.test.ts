@@ -11,6 +11,7 @@ import {
   recordRound,
   recordRulings,
   recordSpendOutsideRounds,
+  recordUnpostedReplies,
   writeState,
 } from "./episode-state.ts";
 import { type Episode, episodeAt } from "./episode.ts";
@@ -68,6 +69,38 @@ test("how long each round ran and posted, and the bound that cut one short, come
 });
 
 /** A floor read back as a total is a cost the reader takes as complete. */
+test("what each round reviewed, raised and ruled comes back as written (#586)", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [
+      { ...firstRound, head: "3f9c2e0aa", raised: 3, ruled: { fixed: 0, withdrawn: 0, open: 0 } },
+      {
+        ...secondRound,
+        head: "1b86987bb",
+        raised: 0,
+        ruled: { fixed: 2, withdrawn: 1, open: 0 },
+        unpostedReplies: ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)"],
+      },
+    ],
+    spentOutsideRounds: unspent,
+  };
+
+  writeState(episode, state);
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
+test("a round's unposted replies are added to its own entry and no other (#586)", () => {
+  const state: EpisodeState = { rounds: [firstRound, secondRound], spentOutsideRounds: unspent };
+  const lines = ["`a.ts:1` — A (ruled fixed, and the reviewer's reply could not be posted on its thread)"];
+
+  assert.deepEqual(recordUnpostedReplies(state, 2, lines).rounds, [
+    firstRound,
+    { ...secondRound, unpostedReplies: lines },
+  ]);
+  assert.deepEqual(recordUnpostedReplies(state, 2, []), state, "an empty list was written onto the round");
+  assert.deepEqual(recordUnpostedReplies(state, 3, lines), state, "a round that does not exist was given lines");
+});
+
 test("a cost that is a floor comes back as a floor, in a round and outside the rounds", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
@@ -244,6 +277,14 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [7]}]}`,
   // A model is named only by the spend it was reported against.
   `{"rounds": [{"models": ["gpt-5-mini"]}]}`,
+  // What a round reviewed and ruled is what the summary lists it by, and a
+  // figure that is there and cannot be read would list a round nobody ran.
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "head": ""}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "raised": -1}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0}}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0, "open": "2"}}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": "a line"}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": [3]}]}`,
   // A record dropped on reading is a state with no record, which a trigger queues
   // again, or a queued state that no round host ever takes.
   `{"rounds": [], "records": {}}`,

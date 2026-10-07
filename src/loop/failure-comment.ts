@@ -21,7 +21,11 @@ import type { PostedFindings } from "./post-findings.ts";
 export type FailedRound = {
   readonly reason: string;
   /** What the round put on the pull request, absent where it salvaged nothing. */
-  readonly salvaged?: { readonly findings: PostedFindings; readonly unappliedNotes: readonly string[] };
+  readonly salvaged?: {
+    readonly findings: PostedFindings;
+    readonly unappliedNotes: readonly string[];
+    readonly unpostedReplyNotes: readonly string[];
+  };
   /** The bound that leaves the episode no round after this one, absent where one remains. */
   readonly closed?: ClosedBy;
 };
@@ -36,7 +40,8 @@ export type FailedRound = {
 function failureReport(round: FailedRound): FailureReport {
   const salvaged = round.salvaged?.findings ?? { outcomes: [] };
   const outcomes = salvaged.outcomes;
-  const unapplied = round.salvaged?.unappliedNotes ?? [];
+  // A failed round posts no summary, so the closing replies it could not post are listed here.
+  const unapplied = [...(round.salvaged?.unpostedReplyNotes ?? []), ...(round.salvaged?.unappliedNotes ?? [])];
   return {
     reason: round.reason.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim(),
     ...(round.closed === undefined ? {} : { closed: round.closed }),

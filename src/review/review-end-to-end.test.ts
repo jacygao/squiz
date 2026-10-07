@@ -263,7 +263,7 @@ const hostLog = (episode: Episode): string => {
 const KEPT_OPEN = "A fixture still needs a line saying what it is for. Add one, or show where the header says it.";
 
 const rulings: readonly [ThreadVerdict, number, string][] = [
-  [{ thread: "PRRT_1", verdict: "withdrawn" }, 0, "Nothing is open. The review is closed, and its summary is on the pull request."],
+  [{ thread: "PRRT_1", verdict: "withdrawn", reason: "The header already says it." }, 0, "Nothing is open. The review is closed, and its summary is on the pull request."],
   [{ thread: "PRRT_1", verdict: "open", reason: KEPT_OPEN }, 2, "1 thread is open:"],
 ];
 
@@ -296,7 +296,17 @@ for (const [ruling, exit, paragraph] of rulings) {
       assert.equal(stateOf(fixture.episode).rounds.length, 2, "the round the reply started did not count against the cap");
       const comments = fixture.gh().threads[0]?.comments ?? [];
       if (ruling.verdict !== "open") {
-        assert.equal(comments.length, 2, "a thread the reviewer closed was replied on");
+        assert.equal(
+          comments.at(-1)?.body,
+          `**Squiz reviewer · withdrawn**\n\nWithdrawn in round 2 at ${fixture.gh().head.slice(0, 7)}.\n\nThe header already says it.`,
+          "the thread the reviewer closed carries no reply saying so (#586)",
+        );
+        assert.equal(comments.length, 3);
+        const summary = fixture.gh().issueComments[0] ?? "";
+        assert.match(
+          summary,
+          /\*\*Rounds\*\*\n\n- Round 1 at [0-9a-f]{7}: raised 1 finding\n- Round 2 at [0-9a-f]{7}: raised nothing, and ruled 1 withdrawn$/u,
+        );
         return;
       }
       assert.deepEqual(
@@ -410,7 +420,7 @@ test("a ruling GitHub refuses and one naming a thread never handed over are name
       findings: [],
       verdicts: [
         { thread: "PRRT_1", verdict: "fixed" },
-        { thread: "PRRT_9", verdict: "withdrawn" },
+        { thread: "PRRT_9", verdict: "withdrawn", reason: "The header already says it." },
       ],
     },
   ];
@@ -494,6 +504,10 @@ test("a cap lowered after a round blocked closes the episode at the next run, wh
         "**Needs a person**",
         "",
         "- `src/ui/card.ts:2` — The new line says nothing (disputed)",
+        "",
+        "**Rounds**",
+        "",
+        `- Round 1 at ${commit}: raised 1 finding`,
         "",
         "**Notes**",
         "",

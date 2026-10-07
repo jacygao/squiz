@@ -140,6 +140,35 @@ export function renderOpenReason(reason: string): string {
 }
 
 /**
+ * The round a ruling was made in, and the full commit that round reviewed.
+ *
+ * `round` is `null` for an attempt that spent no round, whose number the next
+ * round takes.
+ */
+export type RuledAt = { readonly round: number | null; readonly commit: string };
+
+/** A ruling that closes its thread, with the reason a withdrawal carries. */
+export type ClosingRuling =
+  | { readonly verdict: "fixed" }
+  | { readonly verdict: "withdrawn"; readonly reason: string };
+
+/**
+ * The reply the reviewer posts on a thread it closes: its marker and the
+ * verdict on the first line, the round and short commit it was ruled at, and
+ * for a withdrawal the reason beneath.
+ *
+ * It carries the reviewer's marker for the reason `renderOpenReason` does.
+ */
+export function renderClosingReply(ruling: ClosingRuling, at: RuledAt): string {
+  const commit = `at ${at.commit.slice(0, 7)}`;
+  const where = at.round === null ? commit : `in round ${at.round} ${commit}`;
+  if (ruling.verdict === "fixed") return `${reviewerMarker}fixed${boldClose}\n\nConfirmed ${where}.`;
+  return [`${reviewerMarker}withdrawn${boldClose}`, `Withdrawn ${where}.`, ruling.reason.trim()]
+    .filter(nonEmpty)
+    .join("\n\n");
+}
+
+/**
  * What the comment `body` says: who wrote it, and for one the reviewer wrote,
  * the severity and the headline its first line names.
  *

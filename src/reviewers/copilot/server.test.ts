@@ -329,6 +329,22 @@ test("an open verdict with no reason is refused, and Copilot's reviewer can rule
   assert.deepEqual(linesIn(reports).at(-1), { type: "report", call: REPORT_VERDICT, value: ruling });
 });
 
+test("a withdrawn verdict with no reason is refused, and Copilot's reviewer can rule again (#586)", async (t) => {
+  const directory = scratch(t);
+  const reports = join(directory, "reports.jsonl");
+  const server = started(t, directory, { [REPORTS_VARIABLE]: reports });
+
+  const bare = { thread: "PRRT_kwDOabc", verdict: "withdrawn" };
+  const refused = toolAnswer(await server.request(1, "tools/call", call(REPORT_VERDICT, bare)));
+  assert.equal(refused.isError, true);
+  assert.match(refused.text, /withdraws the finding on thread PRRT_kwDOabc and gives no reason/u);
+
+  const ruling = { ...bare, reason: "The caller clamps the retry count." };
+  const ruled = toolAnswer(await server.request(2, "tools/call", call(REPORT_VERDICT, ruling)));
+  assert.deepEqual(ruled, { isError: false, text: "Ruled withdrawn on PRRT_kwDOabc" });
+  assert.deepEqual(linesIn(reports).at(-1), { type: "report", call: REPORT_VERDICT, value: ruling });
+});
+
 test("a call to a tool the server does not serve is a protocol error", async (t) => {
   const server = started(t, scratch(t));
   const answer = await server.request(1, "tools/call", call("bash", { command: "ls" }));

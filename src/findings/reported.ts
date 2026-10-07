@@ -76,16 +76,21 @@ export function readVerdict(value: unknown): Reading<ThreadVerdict> {
     return { reason: `is none of fixed, withdrawn or open, on thread ${thread}` };
   }
   const reason = record["reason"];
-  if (verdict !== "open") {
+  if (verdict === "fixed") {
     if (reason !== undefined) {
-      return { reason: `is ${verdict} and carries a reason, which only an open verdict takes, on thread ${thread}` };
+      return {
+        reason: `is fixed and carries a reason, which only an open or withdrawn verdict takes, on thread ${thread}`,
+      };
     }
     return { value: { thread, verdict } };
   }
-  // Blank is no reason: the reply posted from it would tell the coding agent nothing.
+  // Blank is no reason: the reply posted from it would tell its reader nothing.
   if (typeof reason !== "string" || reason.trim() === "") {
     return {
-      reason: `keeps thread ${thread} open and gives no reason. Say what is still wrong and what would settle it`,
+      reason:
+        verdict === "open"
+          ? `keeps thread ${thread} open and gives no reason. Say what is still wrong and what would settle it`
+          : `withdraws the finding on thread ${thread} and gives no reason. Say why there was no defect`,
     };
   }
   return { value: { thread, verdict, reason } };

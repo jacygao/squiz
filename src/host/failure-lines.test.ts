@@ -26,6 +26,7 @@ test("a failed round names each reason the reviewer gave that could not be poste
         unapplied: [],
       },
       unappliedNotes: [],
+      unpostedReplyNotes: [],
     },
   });
 
@@ -50,6 +51,7 @@ test("a failed round names each ruling it could not apply, with what the reviewe
         ],
       },
       unappliedNotes: [],
+      unpostedReplyNotes: [],
     },
   });
 
