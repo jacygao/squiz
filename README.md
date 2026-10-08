@@ -150,9 +150,10 @@ when the review ends. The summary also says what was fixed, what is still open,
 what it cost, and what each round did. What it lists under "Needs a person" and
 "Notes" is for you.
 
-[Pull request #690](https://github.com/jacygao/squiz/pull/690) on this
-repository shows all of it: three findings, the coding agent's fix for each,
-the reviewer confirming each one, and two summaries.
+[Pull request #703](https://github.com/jacygao/squiz/pull/703), which wrote this
+README, shows all of it. Two findings were fixed and confirmed, and two were
+disputed and left for a person when the round cap was reached. A later commit
+fixed those, and the closing round confirmed them.
 
 `squiz status` lists the reviews running and finished in every worktree of the
 repository.
