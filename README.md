@@ -7,6 +7,8 @@ work, a reviewer on a different harness and a different model reviews the pull
 request, and the two work every finding out in its review thread. It works as a
 plugin for Claude Code and for the GitHub Copilot CLI.
 
+**See it in a real pull request: [#703](https://github.com/jacygao/squiz/pull/703).**
+
 > [!WARNING]
 > Squiz is experimental. Expect bugs, and expect commands and settings to change
 > between versions. Its Copilot support is experimental too, because it relies on
@@ -139,21 +141,6 @@ The last line names the reviewer and the model it will run on, read from
 prompt to `gpt-5-mini`, which costs about 0.35 AI credits. Where the Copilot
 CLI is installed, a line after Claude Code's says whether its experimental
 features are on, and warns where they are off.
-
-## What you see
-
-Each finding is a review thread on the line it is about, or on the whole file.
-The coding agent fixes it or answers in the thread, and the reviewer's next
-round confirms the fix and resolves the thread. A finding about the change as a
-whole has no thread, and goes under "Notes" in the summary comment squiz posts
-when the review ends. The summary also says what was fixed, what is still open,
-what it cost, and what each round did. What it lists under "Needs a person" and
-"Notes" is for you.
-
-[Pull request #703](https://github.com/jacygao/squiz/pull/703), which wrote this
-README, shows all of it. Two findings were fixed and confirmed, and two were
-disputed and left for a person when the round cap was reached. A later commit
-fixed those, and the closing round confirmed them.
 
 `squiz status` lists the reviews running and finished in every worktree of the
 repository.
