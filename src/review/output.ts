@@ -12,12 +12,14 @@
  * each one there.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { threadLine } from "../findings/listing.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { failureLine } from "../hook/report.ts";
+import { episodeAt } from "../loop/episode.ts";
+import { makeEpisodeDirectory } from "../loop/state-directory.ts";
 
 /** What closed an episode short of a clean review. */
 export type Bound = "round cap" | "token bound";
@@ -175,7 +177,7 @@ export function printReview(result: ReviewResult, worktree: string): Printed {
   if (printed.exit === 1) return printed;
 
   try {
-    mkdirSync(dirname(path), { recursive: true });
+    makeEpisodeDirectory(episodeAt(resolve(worktree), result.pullRequest));
     writeFileSync(path, printed.stdout);
   } catch (error) {
     const said = error instanceof Error ? error.message : String(error);

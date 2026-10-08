@@ -6,6 +6,8 @@
  * by a live process exits.
  */
 
+import type { Episode } from "../loop/episode.ts";
+import { makeEpisodeDirectory } from "../loop/state-directory.ts";
 import { takeLock, type HeldLock, type LockOptions, type Release, type Taking } from "../sessions/lock-file.ts";
 
 export type { Release, Taking };
@@ -21,4 +23,14 @@ export type HostLock = HeldLock;
  */
 export function takeHostLock(directory: string, options: HostLockOptions): Taking {
   return takeLock(directory, "host.lock", options);
+}
+
+/** Take the host lock in `episode`'s directory, made as every episode's directory is. */
+export function takeEpisodeHostLock(episode: Episode, options: HostLockOptions): Taking {
+  try {
+    makeEpisodeDirectory(episode);
+  } catch (error) {
+    return { outcome: "unknown", reason: `${episode.directory} could not be made: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  return takeHostLock(episode.directory, options);
 }

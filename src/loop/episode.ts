@@ -16,7 +16,7 @@
 
 import { join } from "node:path";
 
-// Everything one worktree's episodes write goes here. It is gitignored, and it
+// Everything one worktree's episodes write goes here. It ignores itself in git, and it
 // goes with the worktree, so nothing in it outlives the episode.
 const episodesDirectory = ".squiz";
 

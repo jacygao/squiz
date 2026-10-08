@@ -186,6 +186,16 @@ thread. The directory also holds:
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
 
+**`.squiz/` keeps itself out of git.** Each time squiz makes an episode's
+directory, before it writes the state file, takes a lock or writes
+`review.txt`, it also makes `.squiz/.gitignore` holding `*` where that file is
+missing. Git then ignores `.squiz/` and everything in it, with no line in the
+project's own `.gitignore`. A `.squiz/` made before squiz did this gains the
+file on its next write. Squiz writes the file whole and links it into place, so
+two processes making `.squiz/` at once both succeed and leave one file holding
+`*`. A `.squiz/.gitignore` that is already there is left as it is, whatever it
+holds.
+
 **Every change to the state file is made under `state.lock`.** A writer takes the
 lock, reads the file, changes it, writes it, and releases the lock. A trigger
 queueing a state and a round host writing its reviewing record therefore cannot
@@ -3772,13 +3782,13 @@ itself.
 
 ### Getting started
 
-Three things in the host project, the last one optional.
+Two things in the host project, the second one optional. Nothing goes in the
+project's `.gitignore`: squiz keeps `.squiz/`, where it writes each episode's
+state, out of git itself (§ 3 The state file).
 
-1. Add `.squiz/` to `.gitignore`. It holds each episode's state file and the
-   reviewer's session storage.
-2. Allow `squiz` in the project's Claude Code permissions, so the coding agent
+1. Allow `squiz` in the project's Claude Code permissions, so the coding agent
    is not prompted every time it starts a round or works a thread.
-3. **Optional.** `.squiz.json`, to change any of the settings below. Every one
+2. **Optional.** `.squiz.json`, to change any of the settings below. Every one
    has a working default, so a project that writes none still runs.
 
 Then check the setup with `squiz doctor` (§ 6 The setup check), from the
