@@ -35,9 +35,10 @@ claude plugin install squiz@squiz
 Claude Code puts `squiz` on the `PATH` of its own shell, which you reach by
 typing a command after `!` in a session. To run `squiz` from your own terminal,
 or from Copilot, type `! squiz init` in a Claude Code session. It links
-`~/.local/bin/squiz`, or `~/bin/squiz`, to the squiz Claude Code runs. Type it
-again after each update, because the link keeps running the old version until
-you do, and `! squiz doctor` warns until then.
+`~/.local/bin/squiz`, or `~/bin/squiz`, to the squiz Claude Code runs. After
+each update, start a new Claude Code session and type it there again, because
+the link keeps running the old version until you do. `! squiz doctor` warns
+until then.
 
 Into Copilot:
 
@@ -141,11 +142,13 @@ features are on, and warns where they are off.
 
 ## What you see
 
-Each finding is a review thread on the line it is about. The coding agent fixes
-it or answers in the thread, and the reviewer's next round confirms the fix and
-resolves the thread. When the review ends, squiz posts a summary comment: what
-was fixed, what is still open, what it cost, and each round. Anything listed
-under "Needs a person" is for you.
+Each finding is a review thread on the line it is about, or on the whole file.
+The coding agent fixes it or answers in the thread, and the reviewer's next
+round confirms the fix and resolves the thread. A finding about the change as a
+whole has no thread, and goes under "Notes" in the summary comment squiz posts
+when the review ends. The summary also says what was fixed, what is still open,
+what it cost, and what each round did. What it lists under "Needs a person" and
+"Notes" is for you.
 
 [Pull request #690](https://github.com/jacygao/squiz/pull/690) on this
 repository shows all of it: three findings, the coding agent's fix for each,
