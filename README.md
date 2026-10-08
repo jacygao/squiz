@@ -27,46 +27,39 @@ plugin for Claude Code and for the GitHub Copilot CLI.
 
 ## Install
 
-Into Claude Code:
+### Claude Code
 
 ```sh
 claude plugin marketplace add jacygao/squiz
 claude plugin install squiz@squiz
 ```
 
-Claude Code puts `squiz` on the `PATH` of its own shell, which you reach by
-typing a command after `!` in a session. To run `squiz` from your own terminal,
-or from Copilot, type `! squiz init` in a Claude Code session. It links
-`~/.local/bin/squiz`, or `~/bin/squiz`, to the squiz Claude Code runs. After
-each update, start a new Claude Code session and type it there again, because
-the link keeps running the old version until you do. `! squiz doctor` warns
-until then.
+Then, in a Claude Code session:
 
-Into Copilot:
+```
+! squiz init
+```
+
+This lets you run `squiz` from your own terminal too. Run it again in a new
+session after each update.
+
+### Copilot
 
 ```sh
 copilot plugin marketplace add jacygao/squiz
 copilot plugin install squiz@squiz
-copilot --experimental
+copilot --experimental   # once, so squiz can wake your Copilot session
+~/.copilot/installed-plugins/squiz/squiz/bin/squiz init   # once per machine
 ```
 
-`--experimental` turns Copilot's experimental features on for every later
-session, and without them a Copilot session is never woken when its review
-ends. `/experimental on` in a session does the same. Copilot does not put
-`squiz` on its shell's `PATH`, so link it once on each machine. Where Claude
-Code has squiz too, use `! squiz init` as above. Where only Copilot has it, run:
-
-```sh
-~/.copilot/installed-plugins/squiz/squiz/bin/squiz init
-```
-
-Use your own `COPILOT_HOME` in place of `~/.copilot` if you set one.
+If you set `COPILOT_HOME`, use it in place of `~/.copilot`. If Claude Code has
+squiz too, type `! squiz init` there instead of the last line.
 
 ## Set up a project
 
-The coding agent runs three commands: `squiz review`, `squiz threads` and
-`squiz reply`. Allow those, so it is not asked each time. In Claude Code, put
-this in the project's `.claude/settings.json`:
+Let the coding agent run its three `squiz` commands without asking.
+
+Claude Code, in the project's `.claude/settings.json`:
 
 ```json
 {
@@ -76,19 +69,18 @@ this in the project's `.claude/settings.json`:
 }
 ```
 
-In Copilot, start the session with:
+Copilot, when you start a session:
 
 ```sh
 copilot --allow-tool='shell(squiz review:*)' --allow-tool='shell(squiz threads)' --allow-tool='shell(squiz reply:*)'
 ```
 
-These rules open up those three commands and nothing else. They start reviews
-and post replies on GitHub as you. Every other `squiz` command still asks, and
-so does a command chained after one of these with `&&` or `;`, because Claude
-Code checks each part on its own.
+Nothing else is allowed: other commands, and anything chained after these with
+`&&` or `;`, still ask. These three start reviews and post replies on GitHub as
+you.
 
-The coding agent needs no instruction. A review starts each time it finishes its
-work on a branch with an open pull request.
+That is all. A review starts each time the coding agent finishes its work on a
+branch with an open pull request.
 
 ## Configure squiz
 
