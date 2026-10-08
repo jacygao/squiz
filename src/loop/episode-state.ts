@@ -16,12 +16,13 @@
  * it.
  */
 
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 import { isReviewer, type Reviewer } from "../config/config.ts";
 import type { Verdict } from "../findings/status.ts";
 import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
+import { makeEpisodeDirectory } from "./state-directory.ts";
 import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 
 /**
@@ -234,7 +235,7 @@ export function writeState(episode: Episode, state: EpisodeState): StateWrite {
   // part way through leaves the previous round's file standing.
   const partial = `${path}.${process.pid}.writing`;
   try {
-    mkdirSync(episode.directory, { recursive: true });
+    makeEpisodeDirectory(episode);
     writeFileSync(partial, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     renameSync(partial, path);
     return { outcome: "written" };

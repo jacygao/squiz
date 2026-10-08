@@ -68,7 +68,7 @@ function roundTwoPath(worktree: string): string {
 }
 
 /**
- * A repository with `.squiz/` gitignored, as adoption requires, and a coding
+ * A repository whose own `.gitignore` lists `.squiz/`, as an older project's does, and a coding
  * agent's linked worktree beside it, holding a commit and an uncommitted change.
  *
  * The linked worktree is where a subagent works. Its repository is the common

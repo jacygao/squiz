@@ -114,7 +114,7 @@ test("a thread nobody has said anything on has no last comment", () => {
 });
 `;
 
-/** `.squiz/` is ignored, which is the first thing adopting the harness asks for. */
+/** The project's own `.gitignore` lists `.squiz/`, as an older project's does. */
 const gitignore = ".squiz/\nnode_modules/\n";
 
 type Tree = Readonly<Record<string, string>>;

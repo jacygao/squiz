@@ -16,7 +16,6 @@
  * recovers one: it returns what it did, and the caller prints or waits.
  */
 
-import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +26,7 @@ import { currentBranch } from "../hook/branch.ts";
 import { episodeOver } from "../loop/closing-round.ts";
 import { readState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
+import { makeEpisodeDirectory } from "../loop/state-directory.ts";
 import { putRecord, recordFor, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 import { decideTrigger, type TriggerDecision, type TriggerKind } from "../loop/trigger-decision.ts";
@@ -191,7 +191,7 @@ function hostPresence(episode: Episode, record: StateRecord | undefined, request
 function startHost(request: TriggerRequest, episode: Episode, number: number): Detached {
   const { command, args } = request.host?.(number) ?? { command: process.execPath, args: [cli, "host", String(number)] };
   try {
-    mkdirSync(episode.directory, { recursive: true });
+    makeEpisodeDirectory(episode);
   } catch (error) {
     return { outcome: "failed", reason: `${episode.directory} could not be made: ${error instanceof Error ? error.message : String(error)}` };
   }

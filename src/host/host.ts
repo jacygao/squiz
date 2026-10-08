@@ -56,7 +56,7 @@ import { updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
-import { takeHostLock, type HostLock } from "./lock.ts";
+import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote } from "./owner-note.ts";
 import { wakeOwner } from "./wake.ts";
 
@@ -110,7 +110,7 @@ export async function runHost(setup: HostSetup): Promise<HostEnd> {
   const episode = episodeAt(setup.worktree, setup.pullRequest);
   const log = logIn(episode);
 
-  const taking = takeHostLock(episode.directory, { boundMs: LOCK_BOUND_MS });
+  const taking = takeEpisodeHostLock(episode, { boundMs: LOCK_BOUND_MS });
   if (taking.outcome === "held") {
     const { pid, startedAt } = taking.holder;
     log(`exiting: process ${pid}, started at ${startedAt}, holds the host lock`);

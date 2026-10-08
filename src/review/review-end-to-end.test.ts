@@ -197,7 +197,14 @@ type Fixture = {
   readonly push: () => string;
 };
 
-async function withPullRequest(starts: readonly PlannedStart[], body: (fixture: Fixture) => Promise<void>): Promise<void> {
+/** Whether the repository's own `.gitignore` lists `.squiz/`, as a project set up before squiz ignored it itself did. */
+type Ignores = { readonly squizInGitignore: boolean };
+
+async function withPullRequest(
+  starts: readonly PlannedStart[],
+  body: (fixture: Fixture) => Promise<void>,
+  { squizInGitignore }: Ignores = { squizInGitignore: true },
+): Promise<void> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "squiz-review-e2e-")));
   const worktree = join(root, "tree");
   const bin = join(root, "bin");
@@ -208,7 +215,7 @@ async function withPullRequest(starts: readonly PlannedStart[], body: (fixture: 
   git("config", "user.email", "squiz@example.invalid");
   git("config", "user.name", "Squiz");
   git("config", "commit.gpgsign", "false");
-  writeFileSync(join(worktree, ".gitignore"), ".squiz/\n", "utf8");
+  if (squizInGitignore) writeFileSync(join(worktree, ".gitignore"), ".squiz/\n", "utf8");
   writeFileSync(join(worktree, FILE), "// line 1\n// line 2\n", "utf8");
   git("add", ".");
   git("commit", "--quiet", "--message", "the change under review");
@@ -593,6 +600,23 @@ test("a run after a close before any review, without its summary, prints the fai
     assert.equal(later.stdout.split("\n")[1], "Squiz's review of PR #41 closed after 1 round, with 1 thread open. No round runs again in this worktree.");
     assert.equal(later.stderr, closing.stderr);
   });
+});
+
+test("a round leaves the repository clean in git status, with nothing about .squiz/ in its own .gitignore (#699)", async () => {
+  await withPullRequest(
+    [{ findings: [FINDING], verdicts: [] }],
+    async (fixture) => {
+      const printed = await review(fixture);
+      assert.equal(printed.exit, 2, `${printed.stdout}${printed.stderr}\n${hostLog(fixture.episode)}`);
+      assert.ok(existsSync(fixture.episode.stateFile), "the round wrote no state, so git status has nothing to show either way");
+      assert.ok(!existsSync(join(fixture.worktree, ".gitignore")), "the repository's own .gitignore must not be what ignores .squiz/");
+
+      const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: fixture.worktree, encoding: "utf8" });
+      assert.equal(status, "", "git status shows what squiz wrote under .squiz/ as the project's own work");
+      assert.equal(readFileSync(join(fixture.worktree, ".squiz", ".gitignore"), "utf8"), "*\n");
+    },
+    { squizInGitignore: false },
+  );
 });
 
 test("a round whose only finding GitHub refused exits 1 saying it could not post it, rather than nothing open", async () => {

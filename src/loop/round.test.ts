@@ -459,7 +459,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     git(worktree, ["init", "--quiet", "--initial-branch", BRANCH]);
     git(worktree, ["config", "user.email", "squiz@example.invalid"]);
     git(worktree, ["config", "user.name", "Squiz"]);
-    // `.squiz/` is gitignored, as it is in a project the harness is installed in,
+    // The project's own `.gitignore` lists `.squiz/`, as an older project's does,
     // so the episode's own directory is not read as something the reviewer wrote.
     await writeFile(join(worktree, ".gitignore"), ".squiz/\n", "utf8");
     await mkdir(join(worktree, "src", "ui"), { recursive: true });
@@ -1862,7 +1862,7 @@ test("the episode a round opens is keyed by the number of the pull request it fo
   });
 
   assert.ok(ran.conclusion.outcome === "block");
-  assert.deepEqual(ran.episodesLeft, [String(PULL_REQUEST)]);
+  assert.deepEqual([...ran.episodesLeft].sort(), [".gitignore", String(PULL_REQUEST)]);
   assert.equal(ran.state?.rounds.length, 1, "the round recorded nothing under the pull request's number");
 });
 

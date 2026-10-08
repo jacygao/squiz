@@ -22,6 +22,7 @@ import { takeLock, type HeldLock, type Taking } from "../sessions/lock-file.ts";
 import { identityOf, stillRunning, type IdentityRead, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState, writeState } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
+import { makeEpisodeDirectory } from "./state-directory.ts";
 
 const LOCK_NAME = "state.lock";
 
@@ -101,6 +102,11 @@ export function updateState(
   // The last answer a holder gave. An attempt the deadline cut short says only that
   // time ran out, so the failure names what the attempt before it found.
   let found: Exclude<Taking, { readonly outcome: "taken" }> | undefined;
+  try {
+    makeEpisodeDirectory(episode);
+  } catch (error) {
+    return notWritten(`${episode.directory} could not be made: ${error instanceof Error ? error.message : String(error)}`);
+  }
   for (;;) {
     cutShort = false;
     const taking = takeLock(episode.directory, LOCK_NAME, { boundMs: boundMs(), self, presence });

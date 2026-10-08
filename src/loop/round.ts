@@ -50,7 +50,7 @@ import { runRound as runReview, type Round as Review } from "../reviewers/round.
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import type { Environment } from "../sessions/tmux.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
-import { takeHostLock, type HostLock } from "../host/lock.ts";
+import { takeEpisodeHostLock, type HostLock } from "../host/lock.ts";
 import {
   readState,
   recordPostingSeconds,
@@ -789,7 +789,7 @@ function gate(call: GhCall): Step<PullRequest> {
  * cannot be read runs no review either.
  */
 function lockOf(episode: Episode, pullRequest: number): Step<HostLock> {
-  const taking = takeHostLock(episode.directory, { boundMs: LOCK_BOUND_MS });
+  const taking = takeEpisodeHostLock(episode, { boundMs: LOCK_BOUND_MS });
   switch (taking.outcome) {
     case "taken":
       return { step: taking.lock };
