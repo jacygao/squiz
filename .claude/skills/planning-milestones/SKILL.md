@@ -146,15 +146,16 @@ Print in the reply:
 
 - Each issue in the release: number, title, priority, its sub-issues if it was
   split, and its blockers
-- **The parallel frontier**: the issues with no open blocker and no open
-  sub-issue, which can start now. Derive it from the repository rather than from
+- **The parallel frontier**: the issues with no open blocker and no sub-issues,
+  which can start now. A split issue is done through its sub-issues and never
+  started itself. Derive it from the repository rather than from
   memory
 - Anything you could not resolve from the specification, as a question
 
 ```bash
 gh issue list --milestone 0.1.0 --state open --limit 200 \
   --json number,title,blockedBy,subIssuesSummary \
-  --jq '.[] | select(.subIssuesSummary.total == .subIssuesSummary.completed)
+  --jq '.[] | select(.subIssuesSummary.total == 0)
         | select([.blockedBy.nodes[] | select(.state == "OPEN")] | length == 0)
         | "#\(.number) \(.title)"'
 ```

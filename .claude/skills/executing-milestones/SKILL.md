@@ -49,32 +49,39 @@ gh api "repos/{owner}/{repo}/milestones?state=open" \
 **Given an issue number or a description**, read that issue and every
 specification section it cites, then go to section 2.
 
-**Given a release**, read its frontier: the issues with no open blocker and no
-open sub-issue. An issue that was split is done through its sub-issues, so it is
-never dispatched itself. **Readiness is true at the moment it is computed and
+**Given a release**, first close any split issue whose sub-issues are all closed.
+An issue that was split is done through its sub-issues, so it is never
+dispatched itself. Check its own acceptance criteria against `main`, tick the
+ones that hold, and close it. Where one does not hold, file what is missing as a
+new sub-issue instead.
+
+Then read its frontier: the issues with no open blocker and no sub-issues.
+**Readiness is true at the moment it is computed and
 wrong after the next merge**, so compute it here and never carry it forward:
 
 ```bash
 release=0.1.0
 gh issue list --milestone "$release" --state open --limit 200 \
   --json number,title,blockedBy,subIssuesSummary \
-  --jq '[.[] | select(.subIssuesSummary.total == .subIssuesSummary.completed)]
+  --jq '[.[] | select(.subIssuesSummary.total == 0)]
         | sort_by(.number) | .[]
         | "\(if ([.blockedBy.nodes[] | select(.state == "OPEN")] | length) == 0
              then "READY  " else "blocked" end)  #\(.number)  \(.title)"'
 ```
 
-**Check that list against the milestone before believing it.** It is served
-from a search index that lags behind the issues themselves, and this repository
-has already produced a listing that omitted issues GitHub knew about. The
-milestone's own count is not served from that index:
+**Check the listing against the milestone before believing it.** The listing is
+served from a search index that lags behind the issues themselves, and this
+repository has already produced one that omitted issues GitHub knew about. The
+milestone's own count is not served from that index. Compare it with the
+listing before the frontier filter, so that split issues count on both sides:
 
 ```bash
+gh issue list --milestone "$release" --state open --limit 200 --json number --jq length
 gh api "repos/{owner}/{repo}/milestones" \
   --jq ".[] | select(.title == \"$release\") | .open_issues"
 ```
 
-A count above what the listing showed means issues the listing cannot yet see.
+A milestone count above the listing's means issues the listing cannot yet see.
 Find them with `gh api "repos/{owner}/{repo}/issues?milestone=<number>&state=open"`
 rather than waiting for the index.
 
