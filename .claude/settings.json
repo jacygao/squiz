@@ -1,11 +1,13 @@
 {
   "extraKnownMarketplaces": {
     "jacygao": {
-      "source": { "source": "github", "repo": "jacygao/skills" }
+      "source": {
+        "source": "github",
+        "repo": "jacygao/skills"
+      }
     }
   },
   "enabledPlugins": {
-    "core@jacygao": true,
-    "brownfield@jacygao": true
+    "skills@jacygao": true
   }
 }

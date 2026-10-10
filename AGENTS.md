@@ -1,12 +1,12 @@
 # Working in this repository
 
-The skills named here come from the `core` and `brownfield` plugins of the
-`jacygao/skills` marketplace, which `.claude/settings.json` enables. They hold the
+The skills named here come from the `skills` plugin of the `jacygao/skills`
+marketplace, which `.claude/settings.json` enables. They hold the
 method; this file holds what is specific to squiz, and they read it from here.
 
 ## Specs
 
-**Load the `core:writing-specs` skill before writing or editing anything under
+**Load the `skills:writing-specs` skill before writing or editing anything under
 `docs/specs/`.** Every time, without being asked.
 
 `docs/specs/review-harness-spec.md` is the specification. Its § 8, The project,
@@ -19,7 +19,7 @@ that two of them never conflict on the version line.
 
 ## Notes
 
-**Load the `core:writing-notes` skill before writing or editing anything under
+**Load the `skills:writing-notes` skill before writing or editing anything under
 `docs/notes/`.** Every time, without being asked.
 
 `docs/notes/` holds durable findings: what earlier work established, recorded so
@@ -81,7 +81,7 @@ it is woken with the result.
   without a restart. `hooks/hooks.json` is read when the session starts, so a
   change to it waits for a restart (unverified).
 
-**Load the `core:working-issues` skill before dispatching any issue to
+**Load the `skills:working-issues` skill before dispatching any issue to
 subagents.** Every time, without being asked.
 
 ## Issues and releases
@@ -100,12 +100,12 @@ milestone and one priority label:
 The version is in `package.json`, `package-lock.json`,
 `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 
-**Load the `brownfield:triaging-issues` skill before triaging issues or planning
-a release, and the `brownfield:cutting-releases` skill before cutting one.**
+**Load the `skills:triaging-issues` skill before triaging issues or planning
+a release, and the `skills:cutting-releases` skill before cutting one.**
 Every time, without being asked.
 
 ## Pull requests and issues
 
-**Load the `core:writing-pull-requests` skill before running `gh pr create`, and
-the `core:writing-issues` skill before running `gh issue create`.** Every time,
+**Load the `skills:writing-pull-requests` skill before running `gh pr create`, and
+the `skills:writing-issues` skill before running `gh issue create`.** Every time,
 without being asked.
