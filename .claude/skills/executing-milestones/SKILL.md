@@ -1,6 +1,6 @@
 ---
 name: executing-milestones
-description: How a planned milestone's issues become worktrees, subagent briefs, and verified pull requests. Load BEFORE dispatching implementation work to subagents.
+description: How a planned release's issues become worktrees, subagent briefs, and verified pull requests. Load BEFORE dispatching implementation work to subagents.
 user-invocable: true
 ---
 
@@ -11,23 +11,23 @@ what gets built next, brief them so the parts that fail silently get attention,
 and **check what comes back**.
 
 This skill starts where `planning-milestones` stops. That skill ends at a
-reviewable issue tree and files nothing else; this one executes the tree it
-filed.
+release whose issues are each one pull request, with their blockers set; this
+one executes them.
 
 Two shapes of work arrive here, and everything from section 2 onward is the same
 for both:
 
-- **A milestone.** An epic and its sub-issues, already filed. If the milestone
-  has no epic, run `planning-milestones` first and stop there for review.
-- **Anything else.** A bug, a spec correction, a task carrying no milestone
-  label. One issue, one brief, one pull request.
+- **A release.** A GitHub milestone named by its version, such as `0.1.0`, whose
+  issues have been planned. If it has not been planned, run
+  `planning-milestones` first and stop there for review.
+- **One issue.** A bug, a spec correction, a task. One issue, one brief, one
+  pull request.
 
 ## 1. Take the work from the argument, never from inference
 
-**The caller names the milestone or the issue.** Which one to execute next is a
+**The caller names the release or the issue.** Which one to execute next is a
 fact about what the caller intends to build, and the repository does not hold
-it. Do not infer it from which epic is open, from the order of
-`docs/specs/milestones.md`, or from what was planned last.
+it. Do not infer it from which milestone is open or from what was planned last.
 
 A fresh session does not know what merged since the last one, so bring the tree
 and the open pull requests current before answering on any of the three paths
@@ -39,63 +39,51 @@ gh pr list --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
 ```
 
 **Given no argument**, report and stop. Reporting is not executing. Name the
-open epics, so the caller has something to choose from, and the work outside
-them, which no epic's frontier can see:
+open releases, so the caller has something to choose from:
 
 ```bash
-gh issue list --state open --limit 100 --json number,title,parent \
-  --jq '.[] | select(.parent == null) | "epic     #\(.number)  \(.title)"'
-
-gh api "repos/{owner}/{repo}/issues?state=open&per_page=100" --paginate --jq '
-  .[] | select(.pull_request == null)
-      | select([.labels[].name] | any(. == "bug" or . == "needs-human"))
-      | "outside  #\(.number)  \(.title)"'
+gh api "repos/{owner}/{repo}/milestones?state=open" \
+  --jq '.[] | "\(.title)\t\(.open_issues) open"'
 ```
-
-The `pull_request == null` filter is not optional. That endpoint returns pull
-requests alongside issues, and a pull request carries no dependency summary, so
-a query without it reads every open pull request as ready work.
 
 **Given an issue number or a description**, read that issue and every
 specification section it cites, then go to section 2.
 
-**Given a milestone id**, find its epic — the issue with no parent carrying
-that milestone's label, which is exact where matching a title is not:
+**Given a release**, first close any split issue whose sub-issues are all closed.
+An issue that was split is done through its sub-issues, so it is never
+dispatched itself. Check its own acceptance criteria against `main`, tick the
+ones that hold, and close it. Where one does not hold, file what is missing as a
+new sub-issue instead.
+
+Then read its frontier: the issues with no open blocker and no sub-issues.
+**Readiness is true at the moment it is computed and
+wrong after the next merge**, so compute it here and never carry it forward:
 
 ```bash
-milestone=M0
-epic=$(gh issue list --label "milestone:$milestone" --state all --limit 100 \
-  --json number,parent --jq '.[] | select(.parent == null) | .number')
-```
-
-Nothing back means the milestone has not been planned. Two numbers back means
-two epics for one milestone, which splits the tree. Either way, say so and stop.
-
-Then read the frontier, the sub-issues with no open blocker. **Readiness is true
-at the moment it is computed and wrong after the next merge**, so compute it
-here and never carry it forward:
-
-```bash
-gh issue list --label "milestone:$milestone" --state open --limit 100 \
-  --json number,title,parent,blockedBy \
-  --jq '[.[] | select(.parent != null)] | sort_by(.number) | .[]
+release=0.1.0
+gh issue list --milestone "$release" --state open --limit 200 \
+  --json number,title,blockedBy,subIssuesSummary \
+  --jq '[.[] | select(.subIssuesSummary.total == 0)]
+        | sort_by(.number) | .[]
         | "\(if ([.blockedBy.nodes[] | select(.state == "OPEN")] | length) == 0
              then "READY  " else "blocked" end)  #\(.number)  \(.title)"'
 ```
 
-**Check that list against the epic before believing it.** It is served from a
-search index that lags behind the issues themselves, and this repository has
-already produced one that omitted sub-issues the epic knew about. The sub-issues
-API is not served from that index:
+**Check the listing against the milestone before believing it.** The listing is
+served from a search index that lags behind the issues themselves, and this
+repository has already produced one that omitted issues GitHub knew about. The
+milestone's own count is not served from that index. Compare it with the
+listing before the frontier filter, so that split issues count on both sides:
 
 ```bash
-gh api "repos/{owner}/{repo}/issues/$epic/sub_issues" --paginate \
-  --jq '[.[] | select(.state == "open") | .number] | "open: \(.)"'
+gh issue list --milestone "$release" --state open --limit 200 --json number --jq length
+gh api "repos/{owner}/{repo}/milestones" \
+  --jq ".[] | select(.title == \"$release\") | .open_issues"
 ```
 
-A number here that the frontier did not list is a sub-issue the listing cannot
-yet see. Read those with `gh issue view <n> --json blockedBy` rather than
-waiting for the index.
+A milestone count above the listing's means issues the listing cannot yet see.
+Find them with `gh api "repos/{owner}/{repo}/issues?milestone=<number>&state=open"`
+rather than waiting for the index.
 
 ## 2. Give each piece of work its own worktree
 
@@ -150,9 +138,7 @@ tell a subagent's breakage from an inherited one in section 4.
 Squiz has no build step by design — Node strips the types and runs the `.ts`
 files as they are — so nothing checks the types unless something is run that
 checks them. That is `tsc --noEmit`, and the tests are whatever `package.json`
-defines. Where the repository does not have them yet, the baseline is empty, and
-that is a fact to state rather than a gap to fill with an invented check. M1,
-the plugin skeleton, is the milestone that creates them and puts both in CI.
+defines. Both run in CI.
 
 **Dispatch the whole frontier at once**, as one agent call per issue in a
 single message, so they run concurrently. Issues with no open blocker are
@@ -212,8 +198,7 @@ answer is yours to resolve, not theirs to guess:
   is the outcome you asked for.
 
 **A result that contradicts the specification is reconciled in the
-specification, not worked around.** M0, the prerequisites spike, sets that
-precedent in its own acceptance criteria. Reconciling means loading
+specification, not worked around.** Reconciling means loading
 `writing-specs` and, because a specification change is a decision about the
 product, bringing it to the caller.
 
@@ -282,7 +267,7 @@ as its own issue.
 
 **Ask anything that trades cost against product.** A runtime dependency, since
 the specification says there are none and adding one changes the document. A
-default in `.squiz.json`. What a user-facing string says. Whether a milestone's
+default in `.squiz.json`. What a user-facing string says. Whether a release's
 scope moves. Deciding these builds the wrong product confidently.
 
 When asking, bring a recommendation and the reason, not a menu. When you have
@@ -340,15 +325,16 @@ artefact downloaded by hand.
 At the end of a stretch of work, report what merged, what is open, what each
 open pull request is waiting on, and what needs the caller specifically.
 
-Do not start the next milestone without being asked.
+Do not start the next release without being asked.
 
 ## Resources
 
-- `docs/specs/milestones.md` — the milestones in build order
+- `AGENTS.md`, under Releases — what a release, `Backlog` and each priority mean
 - `docs/specs/review-harness-spec.md` — what the work has to satisfy, cited by
   H2 number
 - `docs/notes/` — facts already settled by earlier work
 - `AGENTS.md` — the skills a subagent is required to load, and when
-- The `planning-milestones` skill — how the tree this skill executes was built
+- The `planning-milestones` skill — how the release this skill executes was
+  planned
 - The `writing-notes`, `writing-issues` and `writing-pull-requests` skills — how
   the finding, the issue and the pull request from this work are each written

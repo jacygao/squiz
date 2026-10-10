@@ -26,6 +26,9 @@ Two kinds, each with the matching label:
 - **Every section is optional** — keep one because it says something a reader
   needs, not because the template lists it
 - **Purpose is one sentence** — if it needs two, it is probably two issues
+- **Every issue gets a milestone and a priority** — a release or `Backlog`, and
+  one of `P0`, `P1` and `P2`, as `AGENTS.md` defines them under Releases. An
+  issue without both is missing from every listing that decides what to work on
 - **A blocker is a relationship, not a line of text** — set it with
   `gh issue create --blocked-by` or `gh issue edit --add-blocked-by`, so GitHub
   renders it and `--json blockedBy` reads it back
@@ -33,14 +36,16 @@ Two kinds, each with the matching label:
 ## Resources
 
 ````bash
-gh issue create --title "<one line, imperative>" --label task --body "$(cat <<'EOF'
+gh issue create --title "<one line, imperative>" --label task --label P1 \
+  --milestone 0.1.0 --body "$(cat <<'EOF'
 <the sections worth keeping, from .github/ISSUE_TEMPLATE/task.md, comments removed>
 EOF
 )"
 ````
 
 ````bash
-gh issue create --title "<one line, the symptom>" --label bug --body "$(cat <<'EOF'
+gh issue create --title "<one line, the symptom>" --label bug --label P2 \
+  --milestone Backlog --body "$(cat <<'EOF'
 <the sections worth keeping, from .github/ISSUE_TEMPLATE/bug.md, comments removed>
 EOF
 )"

@@ -1182,12 +1182,12 @@ test("a different version in Copilot's copy leaves the exit at 0, and copilot --
   const asked = join(scratch, `copilot-asked-${made}`);
   const base = context({ ...EVERY_FAKE, copilot: `echo asked >> '${asked}'\necho "GitHub Copilot CLI 1.2.0."` });
   const home = join(scratch, `copilot-home-full-${made}`);
-  versioned(marketplaceCopy(home), "0.0.1");
+  versioned(marketplaceCopy(home), "0.0.0");
   settingsAt(home, "settings.json", '{"experimental": true}');
 
   const printed = squizDoctor({ ...base, environment: { ...base.environment, COPILOT_HOME: home } });
 
-  assert.match(printed.stdout, /^Copilot's squiz: warning: .* is 0\.0\.1, and this squiz at /mu);
+  assert.match(printed.stdout, /^Copilot's squiz: warning: .* is 0\.0\.0, and this squiz at /mu);
   assert.equal(printed.exit, 0, printed.stdout);
   assert.equal(readFileSync(asked, "utf8"), "asked\n", "copilot --version is asked once per run");
 });
