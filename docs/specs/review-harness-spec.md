@@ -1427,21 +1427,15 @@ nothing any other way. A last message is not read.
 
 **A call whose arguments are not the shape a finding takes is refused where it
 is made**, and the reviewer is told what was wrong with it. The round keeps
-every other report of that round: one malformed finding costs that finding and
-nothing else. What the reviewer does after a refusal is its own: the call can be
-made again.
+every other report: one malformed finding costs that finding and nothing else.
 
-**A round keeps every finding reported before it ended, however it ended.** A
-round killed at its time bound keeps what it was told; so does a round whose
-reviewer never finished its review, and so does one whose reviewer reported three
-findings and then could not reach its model again. None of them is a review: what
-the reviewer never got to is not a thing the round has, and § 7 records each as
-the failure it was.
+**A round keeps every finding reported before it ended, however it ended**:
+killed at its time bound, never finished, or cut off from its model. None of
+those is a review, and § 7 records each as the failure it was.
 
 **The call that finishes the review is what tells an empty review from an
-unfinished one.** A round that reported nothing and finished found nothing,
-which is a result. A round that reported nothing and did not finish reached the
-end of nothing, which is a failure. No count of findings separates the two.
+unfinished one.** A round that reported nothing and finished found nothing. A
+round that reported nothing and did not finish failed.
 
 The pull request holds the record, so a finding carries only what composes a
 comment and what the harness needs in order to route it:
@@ -1464,28 +1458,17 @@ comment and what the harness needs in order to route it:
 | `medium` | Wrong under conditions this change makes reachable, or a test that would pass with the code under it deleted. |
 | `low` | Real, narrow, and survivable. |
 
-Every finding holds the work whatever its severity. Severity orders the
-findings; it does not decide whether they count. The order runs `high` to
-`low`, and findings of one severity keep the order the reviewer reported them
-in.
+Severity orders the findings and does not decide whether they count. The order
+runs `high` to `low`, and findings of one severity keep the order the reviewer
+reported them in.
 
-Every round hands the reviewer the threads the reviewer itself opened, and it
-reports one verdict for each. It rules by reading the code as it now stands.
-
-A thread is the reviewer's own when the comment that opened it carries the
-reviewer's marker from § 2. A thread a person replied to is still the reviewer's
-own, because the comment that opened it is the finding. The reviewer's resolved
-threads go over beside its open ones, because re-opening a thread is a verdict
-and a verdict only reaches a thread that was handed over.
-
-The threads are the whole of what the reviewer knows about the rounds before it,
-so they go over in every round rather than from the second round on. A pull
-request carries the threads of every episode that has run on it, and the first
-round of a second episode is handed them. The first round of a first episode is
-handed none, because there are none yet.
-
-A thread a person opened is left alone. It is not handed over, no verdict is
-applied to it, and nothing in the loop reads or answers it.
+Every round hands the reviewer the threads it opened, resolved and open alike,
+from every episode on the pull request, and it reports one verdict for each from
+the code as it now stands. A thread is the reviewer's own when the comment that
+opened it carries the reviewer's marker from § 2, whoever replied on it since.
+Resolved threads go over because re-opening one is a verdict. A thread a person
+opened is left alone: it is not handed over, no verdict is applied to it, and
+nothing in the loop reads or answers it.
 
 A verdict carries three fields:
 
@@ -1495,8 +1478,7 @@ A verdict carries three fields:
   `open` it is the reviewer's feedback to the coding agent: what is still wrong
   in the code as it now stands, and what change or argument would settle it. On
   `withdrawn` it says why there was no defect. A verdict of `open` or
-  `withdrawn` with no reason, or with one that is blank, is refused. The shared
-  report checks hold this rule, so both reviewers' calls refuse alike.
+  `withdrawn` with no reason, or with one that is blank, is refused.
 
 ```json
 {
@@ -1543,34 +1525,27 @@ The retry count is bounded by the caller: `schedule()` in `queue.ts:40` stops at
 ```
 
 A thread that was already resolved when it was handed over gets no reply from a
-`fixed` or `withdrawn` verdict. The round still sends the resolve, because the
-mutation's report is its only evidence the thread is closed, but it posts
-nothing: the thread is handed over and ruled on again every round, and a reply
-each time would repeat itself. An attempt that spends no round, such as a setup
-problem that salvaged a verdict, names the commit and no round, as
-`Confirmed at 1b86987.`, because the next round takes the number it would have
-named.
+`fixed` or `withdrawn` verdict. The round still sends the resolve, whose report
+is its only evidence the thread is closed. An attempt that spends no round, such
+as a setup problem that salvaged a verdict, names the commit and no round, as
+`Confirmed at 1b86987.`
 
 The next `squiz review` prints the replies with the thread's other comments
 (§ 6), which is how the coding agent receives a reason.
 
 **A reply that cannot be posted leaves the verdict standing.** The thread is put
-in the state the reviewer ruled either way, and a closing reply that fails does
-not stop the resolve after it. The round names the thread and what GitHub
-answered on `squiz review`'s stderr, and in `squiz status` where the round
-reviewed. Where the reply was a reason on a thread kept open, the summary's
-Notes name the thread only where the round closes the episode, because the next
-round that keeps it open posts a reason of its own. Where the reply was on a
-thread the round closed, nothing posts it later: the round's entry in the state
-file keeps the line, the summary that closes the episode names it in Notes
-(§ 5), and a round that fails lists it in its failure comment instead.
+in the state the reviewer ruled, and a closing reply that fails does not stop
+the resolve after it. The round names the thread and what GitHub answered on
+`squiz review`'s stderr, and in `squiz status`. A failed reason on a thread kept
+open is named in the summary's Notes only by the round that closes the episode,
+since a later round posts a reason of its own. A failed reply on a thread the
+round closed is kept in the round's entry in the state file, and named by the
+summary that closes the episode (§ 5), or by the failure comment of a round that
+fails.
 
-A thread the reviewer returns no verdict for is treated as `open`, where the
-reviewer finished its review, and nothing is posted on it, because the reviewer
-gave no reason. Where the review did not finish, such a thread is left in the
-state it was handed over in. The reviewer was silent about every thread it never
-reached, and the default would read that silence as a ruling on code it had not
-read.
+A thread the reviewer returns no verdict for is treated as `open` where the
+reviewer finished its review, and nothing is posted on it. Where the review did
+not finish, such a thread is left as it was handed over.
 
 Every finding posted as a thread ends its episode in one of four states. The
 reviewer names the first two; the harness reads the last two off the thread when
@@ -1610,48 +1585,29 @@ stand.
 
 ### Pull request comments
 
-A finding's `scope` decides where its comment goes. The reviewer sets it,
-because it is a judgement about what the finding is about rather than about
-where a line falls.
+A finding's `scope`, which the reviewer sets, decides where its comment goes:
 
 - **Inline**, for a finding scoped to `line`. It becomes a review comment thread
-  anchored to a file and a line that the change touched. This is the normal case
-  and the preferred one.
-- **File**, for a finding scoped to `file`. It is about a file rather than any
-  line of it, or about a file the diff carries without a line to anchor to. It
-  becomes a review comment thread on the file, carrying no line.
-- **General**, for a finding scoped to `change`. It is about the change as a
-  whole rather than about any line of it — that the feature duplicates one the
-  project already has, or that the approach is wrong. It goes into the summary
-  comment.
+  anchored to a file and a line that the change touched. This is the normal case.
+- **File**, for a finding scoped to `file`. It becomes a review comment thread on
+  the file, carrying no line.
+- **General**, for a finding scoped to `change`. It goes into the summary comment
+  as a line of text, so nothing records whether it was fixed, and no later round
+  rules on it.
 
-The reviewer reads beyond the diff by design: untouched files, callers, history.
-A finding it makes there is still scoped to `line`, and it is anchored to the
-changed line that caused it, with the affected file and line named in the body.
-The reviewer does not go looking for the affected line to anchor to, and GitHub
-would refuse an anchor outside the diff in any case.
-
-An anchor is one line. A finding about several lines names the one a reader
-would point at when explaining the defect, which is where it is visible rather
-than where the construct begins or ends. The charter carries that instruction,
-since it is a judgement the reviewer makes.
+A finding about code the change did not touch is still scoped to `line`, and
+anchored to the changed line that caused it, with the affected file and line
+named in the body. An anchor is one line: where the defect is visible, as the
+charter instructs.
 
 An anchor the harness cannot place is posted on the file instead, with
 `file:line` written in the text. Where the diff does not carry the file either,
-the finding is reported as general and the summary's Notes records that it could
-not be anchored.
+the finding is reported as general, and the summary's Notes records that it
+could not be anchored. A finding scoped to `file` whose file the diff does not
+carry goes to Notes the same way.
 
-A finding scoped to `file` is reported general on the same terms: where the diff
-does not carry its file, the finding goes to Notes carrying the file alone. What
-the diff carries decides where a comment can hang, and the scope the reviewer
-chose does not change that.
-
-A file-scoped comment is a thread. It is resolved, re-opened and ruled on the
-way an inline one is, and it carries across rounds.
-
-A general finding is reported once and then forgotten. It is a line of text in
-the summary comment rather than a thread, so nothing records whether it was
-fixed, and no later round rules on it.
+A file-scoped comment is a thread like an inline one: it is resolved, re-opened
+and ruled on, and it carries across rounds.
 
 ## 5. The summary
 
