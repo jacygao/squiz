@@ -589,54 +589,45 @@ at once. The line is the reviewer's behind a gate, each word single-quoted:
 '/bin/sh' '-c' '<gate>' '/tmp/squiz-gate-Xa81Qe' '400' 'pi' '--session-dir' …
 ```
 
-**No line over 512 bytes is typed.** A new pane's shell may not have started its
-line editor when the line arrives, and macOS then keeps only 1024 bytes of it. A
-line cut inside a quoted word runs nothing. A gated line over 512 bytes is
-written to a file named `line` in the gate directory before the tab is created,
-and the line typed runs that file:
+**No line over 512 bytes is typed**, because a new pane's shell can drop part
+of a long line before its line editor starts. A longer gated line is written to
+a file named `line` in the gate directory before the tab is created, and the
+line typed runs that file, which removes itself and then execs the gated line:
 
 ```
 '/bin/sh' '/tmp/squiz-gate-Xa81Qe/line'
 ```
 
-The file removes itself and then execs the gated line, so the gate's pid is
-still the typed command's. Copilot's line is about 1.7 KB, and `pi`'s is about
-900 bytes from a worktree, so both run from the file. tmux types nothing: the
-command line is `new-window`'s own argument.
+tmux types nothing: the command line is `new-window`'s own argument.
 
 The gate writes its pid into the gate directory, waits for a `go` file there,
 and then becomes the reviewer with the same pid, group and start time. The
 round host reads the pid and the reviewer's group while the gate is shut, and
-only then writes `go`. So a reviewer that finishes within a second of starting is
-still a review that started, and a start that fails never lets the reviewer run.
-A gate left waiting gives up on its own after four times the bound on each
+only then writes `go`, so a start that fails never lets the reviewer run. A
+gate left waiting gives up on its own after four times the bound on each
 program the start runs, without running the reviewer. Where the reviewer's
 command is not on the shell's path, the gate says so and the start fails at
 once. Where the reviewer has not started 15 seconds after the line was typed,
 the start fails.
 
 **A pane's shell reads the line as typed**, so a control character in an
-argument would be a key: a newline would end the line, and a tab would complete.
-The round host checks the arguments before it creates the tab, and treats such a
-command as a pane Herdr refused: nothing opens, and it goes on to tmux or a
-child. Neither adapter's line carries one unless a path in it does.
+argument would be a key. The round host checks the arguments before it creates
+the tab, and treats a command holding one as a pane Herdr refused: nothing
+opens, and it goes on to tmux or a child.
 
 **The variables the round sets reach the reviewer on every backend, over any
 value the pane's shell gives them.** They are the adapter's, and the GitHub
-variables under Tools, which come last so that no adapter can undo them. A
-child is started with them in its environment. A pane starts its shell with the server's environment rather than
-the round host's, so they are passed with Herdr's `--env` and tmux's `-e`. The
-shell then runs the person's startup files, which can set any of them again: zsh
-reads `.zshenv` even for `-c`. So the line typed into a Herdr pane, and the
-command of a tmux window, set each variable once more, as `env` arguments in
-front of the gate or the reviewer:
+variables under Tools, which come last so that no adapter can undo them. A child
+has them in its environment. A pane gets them through Herdr's `--env` and tmux's
+`-e`, and again as `env` arguments in front of the gate or the reviewer, because
+the shell's startup files can set any of them again:
 
 ```
 '/usr/bin/env' 'SQUIZ_REPORTS=…' 'GH_TOKEN=' 'GH_CONFIG_DIR=…' … '/bin/sh' '-c' '<gate>' …
 ```
 
-`env` sets them and then becomes the gate or the reviewer, so the pid, group and
-start time the round reads are still the reviewer's.
+`env` then becomes the gate or the reviewer, so the pid, group and start time
+the round reads are still the reviewer's.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits. Herdr returns the pane to its shell when
@@ -649,17 +640,11 @@ pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e
 ```
 
 `squiz status` prints it on the round's line. A person runs it from the coding
-agent's worktree, which the paths are relative to. The session ran in the
-snapshot, which is gone once the round ends, so `pi` does not resume it in place.
-It asks to fork the session into the current directory:
-
-```
-Fork this session into current directory? [y/N]
-```
-
-Answering yes opens the reviewer's conversation in the worktree, with everything
-the reviewer read and said. A conversation resumed after the round is not part
-of the review. Copilot's resume line is under The Copilot adapter.
+agent's worktree, which the paths are relative to. The snapshot the session ran
+in is gone, so `pi` asks to fork the session into the current directory, and
+answering yes opens the reviewer's conversation there. A conversation resumed
+after the round is not part of the review. Copilot's resume line is under The
+Copilot adapter.
 
 **What a person types into a `pi` reviewer's pane reaches `pi`.** It can steer
 the review, and nothing records it. A Copilot reviewer's pane can be watched and
@@ -674,11 +659,9 @@ closes the pane. It reads the reviewer's group from the backend while `pi` runs:
 | tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is the one the adapter built, `pi` or the `sh` of the Copilot adapter's line, so this is that command's own pid and leads its group. |
 | Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold the reviewer. |
 
-A pane close is not relied on to stop anything. tmux's `kill-window` sends one
-`SIGHUP` to the window's command and nothing more, so a command that ignores it
-runs on with the window gone. Herdr's `pane close` sends `SIGHUP`, then `SIGTERM`,
-then `SIGKILL`, to every process in the pane's shell session. Neither reaches a
-process in a session of its own.
+A pane close is not relied on to stop anything: neither backend's close reaches
+a process in a session of its own, and a command that ignores `SIGHUP` outlives
+a tmux window.
 
 ### The snapshot
 
@@ -702,11 +685,9 @@ The fetch, the clone and the checkout run in the part of the round before the
 review, under its 30 seconds (§ 7 The review budget).
 
 **The snapshot borrows the repository's objects and shares nothing else.**
-`--shared` writes the repository's object directory into the clone's
-`objects/info/alternates`, so the clone reads every object the repository has,
-without copying one. That includes a head commit the fetch brought, which no ref
-points to. The clone's history is the repository's, so `git log`, `git blame`
-and `git show` in the snapshot answer as they would in a worktree at the same
+`--shared` lets the clone read every object the repository has without copying
+one, a head commit the fetch brought included, so `git log`, `git blame` and
+`git show` in the snapshot answer as they would in a worktree at the same
 commit. Everything else is the clone's own, so the repository's config, hooks
 and refs never reach the history tools (Tools):
 
@@ -736,9 +717,8 @@ own config is not applied when the snapshot is checked out.
 | `<digest>-<number>` | The first 16 hex digits of the SHA-256 of the coding agent's worktree path, and the pull request's number |
 | `rounds/<k>/tree` | The round's number within the episode |
 
-Two worktrees reviewing pull requests with the same number never share a path,
-and neither do two rounds of one episode. The same worktree, number and round
-always give the same path.
+Two worktrees, or two rounds of one episode, never share a path, and the same
+worktree, number and round always give the same path.
 
 **No component the harness adds to the path begins with a dot**, wherever the
 coding agent's worktree is. A `TMPDIR` whose own path has such a component is
@@ -746,9 +726,9 @@ the user's, and the harness does not change it.
 
 **The round host refuses to make a snapshot where `squiz-<uid>` is not the
 user's alone**: a link, a directory another user owns, or one that a group or
-other users can write. The temporary directory may be shared, as `/tmp` is, and
-another user could make that path first. The round fails before the review, as
-any snapshot that cannot be made does.
+other users can write, since another user could make that path first in a shared
+`/tmp`. The round then fails before the review, as any snapshot that cannot be
+made does.
 
 **The snapshot holds the commit and nothing else.** It carries none of the coding
 agent's uncommitted changes, which no state names, and none of its untracked
@@ -757,14 +737,11 @@ repository, so it shows in neither the coding agent's `git status` nor
 `git worktree list`.
 
 **The round host removes the snapshot once the round has recorded its result**,
-by deleting its directory, whatever the round became. It deletes only a path of
-the form above, inside `squiz-<uid>`. It then removes `rounds/<k>/`, `rounds/`
-and `<digest>-<number>/` where each is empty. Removal grows with every file in
-the snapshot, so it runs after the result rather than before it, and delays nothing a waiting `squiz review`
-returns. It takes no part of the round's deadline. The round host takes the next
-queued state once it is done. Nothing in the repository refers to the snapshot,
-so removing it needs nothing from the repository, and works the same where the
-coding agent's worktree has gone.
+whatever the round became, and before it takes the next queued state. It
+deletes only a path of the form above, inside `squiz-<uid>`, then removes
+`rounds/<k>/`, `rounds/` and `<digest>-<number>/` where each is empty. Removal
+takes no part of the round's deadline, and needs nothing from the repository, so
+it works where the coding agent's worktree has gone.
 
 **A snapshot that cannot be removed stays on disk, and the round's result
 stands.** The round host writes a line in `host.log` giving the snapshot's path
@@ -781,27 +758,18 @@ reviewer has started. Before then, the record's round number gives the same path
 
 **What it costs:**
 
-- **Time and disk on every round.** Checking out every tracked file grows with
-  the size of the repository, not the size of the change. The clone itself, with
-  no objects of its own, takes a few hundredths of a second. The disk held at
-  once is the checkout's size times the reviews running at once, and it is held
-  on the temporary directory's filesystem. Where that filesystem is in memory, as
-  `/tmp` is on some Linux systems, so is the snapshot.
-- **A snapshot nothing removes stays until the system clears its temporary
-  directory, or a person deletes it.** That is a snapshot whose round host was
-  killed and which no later trigger or round host for the same episode finds, or
-  one its round could not remove.
-- **A snapshot that loses its objects if the repository's are pruned.** The
-  clone reads the repository's objects in place. A `git gc`, automatic or not,
-  keeps an object no ref reaches for two weeks by default, so a head commit the
-  fetch brought survives one that runs while the round does. A
-  `git gc --prune=now`, a `git prune`, or a `gc.pruneExpire` of `now` deletes it
-  at once, and the snapshot then cannot read its own `HEAD`, so the history
-  tools fail. The round does not guard against that.
-- **A limit on very large repositories.** The checkout runs inside the 30
-  seconds before the review, so a repository large enough that it spends them
-  cannot be reviewed. A snapshot per round does not scale to such repositories,
-  and the first version accepts that.
+- **Time and disk on every round.** The checkout grows with the repository, not
+  the change, and the disk held at once is the checkout's size times the reviews
+  running at once, on the temporary directory's filesystem.
+- **A snapshot nothing removes stays** until the system clears its temporary
+  directory or a person deletes it: one whose round host was killed and that no
+  later trigger finds, or one its round could not remove.
+- **Pruning the repository breaks a running round.** A `git gc --prune=now`, a
+  `git prune`, or a `gc.pruneExpire` of `now` deletes a fetched head commit no
+  ref reaches, and the history tools then fail. An ordinary `git gc` keeps it for
+  two weeks. The round does not guard against pruning.
+- **A repository whose checkout spends the 30 seconds before the review cannot
+  be reviewed.**
 
 ### Tools
 
@@ -814,13 +782,11 @@ the grant. It holds three kinds of tool, under each adapter's own names:
 | Reporting | `report_finding`, `report_verdict`, `finish_review` | `squiz-report_finding`, `squiz-report_verdict`, `squiz-finish_review` |
 | History | `git_log_search`, `git_blame`, `git_show` | `squiz-git_log_search`, `squiz-git_blame`, `squiz-git_show` |
 
-The reading tools answer anything the code can be read for. The history tools
-answer whether a line was meant: which commit wrote it, and what that commit
-said it was for. The reporting calls are how the reviewer returns what it found,
-as Findings sets out, and a reviewer with no way to report returns nothing
-whatever it read. Copilot names a call an MCP server serves `<server>-<call>`,
-and the server the Copilot adapter ships is `squiz`. Nothing else is granted:
-no tool that writes, and no shell (Confinement).
+The history tools answer whether a line was meant. The reporting calls are how
+the reviewer returns what it found, as Findings sets out. Copilot names a call an
+MCP server serves `<server>-<call>`, and the server the Copilot adapter ships is
+`squiz`. Nothing else is granted: no tool that writes, and no shell
+(Confinement).
 
 **Each history tool runs one `git` subcommand in the snapshot, and no argument
 reaches a shell.** Each runs `git` from an argument list, with the reviewer's
@@ -832,10 +798,8 @@ arguments as separate words:
 | `git_blame` | A file and a line | `git blame -L <line>,<line> HEAD -- <file>`: the commit that last changed that line, with its author and date. |
 | `git_show` | A commit | `git show` on the one commit the name resolves to: its author, date, message and change. A range, a tree or a file at a revision is refused. |
 
-**The history tools are hardened against the repository they read.** The
-snapshot's tracked files are the code under review's to set, so nothing they
-hold may turn an argument into an option, make `git` run a program, or put a
-file outside the snapshot into what the reviewer reads:
+**The history tools are hardened against the repository they read**, whose
+tracked files are the code under review's to set:
 
 - **No argument reads as an option.** The term is joined to `-S`, a commit is
   resolved to its full name before `git show` is given it, and a file follows
@@ -871,41 +835,23 @@ configuration of its own:
 | `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN` | The empty string, which `gh` reads as no token |
 | `GH_CONFIG_DIR` | `.squiz/<number>/rounds/<k>/gh/`, which the round empties before the reviewer starts |
 
-They are set empty rather than left out because a pane's shell starts with its
-server's environment, and only a value the round sets replaces one the server
-has (The reviewer session). Everything the reviewer starts inherits them, so a
-`gh` that its CLI or a tool starts finds no login: `gh auth status` says none,
-and `gh api` refuses to run.
+They are set empty rather than left out, so that they replace any value a pane's
+shell has (The reviewer session). A `gh` that the reviewer's CLI or a tool
+starts finds no login.
 
 The credential each CLI needs for its model is left alone: `pi`'s provider key,
-such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot looks for that login in
-three places:
+such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot signs in from
+`COPILOT_GITHUB_TOKEN`, which is left set where the round host has it, from a
+login of its own, or from `gh`'s login, which it reads by running
+`gh auth token`. A user who signs Copilot in through `GH_TOKEN` or
+`GITHUB_TOKEN` alone has no model credential in the round, and nothing here
+handles that.
 
-- **`COPILOT_GITHUB_TOKEN`, which is left set where the round host has it.** A
-  user who signs Copilot in that way has no other model credential. Only a
-  made-up token has been tried. With `gh` off `PATH`, Copilot refuses it with
-  `Error: Authentication token found but could not be validated.`; with `gh` on
-  `PATH`, it falls back to `gh`'s login and answers. A valid token is untested.
-- **A login of Copilot's own, from its `/login` command.** Untested: no machine
-  Squiz has run on has had one. Where Copilot keeps it, and whether a reviewer
-  finds it under the adapter's `COPILOT_HOME` (Keeping the project and the user
-  out), are not known.
-- **`gh`'s login, which Copilot reads by running `gh auth token`.** Tested on
-  macOS. `gh auth token` prints the login `gh` keeps in the keychain whatever
-  `GH_CONFIG_DIR` names, and the round passes its `PATH` on unchanged, so a
-  reviewer that finds `gh` on that `PATH` signs in under the variables above.
-  With `gh` off `PATH` and the token variables empty, Copilot exits 1 at once
-  with `Error: No authentication information found.`
-
-A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
-model credential in the round, because the round sets both empty, and nothing
-here handles that.
-
-**The system's credential store stays readable.** On macOS any process running
-as the user can read the keychain, and `gh auth token` prints `gh`'s login from
-it whatever `GH_CONFIG_DIR` names. That command is how Copilot reads `gh`'s
-login, so that login cannot be closed to the reviewer without being closed to Copilot.
-The operating-system sandbox under § 8 What ships is what would close it.
+**The system's credential store stays readable.** `gh auth token` prints `gh`'s
+login from the keychain whatever `GH_CONFIG_DIR` names, and Copilot signs in
+through it, so that login cannot be closed to the reviewer without closing it to
+Copilot. The operating-system sandbox under § 8 What ships is what would close
+it.
 
 ### Confinement
 
@@ -914,17 +860,14 @@ not read anything outside the code under review. Four things hold it there. None
 is configurable, and each holds for both adapters, every round.
 
 **No tool writes, and none is a shell.** The grant under Tools is everything the
-reviewer can call, and it leaves out `edit`, `write` and every shell tool.
-Nothing the reviewer can call touches the tree, the reporting calls included:
-what a report reaches is the round that is reading the reviewer's output, and
-nothing on disk.
+reviewer can call, and it leaves out `edit`, `write` and every shell tool. A
+reporting call reaches the round reading the reviewer's output, and nothing on
+disk.
 
 **The reading tools read the snapshot and nothing outside it.** A path is inside
-where its real path, every link resolved, is inside the snapshot's real path. So
-an absolute path elsewhere, a `..` path, and a link in the tree under review
-that points out are each refused before anything is read. A finding is posted
-publicly on the pull request, so a file the reviewer reads can end up there.
-Each adapter confines its tools differently:
+where its real path, every link resolved, is inside the snapshot's real path, so
+an absolute path elsewhere, a `..` path, and a link that points out are each
+refused before anything is read. Each adapter confines its tools differently:
 
 | Adapter | What refuses a read outside the snapshot |
 |---|---|
@@ -935,21 +878,17 @@ No tool reads outside the snapshot on purpose. The charter, the prompt and
 Copilot's agent file are read by the CLI itself, from its command line and its
 `COPILOT_HOME`, and no granted tool reads them.
 
-**The history tools read, and the repository cannot turn them to anything
-else.** Each runs one `git` subcommand that reads, hardened as Tools sets out,
-and a file `git_blame` is given is confined to the snapshot as a read is. The
-snapshot is a clone, so the config, hooks and refs those subcommands read are
-the clone's own and never the coding agent's repository's (The snapshot).
+**The history tools only read.** They are hardened as Tools sets out, and a file
+`git_blame` is given is confined to the snapshot as a read is.
 
 **`pi` refuses every call outside the grant.** The extension's `tool_call`
-handler refuses a call to any tool `grants` does not name, before it runs. While
-`--tools` carries the grant, `pi` offers the model no other tool and the refusal
-never fires. It is what holds if the grant ever stops being passed, because `pi`
-then falls back to its default tools, a shell among them. The reviewer reads
+handler refuses a call to any tool `grants` does not name, before it runs. It
+holds if the grant ever stops being passed, when `pi` would fall back to its
+default tools, a shell among them. The reviewer reads
 ``squiz refused this call: `<tool>` is not a tool this review grants.`` as the
-call's error, and the refusal is recorded like any other. Copilot needs no
-refusal of its own: it disables every tool `--available-tools` leaves out, as
-The grant under The Copilot adapter sets out.
+call's error, and the refusal is recorded like any other. Copilot disables every
+tool `--available-tools` leaves out, as The grant under The Copilot adapter sets
+out.
 
 ### Adapters
 
