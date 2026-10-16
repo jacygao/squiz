@@ -579,7 +579,8 @@ shell line, which starts Copilot. Below, "the reviewer" is that command.
 **The Herdr workspace is the trigger's.** A trigger records the
 `HERDR_WORKSPACE_ID` in its environment on the state's record. Herdr sets it in
 every pane it manages, so the reviewer's tab opens beside the coding agent's
-pane. A value that is not a `w` and a number, such as `w2`, is not recorded.
+pane. A workspace id is a `w` and a number, such as `w2`, and a value of any
+other shape is not recorded.
 
 **In Herdr, the start returns once the reviewer is running, and the round's
 bound is all that limits the review.** `herdr pane run` types a line and returns
