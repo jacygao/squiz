@@ -887,8 +887,7 @@ holds if the grant ever stops being passed, when `pi` would fall back to its
 default tools, a shell among them. The reviewer reads
 ``squiz refused this call: `<tool>` is not a tool this review grants.`` as the
 call's error, and the refusal is recorded like any other. Copilot disables every
-tool `--available-tools` leaves out, as The grant under The Copilot adapter sets
-out.
+tool `--available-tools` leaves out, as The Copilot adapter sets out.
 
 ### Adapters
 
@@ -961,63 +960,48 @@ reviewer stops the `git` they start.
 | Adapter | Where the history tools find the snapshot |
 |---|---|
 | `pi` | The directory `pi` was started in, which is the snapshot, as for the reads the extension confines. |
-| Copilot | `SQUIZ_SNAPSHOT`, the snapshot's absolute path, which the adapter puts in the `env` of the reporting server's MCP configuration (The command line, under The Copilot adapter). |
+| Copilot | `SQUIZ_SNAPSHOT`, the snapshot's absolute path, which the adapter puts in the `env` of the reporting server's MCP configuration (The Copilot adapter). |
 
 A history tool that finds no snapshot named answers with its error and runs
 nothing.
 
 ### The `pi` adapter
 
-The adapter `reviewer` chooses by default. It builds this command line:
+The adapter `reviewer` chooses by default. It must:
 
-```bash
-pi --session-dir .squiz/<number>/rounds/<k>/session \
-   --no-approve \
-   --no-extensions --extension <reporting-extension> \
-   --tools read,grep,find,ls,report_finding,report_verdict,finish_review,git_log_search,git_blame,git_show \
-   --thinking medium \
-   --append-system-prompt <charter-file> \
-   @.squiz/<number>/rounds/<k>/prompt.md
-```
+- **Hand `pi` the prompt as a file**, read into its first message, so that no
+  argument carries a newline, which a pane's shell would read as a key.
+- **Grant exactly the tools Tools names.** `pi` drops a name the grant does not
+  carry without saying so, so a grant short of a reporting call leaves the
+  reviewer no way to report.
+- **Load its own extension and no other.** The extension registers the reporting
+  calls and the history tools, and refuses a call outside the grant and a read
+  outside the snapshot, as Confinement sets out. With no other extension loaded,
+  none can register a tool under a reporting call's name.
+- **Keep the tree's `pi` configuration out, and leave the user's alone.** The tree
+  under review is untrusted, so none of its `.pi/` configuration reaches `pi`.
+  The adapter writes none of `pi`'s settings. `pi` loads `AGENTS.md` and
+  `CLAUDE.md` itself, which is how the project's conventions reach the reviewer.
+- **Set the thinking level on every run**, so that it never comes from the
+  user's own settings.
+- **Run `pi` interactively in a pane, and in print mode with no standard input
+  when detached.**
+- **End the reviewer**, because interactive `pi` waits for input once its agent
+  settles. After `finish_review` the extension records the finish and shuts
+  `pi` down once its closing message is written. When the agent settles with no
+  finish, it records an unfinished end and shuts `pi` down.
 
-**The task prompt reaches `pi` as a file.** The round writes it to
-`rounds/<k>/prompt.md` before `pi` starts, and `pi` reads the file an `@`
-argument names into its first message, wrapped in a tag that names the file:
+**A configured model is `provider/id`, exactly as `pi --list-models` lists it**,
+such as `openai/gpt-5-mini`. `pi --model` matches a bare name loosely and sends
+an unknown id to the provider as it is, so `confine` lists the models in the
+snapshot, which makes no model request, and prepares the round only where the
+configured model is listed exactly. A bare id listed under one provider is
+refused with its full name in the reason. A `pi` that cannot list fails
+`confine`. With no model configured, `pi` runs on the user's default.
 
-```
-<file name="/…/.squiz/41/rounds/2/prompt.md">
-# Review pull request #41
-…
-</file>
-```
-
-So no argument on the line carries a newline, which a pane's shell would read as
-a key.
-
-In a pane `pi` runs interactively, with the pane as its standard input and
-output. Detached, the round host adds `--print` and gives it `< /dev/null`,
-without which `pi` in print mode blocks forever and emits nothing.
-
-`--extension` names the file that registers the three reporting calls and the
-three history tools. It ships with the adapter. A reporting call refuses a report
-the harness could not compose a comment or a mutation from, and a history tool
-that refused its arguments or failed throws its error text. Either way the
-reviewer reads it as that call's error. The extension also subscribes the
-`tool_call` handler that refuses a call outside the grant, and a read outside the
-snapshot (Confinement).
-
-`--no-extensions` turns off discovery, so the extension named on the command
-line is the only one loaded, and no other can register a tool under a reporting
-call's name.
-
-**The adapter writes none of `pi`'s settings.** `PI_CODING_AGENT_DIR` is left
-as the user has it. `--no-approve` untrusts the tree under review, so none of its
-own `.pi/` configuration reaches `pi`.
-
-**The reviewer's reports reach the round through a file, not through `pi`'s
-output.** The extension appends one line to
-`.squiz/<number>/rounds/<k>/reports.jsonl`, which `SQUIZ_REPORTS` names, for each
-of these, in the order they happen:
+**The reviewer's reports reach the round through a file.** The extension appends
+one line to `.squiz/<number>/rounds/<k>/reports.jsonl`, which `SQUIZ_REPORTS`
+names, for each of these, in the order they happen:
 
 - every report a call accepted, as the extension accepted it;
 - every call it refused, with the refusal;
@@ -1027,296 +1011,127 @@ of these, in the order they happen:
 - an unfinished end, when the agent settles with no finish recorded.
 
 The adapter reads the file as it grows. A report is the value the call accepted,
-after `pi` converted its arguments to the schema's types, which is what the
-reviewer was told had landed.
+after `pi` converted its arguments to the schema's types.
 
-**A round's cost is the sum of its assistant messages' usage.** `pi` prices the
-run from a local catalogue, so a model the catalogue does not cover reports a
-zero cost against a non-zero token count. The adapter returns the token count
-with the cost, which tells that case apart from a round that cost nothing.
+**A round's cost is the sum of its assistant messages' usage**, returned with the
+token count, which tells a model `pi`'s catalogue cannot price from a round that
+cost nothing. A round's models are the ones its messages name, each as
+`provider/model`, or as the model alone where a message names no provider, in
+the order the run first named each. A provider or a model that is not text is a
+line that cannot be read.
 
-**A round's models are the ones its messages name**, each as `provider/model`, as
-`pi --list-models` lists it. A message naming a model and no provider is named by
-the model alone, and a blank model names none. The cost carries every model the
-run named, in the order it first named each. A provider or a model that is not
-text is a line that cannot be read.
+**A round's cost is a floor**, at least what the round spent, where:
 
-**A round's cost is a floor wherever the run's end cannot confirm it as a
-total.** A floor is at least what the round spent. The cost is a floor where:
-
-- **the file's last line is not a message's usage**, because every run ends on
-  an assistant message, a finish included;
-- **the time bound stopped the reviewer**, because a request in flight was spent
-  and never reported;
-- **a line of the file could not be read, or the file could not be read to its
-  end**, a last line with no newline included.
+- the file's last line is not a message's usage, because every run ends on an
+  assistant message;
+- the time bound stopped the reviewer;
+- a line of the file could not be read, or the file could not be read to its
+  end.
 
 A round that ran the reviewer twice has a floor where either run does.
 
-A message whose `stopReason` is `error` does not mean the run failed, because
-`pi` retries a failed request itself, and it carries zero usage. The run reached
-no reviewer where no assistant message carries a `stopReason` of `stop` and no
-finish was recorded. The adapter reports the errored message's `errorMessage`,
-and does not start a second run.
+**How the run is read back:**
 
-**The extension ends the reviewer**, because interactive `pi` waits for input
-once its agent settles:
-
-- **After `finish_review`**, it records the finish and calls `ctx.shutdown()`,
-  which `pi` defers until it is idle, so the reviewer writes its closing message
-  first.
-- **On `agent_settled` with no finish recorded**, it records an unfinished end
-  and calls `ctx.shutdown()`.
-
-**The round is over when the reviewer's process has exited, or when the time
-bound stops it.** What arrives between the finish and the exit is part of the
-review, because `pi` can answer a report after the call that finished. A reviewer
-that does not stop is killed at the bound, as one that reported nothing is.
-
-**A round holding the reviewer's declaration is the review it declared, whatever
-ended the run.** The declaration is read before any stop reason, whether the
-bound ended the run or the process exited.
-
-**A line of the report file the adapter cannot read fails the round, declaration
-or not**, on both paths, because the reviewer was told that report had landed.
-The reports that were read stand.
-
-`pi` loads `AGENTS.md` and `CLAUDE.md` on its own, so the host project's
-conventions reach the reviewer without the charter carrying them.
-
-`--tools` sets the grant, and filters the extension's calls as it filters the
-built-in tools. A name the grant does not carry is dropped silently, so a grant
-short of a reporting call leaves the reviewer no way to report.
-
-`--thinking` is on every command line, so the level never comes from the user's
-own settings. `pi` warns on a level it does not recognise and otherwise ignores
-it.
-
-**A configured model is `provider/id`, exactly as `pi --list-models` lists it**,
-such as `openai/gpt-5-mini`, and it goes on the line as `--model
-openai/gpt-5-mini`, after `--thinking`. With no model configured there is no
-`--model`, and `pi` runs on the user's default.
-
-`pi --model` matches a bare name against any model whose name contains it, and
-sends an unknown id to the provider as it is. So `confine` runs
-`pi --no-approve --no-extensions --list-models` in the snapshot, with no
-terminal, and prepares the round only where the configured model is one of the
-listed `provider/id` names, matched exactly. A bare id listed under one provider
-is refused with its full name in the reason. A `pi` that cannot be started, or
-exits non-zero listing, fails `confine` too. `--list-models` lists only the
-models whose provider has a credential, and makes no model request.
+- A message whose `stopReason` is `error` carries zero usage and does not fail
+  the run, because `pi` retries a failed request itself.
+- The run reached no reviewer where no assistant message carries a `stopReason`
+  of `stop` and no finish was recorded. The adapter reports the errored message's
+  `errorMessage`, and does not start a second run.
+- The round is over when the reviewer's process has exited, or when the time
+  bound stops it. What arrives between the finish and the exit is part of the
+  review.
+- A round holding the reviewer's declaration is the review it declared, whatever
+  ended the run.
+- A line of the report file the adapter cannot read fails the round, declaration
+  or not, and the reports that were read stand.
 
 ### The Copilot adapter
 
 The adapter for the GitHub Copilot CLI, which a project chooses with
-`"reviewer": "copilot"`. It grants the tools § 4 Tools names, as The grant sets
-out.
+`"reviewer": "copilot"`. It must:
 
-#### The command line
+- **Run Copilot non-interactively, in a pane and detached alike**, so that it
+  exits by itself once the reviewer's last message is written, with nobody to
+  answer it.
+- **Hand Copilot the prompt byte for byte**, read from its file as Copilot
+  starts, so that no newline reaches the line a pane's shell reads. The prompt
+  must fit in one argument, which Linux limits to 128 KiB, and nothing here
+  handles a longer one.
+- **Put the charter in the system prompt**, as the instructions of a custom agent
+  the adapter writes into its own `COPILOT_HOME`, where it wins over a tree's
+  agent of the same name.
+- **Grant exactly the tools Tools names**, which disables every other tool,
+  `skill` and every shell tool among them.
+- **Confine reads to the snapshot** with Copilot's own path check, with the
+  temporary directory taken out of it (Confinement).
+- **Keep the tree's and the user's configuration out:**
+  - its own `COPILOT_HOME`, holding the agent file and no trusted folders, so
+    that none of the tree's hooks or MCP servers runs;
+  - `COPILOT_ALLOW_ALL` set empty, since `true` would trust the working directory;
+  - the tree's custom instruction files left out of the system prompt;
+  - the built-in GitHub MCP server off;
+  - no directory added with `--add-dir`, which would load its skills and agents
+    as trusted.
 
-The line the round starts is one shell line, which `argv` builds:
-
-```bash
-sh -c 'prompt=$(cat .squiz/<number>/rounds/<k>/prompt.md && printf .) \
-       && copilot -p "${prompt%.}" \
-         --agent squiz-reviewer \
-         --no-ask-user --allow-all-tools \
-         --available-tools=view,grep,glob,squiz-report_finding,squiz-report_verdict,squiz-finish_review,squiz-git_log_search,squiz-git_blame,squiz-git_show \
-         --disallow-temp-dir \
-         --no-custom-instructions \
-         --disable-builtin-mcps \
-         --additional-mcp-config "$0" \
-         --model "$1" \
-         --reasoning-effort medium \
-         --usage-output-file .squiz/<number>/rounds/<k>/session/usage.json \
-       && usage=$(tr -d "\n" < .squiz/<number>/rounds/<k>/session/usage.json) \
-       && printf "{\"type\":\"usage\",\"usage\":%s}\n" "$usage" >> <reports-file>' \
-  '{"mcpServers":{"squiz":{"type":"local","command":"<node>","args":["<server>"],"env":{"SQUIZ_REPORTS":"<reports-file>","SQUIZ_SNAPSHOT":"<snapshot>"},"tools":["*"]}}}' \
-  gpt-5-mini
-```
-
-The line is shown wrapped. As `argv` builds it, the script is one argument with
-no newline in it, and every path is absolute and single-quoted inside it. The
-MCP configuration travels as the script's `$0` and the model as its `$1`, which
-the shell passes on without reading. `--model "$1"` and the model are there only
-where `model` is configured. `<node>` is the Node the harness runs on, `<server>`
-the reporting server the adapter ships, and `<snapshot>` the round's snapshot,
-each by absolute path.
-
-The environment adds three variables:
-
-- `COPILOT_HOME`, pointing at the round's session directory,
-  `.squiz/<number>/rounds/<k>/session/`, which `confine` creates holding the
-  reviewer's agent file and nothing else;
-- `COPILOT_ALLOW_ALL`, set to the empty string, which Copilot reads as off;
-- `COPILOT_MODEL`, the user's default model, where the project configures no
-  `model` and the user has a default.
-
-**The task prompt is read from its file by the shell, not carried on the line.**
-`-p` takes the prompt as one argument, which the shell reads with `cat` as
-Copilot starts. The `.` after it and `${prompt%.}` keep its trailing newlines, so
-Copilot is handed the file's bytes exactly. Where the file cannot be read,
-Copilot is not started. The prompt must fit in one argument, which Linux limits
-to 128 KiB, and nothing here handles a prompt longer than that.
-
-**The charter reaches Copilot's system prompt as a custom agent's
-instructions.** `confine` writes the agent file
-`<COPILOT_HOME>/agents/squiz-reviewer.agent.md`, whose body is the charter:
-
-```markdown
----
-name: squiz-reviewer
-description: Reviews a pull request for squiz.
----
-
-<the charter>
-```
-
-`--agent squiz-reviewer` chooses it, and Copilot puts its body in the system
-prompt as `<agent_instructions>`. A tree's own agent of the same name, in
-`.github/agents/`, loses to the one in `COPILOT_HOME`.
-
-**The usage reaches the report file only where Copilot exits 0 by itself and
-wrote a usage file.** The shell reads the file with its newlines taken out, and
-appends it to the report file as one usage line, after Copilot has stopped the
-reporting server.
-
-**Copilot runs with `-p` in a pane and detached alike**, and exits by itself once
-the reviewer's last message is written. `-i` is never used, because it waits at
-its prompt once the work is done. Detached, the shell gets `/dev/null` as its
-standard input, as `pi` does.
-
-| Flag | What it does for the round |
-|---|---|
-| `--agent` | Chooses the agent whose instructions are the charter. |
-| `--no-ask-user`, `--allow-all-tools` | Copilot runs to the end with nobody to answer it. `--allow-all-tools` lets the granted tools run without asking, and `-p` requires it. |
-| `--available-tools` | The grant. A tool outside it is disabled, and the model is not shown it. |
-| `--disallow-temp-dir` | The reading tools reach the snapshot and nothing else, as Confinement sets out. |
-| `--no-custom-instructions` | Keeps the tree's `AGENTS.md`, `.github/copilot-instructions.md` and `.github/instructions/` out of the system prompt. These load whether or not the folder is trusted. |
-| `--disable-builtin-mcps` | The GitHub MCP server is not started for a reviewer that has no GitHub access of its own. |
-| `--additional-mcp-config` | Starts the reporting server. |
-| `--usage-output-file` | Where Copilot writes the run's usage as it exits. |
-| `--model` | The configured model, only where there is one. |
-| `--reasoning-effort` | The thinking level, on every command line. |
-
-The tree's `AGENTS.md` still reaches the reviewer, by the charter's instruction
-to read it, which it does with `view`.
-
-`--reasoning-effort` takes `thinking` as it is, except that `off` is `none`.
+  None of the user's own Copilot configuration reaches the reviewer except its
+  default model, where the project configures none. The reviewer still signs in
+  through `gh`'s login (Tools), and reads the tree's `AGENTS.md` with `view`, as
+  the charter tells it to.
+- **Set the reasoning effort on every run**: `thinking` as it is, and `off` as
+  `none`.
+- **Start the reporting server the adapter ships**, with `SQUIZ_REPORTS` and
+  `SQUIZ_SNAPSHOT` in the `env` of its MCP configuration.
+- **Append the run's usage to the report file only where Copilot exits 0 by
+  itself.**
 
 **The reviewer runs on the configured model, or else the user's default.** A
 configured `model` is Copilot's own name for it, such as `gpt-5-mini`, and goes
-on `--model`, which wins over a `COPILOT_MODEL` in the environment. Copilot
-refuses a model the user cannot use before any request: it exits 1, spending
-nothing, with `Model "<name>" from --model flag is not available.` on stderr.
-`COPILOT_MODEL` is never used for a configured model, because Copilot runs on
-some other model, and exits 0, when that variable names one it does not have.
+on `--model`. Copilot refuses a model the user cannot use before any request,
+exiting 1 and spending nothing. `COPILOT_MODEL` never carries a configured model,
+because Copilot runs on some other model, and exits 0, when that variable names
+one it does not have.
 
-With no `model` configured the adapter passes no `--model`. `confine` reads
-`model` from the user's own `settings.json`, under `~/.copilot/` or the
-`COPILOT_HOME` the user set, and returns it as `COPILOT_MODEL`, so a pane runs
-it too. A `COPILOT_MODEL` already in the round host's environment is the user's
-default, and is returned in place of the setting. A `settings.json` that is
-there and cannot be read, or does not hold a JSON object, fails `confine`. Where
-the user has neither, the round runs on whatever Copilot falls back to, and
-nothing makes sure that is a different model from the coding agent's, as § 2
-requires.
-
-#### Keeping the project and the user out
-
-**`COPILOT_HOME` is the adapter's own, and holds no trusted folders.** Copilot
-runs a project's hooks and starts its MCP servers only in a folder it trusts, and
-it trusts every folder below one it was told to trust. Under the adapter's
-`COPILOT_HOME` it trusts nothing, so none of the tree's hooks or MCP servers
-runs. The reviewer still signs in through `gh`'s login, which is not kept in
-`COPILOT_HOME` (Tools).
-
-`COPILOT_ALLOW_ALL` set to exactly `true` trusts the working directory whatever
-`COPILOT_HOME` holds, so the adapter sets it to the empty string, which trusts
-nothing, rather than leave whatever the round host inherited.
-
-`-p` never opens the folder-trust dialog. `--add-dir` is never passed, because
-it loads the skills and agents of the directory it names as trusted
-configuration.
-
-**Skills are kept out by the grant.** A tree's `.github/skills/` and
-`.claude/skills/` load whether or not the folder is trusted. The grant leaves out
-`skill`, so no skill reaches the reviewer.
-
-**None of the user's own Copilot configuration reaches the reviewer except its
-default model, where the project configures none**: not its effort level, its
-hooks, its MCP servers or its skills.
-
-#### The grant
-
-`--available-tools` carries the Copilot column of the grant § 4 Tools sets out:
-`view`, `grep` and `glob`, and the reporting calls and history tools under the
-reporting server's `squiz-` prefix.
-
-**No shell tool is granted.** Copilot disables every tool that
-`--available-tools` leaves out and does not show it to the model. Nothing is
-refused by pattern, so the run's refusals are always zero.
+With no `model` configured, `confine` reads `model` from the user's own
+`settings.json`, under `~/.copilot/` or the `COPILOT_HOME` the user set, and
+returns it as `COPILOT_MODEL`, so that a pane runs it too. A `COPILOT_MODEL`
+already in the round host's environment is the user's default, and is returned
+in place of the setting. A `settings.json` that is there and cannot be read, or
+does not hold a JSON object, fails `confine`. Where the user has neither, the
+round runs on whatever Copilot falls back to, and nothing makes sure that is a
+different model from the coding agent's, as § 2 requires.
 
 #### The reporting server
 
 **The reporting calls and the history tools are served by an MCP server the
-adapter ships.** Copilot starts it from `--additional-mcp-config` and talks to
-it over standard input and output, in newline-delimited JSON-RPC. Its answer to
-`initialize` carries the file `SQUIZ_CHARTER` names as its `instructions`, where
-that is set, and the adapter never sets it.
+adapter ships**, over standard input and output. It lists the three reporting
+calls with the schemas the report checks declare, and writes the same lines to
+the report file as `pi`'s extension does. It lists the three history tools after
+them, and runs each in the directory `SQUIZ_SNAPSHOT` names. A call to a tool the
+server does not serve is a protocol error. Copilot hands the server its own
+environment, so the emptied GitHub credentials reach it too.
 
-The server lists the three reporting calls with the schemas the report checks
-declare, and answers each as `pi`'s extension does. It writes the same lines to
-the report file that `SQUIZ_REPORTS` names, so the round reads the file as it
-reads `pi`'s. It lists the three history tools after the reporting calls, and
-runs each in the directory `SQUIZ_SNAPSHOT` names, as § 4 Tools sets out. A call
-to a tool the server does not serve is a protocol error.
-
-**Copilot hands the server its own environment**, with the configuration's
-`env` laid over it. So what the round puts on the reviewer's environment reaches
-the server as it reaches Copilot, the emptied GitHub credentials among it.
-
-**The server checks every call itself, because Copilot validates none**, as
-Adapters sets out:
-
-- a reporting call meets the report checks;
-- a history tool's arguments are checked against that tool's schema before it
-  runs, and a call they do not match runs nothing.
-
-Either refusal, and a history tool that failed, is answered with `isError: true`
-and the reason as its text, which Copilot hands to the model as the call's own
-error:
+**The server checks every call itself, because Copilot validates none.** A
+reporting call must meet the report checks, and a history tool's arguments must
+match its schema before it runs. Either refusal, and a history tool that failed,
+is answered with `isError: true` and the reason as its text, which Copilot hands
+to the model as the call's error:
 
 ```
 MCP server 'squiz': git_blame was not run: line must be an integer.
 ```
 
-Nothing converts an argument first, so the value a report records is always what
-the model sent.
+Nothing converts an argument first, so a report records what the model sent.
 
-**The server goes on answering while a history tool runs**, and answers each
-call when it ends. A `notifications/cancelled` naming a running history tool
-stops its `git`, and that call is not answered.
-
-The server exits when its standard input closes, and on `SIGTERM` and `SIGHUP`.
-Copilot sends it `SIGTERM` as it exits, and `SIGHUP` where a signal reached
-Copilot's own pid rather than its group.
+**The server goes on answering while a history tool runs.** A
+`notifications/cancelled` naming a running history tool stops its `git`, and
+that call is not answered. The server exits when its standard input closes, and
+on `SIGTERM` and `SIGHUP`.
 
 #### How the run ends and is read back
 
-**Copilot exits by itself whether or not the reviewer finished its review.** The
-finish in the report file is what says it did. A run that exits with no finish
-recorded is a review that stopped without finishing, as § 7 sets out, unless it
-reached no model at all.
-
-**The shell records what the run spent once Copilot has exited 0.** It appends
-the usage file Copilot wrote to the report file, whole, as one usage line:
-
-```json
-{"type":"usage","usage":{"totalNanoAiu":535970000,"modelMetrics":{"gpt-5-mini":{"requests":{"count":5,"cost":0},"usage":{"inputTokens":60586,"outputTokens":521,"cacheReadTokens":48128,"cacheWriteTokens":0,"reasoningTokens":64}}}, …}}
-```
-
-The adapter's read takes four things from that line:
+**Copilot exits by itself whether or not the reviewer finished its review**, so
+the finish in the report file is what says it did. The usage line Copilot's run
+leaves reads as:
 
 | Figure | Read as |
 |---|---|
@@ -1325,17 +1140,9 @@ The adapter's read takes four things from that line:
 | Messages | The sum, over every model, of `requests.count`. |
 | Models | Each model in `modelMetrics` whose name is not blank and whose `requests.count` is a number above zero, in the order the file lists them. |
 
-A Copilot round has no dollar figure. AI credits are shown where `totalNanoAiu`
-is there. A usage line with no model in `modelMetrics`, or with a model that
-lacks `inputTokens` or `outputTokens`, reports no usable cost: the round records
-no cost for it, and reads the rest of the line as the table below does.
-
-A run that wrote nothing to the report file completed no message: Copilot could
-not be started, its model provider refused the run, or Copilot refused the
-configured model. Detached, the round adds the run's stderr to the reason. In a
-pane, stderr is the screen, and the reason names no cause.
-
-**What the read concludes:**
+A Copilot round has no dollar figure. A usage line with no model in
+`modelMetrics`, or with a model that lacks `inputTokens` or `outputTokens`,
+reports no usable cost.
 
 | The file holds | The run |
 |---|---|
@@ -1343,28 +1150,21 @@ pane, stderr is the screen, and the reason names no cause.
 | No finish, and a usage line counting at least one request | Stopped without finishing |
 | No finish, and no usage line or one counting no request | Completed no message |
 
+A run that wrote nothing to the report file completed no message: Copilot could
+not be started, its model provider refused the run, or Copilot refused the
+configured model. Detached, the round adds the run's stderr to the reason.
+
 **A Copilot round records a cost only where Copilot ended by itself and its
 usage line carried token counts.** That cost is Copilot's own total, and is never
-marked a floor. A round with no usage line, one whose line carried no token
-counts, and one the round stopped all record no cost: not a floor, and not a
-figure. Such a round names no model either, because the usage line is the only
-place a Copilot run names one.
+a floor. Any other round records no cost and names no model, because the usage
+line is the only place a Copilot run names one. A round the time bound stopped
+leaves no usage line.
 
-#### Stopping
+**The reviewer's process group holds everything the run starts**, the reporting
+server and the `git` its history tools run included, and nothing in it traps a
+signal.
 
-**`sh` leads the reviewer's group**, with Copilot its child and the reporting
-server Copilot's. Nothing on the line traps a signal, and nothing Copilot starts
-leaves the group. The round stops a Copilot reviewer as it stops any other:
-`SIGTERM` to the group, then `SIGKILL` after the grace. `sh` exits at once, so the
-append after `&&` never runs, and a stopped round leaves no usage line and
-records no cost.
-
-#### Resuming
-
-Copilot keeps its session under `COPILOT_HOME`, in
-`session-state/<session id>/`. The adapter reads the session's
-identifier from there, and the round writes the command that resumes it to
-`resume.txt`:
+The round writes the command that resumes the run's session to `resume.txt`:
 
 ```
 COPILOT_HOME=.squiz/41/rounds/2/session copilot --resume=99b4a257-0666-4e1f-a9a2-94d9c79b14be
