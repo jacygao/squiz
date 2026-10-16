@@ -1678,13 +1678,10 @@ run from a shell. Squiz ships no slash command: the setup check is
 
 ### The `squiz` binary
 
-A plugin's `bin/` is added to the Bash tool's `PATH` while the plugin is
-enabled, so a coding agent in Claude Code runs the binary by name. A command a
-person types after `!` in a Claude Code session gets the same `PATH`, so
-`! squiz doctor` and `! squiz init` run by name too. Every other coding agent's
-shell, Copilot's included, and a person's terminal outside Claude Code get the
-`PATH` they were started with, and run `squiz` by name through the link
-`squiz init` makes in a directory already on it.
+A coding agent in Claude Code, and a command a person types after `!` in a
+Claude Code session, run `squiz` by name, because the plugin's `bin/` is on the
+Bash tool's `PATH`. Every other shell, Copilot's included, runs it by name
+through the link `squiz init` makes in a directory already on its `PATH`.
 
 | Command | Run by | What it does |
 |---|---|---|
@@ -1707,10 +1704,9 @@ A thread whose first comment carries none of § 2 Identity's markers was opened 
 a person rather than by the reviewer. It is no finding, and its line is the
 identifier and the location alone.
 
-`<id>` is whatever `squiz threads` printed for that thread. It round-trips
-between the two commands, and is short enough for an agent to copy. It leads the
-line and is printed undecorated, so a line splits into the identifier and the
-rest of it at the first space.
+`<id>` is whatever `squiz threads` printed for that thread. It leads the line,
+undecorated, so a line splits into the identifier and the rest at the first
+space.
 
 ### `squiz review`
 
@@ -1727,24 +1723,19 @@ invocation (§ 7). The exit status says what the coding agent does next:
 | 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
 
-Exit 4 is neither an outcome nor a failure: nothing about the pull request was
-decided, and nothing went wrong. Exit 1 is the status for a review that could not
-run. Every status outside the table reads the same way as 1, so a command that could not be started, or that
-crashed past the harness's own trap, is never read as a result.
+Exit 4 is neither an outcome nor a failure. Every status outside the table reads
+as 1 does, so a command that could not be started, or crashed past the
+harness's own trap, is never read as a result.
 
 **stdout carries the outcome and stderr carries what failed.** A run that exits 0,
 2, 3 or 4 prints its outcome on stdout, and § 7 The command's stderr sets out what
 it adds on stderr. A run that exits 1 prints nothing on stdout.
 
-**The first line names a file holding the whole output, and says to read it
-where the output is cut.** A run that exits 0, 2, 3 or 4 writes everything it
-prints on stdout to `.squiz/<number>/review.txt`, and prints that path first. The
-file is replaced on every run. Claude Code can hand the agent less than the
-command printed, so several open threads can be missing from
-what the agent sees. The first line is the part every cut keeps.
-
-A file that cannot be written leaves the outcome and its status as they are. The
-path line still names it, and stderr adds one line:
+**The first line names a file holding the whole output**, because Claude Code can
+hand the agent less than the command printed. A run that exits 0, 2, 3 or 4
+writes everything it prints on stdout to `.squiz/<number>/review.txt`, replaced
+on every run, and prints that path first. A file that cannot be written leaves
+the outcome and its status as they are, and stderr adds one line:
 
 ```
 squiz: the output could not be written to /work/squiz/.squiz/41/review.txt: EACCES: permission denied
@@ -1915,10 +1906,9 @@ squiz: no review ran: PR #41 is closed
 squiz: no review ran: whether round host 4242 for PR #41 is still running could not be told: ps did not answer within 2000ms
 ```
 
-A round host whose start cannot be told started or not is waited on once a live
-process holds `.squiz/<number>/host.lock`. Where none holds it within 10 seconds
-of the start, or by the run's deadline where that comes first, the run exits 1
-with a second line saying where to look:
+A round host whose start cannot be told is waited on once a live process holds
+`.squiz/<number>/host.lock`. Where none holds it within 10 seconds, or by the
+run's deadline where that comes first, the run exits 1 saying where to look:
 
 ```
 squiz: no review ran: whether the round host for PR #41 started could not be told, and none has taken the review since: the intermediate process exited 1: spawn node ENOENT
@@ -1975,8 +1965,7 @@ Each column holds:
 - **Resume:** the content of the round's `rounds/<k>/resume.txt` once the round
   is over, or `—`.
 
-The order is newest first by what the records carry, because a queued record
-carries no time:
+The order is newest first by what the records carry:
 
 1. Episodes with a state queued or under review come first.
 2. Then episodes by the latest start or end time any of their records carries.
@@ -1991,8 +1980,7 @@ is printed as one space, so each state keeps its one line.
 **A reviewed state's problems follow its line, one line each, indented by two
 spaces.** These are what failed without changing the round's outcome, such as a
 summary that could not be posted. Each is one line by the same rule as a cell,
-and none of them widens a column. A reviewed state with no problems, no
-unposted findings and no closing bound prints as the table above shows:
+and none of them widens a column:
 
 ```
 PR    Commit   Replies  State     Started           Elapsed  Result                                                                       Session   Worktree                          Resume
@@ -2019,13 +2007,11 @@ taken for none.
 
 ### `squiz init`
 
-`squiz init` links `squiz` into a directory already on `PATH`, so that a coding
-agent whose shell does not have the plugin's `bin/` on its `PATH` runs `squiz` by
-name. Only Claude Code puts the plugin's `bin/` there, and only for its Bash
-tool and the commands typed after `!` (The `squiz` binary). It prints a line
-for what it did, and exits 0 where the link is in place afterwards and 1
-otherwise, with the line on stderr. It writes nothing in
-the repository it is run from, and runs outside one as well.
+`squiz init` links `squiz` into a directory already on `PATH`, for a coding
+agent whose shell does not have the plugin's `bin/` on its `PATH`. It prints a
+line for what it did, and exits 0 where the link is in place afterwards and 1
+otherwise, with the line on stderr. It writes nothing in the repository it is
+run from, and runs outside one as well.
 
 - **The link's target is this squiz:** the real path of the `bin/squiz` that is
   running, every symlink resolved, so the link holds an absolute path.
@@ -2035,9 +2021,9 @@ the repository it is run from, and runs outside one as well.
   edits no shell startup file.
 - **Every `squiz` already on `PATH` is read first,** in each of its
   directories, with an empty or relative entry read from the working directory
-  as a shell would. One person may run several coding agents on one machine, and
-  none of them may change which `squiz` another runs. So nothing named `squiz`
-  that is not this squiz is replaced, or shadowed by a link put ahead of it:
+  as a shell would. Nothing named `squiz` that is not this squiz is replaced, or
+  shadowed by a link put ahead of it, so that no coding agent changes which
+  `squiz` another runs:
 
 | Already on `PATH` | `squiz init` |
 |---|---|
@@ -2079,11 +2065,10 @@ squiz link: /Users/ana/.local/bin/squiz already links to this squiz
 Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
 ```
 
-It exits 0 where every required dependency is usable and 1 otherwise. It runs
-outside a repository as well. Every tool it starts, it starts in the directory
-it was run from, except Copilot's sign-in prompt. That prompt runs in a temporary
-directory, which is the only thing the check writes and which it removes once
-the prompt ends.
+It exits 0 where every required dependency is usable and 1 otherwise, and runs
+outside a repository as well. It starts every tool in the directory it was run
+from, except Copilot's sign-in prompt, which runs in a temporary directory the
+check removes afterwards. That directory is the only thing the check writes.
 
 Each line is one row of a list, in the order printed. A row is at one of three
 levels, and only `failed` changes the exit status:
@@ -2125,10 +2110,8 @@ An optional tool that could be found but not run is a warning rather than a
 failure.
 
 **`gh` is signed in where `gh auth status --json` reports an account whose check
-succeeded.** That command exits 0 whatever the login's state, and reports each
-host's active account with the outcome of checking it against GitHub. `gh auth
-token` is not used, because it can print a token from the system's credential
-store that `gh` itself does not use.
+succeeded.** `gh auth token` is not used, because it can print a token from the
+system's credential store that `gh` itself does not use.
 
 ```
 gh 2.97.0, signed in as ana
@@ -2138,9 +2121,8 @@ gh 2.97.0: not signed in: the login ana on github.com failed its check: non-200 
 gh 2.20.0: its sign-in could not be checked: gh exited 1: unknown flag: --json
 ```
 
-**The Node reported is the one running squiz**, which is the `node` that
-`bin/squiz` found on `PATH`. Every subcommand runs on that one, so it is the
-version § 8 Language requires. A version below 24 fails:
+**The Node reported is the one running squiz**, the `node` that `bin/squiz`
+found on `PATH`. A version below 24, which § 8 Language requires, fails:
 
 ```
 Node 23.6.0: too old. Squiz needs Node 24 or later
@@ -2151,12 +2133,12 @@ check prints anything.
 
 **The `squiz` link row reads `PATH` as `squiz init` reads it** (§ 6 `squiz
 init`), measured against the squiz that is running, and names what it finds in
-`squiz init`'s words. It is never a failure. Claude Code's own shell runs squiz
-with no link, so no link is present rather than missing. Anything `squiz init`
-would refuse or change is a warning, as an optional tool that cannot be run is.
-Where `PATH` holds more than one `squiz`, the row names the one `squiz init`
-would act on: the first that is not squiz or not this squiz, then the first
-other version of this install, then a link to this squiz.
+`squiz init`'s words. It is never a failure: no link is present rather than
+missing, since Claude Code's own shell needs none, and anything `squiz init`
+would refuse or change is a warning. Where `PATH` holds more than one `squiz`,
+the row names the one `squiz init` would act on: the first that is not squiz or
+not this squiz, then the first other version of this install, then a link to
+this squiz.
 
 | Already on `PATH` | Level | The line |
 |---|---|---|
@@ -2165,17 +2147,15 @@ other version of this install, then a link to this squiz.
 | A link to another version of the same plugin-cache install | warning | `squiz link: warning: /Users/ana/.local/bin/squiz links to /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, another version of this install. Run squiz init to move it to this one` |
 | A link to another squiz, another squiz's own `bin/`, anything else named `squiz`, or a link to something missing | warning | `squiz link: warning: ` followed by the reason `squiz init` gives, such as `/Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again` |
 
-This squiz's own `bin/` on `PATH`, which Claude Code's Bash tool has, is no
-link: another agent's shell does not have it. The squiz that is running is the
-real path of its `bin/squiz`, so `squiz doctor` run through the link still
-finds the link pointing at itself.
+This squiz's own `bin/` on `PATH` is no link. The squiz that is running is the
+real path of its `bin/squiz`, so `squiz doctor` run through the link finds the
+link pointing at itself.
 
 **Each copy of squiz that Copilot keeps is compared with the squiz that is
-running.** Copilot's hook runs its own copy (§ 9 Installing), and `squiz review`
-run by name runs the one `squiz init` linked. Where the two are different
-versions, both write one `.squiz/<number>/state.json`. The row prints one line
-per copy, and nothing where `copilot` is not on `PATH` or Copilot has no copy.
-None of its lines changes the exit status.
+running**, because Copilot's hook runs its own copy (§ 9 Installing), and two
+versions would write one state file. The row prints one line per copy, and
+nothing where `copilot` is not on `PATH` or Copilot has no copy. None of its
+lines changes the exit status.
 
 The copies are the directories under `<COPILOT_HOME>/installed-plugins/`, with
 `COPILOT_HOME` read as for experimental features:
@@ -2206,9 +2186,8 @@ such as `0.2.0-beta.1`, it ends `Update the older one`.
 repository the check is run in, which `git rev-parse --show-toplevel` gives.
 Outside a repository, or in one with no `.squiz.json`, it is the default, `pi`.
 It is outside a repository only where git says `not a git repository`, read
-with `LC_ALL=C` so the message is not translated. Where git is missing, or
-refuses for any other reason, the row fails with that reason, because a round
-would stop on it too:
+with `LC_ALL=C`. Where git is missing, or refuses for any other reason, the row
+fails with that reason:
 
 ```
 Reviewer: the repository could not be found: git exited 128: fatal: detected dubious ownership in repository at '/work/app'
@@ -2238,10 +2217,9 @@ the reviewer CLI's own settings give it:
 | `pi` | `defaultProvider` and `defaultModel`, as `provider/id`, in `settings.json` under `PI_CODING_AGENT_DIR`, or under `~/.pi/agent` where that is unset |
 | `copilot` | `COPILOT_MODEL`, or else `model` in the user's own `settings.json`, as `confine` reads it (§ 4 The Copilot adapter) |
 
-A project's own `.pi/settings.json` is not read, because a review runs `pi`
-with the project untrusted (§ 4 The `pi` adapter), and Copilot does not use a
-project's `.github/copilot/settings.json` for the model. Where neither
-`.squiz.json` nor the CLI's settings name a model, the model is unknown:
+A project's own settings are not read, since a review does not use them for the
+model. Where neither `.squiz.json` nor the CLI's settings name a model, the
+model is unknown:
 
 ```
 Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json
@@ -2256,24 +2234,20 @@ Settings that cannot be read are a warning for `pi`, which starts without them,
 and a failure for Copilot, whose round fails on them before it starts (The
 Copilot adapter).
 
-**Copilot's sign-in is checked with one prompt, which spends one request.** No
-`copilot` command reports whether it is signed in without reaching the model.
-Where `.squiz.json` names Copilot as the reviewer, and its settings do not
-already fail the row, the row runs:
+**Copilot's sign-in is checked with one prompt, which spends one request**,
+since no `copilot` command reports a sign-in without reaching the model. Where
+`.squiz.json` names Copilot as the reviewer, and its settings do not already
+fail the row, the row runs:
 
 ```
 copilot -p "Reply with the single word OK." --model gpt-5-mini --no-ask-user
 ```
 
-It runs with the variables a round gives a Copilot reviewer, so it signs in the
-way a round does. `COPILOT_HOME` and `GH_CONFIG_DIR` name empty directories in
-the prompt's temporary directory, and `COPILOT_ALLOW_ALL` and the four `gh`
-token variables are empty (§ 4 Tools, The Copilot adapter). A relative or
-empty `PATH` entry is read from the directory the check was run in, so the
-prompt reaches the `copilot` whose version the row names. The model is
-`gpt-5-mini` whatever model a round would run on. On Copilot CLI 1.0.93 the
-prompt cost 0.35 AI credits and took 13 seconds. It is bounded at 60 seconds
-rather than the 15 a version is given.
+It runs with the variables a round gives a Copilot reviewer, so it signs in as a
+round does, with `COPILOT_HOME` and `GH_CONFIG_DIR` naming empty directories in
+its temporary directory. It reaches the `copilot` whose version the row names,
+runs on `gpt-5-mini` whatever model a round would run on, and is bounded at 60
+seconds.
 
 | The prompt | Level | The line ends |
 |---|---|---|
@@ -2281,20 +2255,6 @@ rather than the 15 a version is given.
 | Exits non-zero | failed | `. Its sign-in check failed: copilot exited 1: Error: No authentication information found.`, with the first line Copilot printed and the indented lines under it |
 | Does not answer within 60 seconds | failed | `. Its sign-in check failed: copilot did not answer within 60 seconds` |
 | Its temporary directory cannot be made | failed | `. Its sign-in could not be checked: ` followed by the reason |
-
-Copilot exits 1 before any request when it finds no login, and prints one of
-these first:
-
-```
-Error: No authentication information found.
-Error: Authentication token found but could not be validated.
-
-  Failed to fetch PAT user login (401): GitHub returned: Bad credentials
-```
-
-For the second, the line ends `. Its sign-in check failed: copilot exited 1:
-Error: Authentication token found but could not be validated. Failed to fetch
-PAT user login (401): GitHub returned: Bad credentials`.
 
 No prompt is sent where the reviewer is `pi`, or for Copilot as a coding agent.
 
@@ -2310,18 +2270,14 @@ Claude Code: not found
 ```
 
 **Copilot is reported as a coding agent wherever `copilot` is on `PATH`,** since
-`.squiz.json` names the reviewer and nothing names the coding agents. Where it
-is not on `PATH`, the check prints nothing about it. Every line of this row is
-present or a warning, and none changes the exit status.
+nothing names the coding agents. Every line of this row is present or a warning.
 
-The row says whether experimental features are on, because a Copilot session
+The row says whether experimental features are on, since a Copilot session
 without them is never woken by its review (§ 9 Getting started). They are on
 where `"experimental"` is `true` in the user's own `<COPILOT_HOME>/settings.json`,
-under `COPILOT_HOME` or `~/.copilot` where that is unset. The file is read as
-the reviewer's model is read from it, with Copilot's `//` lines removed. They
-are off where the file is missing, sets no `"experimental"`, or sets it to
-`false`. A repository's `.github/copilot/settings.json` is not read, because it
-turns nothing on.
+under `COPILOT_HOME` or `~/.copilot` where that is unset, read with Copilot's
+`//` lines removed. They are off where the file is missing, sets no
+`"experimental"`, or sets it to `false`.
 
 | Found | Level | The line |
 |---|---|---|
@@ -2340,11 +2296,9 @@ on macOS and 108 on Linux, and a longer one is a warning:
 warning: copilot's extension cannot listen: its socket /Users/ana/work/tools/copilot-home-of-ana-1/session-state/<session id>/squiz.sock is 105 bytes, over the 104 macOS allows. Set COPILOT_HOME to a shorter directory
 ```
 
-**Where Copilot is both a coding agent and the reviewer, both rows print, and
-each says what the other does not.** The coding agent's row says whether its
-experimental features are on and whether its socket fits. The reviewer's row
-says its model and its sign-in. A round runs the reviewer under a
-`COPILOT_HOME` of its own, so neither the features nor the socket bear on it.
+**Where Copilot is both a coding agent and the reviewer, both rows print.** The
+coding agent's row says whether its experimental features are on and whether
+its socket fits, and the reviewer's row its model and its sign-in.
 
 ```
 copilot 1.0.92, experimental features on
@@ -2354,21 +2308,17 @@ Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Signed in; the ch
 `copilot --version` is started once, however many rows read it.
 
 **Where the reviewer is `pi`, the row after it names the project's own `pi`
-settings, which a review does not use.** A round runs `pi` with `--no-approve`
-(§ 4 The `pi` adapter), and `pi` takes none of these from a project it does not
-trust:
+settings, which a review does not use**, since `pi` takes none of these from a
+project it does not trust (§ 4 The `pi` adapter):
 
 - `.pi/settings.json`, named with its top-level keys where it is a JSON object
 - `.pi/extensions`, `.pi/skills`, `.pi/prompts` and `.pi/themes`
 - `.pi/SYSTEM.md` and `.pi/APPEND_SYSTEM.md`
 - `.agents/skills`
 
-In their place the review takes the user's own `pi` settings, the ones under
-`PI_CODING_AGENT_DIR` or `~/.pi/agent`. The row ends with the context file that
-still reaches the reviewer, where the root holds one. `pi` loads a context file
-whatever the trust, and only one from a directory: the first of
-`AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md` and `CLAUDE.MD` that
-is there.
+The row ends with the context file that still reaches the reviewer, where the
+root holds one: the first of `AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`,
+`CLAUDE.md` and `CLAUDE.MD` that is there.
 
 ```
 pi project settings: a review does not use .pi/settings.json (defaultModel, retry), .pi/SYSTEM.md or .agents/skills, and takes your own pi settings instead. AGENTS.md still reaches the reviewer
@@ -2381,17 +2331,10 @@ repository, or where the reviewer's row failed on the repository or its
 `.squiz.json`. It reads the root the reviewer's row found, and git is not asked
 for it again.
 
-**The row reports configuration, not that a review leaves it unused.** It
-establishes that the files are there for `pi` to find. It does not establish:
-
-- That `pi` honours `--no-approve`. The flag is on squiz's own command line, so a
-  row that checked for it would restate squiz's assumption. A `pi` that renamed
-  the flag would leave the row unchanged.
-- That a round reads these files at all. The row reads the working tree at the
-  repository's root, and a round reads a snapshot of the head commit (§ 4 The
-  snapshot), so a file not committed there is named all the same.
-- That the list is `pi`'s whole list. It is the list `pi` 0.85.1 requires trust
-  for, read from its code, and a later `pi` may add to it.
+**The row reports that the files are there, not that a review leaves them
+unused.** It reads the working tree rather than the head commit a round reads,
+it does not check that `pi` honours `--no-approve`, and its list is the one
+`pi` 0.85.1 requires trust for, which a later `pi` may add to.
 
 ## 7. Failure modes
 
