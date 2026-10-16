@@ -1412,36 +1412,25 @@ and ruled on, and it carries across rounds.
 ## 5. The summary
 
 One comment is posted on the pull request when an episode closes. It carries the
-status of every finding, what each round did, and the cost of the review.
-
-The comment is never edited or replaced. A second episode on the same pull
-request posts a second comment, and the comments accumulate as a history of the
-review passes.
+status of every finding, what each round did, and the cost of the review. It is
+never edited or replaced, so a second episode on the same pull request posts a
+second comment.
 
 **An episode reports its close once.** The round that closes it writes the
 close to the episode's state, and then posts the comment, as The state file
 under § 3 sets out. Every path that ends an episode writes the close, the paths
-that end one with no comment included.
+that end one with no comment included. A round that leaves threads open for the
+coding agent posts no summary, and a round that failed posts the failure comment
+under § 7 instead.
 
-A round that leaves threads open for the coding agent posts no summary and records
-no close, because the comment is the close of the episode rather than the end of a
-round. A round the reviewer failed posts no summary either: it reached no decision
-about the episode, and counts taken from a review that did not finish would read
-as counts from one that did. It posts the failure comment under § 7 instead.
-
-A run that finds the round cap or the token bound already spent closes the
-episode without running a reviewer. A bound lowered between runs reaches this: the
-episode reviewed, its last round left threads open, and the next run ends it. The
-run lists the episode's threads, posts the summary comment from them and from what
-the episode recorded, and prints the open ones. It exits 3 where any are open and 0
-where none are, as any close does.
-
-An episode that ran no round at all reaches this too, when its failed attempts
-spent the token bound. Such an attempt may still have posted the findings it
-salvaged, so the run lists the threads the same way. Where any of the reviewer's
-threads are on the pull request, it posts the summary, prints the open ones, and
-exits 3 or 0 as any close does. Only where there are none does it post no summary,
-exit 0, and say on stderr that the episode closed before any round ran.
+**A run that finds the round cap or the token bound already spent closes the
+episode without running a reviewer**, as it does where a bound was lowered since
+the last round. It lists the episode's threads, posts the summary from them and
+from what the episode recorded, prints the open ones, and exits 3 where any are
+open and 0 where none are. Where the episode ran no round, because its failed
+attempts spent the token bound, and none of the reviewer's threads is on the
+pull request, it posts no summary, exits 0, and says on stderr that the episode
+closed before any round ran.
 
 **A close that runs no reviewer counts each thread by its resolved state and the
 last ruling the state file holds for it** (§ 3 The state file):
@@ -1453,11 +1442,9 @@ last ruling the state file holds for it** (§ 3 The state file):
 | Resolved, last ruled `withdrawn` | `withdrawn` |
 | Resolved, last ruled `open`, or with no ruling on record | resolved, ruling unknown |
 
-A resolved thread with no ruling on record was resolved by a person, or in an
-episode whose state is in another worktree. One last ruled `open` was resolved
-after the reviewer kept it open. Neither says whether a defect was fixed, so
-neither is counted `fixed` or `withdrawn`. Neither needs a person, because
-someone closed the thread.
+A thread resolved by a person, in another worktree's episode, or after the
+reviewer kept it open says nothing about the defect, so it counts as neither
+`fixed` nor `withdrawn`, and needs no person.
 
 ### What the comment carries
 
@@ -1486,35 +1473,33 @@ Four blocks, in this order.
    that raised nothing and ruled on nothing says so in one line, as
    `- Round 4 at 9a0b1c2: found nothing new and ruled on nothing`. The list is
    read from the episode's state file and never from the pull request, so a
-   round whose replies GitHub refused is listed all the same. A round whose entry
-   holds none of this, which only a state file an earlier version wrote has, is
-   listed as not recorded, and an episode none of whose rounds holds it carries
-   no Rounds block.
+   round whose replies GitHub refused is listed all the same.
 4. **Notes.** Anything else a person reviewing the pull request should know:
-   findings about the change as a whole, each with its headline; a finding the
-   harness could anchor to neither a line nor a file, with its `file:line`; a
-   finding whose comment could not be posted at all, with the location the
-   finding carries; a thread the last round kept open whose reason could
-   not be posted, with its location and headline; a thread any round closed
-   whose reply could not be posted, with its location, headline and ruling; a
-   ruling of the last round that could not be applied, with what the
-   reviewer ruled; a round whose review the time bound cut
-   short, with the round's number and the bound; and a cap or bound that ended
-   the episode early, with each queued state it left not reviewed.
+   - findings about the change as a whole, each with its headline;
+   - a finding the harness could anchor to neither a line nor a file, with its
+     `file:line`;
+   - a finding whose comment could not be posted at all, with its location;
+   - a thread the last round kept open whose reason could not be posted, with
+     its location and headline;
+   - a thread any round closed whose reply could not be posted, with its
+     location, headline and ruling;
+   - a ruling of the last round that could not be applied, with what the
+     reviewer ruled;
+   - a round whose review the time bound cut short, with the round's number and
+     the bound;
+   - a cap or bound that ended the episode early, with each queued state it left
+     not reviewed.
 
-**A closing reply that could not be posted is a line naming the ruling.** The
-thread is closed with nothing on it saying so, and the round recorded the line
-in its entry of the state file, so the close lists it whichever round it was:
+**A closing reply that could not be posted is a line naming the ruling**, read
+from the round's entry in the state file:
 
 ```markdown
 - `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)
 ```
 
-**A ruling that could not be applied is a line saying what the reviewer ruled.**
-Its thread stays as GitHub had it, and the line is what a person reads to apply
-the ruling by hand. A ruling on a thread that was handed over names the thread by
-its location and headline. One naming a thread that was not handed over names it
-by the id the reviewer gave. What GitHub answered is left out:
+**A ruling that could not be applied is a line saying what the reviewer ruled**,
+so a person can apply it by hand. A thread that was handed over is named by its
+location and headline, and one that was not by the id the reviewer gave:
 
 ```markdown
 - `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)
@@ -1524,46 +1509,29 @@ by the id the reviewer gave. What GitHub answered is left out:
 - A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied
 ```
 
-**The findings that no thread holds are the last round's, and those an
-earlier round left that no later round settled.** A round that leaves the
-episode open posts no summary, so its record keeps each of those findings as
-its Notes line (§ 3 The state file), and `squiz review` prints each on stderr
-for the coding agent working that round (§ 6). A later round whose reviewer
-finished its review settles them: the reviewer read the whole change again, and
-raised again each one it still found. The earlier findings are therefore listed
-only by a close that ran no reviewer, which lists those of the last round that
-reached a result. They come first in Notes, before the last round's own.
+**The findings that no thread holds are the last round's.** A round that leaves
+the episode open keeps each of its own as its Notes line (§ 3 The state file),
+and `squiz review` prints each on stderr (§ 6). A later round whose reviewer
+finished settles them, because it reads the whole change again. So only a close
+that ran no reviewer lists an earlier round's, those of the last round that
+reached a result, first in Notes. A failed round lists the findings it salvaged
+in its failure comment instead (§ 7 The failure comment).
 
-A failed round settles nothing and posts no summary. The findings it salvaged
-that no thread holds are listed in its failure comment instead, as § 7 The
-failure comment sets out.
-
-A finding whose comment could not be posted is in Notes because nothing else on
-the pull request holds it. The reviewer confirmed it and the harness lost it, so
-a comment that left it out would read as a review that found nothing there.
-
-**A round whose review the time bound cut short is a line of its own.** Its
-findings are on the pull request like a finished review's, so nothing else tells
-a person that the reviewer stopped before it had read everything it meant to.
-The round is a failed one and closes no episode, so the line is written by the
-round that closes the episode later, from the episode's state:
+**A round whose review the time bound cut short is a line of its own**, written
+by the round that later closes the episode, from the episode's state:
 
 ```markdown
 - The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
 ```
 
 **A cap or bound that left queued states not reviewed is one line, naming the
-bound and each of those states.** It takes the place of the line the bound
-writes where nothing was queued. Each state is named as § 3 The state file names
-it:
+bound and each of those states**, as § 3 The state file names them. It takes the
+place of the line the bound writes where nothing was queued:
 
 ```markdown
 - The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f or 8d21a4f with different replies
 - The episode ended at the token bound with nothing left open, and did not review 3f9c2e0 with different replies
 ```
-
-The second is a last round that left nothing open, with a state queued behind it
-that the bound left no round for.
 
 ### The format
 
@@ -1638,32 +1606,23 @@ it records its end, and its posting time once posting ends:
   closed that GitHub refused, and is absent where none was refused. A round
   that fails records none, and lists them in its failure comment.
 
-A state file written before `elapsedSeconds`, `cutShortAtSeconds`,
-`postingSeconds`, `floor`, `credits`, `reviewer`, `models`, `head`, `raised`,
-`ruled` and `unpostedReplies` existed has none of them, and reads back
-as rounds with no timing, no cut, no credits, no reviewer and no model, costs
-that are totals, and no record of what they reviewed or ruled.
 A field that is there and does not hold a value of the right kind makes the file
 unreadable, like any other.
 
-The comment leads with the tokens, because every reviewer reports them and not
-every reviewer is priced. A model run on a subscription has no dollar figure at
-all, and the line carries none for it. Where some rounds were priced and others
-were not, the dollar total covers the rounds that carry one.
+**The spend line leads with the tokens**, which every reviewer reports. A round
+with no dollar figure, such as a model run on a subscription, adds none, and
+where only some rounds were priced, the dollar total covers those.
 
 **A Copilot round carries AI credits in place of dollars**, to two decimal
-places. Copilot reports no dollars, so the line shows none for its rounds, and
-never shows zero dollars for them:
+places, and never zero dollars:
 
 ```markdown
 31,400 tokens over 2 rounds: 18,200, 13,200 · 0.84 AI credits
 ```
 
 Where some rounds carry credits and others dollars, the line gives both totals,
-each covering the rounds that carry it.
-
-A round that completed no assistant message is given as unknown rather than as
-zero. Nothing it spent was reported, and zero would say it spent nothing.
+each covering the rounds that carry it. A round that completed no assistant
+message is given as unknown rather than as zero.
 
 **A round with no cost has no figure in the line**, neither a zero nor a floor.
 The line covers the rounds that have one, and says how many those are:
@@ -1674,29 +1633,21 @@ The line covers the rounds that have one, and says how many those are:
 
 Where no round of the episode has a cost, the comment carries no spend line.
 
-**A figure that is a floor reads "at least".** That is a round whose cost is a
-floor, and every total of an episode holding one, its tokens, its dollars and
-its credits alike. An episode none of whose rounds is a floor reads as the format above
-shows. Here the second of two rounds is a floor:
+**A figure that is a floor reads "at least"**: a floor round's own, and every
+total of an episode holding one. Here the second of two rounds is a floor:
 
 ```markdown
 At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.0105
 ```
 
-A round the time bound killed is one such round. It reports its **last tracked
-spend**, which covers the assistant messages that completed, and the message in
-flight when the reviewer was killed was spent and never reported. A Copilot
-round the bound stopped has no cost, and so no figure. A floor round
-that completed no assistant message is given as unknown, and the totals beside it
-are still marked, because what it spent is in none of them.
+A `pi` round the time bound killed is such a round: it reports the spend of the
+messages that completed. A floor round that completed no assistant message is
+given as unknown, and the totals beside it are still marked.
 
 **The reviewer line names the reviewer CLI each round ran and the model the run
-reported.** The model comes from the run: from each assistant message for `pi`,
-and from the usage line for Copilot, as § 4 sets out for each adapter. The
-`model` that `.squiz.json` configures never stands in for it, because a CLI can
-run a model other than the one it was handed. A round whose run reported no
-model reads "an unknown model". A Copilot round with no cost is one, and so is a
-`pi` round killed before its first message completed.
+reported**, as § 4 sets out for each adapter, never the `model` `.squiz.json`
+configures, since a CLI can run another. A round whose run reported no model
+reads "an unknown model".
 
 Where every round ran the same reviewer on the same models, the line names them
 once:
