@@ -169,8 +169,8 @@ because the state is read from them.
 **A failed state is retried only when someone runs `squiz review`.** A hook
 firing on it queues nothing, so a turn spent reading a failure note does not
 bring the failure back. A retry that fails again posts its failure comment,
-exits 1 and writes no second note, and the run is told not to run the command
-again (§ 9). A new commit or reply is a new state, and is queued like any other.
+exits 1 and writes no second note, and its stderr tells the coding agent not to
+run the command again (§ 6 `squiz review`). A new commit or reply is a new state, and is queued like any other.
 
 **One state gets one review.** A trigger for a state already queued or under
 review queues nothing, so two firings for one commit and the same replies post
