@@ -313,35 +313,18 @@ person's.
 ### What starts a round
 
 **A round starts when a trigger queues a state and the round host takes it.**
-There are two kinds of trigger:
-
-- **The plugin's hooks**, on `Stop` and `SubagentStop`, which queue the state
-  and return at once. Claude Code and the GitHub Copilot CLI both fire them, as
-  The Claude Code hooks sets out. In either runtime they start every round, and
-  the session that owns the work is woken with the result, as The report sets
-  out.
-- **`squiz review <number>`**, which waits for the review and prints the result.
-  The note that wakes the session names it, and the coding agent runs it to read
-  the threads. A coordinator or a CI job may run it as well, from a checkout of
-  the pull request's branch.
-
-**Nothing tells a coding agent to run `squiz review` before it is woken.** An
-agent that runs it anyway queues the state itself. Copilot fires `Stop` when a
-turn ends, and a turn that ran the command ends after the command queued the
-state, so that firing finds the state queued or reviewed and queues nothing.
-
-**An agent in a runtime with no hook gets a round only by running the command.**
-Squiz does not tell it to. A pull request no round has read carries no comment
-with any of § 2 Identity's markers.
+The triggers are the plugin's `Stop` and `SubagentStop` hooks, under Claude Code
+and Copilot alike, and `squiz review <number>`, which a coordinator or a CI job
+can also run from a checkout of the pull request's branch. In a runtime with no
+hook, only `squiz review` starts a round.
 
 ### The round host
 
 **The round host runs the rounds of one episode, one at a time, outside every
 trigger's process.** It is `squiz host <number>`. A trigger that queues a state
-starts one where none is running, by a double fork with `setsid` between the
-forks, with its standard input on `/dev/null` and its output in
-`.squiz/<number>/host.log`. That is what lets it outlive the shell call or hook
-that started it.
+starts one where none is running, detached so that it outlives the shell call or
+hook that started it: a double fork with `setsid` between the forks, standard
+input on `/dev/null`, and output in `.squiz/<number>/host.log`.
 
 It takes the oldest queued state, writes the reviewing record naming itself, and
 runs the round as the steps above set out. It exits when nothing is left queued,
@@ -351,11 +334,10 @@ and when the worktree it serves is gone.
 names its pid and start time. A host that finds the lock held by a live process
 exits at once, so two triggers that each start one leave one running.
 
-**A host that died is found by its pid and start time.** A queued state with no
-live host is one no host will take, and the next trigger starts a host for it. A
-reviewing record whose host has gone is a killed round, and its reviewer may
-still be running: the host and the reviewer are separate processes, and a
-reviewer in a pane is not the host's child.
+**A host that died is found by its pid and start time.** The next trigger starts
+a host for any queued state. A reviewing record whose host has gone is a killed
+round, and its reviewer may still be running, because a reviewer is not the
+host's child.
 
 **Recovery stops the orphaned reviewer before anything replaces it.** Every
 trigger, and every round host as it starts, recovers each killed round it finds:
@@ -379,7 +361,7 @@ naming the process it could not stop, and the next recovery tries again.
 reviewer's time bound is enforced when the next trigger or `squiz review` runs,
 and not before.
 
-### The Claude Code hooks
+### The hooks
 
 **Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`.**
 `Stop` fires when a regular session's turn ends, and `SubagentStop` when a
@@ -410,9 +392,6 @@ worktree.
 | `Stop` | The session itself, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one |
 | `SubagentStop` | The session that dispatched the subagent, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one; and the subagent, from its `agent_id` |
 
-A subagent runs inside its parent's process and has no socket of its own, so the
-socket in a `SubagentStop` hook's environment is the parent's.
-
 **GitHub Copilot CLI runs the same two registrations from the plugin, and the
 socket the hook records under it is the plugin's extension's.** Copilot fires the
 plugin's `Stop` and `SubagentStop` with Claude Code's payload fields, and the
@@ -430,11 +409,7 @@ the empty string.
   extension refuses the connection. Either way the hook records no socket, and
   the owner is recorded with its session id alone.
 - **A `CLAUDE_CODE_MESSAGING_SOCKET` in the hook's environment is never
-  recorded.** Copilot puts no socket there, so one found there belongs to a
-  Claude Code session that started Copilot.
-
-The plugin's manifest names the extension's directory in its `extensions` field,
-`"extensions": "extensions"`. Claude Code ignores the field.
+  recorded.** Copilot puts no socket there.
 
 Under Claude Code the `Stop` registration runs in the background, so the session
 does not wait on it. After it has queued, it stays to deliver a note, as The
@@ -442,43 +417,27 @@ report sets out. The `SubagentStop` hook returns as soon as it has queued, and
 so does the `Stop` hook under Copilot, which waits for every hook to end before
 the session goes idle.
 
-**Nothing the runtime does to a hook bounds a review.** The hook only queues, so
-neither the hook's timeout, nor the stall threshold, nor the hand-back that ends a
-subagent in auto mode reaches the round.
-
-A turn ending is not work being done. The hook fires on every turn, including one
-that ended on a question, and queues only a state that needs a review, so a turn
-that pushed nothing starts nothing. A firing for a subagent the session did not
-dispatch, for a state already queued or reviewed, queues nothing.
-
 **A `SubagentStop` firing whose `agent_type` is empty is no subagent's work.** In
 an interactive session, Claude Code fires several of them after a turn ends, each
 with a new `agent_id`, the parent's `session_id`, and no transcript. The hook
 does nothing for one: it resolves nothing, records no owner and queues nothing.
 
 **A `Stop` firing whose `session_id` is not the session its `transcript_path`
-names is a subagent's turn.** Copilot fires one when a subagent's turn ends, just
-before that subagent's `SubagentStop`. It carries the subagent's id as
-`session_id` and the parent's transcript, so read as it stands it would make the
-subagent the owner. The hook does nothing for one, as for an empty `agent_type`,
-and the `SubagentStop` that follows queues the work. Only a Copilot transcript
-path, `<COPILOT_HOME>/session-state/<session id>/events.jsonl`, names a session.
-Claude Code fires no `Stop` for a subagent, so its transcript path is not read,
-and a Claude Code `Stop` is never dropped by this rule.
-
-The hook's shell does not have the plugin's `bin/` on its `PATH`, so the
-registration names the binary through `${CLAUDE_PLUGIN_ROOT}`.
+names is a subagent's turn.** Copilot fires one just before that subagent's
+`SubagentStop`, carrying the subagent's id and the parent's transcript. The hook
+does nothing for one, and the `SubagentStop` that follows queues the work. Only
+a Copilot transcript path, `<COPILOT_HOME>/session-state/<session id>/events.jsonl`,
+names a session, so a Claude Code `Stop` is never dropped by this rule.
 
 ### The report
 
 **The result goes to the session that owns the work and is still alive.** For a
 regular session's work that is the session itself. For a subagent's work it is
-the session that dispatched it: the subagent has ended, and in auto mode it has
-handed back, so nothing reaches it.
+the session that dispatched it.
 
 When a round records its result, the round host writes a note for the owner
 recorded on the state, in `.squiz/<number>/notes/<session id>/`, one file per
-note, written under a temporary name and renamed into place:
+note:
 
 ```
 to=60517e1f-e1dc-49b1-8e39-6fcbe686f3fb
@@ -501,16 +460,8 @@ commit, or running `squiz review` once, retries it:
 text=Squiz could not review PR #41 at 3f9c2e0: the reviewer could not run: the provider refused the credential. `squiz status` lists it. A new commit, or running `squiz review 41` once, retries it.
 ```
 
-Where the failed round leaves no round to run, the note says the review is closed
-and which bound closed it, in the failure comment's words. Whether a round
-remains is read as that comment reads it (§ 7 The failure comment):
-
-```
-text=Squiz could not review PR #41 at 3f9c2e0: round 3 found 2 findings and could not post them to PR #41. `squiz status` lists it. The review is closed: it has run 3 rounds, and the round cap allows 3. No round runs again. A new commit, or running `squiz review 41`, posts its summary.
-```
-
-A note for an episode that ran no round ends at "No round runs again.", as the
-comment does.
+Where no round remains, the text ends as the failure comment does, saying the
+review is closed and which bound closed it (§ 7 The failure comment).
 
 **Then it wakes a Claude Code owner, one of two ways.** Whichever delivers a note
 moves it into `delivered/` beside it, so the other does not deliver it again.
@@ -523,10 +474,8 @@ moves it into `delivered/` beside it, so the other does not deliver it again.
 - **The `asyncRewake` waiter.** The `Stop` hook, once it has queued, waits while
   any state its session owns is queued or under review. When a note for its
   session arrives it writes the text to stderr and exits 2, which starts a turn.
-  It delivers any note already waiting for its session first. Claude Code does
-  not deduplicate background hooks, so a session that ends three turns has three
-  waiters, and a waiter whose session has ended a later turn exits 0 without
-  delivering anything. Only the newest delivers.
+  It delivers any note already waiting for its session first. Of several waiters
+  for one session, only the newest delivers, and the others exit 0.
 
 **A Copilot owner is woken through the plugin's extension.** Copilot loads
 extensions only with its experimental features on, so squiz's Copilot support
@@ -535,7 +484,7 @@ is experimental as a whole, and § 9 has the user turn them on. Copilot starts
 `squiz.sock` in the session's state directory, reads the posts the round host
 makes to a Claude Code socket, and turns each one into a turn with
 `session.send()`, as a system message carrying the note's text. The hook
-records that socket as The Claude Code hooks sets out, and the round host posts
+records that socket as The hooks sets out, and the round host posts
 to it exactly as it posts to Claude Code's.
 
 - **One socket per session.** The extension removes any file at the path before
@@ -544,77 +493,27 @@ to it exactly as it posts to Claude Code's.
 - **A post that finds nothing listening fails.** The note goes back to wait for
   a pull, and nothing posts it again.
 
-**A Copilot owner with no socket learns the result only from its own
-`squiz review`.** That is a session started without experimental features, which
-squiz does not support, or one whose socket path is too long for the extension
-to listen on (§ 9). Its reviews still run. Copilot leaves no waiter, so the round
-host writes the note and wakes nothing. A `squiz review` that the session ran in
-the background, or that Copilot moved there, wakes the idle session when it
-exits, with its output and its exit code. That is the round's result where
-the round ended before the command's deadline. Where the deadline came first the
-command exits 4, the agent runs `squiz review` again, and that run's exit is the
-next wake. This is a fallback, and § 9 sets up no session to rely on it.
-
-**A subagent's parent decides what follows.** It reads the threads with
-`squiz review`, and sends the same subagent back to work them, dispatches
-another, or works them itself. Squiz does not choose.
+**A Copilot owner with no socket is woken by nothing.** That is a session
+started without experimental features, which squiz does not support, or one
+whose socket path is too long for the extension (§ 9). Its reviews still run.
+It learns the result from its own `squiz review`, and one it ran in the
+background wakes it when it exits.
 
 **A note no wake reached stays where it was written.** The owner learns the
 result by running `squiz review` or `squiz status`, and the pull request holds it
-in any case.
-
-### Not in the first version
-
-- **Delivering notes when a session starts.** A note waiting for a session that
-  was closed is delivered only by its next `Stop` waiter, or read by pull.
-- **Copilot sessions without experimental features.** Squiz does not support
-  them. A note for a round only a hook queued wakes nothing in one, and is read
-  by pull.
-- **Acknowledgement and retry rules.** A note is delivered at most once, and
-  nothing retries one a wake did not reach.
-- **A two-way inbox.** The coding agent answers on the pull request, and never
-  through a note.
+in any case. A note for a session that was closed is delivered only by that
+session's next `Stop` waiter.
 
 ### Parallel coding agents
 
-Each coding agent that opens a pull request works in its own git worktree on its
-own branch. A branch can be checked out in only one worktree at a time, so the two
-go together.
-
-**The command reviews the worktree it is run in.** It resolves the toplevel with
-`git rev-parse --show-toplevel` from its own working directory, which is the
-caller's. A coding agent working in a worktree by path runs the command from that
-path, and that worktree is the one reviewed. The hook resolves the toplevel from
-the payload's `cwd` instead, which is the session's directory. For a subagent it
-is fixed when the subagent is dispatched.
-
-```mermaid
-flowchart TD
-    R[(Repository - one object store)]
-
-    subgraph WA [worktree A - branch feature-a]
-        AS[Coding agent A] --> AH[squiz review or hook] --> AX[Round host A] --> AR[Reviewer A]
-    end
-
-    subgraph WB [worktree B - branch feature-b]
-        BS[Coding agent B] --> BH[squiz review or hook] --> BX[Round host B] --> BR[Reviewer B]
-    end
-
-    R --> WA
-    R --> WB
-    AR --> PA[Pull request A - episode A]
-    BR --> PB[Pull request B - episode B]
-```
-
-The worktrees share one object store and nothing else. Each run of the command
-resolves its own working directory, so one reviewer sees one coding agent's change
-and posts to one pull request. One worktree, one branch, one pull request, one
-episode.
+**Each worktree is reviewed on its own.** `squiz review` resolves the worktree
+with `git rev-parse --show-toplevel` from the directory it is run in, and the
+hook from the payload's `cwd`, which for a subagent is fixed when it is
+dispatched. One worktree, one branch, one pull request, one episode.
 
 **The harness does not remove a worktree.** The coding agent is still in it when
 the command returns. Whatever created the worktree removes it. The episode's
-state goes with the worktree, and nothing in it outlives the worktree, because
-the pull request holds the findings.
+state goes with the worktree.
 
 **A tree two episodes share keeps them apart.** One tree holds two pull
 requests' episodes when its `HEAD` moved to another branch while the first
@@ -3326,7 +3225,7 @@ until something asks.
 | | | |
 |---|---|---|
 | **P0** | The command and the loop | `squiz review <number>`, the pull request gate, the record per head commit and latest reply, the round cap, the exit statuses and what is printed with each, and the time bound on the reviewer |
-| **P0** | The Claude Code hooks | The `Stop` and `SubagentStop` registrations, which resolve the pull request for their worktree, queue the review and return |
+| **P0** | The hooks | The `Stop` and `SubagentStop` registrations, which resolve the pull request for their worktree, queue the review and return |
 | **P0** | The round host | `squiz host`, started by a double fork, which runs an episode's rounds one at a time and is found again by pid and start time |
 | **P0** | The reviewer session | A fresh reviewer per round in a tmux or Herdr pane, or detached, whose pane closes at the end and whose session stays resumable |
 | **P0** | The report | The note for the session that owns the work, and its wake by the messaging socket or the `asyncRewake` waiter |
