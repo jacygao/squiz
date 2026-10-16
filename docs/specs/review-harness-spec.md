@@ -2048,10 +2048,8 @@ squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a direc
 
 ### The setup check
 
-`squiz doctor` is run by a person, from a shell. It prints one line per
-dependency on stdout, saying it is present or naming what is wrong with it, and
-a line naming the project's `pi` settings a review does not use, where it has
-any:
+`squiz doctor` is run by a person, from a shell, inside a repository or outside
+one. It prints one line per dependency, and exits 1 where any line failed:
 
 ```
 git 2.51.0
@@ -2065,276 +2063,70 @@ squiz link: /Users/ana/.local/bin/squiz already links to this squiz
 Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
 ```
 
-It exits 0 where every required dependency is usable and 1 otherwise, and runs
-outside a repository as well. It starts every tool in the directory it was run
-from, except Copilot's sign-in prompt, which runs in a temporary directory the
-check removes afterwards. That directory is the only thing the check writes.
+Each line is at one of three levels, and only `failed` changes the exit status:
 
-Each line is one row of a list, in the order printed. A row is at one of three
-levels, and only `failed` changes the exit status:
+| Level | Meaning |
+|---|---|
+| present | Usable, or an optional tool that is absent |
+| warning | Something a person should see, which squiz runs without |
+| failed | A required dependency is missing, unusable or unauthenticated |
 
-| Level | Meaning | Example |
-|---|---|---|
-| present | Usable, or an optional tool that is absent | `tmux: not found. Not required: without tmux or Herdr, reviews run detached` |
-| warning | Something a person should see, which squiz runs without | `tmux: warning: could not be run: tmux exited 134: dyld: Library not loaded` |
-| failed | A required dependency is missing, unusable or unauthenticated | `gh 2.97.0: not signed in. Run gh auth login` |
+It starts every tool in the directory it was run from, and writes nothing but
+the temporary directory of Copilot's sign-in prompt, which it removes.
+
+**Each tool is found on `PATH` and started once to ask its version**, within 15
+seconds, and only a version read from its output makes it present. An optional
+tool that is found and cannot be run is a warning.
 
 The rows, in the order they print:
 
-| Row | Required | Read from |
+| Row | Required | Present where |
 |---|---|---|
-| `git` | Yes | `git --version` |
-| `gh`, and its sign-in | Yes | `gh --version`, then `gh auth status --json hosts --active` |
-| Claude Code | Where `copilot` is missing or cannot be run | `claude --version` |
-| Copilot, and its experimental features | No, and printed only where `copilot` is on `PATH` | `copilot --version`, then `<COPILOT_HOME>/settings.json` |
-| Node | Yes | The Node running squiz |
-| tmux | No | `tmux -V` |
-| Herdr | No | `herdr --version` |
-| The `squiz` link | No | What `squiz init` finds on `PATH` |
-| Copilot's copies of squiz | No, and printed only where `copilot` is on `PATH` and has squiz installed | `.claude-plugin/plugin.json` in each copy under `<COPILOT_HOME>/installed-plugins/` |
-| The reviewer, its model, and Copilot's sign-in | Yes | `.squiz.json`, then `pi --version` or `copilot --version`, then the reviewer CLI's own settings, then for Copilot one prompt |
-| The project's `pi` settings a review does not use | No | The repository's root, where the reviewer is `pi` |
+| `git` | Yes | It answers. |
+| `gh` | Yes | It answers, and `gh auth status --json` reports an account whose check succeeded. `gh auth token` is not used, because it can print a token `gh` itself does not use. |
+| Claude Code | Only where `copilot` is missing or cannot be run, since either can be the coding agent | It answers. |
+| Copilot as a coding agent | No, and printed only where `copilot` is on `PATH` | It answers, its experimental features are on, and its extension's socket path fits. |
+| Node | Yes | The Node running squiz is 24 or later. |
+| tmux, Herdr | No | It answers. |
+| The `squiz` link | No, and never a failure | `PATH` holds a link to this squiz, read as `squiz init` reads it. Anything `squiz init` would refuse or change is a warning. |
+| Copilot's copies of squiz | No, and printed only where Copilot has one | Each copy under `<COPILOT_HOME>/installed-plugins/` is this squiz's version. A different one is a warning naming the older, since Copilot's hook runs its own copy and two versions would write one state file. |
+| The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, and for Copilot the sign-in prompt succeeds. |
+| The project's `pi` settings | No, and printed only where the reviewer is `pi` and there are any | Never: the row names what a review does not use. |
 
-**Each tool is found on `PATH` and started once to ask its version.** What
-starting it came to decides the line, and only a version read from its output
-makes it present:
+**The reviewer is the one `reviewer` names in `.squiz.json`** at the root
+`git rev-parse --show-toplevel` gives, or `pi` outside a repository or where the
+file does not exist. A git that refuses for any other reason fails the row.
 
-| Starting it | The line |
-|---|---|
-| No directory on `PATH` holds it | `git: not found` |
-| It exits non-zero | `git: could not be run: git exited 1: xcrun: error: invalid active developer path`, with the first line it printed |
-| It does not answer within 15 seconds | `git: could not be run: git did not answer within 15 seconds` |
-| It prints no version | `Claude Code: could not be run: claude printed no version: hello` |
+**The row names the model a round would run on:** `model` from `.squiz.json`,
+or else the user's default from the reviewer CLI's own settings, as § 4 sets out
+for each adapter. Where neither names one, the model is unknown. Settings that
+cannot be read are a warning for `pi`, which starts without them, and a failure
+for Copilot, whose round fails on them.
 
-An optional tool that could be found but not run is a warning rather than a
-failure.
-
-**`gh` is signed in where `gh auth status --json` reports an account whose check
-succeeded.** `gh auth token` is not used, because it can print a token from the
-system's credential store that `gh` itself does not use.
-
-```
-gh 2.97.0, signed in as ana
-gh 2.97.0, signed in as ana on github.example.com
-gh 2.97.0: not signed in. Run gh auth login
-gh 2.97.0: not signed in: the login ana on github.com failed its check: non-200 OK status code: 401 Unauthorized
-gh 2.20.0: its sign-in could not be checked: gh exited 1: unknown flag: --json
-```
-
-**The Node reported is the one running squiz**, the `node` that `bin/squiz`
-found on `PATH`. A version below 24, which § 8 Language requires, fails:
-
-```
-Node 23.6.0: too old. Squiz needs Node 24 or later
-```
-
-A Node too old to strip types cannot load squiz at all, and fails before the
-check prints anything.
-
-**The `squiz` link row reads `PATH` as `squiz init` reads it** (§ 6 `squiz
-init`), measured against the squiz that is running, and names what it finds in
-`squiz init`'s words. It is never a failure: no link is present rather than
-missing, since Claude Code's own shell needs none, and anything `squiz init`
-would refuse or change is a warning. Where `PATH` holds more than one `squiz`,
-the row names the one `squiz init` would act on: the first that is not squiz or
-not this squiz, then the first other version of this install, then a link to
-this squiz.
-
-| Already on `PATH` | Level | The line |
-|---|---|---|
-| A link to this squiz | present | `squiz link: /Users/ana/.local/bin/squiz already links to this squiz` |
-| No link, or only this squiz's own `bin/` | present | `squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init` |
-| A link to another version of the same plugin-cache install | warning | `squiz link: warning: /Users/ana/.local/bin/squiz links to /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, another version of this install. Run squiz init to move it to this one` |
-| A link to another squiz, another squiz's own `bin/`, anything else named `squiz`, or a link to something missing | warning | `squiz link: warning: ` followed by the reason `squiz init` gives, such as `/Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again` |
-
-This squiz's own `bin/` on `PATH` is no link. The squiz that is running is the
-real path of its `bin/squiz`, so `squiz doctor` run through the link finds the
-link pointing at itself.
-
-**Each copy of squiz that Copilot keeps is compared with the squiz that is
-running**, because Copilot's hook runs its own copy (§ 9 Installing), and two
-versions would write one state file. The row prints one line per copy, and
-nothing where `copilot` is not on `PATH` or Copilot has no copy. None of its
-lines changes the exit status.
-
-The copies are the directories under `<COPILOT_HOME>/installed-plugins/`, with
-`COPILOT_HOME` read as for experimental features:
-
-- `<marketplace>/squiz`, for each marketplace squiz was installed from
-- `_direct/<name>`, for a direct install, where its `plugin.json` names squiz,
-  or where it has no readable `plugin.json` and holds `bin/squiz`
-
-A copy's version is `version` in its `.claude-plugin/plugin.json`, and this
-squiz's is the same field in its own. A directory whose `plugin.json` names
-another plugin is not a copy. A plugin installed from a local marketplace is
-loaded from that directory and has no copy, so it is not compared.
-
-| Found | Level | The line |
-|---|---|---|
-| The same version | present | `Copilot's squiz: /Users/ana/.copilot/installed-plugins/squiz/squiz is 0.2.0, as this squiz is` |
-| A different version | warning | `Copilot's squiz: warning: /Users/ana/.copilot/installed-plugins/squiz/squiz is 0.1.0, and this squiz at /Users/ana/.claude/plugins/cache/squiz/squiz/0.2.0 is 0.2.0. Copilot's hook runs its own copy, so two versions write one state file. Update Copilot's copy, which is older` |
-| A `plugin.json` that cannot be read, is not JSON, is not an object, or names no plugin or no version | warning | `Copilot's squiz: warning: the version of /Users/ana/.copilot/installed-plugins/squiz/squiz could not be read: /Users/ana/.copilot/installed-plugins/squiz/squiz/.claude-plugin/plugin.json is not JSON: Unexpected token` |
-| This squiz's own version that cannot be read | warning | `Copilot's squiz: warning: /Users/ana/.copilot/installed-plugins/squiz/squiz is 0.1.0, and the version of this squiz at /Users/ana/dev/squiz could not be read: /Users/ana/dev/squiz/.claude-plugin/plugin.json names no version` |
-| An `installed-plugins`, or a `_direct` in it, that exists and cannot be listed. The marketplace copies are still compared where only `_direct` cannot be | warning | `Copilot's squiz: warning: /Users/ana/.copilot/installed-plugins could not be read: EACCES: permission denied, scandir '/Users/ana/.copilot/installed-plugins'` |
-
-The older version is the one whose dotted numbers are lower, read as numbers,
-so `0.9.0` is older than `0.10.0`. The line ends `Update this squiz, which is
-older` where this squiz is. Where either version is more than dotted numbers,
-such as `0.2.0-beta.1`, it ends `Update the older one`.
-
-**The reviewer is the one `reviewer` names in `.squiz.json`** at the root of the
-repository the check is run in, which `git rev-parse --show-toplevel` gives.
-Outside a repository, or in one with no `.squiz.json`, it is the default, `pi`.
-It is outside a repository only where git says `not a git repository`, read
-with `LC_ALL=C`. Where git is missing, or refuses for any other reason, the row
-fails with that reason:
-
-```
-Reviewer: the repository could not be found: git exited 128: fatal: detected dubious ownership in repository at '/work/app'
-```
-
-The file is read as a round reads it (§ 9 Configuration). A file that reading
-refuses fails the row, with the reason it was refused:
-
-```
-Reviewer: .squiz.json refused: /work/app/.squiz.json: "reviewer" is "claude", but it must be "pi" or "copilot"
-```
-
-Otherwise the reviewer's CLI is started for its version, as every tool is, and a
-missing one fails the row by name:
-
-```
-Reviewer pi: not found
-Reviewer copilot: not found
-```
-
-**The model named is the one a round would run on.** It is `model` from
-`.squiz.json` where the file sets it. Otherwise it is the user's default, as
-the reviewer CLI's own settings give it:
-
-| Reviewer | The user's default |
-|---|---|
-| `pi` | `defaultProvider` and `defaultModel`, as `provider/id`, in `settings.json` under `PI_CODING_AGENT_DIR`, or under `~/.pi/agent` where that is unset |
-| `copilot` | `COPILOT_MODEL`, or else `model` in the user's own `settings.json`, as `confine` reads it (§ 4 The Copilot adapter) |
-
-A project's own settings are not read, since a review does not use them for the
-model. Where neither `.squiz.json` nor the CLI's settings name a model, the
-model is unknown:
-
-```
-Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json
-Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
-Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one
-Reviewer pi 0.85.1: warning: model unknown: pi's settings /Users/ana/.pi/agent/settings.json are not JSON: Unexpected token
-Reviewer copilot 1.0.93, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini
-Reviewer copilot 1.0.93: model unknown: the user's Copilot settings /Users/ana/.copilot/settings.json are not an object
-```
-
-Settings that cannot be read are a warning for `pi`, which starts without them,
-and a failure for Copilot, whose round fails on them before it starts (The
-Copilot adapter).
-
-**Copilot's sign-in is checked with one prompt, which spends one request**,
-since no `copilot` command reports a sign-in without reaching the model. Where
-`.squiz.json` names Copilot as the reviewer, and its settings do not already
-fail the row, the row runs:
+**Copilot's sign-in is checked with one prompt, which spends one request**, since
+no `copilot` command reports a sign-in without reaching the model:
 
 ```
 copilot -p "Reply with the single word OK." --model gpt-5-mini --no-ask-user
 ```
 
 It runs with the variables a round gives a Copilot reviewer, so it signs in as a
-round does, with `COPILOT_HOME` and `GH_CONFIG_DIR` naming empty directories in
-its temporary directory. It reaches the `copilot` whose version the row names,
-runs on `gpt-5-mini` whatever model a round would run on, and is bounded at 60
-seconds.
+round does, and is bounded at 60 seconds. No prompt is sent where the reviewer
+is `pi`, or for Copilot as a coding agent.
 
-| The prompt | Level | The line ends |
-|---|---|---|
-| Exits 0 | present | `. Signed in; the check spent one request on gpt-5-mini` |
-| Exits non-zero | failed | `. Its sign-in check failed: copilot exited 1: Error: No authentication information found.`, with the first line Copilot printed and the indented lines under it |
-| Does not answer within 60 seconds | failed | `. Its sign-in check failed: copilot did not answer within 60 seconds` |
-| Its temporary directory cannot be made | failed | `. Its sign-in could not be checked: ` followed by the reason |
+**Copilot's experimental features are on** where `"experimental"` is `true` in
+the user's own `<COPILOT_HOME>/settings.json`, since a session without them is
+never woken by its review (§ 9 Getting started). **Its socket path fits** where
+`<COPILOT_HOME>/session-state/<session id>/squiz.sock` is at most 104 bytes on
+macOS and 108 on Linux.
 
-No prompt is sent where the reviewer is `pi`, or for Copilot as a coding agent.
-
-**Claude Code is required only where Copilot cannot be the coding agent
-instead.** Either can be (§ 2), so where `claude` is not on `PATH` and
-`copilot` answers with its version, the row is present. Where `copilot` is
-missing too, or cannot be run, the row fails. A `claude` that is installed and
-cannot be run fails the row either way.
-
-```
-Claude Code: not found. Not required: copilot is installed, and either can be the coding agent
-Claude Code: not found
-```
-
-**Copilot is reported as a coding agent wherever `copilot` is on `PATH`,** since
-nothing names the coding agents. Every line of this row is present or a warning.
-
-The row says whether experimental features are on, since a Copilot session
-without them is never woken by its review (§ 9 Getting started). They are on
-where `"experimental"` is `true` in the user's own `<COPILOT_HOME>/settings.json`,
-under `COPILOT_HOME` or `~/.copilot` where that is unset, read with Copilot's
-`//` lines removed. They are off where the file is missing, sets no
-`"experimental"`, or sets it to `false`.
-
-| Found | Level | The line |
-|---|---|---|
-| `"experimental": true` | present | `copilot 1.2.0, experimental features on` |
-| No file, no key, or `false` | warning | `warning: copilot 1.2.0 has experimental features off. If Copilot writes your code, it is never woken when a review finishes. Run /experimental on in Copilot, or start it once with copilot --experimental` |
-| A file that cannot be read, is not JSON, or is not an object | warning | `warning: copilot 1.2.0: whether experimental features are on is unknown: the user's Copilot settings /Users/ana/.copilot/settings.json are not JSON: Unexpected token` |
-| `"experimental"` set to anything else | warning | `warning: copilot 1.2.0: whether experimental features are on is unknown: "experimental" is "yes" in /Users/ana/.copilot/settings.json` |
-| A `copilot` that cannot be run | warning | `copilot: warning: could not be run: copilot exited 139: segfault` |
-
-A second line follows where the extension's socket path is too long to listen
-on. The path is `<COPILOT_HOME>/session-state/<session id>/squiz.sock`, and a
-session id is a 36-character UUID. Its length in bytes is measured against 104
-on macOS and 108 on Linux, and a longer one is a warning:
-
-```
-warning: copilot's extension cannot listen: its socket /Users/ana/work/tools/copilot-home-of-ana-1/session-state/<session id>/squiz.sock is 105 bytes, over the 104 macOS allows. Set COPILOT_HOME to a shorter directory
-```
-
-**Where Copilot is both a coding agent and the reviewer, both rows print.** The
-coding agent's row says whether its experimental features are on and whether
-its socket fits, and the reviewer's row its model and its sign-in.
-
-```
-copilot 1.0.92, experimental features on
-Reviewer copilot 1.0.92, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini
-```
-
-`copilot --version` is started once, however many rows read it.
-
-**Where the reviewer is `pi`, the row after it names the project's own `pi`
-settings, which a review does not use**, since `pi` takes none of these from a
-project it does not trust (§ 4 The `pi` adapter):
-
-- `.pi/settings.json`, named with its top-level keys where it is a JSON object
-- `.pi/extensions`, `.pi/skills`, `.pi/prompts` and `.pi/themes`
-- `.pi/SYSTEM.md` and `.pi/APPEND_SYSTEM.md`
-- `.agents/skills`
-
-The row ends with the context file that still reaches the reviewer, where the
-root holds one: the first of `AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`,
-`CLAUDE.md` and `CLAUDE.MD` that is there.
-
-```
-pi project settings: a review does not use .pi/settings.json (defaultModel, retry), .pi/SYSTEM.md or .agents/skills, and takes your own pi settings instead. AGENTS.md still reaches the reviewer
-pi project settings: a review does not use .pi/APPEND_SYSTEM.md, and takes your own pi settings instead
-```
-
-The row prints nothing where the root holds none of these, as for a bare `.pi`
-directory. Nor does it print where the reviewer is Copilot, outside a
-repository, or where the reviewer's row failed on the repository or its
-`.squiz.json`. It reads the root the reviewer's row found, and git is not asked
-for it again.
-
-**The row reports that the files are there, not that a review leaves them
-unused.** It reads the working tree rather than the head commit a round reads,
-it does not check that `pi` honours `--no-approve`, and its list is the one
-`pi` 0.85.1 requires trust for, which a later `pi` may add to.
+**The project's `pi` settings row** names each of `.pi/settings.json`,
+`.pi/extensions`, `.pi/skills`, `.pi/prompts`, `.pi/themes`, `.pi/SYSTEM.md`,
+`.pi/APPEND_SYSTEM.md` and `.agents/skills` that the repository's root holds,
+since `pi` takes none of them from a project it does not trust (§ 4 The `pi`
+adapter). It ends with the context file that still reaches the reviewer, where
+there is one. It reads the working tree rather than the head commit a round
+reads, and its list is the one `pi` 0.85.1 requires trust for.
 
 ## 7. Failure modes
 
