@@ -9,9 +9,11 @@ method; this file holds what is specific to squiz, and they read it from here.
 **Load the `skills:writing-specs` skill before writing or editing anything under
 `docs/specs/`.** Every time, without being asked.
 
-`docs/specs/review-harness-spec.md` is the specification. Its § 8, The project,
-fixes the language rules and the `src/` layout: erasable syntax only, and no
-directory the layout does not have.
+`docs/specs/review-harness/` is the specification, one file per section. Its
+`README.md` holds the version and says which file covers what. Read the files a
+change touches, not the whole specification. `project.md`, § 8, fixes the
+language rules and the `src/` layout: erasable syntax only, and no directory the
+layout does not have.
 
 **A spec's version number changes once a release.** The pull request that sets
 the release's version bumps it. Every other pull request leaves it alone, so

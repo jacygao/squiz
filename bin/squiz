@@ -2,14 +2,13 @@
 # The `squiz` binary. A plugin's bin/ is on Claude Code's Bash tool PATH while
 # the plugin is enabled, and any other coding agent reaches this file through
 # the link `squiz init` makes, so either runs it by name.
-# (review-harness-spec, "The `squiz` binary")
 #
 # The hook is given no such PATH and reaches this same file through the plugin
 # root. (docs/notes/the-hook-shell-does-not-get-the-plugin-bin-on-path.md)
 #
 # Shell rather than an extensionless Node file: Node decides whether to strip
 # types from the extension, and would run an extensionless entry point as
-# JavaScript. (review-harness-spec, "Language")
+# JavaScript.
 
 set -eu
 
