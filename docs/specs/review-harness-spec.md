@@ -91,11 +91,8 @@ episode stays live.
 ### The state file
 
 **An episode is keyed by the number of its pull request.** Its state lives in
-`.squiz/<number>/` inside the worktree. The state file holds the round count, the
-cost of each round and what it reviewed and ruled (§ 5 The format), what the
-episode spent on attempts that were no round, whether the episode has reported
-its close, what was open at that close, and the reviewer's last ruling on each
-thread. The directory also holds:
+`.squiz/<number>/` inside the worktree. The directory holds the state file, which
+the rest of this section describes, and:
 
 - `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
   handed, the report file the reviewer reports into, the reviewer's session,
@@ -111,15 +108,12 @@ directory and `.squiz/.gitignore` is missing, it writes one holding `*`. One tha
 exists is left as it is.
 
 **Every change to the state file is made under `state.lock`.** A writer takes the
-lock, reads the file, changes it, writes it, and releases the lock. A trigger
-queueing a state and a round host writing its reviewing record therefore cannot
-drop each other's record. The lock is held for one update and never across a
-review, and it is a different file from `host.lock`. It names its holder's pid
-and start time. A lock whose holder has gone is taken over. A writer that finds
-the lock held by a live process, or by one that cannot be told running or gone,
-waits up to a deadline of its own and never breaks the lock. A wait that runs out
-is a state file that cannot be written (§ 7). Readers take no lock, because every
-write replaces the file whole.
+lock, reads the file, changes it, writes it whole, and releases the lock. The
+lock is held for one update and never across a review. It names its holder's pid
+and start time, and a lock whose holder has gone is taken over. A writer that
+finds the lock held by a live process, or by one that cannot be told running or
+gone, waits up to a deadline of its own and never breaks the lock. A wait that
+runs out is a state file that cannot be written (§ 7). Readers take no lock.
 
 **The state file also holds one record for each state of the pull request the
 episode has reviewed.** A state is two things, read when a trigger starts:
@@ -138,23 +132,14 @@ Each record has one of five statuses:
 
 | Status | What it records |
 |---|---|
-| Queued | A trigger asked for a review of this state, and no round has started it yet. |
-| Reviewing | The round host running the round, and when that process started. A pid alone is reused, so the start time is what tells the round that holds it now from one that held it before. Also the round's number `k`, from the moment the round starts. Once the reviewer starts, also the reviewer's session: its backend, its pane or window where it has one, its pid and start time, the moment its time bound runs out, and its snapshot. |
-| Reviewed | The result the round reached: its exit status, and the threads it left open. A round that left nothing open while a later state was queued behind it reached no close, so it records the result *reviewed clean, episode open*, with no exit status. Also the round's number `k`, which names its directory `rounds/<k>/` and so its `resume.txt`, when the round started and ended, and the reviewer's backend and pane or window. A round that left the episode open also records each of its findings that no thread holds, as the line § 5's Notes would give it. |
-| Failed | The reason the round failed, and whether its owner has been sent a note about it. Also the round's number `k` and when the round started and ended, where a round started, and the reviewer's backend and pane or window, where a reviewer started. |
-| Not reviewed | The episode closed before a round took this state, or a later commit or reply superseded it before its round started, and why. |
+| Queued | A trigger asked for a review of this state, and no round has started it. |
+| Reviewing | A round host is running the round. The record names the host, and once the reviewer starts, the reviewer's session and snapshot, so that a recovery can find and stop them. |
+| Reviewed | The round's result: its exit status and the threads it left open. A round that left nothing open while a later state was queued behind it records *reviewed clean, episode open* instead, with no exit status. A round that left the episode open also records each finding no thread holds, as § 5's Notes would give it. |
+| Failed | Why the round failed, and whether its owner has had a note about it. |
+| Not reviewed | Why no round reviewed it: the episode closed first, or a later state superseded it. |
 
-A record also names the session that owns the work, where a trigger knew it:
-the session's identifier, the subagent that did the work where one did, and the
-session's messaging socket where the hook found one. The Claude Code hooks
-record it, and `squiz review` records none.
-
-A record also carries the Herdr workspace the trigger ran in, from the
-`HERDR_WORKSPACE_ID` in its environment, where it has one. Herdr sets it in every
-pane it manages, so a hook or a `squiz review` run from the coding agent's pane
-finds the coding agent's workspace. The reviewer's tab opens there (§ 4 The
-reviewer session). A workspace id is a `w` and a number, such as `w2`. A value of any other shape
-is not recorded, and the tab opens in the focused workspace.
+A record of a round that started also holds what `squiz status` prints for it
+(§ 6).
 
 **A trigger reads the record for the pull request's state before it queues
 anything.** It has looked up the pull request and listed its threads by then,
@@ -241,46 +226,27 @@ summary is posted is stopped by a close it arrived before. A round that finds
 the round cap or the token bound already spent, and closes the episode without
 starting a reviewer (§ 5), also writes the close before it posts the summary.
 
-**A state left not reviewed is named by its short head commit, and by its
-replies where an earlier state has the same commit.** The earlier states are the
-one the round that closed the episode reviewed and those queued ahead of it. A state with the head
-of an earlier state differs from it only in its replies: a reply was added or
-deleted, and the record cannot say which. Such a state is named "with different
-replies". A state whose head two earlier states have is named "with different
-replies a second time", one with three "with different replies a third time", and
-so on. Where B has A's commit and different replies, the line reads:
+**A state left not reviewed is named by its short head commit, followed by "with
+different replies" where an earlier state has the same commit.** The earlier
+states are the one the round that closed the episode reviewed, and those
+queued ahead of it:
 
 ```
 Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.
 ```
 
-**A reply is ruled on even where no commit follows it.** A coding agent that
-disputes a finding and pushes nothing asks for a review again on a new state, and
-the round reads its reply and rules on the thread: `withdrawn` where the argument
-holds, `open` where it does not. A reply posted while a round runs is not in that
-round's state, so the next run reviews again.
+**The state file keeps the reviewer's last ruling on each thread**, by the
+thread's node id: `fixed`, `withdrawn` or `open`. A close that runs no reviewer
+counts the thread by it (§ 5). A round writes its rulings in the update that
+records its cost, before it posts anything, so no verdict reaches a thread unless
+its ruling is on record. A state file that will not take that update fails the
+round with nothing posted. A thread a finished review gave no verdict is kept as
+`open`. A failed round writes the rulings it salvaged, and leaves every other
+thread's alone. A ruling is kept whether or not GitHub then takes it.
 
-**Every round counts against the round cap, whatever started it.** A round that a
-reply started is a round, exactly as one a commit started. A coding agent that
-answers every finding with a dispute spends the cap doing so, and the episode
-closes at the cap with the disputes for a person. A run that returns a recorded
-result is no round and spends nothing.
-
-**The state file keeps the reviewer's last ruling on each thread it ruled on**,
-by the thread's node id: `fixed`, `withdrawn` or `open`. GitHub's resolved state
-says a thread is closed and not which verdict closed it, and a close that runs no
-reviewer counts the thread by this ruling (§ 5). A round writes its rulings in
-the update that records its cost, before it posts anything, each in place of the
-one its thread held before. A state file that will not take that update fails
-the round with nothing posted, so no verdict reaches a thread unless its ruling
-is on record. A thread a finished review gave no verdict is kept as `open`,
-which is the verdict it is treated as. A failed round writes the rulings it
-salvaged, and leaves every other thread's alone. A ruling is kept whether or not
-GitHub then takes it, because the thread's resolved state still says whether it
-is closed. A state file with no rulings holds none.
-
-**A closed episode stays closed in its worktree.** A second episode on the same pull request starts in another worktree
-on the same branch, which holds no state for it.
+**A closed episode stays closed in its worktree.** A second episode on the same
+pull request starts in another worktree on the same branch, which holds no state
+for it.
 
 ### A round, step by step
 
@@ -325,6 +291,18 @@ accepted it.
 
 The cap defaults to 3 and is settable from 1 to 8. A cap of R hands open threads
 back to the coding agent at most R−1 times.
+
+**A reply is ruled on even where no commit follows it.** A coding agent that
+disputes a finding and pushes nothing asks for a review again on a new state, and
+the round reads its reply and rules on the thread: `withdrawn` where the argument
+holds, `open` where it does not. A reply posted while a round runs is not in that
+round's state, so the next run reviews again.
+
+**Every round counts against the round cap, whatever started it.** A round that a
+reply started is a round, exactly as one a commit started. A coding agent that
+answers every finding with a dispute spends the cap doing so, and the episode
+closes at the cap with the disputes for a person. A run that returns a recorded
+result is no round and spends nothing.
 
 **Round R is the closing round.** It reviews as any round does, then closes the
 episode whatever is still open: it posts the summary and hands nothing back to
@@ -698,6 +676,11 @@ it.** The round host starts it in the first place that applies:
 
 The command line is the one the adapter built: `pi`'s, or the Copilot adapter's
 shell line, which starts Copilot. Below, "the reviewer" is that command.
+
+**The Herdr workspace is the trigger's.** A trigger records the
+`HERDR_WORKSPACE_ID` in its environment on the state's record. Herdr sets it in
+every pane it manages, so the reviewer's tab opens beside the coding agent's
+pane. A value that is not a `w` and a number, such as `w2`, is not recorded.
 
 **In Herdr, the start returns once the reviewer is running, and the round's
 bound is all that limits the review.** `herdr pane run` types a line and returns
