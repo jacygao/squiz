@@ -348,7 +348,7 @@ function included(status: string, body: string): string {
 
 function prList(listed: number, head: string): string {
   return JSON.stringify([
-    { number: listed, id: "PR_pull", baseRefName: "main", headRefName: BRANCH, headRefOid: head, body: "What this changes." },
+    { number: listed, id: "PR_pull", baseRefName: "main", headRefName: BRANCH, headRefOid: head, body: "What this changes.", isDraft: false },
   ]);
 }
 
@@ -718,7 +718,7 @@ test("a state queued while the summary is being posted is reviewed or refused, a
           `cd '${worktree}' || exit 1`,
           "git commit --quiet --allow-empty --message 'a push during the summary'",
           'sha=$(git rev-parse HEAD)',
-          `printf '[{"number":${PULL_REQUEST},"id":"PR_pull","baseRefName":"main","headRefName":"${BRANCH}","headRefOid":"%s","body":"x"}]' "$sha" > '${fixture.binaries}/answer-prlist'`,
+          `printf '[{"number":${PULL_REQUEST},"id":"PR_pull","baseRefName":"main","headRefName":"${BRANCH}","headRefOid":"%s","body":"x","isDraft":false}]' "$sha" > '${fixture.binaries}/answer-prlist'`,
           `'${process.execPath}' '${queueRacer}' '${worktree}' ${PULL_REQUEST} "$sha"`,
           "",
         ].join("\n"),

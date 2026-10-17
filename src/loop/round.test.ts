@@ -862,6 +862,7 @@ const PR_LIST = JSON.stringify([
     headRefName: BRANCH,
     headRefOid: HEAD_SHA,
     body: "What this changes.",
+    isDraft: false,
   },
 ]);
 

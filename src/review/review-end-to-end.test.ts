@@ -88,7 +88,7 @@ function answer(body) {
   if (argv[0] === "pr") {
     const head = (state.staleHeads ?? []).shift() ?? state.head;
     save();
-    return JSON.stringify([{ number: state.number, id: "PR_pull", baseRefName: "main", headRefName: state.branch, headRefOid: head, body: "" }]);
+    return JSON.stringify([{ number: state.number, id: "PR_pull", baseRefName: "main", headRefName: state.branch, headRefOid: head, body: "", isDraft: state.draft === true }]);
   }
   if (argv[1] === "graphql") {
     const request = JSON.parse(body);
@@ -172,6 +172,8 @@ type GhState = {
   readonly head: string;
   /** Heads the next lookups answer with, one each, before `head`: GitHub not yet showing a push. */
   readonly staleHeads?: readonly string[];
+  /** Whether the pull request is a draft. */
+  readonly draft?: boolean;
   readonly diff: string;
   threads: { id: string; isResolved: boolean; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
   readonly issueComments: string[];
@@ -736,6 +738,29 @@ function started(fixture: Fixture): number {
   const file = `${fixture.planFile}.started`;
   return existsSync(file) ? Number(readFileSync(file, "utf8")) : 0;
 }
+
+test("a draft runs no round, however often it is pushed to, and its first run once marked ready reviews the head it then has (#720)", async () => {
+  await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {
+    fixture.setGh({ ...fixture.gh(), draft: true });
+    const draftLine = "PR #41 is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.\n";
+
+    const opened = await review(fixture);
+    assert.deepEqual(opened, { exit: 0, stdout: draftLine, stderr: "" });
+
+    fixture.push();
+    const pushed = await review(fixture);
+    assert.deepEqual(pushed, { exit: 0, stdout: draftLine, stderr: "" });
+    assert.equal(existsSync(fixture.episode.directory), false, "a run on a draft wrote into .squiz");
+
+    const head = fixture.push().slice(0, 7);
+    fixture.setGh({ ...fixture.gh(), draft: false });
+    const ready = await review(fixture);
+
+    assert.equal(ready.exit, 2, `${ready.stdout}${ready.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(ready.stdout.split("\n")[1], `Squiz reviewed PR #41 at ${head}: round 1 of 3, 1 new finding.`);
+    assert.equal(started(fixture), 1);
+  });
+});
 
 test("the round at the cap is the closing round: it opens threads for new findings, and a fix pushed after it runs no reviewer (#718)", async () => {
   const starts: PlannedStart[] = [

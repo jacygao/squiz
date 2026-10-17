@@ -70,7 +70,7 @@ function fakeGh(directory: string): string {
 
 function pullRequestRow(headRefName: string = BRANCH, number: number = NUMBER): string {
   return JSON.stringify([
-    { number, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName, headRefOid: HEAD, body: "" },
+    { number, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName, headRefOid: HEAD, body: "", isDraft: false },
   ]);
 }
 
@@ -300,6 +300,49 @@ test("a detached HEAD queues nothing and makes no .squiz", async () => {
     assert.equal(result.outcome, "no review", JSON.stringify(result));
     assert.match(result.outcome === "no review" ? result.reason : "", /HEAD is detached/u);
     assert.equal(existsSync(join(fixture.worktree, ".squiz")), false);
+  });
+});
+
+function draftRow(): string {
+  return JSON.stringify([{ ...(JSON.parse(pullRequestRow()) as Record<string, unknown>[])[0], isDraft: true }]);
+}
+
+test("a draft queues nothing, lists no threads, starts no host and makes no .squiz, for a hook and for squiz review (#720)", async () => {
+  await withFixture((fixture) => {
+    writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
+
+    for (const asked of [request(fixture), request(fixture, { trigger: "review", pullRequest: NUMBER })]) {
+      const result = trigger(asked);
+
+      assert.deepEqual(result, { outcome: "draft", pullRequest: NUMBER });
+    }
+    assert.equal(existsSync(join(fixture.bin, "count")), false, "the trigger listed the threads of a draft");
+    assert.equal(existsSync(join(fixture.worktree, ".squiz")), false);
+    assert.deepEqual(hostLines(fixture), []);
+  });
+});
+
+test("a draft whose episode closed is still a draft, rather than the close (#720)", async () => {
+  await withFixture((fixture) => {
+    seed(fixture.episode, { closeReported: true });
+    writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
+
+    assert.deepEqual(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })), { outcome: "draft", pullRequest: NUMBER });
+  });
+});
+
+test("a pull request marked ready after a trigger found it a draft is queued by the next trigger (#720)", async () => {
+  await withFixture(async (fixture) => {
+    writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
+    assert.equal(trigger(request(fixture)).outcome, "draft");
+
+    writeFileSync(join(fixture.bin, "list.out"), pullRequestRow(), "utf8");
+    const result = decided(trigger(request(fixture)));
+
+    assert.equal(result.decision.outcome, "queue");
+    assert.equal(result.queued, true);
+    assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }]);
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
   });
 });
 

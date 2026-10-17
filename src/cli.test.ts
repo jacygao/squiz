@@ -321,6 +321,7 @@ const pullRequestRow = JSON.stringify([
     headRefName: "main",
     headRefOid: "655997442d7a69aec2903665478883e71dac5da0",
     body: "",
+    isDraft: false,
   },
 ]);
 

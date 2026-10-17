@@ -12,7 +12,7 @@
  * - A host started as the trigger's child dies with it. It is started detached.
  *
  * Nothing is written before the gate passes, so a trigger on a branch with no
- * pull request leaves no `.squiz` behind. This neither waits for the round nor
+ * pull request, or on a draft, leaves no `.squiz` behind. This neither waits for the round nor
  * recovers one: it returns what it did, and the caller prints or waits.
  */
 
@@ -66,6 +66,12 @@ export type HostStart = { readonly outcome: "not started" } | Detached;
 export type Triggered =
   /** The gate stopped it: no open pull request, another branch, or a detached HEAD. Nothing was written. */
   | { readonly outcome: "no review"; readonly reason: string }
+  /**
+   * The pull request is a draft, and is reviewed from the first trigger after it
+   * is marked ready. Nothing was written. Not a failure, so a caller says nothing
+   * of one where it says nothing of a state it chose not to queue.
+   */
+  | { readonly outcome: "draft"; readonly pullRequest: number }
   /** What the decision needs could not be read, or the queue could not be written. Nothing was queued. */
   | { readonly outcome: "failed"; readonly reason: string }
   | {
@@ -148,7 +154,7 @@ export function trigger(request: TriggerRequest): Triggered {
   return { outcome: "decided", pullRequest, episode, state, threads: listed.threads, decision, queued, host };
 }
 
-type Gate = { readonly outcome: "found"; readonly pullRequest: PullRequest } | Failed | NoReview;
+type Gate = { readonly outcome: "found"; readonly pullRequest: PullRequest } | Failed | NoReview | Draft;
 
 /** The open pull request whose head is the branch checked out, and the one asked for where a number was given. */
 function gatePullRequest(request: TriggerRequest): Gate {
@@ -169,7 +175,8 @@ function gatePullRequest(request: TriggerRequest): Gate {
       `PR #${request.pullRequest} is not the open pull request whose head is ${named}, which ${where} has checked out: that is PR #${found.number}`,
     );
   }
-  const { outcome: _, ...pullRequest } = found;
+  if (found.draft) return { outcome: "draft", pullRequest: found.number };
+  const { outcome: _, draft: __, ...pullRequest } = found;
   return { outcome: "found", pullRequest };
 }
 
@@ -202,6 +209,7 @@ function startHost(request: TriggerRequest, episode: Episode, number: number): D
 
 type Failed = Extract<Triggered, { readonly outcome: "failed" }>;
 type NoReview = Extract<Triggered, { readonly outcome: "no review" }>;
+type Draft = Extract<Triggered, { readonly outcome: "draft" }>;
 
 function failed(reason: string): Failed {
   return { outcome: "failed", reason };

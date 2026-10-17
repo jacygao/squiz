@@ -104,7 +104,7 @@ async function withPlace(body: (place: Place) => Promise<void>): Promise<void> {
     git(worktree, "init", "--quiet", "--initial-branch", BRANCH);
     git(worktree, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false",
       "commit", "--quiet", "--allow-empty", "--message", "a commit to hang a branch off");
-    const row = { number: NUMBER, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName: BRANCH, headRefOid: HEAD, body: "" };
+    const row = { number: NUMBER, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName: BRANCH, headRefOid: HEAD, body: "", isDraft: false };
     writeFileSync(join(bin, "list.out"), JSON.stringify([row]), "utf8");
     standIn(bin, "gh", fakeGh(bin));
     await body(place);
@@ -496,6 +496,23 @@ test("a branch with no pull request writes the line naming the branch and the di
       `squiz: no review ran: no open pull request has "${BRANCH}" as its head, in ${JSON.stringify(place.worktree)}\n`,
     );
     assert.equal(existsSync(join(place.worktree, ".squiz")), false, "a firing with no pull request wrote state");
+  });
+});
+
+test("a draft exits 0 and says nothing, having asked GitHub, queued nothing and started no host (#720)", async () => {
+  await withPlace(async (place) => {
+    const row = (JSON.parse(readFileSync(join(place.bin, "list.out"), "utf8")) as Record<string, unknown>[])[0];
+    writeFileSync(join(place.bin, "list.out"), JSON.stringify([{ ...row, isDraft: true }]), "utf8");
+
+    const fired = await fire(place, { payload: stopPayload(place.worktree) });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    // A lookup that failed says so on stderr, and one never made leaves no call
+    // here: only the draft read and acted on gets this far in silence.
+    const calls = readFileSync(join(place.bin, "calls.log"), "utf8").trim().split("\n");
+    assert.deepEqual(calls.map((call) => call.split(" ").slice(0, 2).join(" ")), ["pr list"], "the hook went past the lookup");
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false, "a firing on a draft wrote state");
+    assert.equal(hostsAsked(place), 0);
   });
 });
 

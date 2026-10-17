@@ -251,14 +251,22 @@ for it.
 ### A round, step by step
 
 1. **Gate on the pull request.** The trigger checks that pull request `<number>`
-   is open and that its head branch is checked out in the directory it was run
-   in, not another branch or a detached HEAD. The round host checks again when
-   the round starts. Where either check fails, no review runs and nothing is
-   posted. `squiz review` exits 1, and stderr names what it found:
+   is open, that it is not a draft, and that its head branch is checked out in
+   the directory it was run in, not another branch or a detached HEAD. The round
+   host checks again when the round starts that the pull request is open and
+   checked out. Where a check fails, no review runs, nothing is posted, and
+   nothing is written to `.squiz/`.
+
+   Where the pull request is not open or not checked out, `squiz review` exits 1,
+   and stderr names what it found:
 
    ```
    squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
    ```
+
+   Where it is a draft, `squiz review` exits 0 and prints one line on stdout
+   saying so (§ 6 `squiz review`), and the hooks say nothing. Once it is marked
+   ready for review, the next trigger queues its state as it would any other.
 2. **Gate on the episode.** An episode that has reported its close is over:
    `squiz review` prints the close and exits as the close did, whatever the round
    cap or the token bound would now allow. Otherwise the record for the pull request's
@@ -370,6 +378,7 @@ checked out in the payload's `cwd`, records the session that owns the work,
 queues the state as The state file sets out, and returns. It never runs a round
 and never blocks the agent: it exits 0 whatever it found. Where it finds no pull
 request it writes the line under step 1 naming the branch and the directory.
+Where it finds a draft it writes nothing.
 
 **The worktree comes from the payload's `cwd`, never from the directory the hook
 process runs in.** Under Claude Code the two are the same directory. Copilot runs
@@ -1729,7 +1738,7 @@ invocation (§ 7). The exit status says what the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
-| 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. | Finishes. |
+| 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. Or the pull request is a draft, and no review runs until it is marked ready for review. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
 | 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
 | 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
@@ -1746,8 +1755,9 @@ it adds on stderr. A run that exits 1 prints nothing on stdout.
 **The first line names a file holding the whole output**, because Claude Code can
 hand the agent less than the command printed. A run that exits 0, 2, 3 or 4
 writes everything it prints on stdout to `.squiz/<number>/review.txt`, replaced
-on every run, and prints that path first. A file that cannot be written leaves
-the outcome and its status as they are, and stderr adds one line:
+on every run, and prints that path first. A run on a draft prints its one line
+alone, and writes no file. A file that cannot be written leaves the outcome and
+its status as they are, and stderr adds one line:
 
 ```
 squiz: the output could not be written to /work/squiz/.squiz/41/review.txt: EACCES: permission denied
@@ -1804,6 +1814,12 @@ Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
 
 Nothing is open. The review is closed, and its summary is on the pull request.
+```
+
+A draft, exit 0. The line is the whole output:
+
+```
+PR #41 is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.
 ```
 
 Closed with threads open, exit 3:
