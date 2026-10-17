@@ -81,6 +81,20 @@ it is woken with the result.
   without a restart. `hooks/hooks.json` is read when the session starts, so a
   change to it waits for a restart (unverified).
 
+- **Run only the checkout's squiz here, never an installed release beside it.**
+  An installed squiz still enabled fires its own hooks on every stop, so a
+  round can run on the release's code. Turn it off for this repository:
+
+  - **Claude Code:** `.claude/settings.local.json` holds
+    `{ "enabledPlugins": { "squiz@squiz": false } }`. It applies to this
+    repository alone, so other projects keep the release.
+  - **Copilot:** it has no per-project switch. Keep the release disabled with
+    `copilot plugin disable squiz@squiz`, and start a session with
+    `copilot --plugin-dir ../squiz-plugin --experimental`.
+  - **A command typed by hand** runs the `squiz` on `PATH`. Point
+    `~/.local/bin/squiz` at `../squiz-plugin/bin/squiz`, and run `squiz doctor`
+    to see which one answers.
+
 **Load the `skills:working-issues` skill before dispatching any issue to
 subagents.** Every time, without being asked.
 
