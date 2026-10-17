@@ -289,3 +289,11 @@ test("a blank model names no model (#271)", async () => {
   const { run } = await read(fileOf(servedBy(undefined, ""), servedBy("deepseek", " "), finish, usage("stop", 0.001)));
   assert.equal(run.cost?.models, undefined);
 });
+
+test("a progress counts the requests the provider failed by then, with the last one's error (#494)", async () => {
+  const { told } = await read(
+    fileOf(usage("error", 0, "429 Too Many Requests"), usage("toolUse", 0.002), usage("error", 0, "503 overloaded")),
+  );
+  assert.deepEqual(told.at(-1)?.failedRequests, { count: 2, last: "503 overloaded" });
+  assert.equal(told[1]?.failedRequests?.count, 1, "each progress carries the count as of its own line");
+});

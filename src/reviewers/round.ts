@@ -27,6 +27,7 @@ import { closeWindow, windowProcess, type Environment } from "../sessions/tmux.t
 
 import {
   type Adapter,
+  type FailedRequests,
   type Invocation,
   type ParsedRun,
   type ProgressSoFar,
@@ -73,6 +74,8 @@ export type Round = { readonly refusals: number } & (
       readonly outcome: "timed-out";
       readonly cost: Spend;
       readonly seconds: number;
+      /** Across both attempts, and absent where none failed or the adapter cannot tell. */
+      readonly failedRequests?: FailedRequests;
     } & RoundOutput)
   /**
    * Output no fresh process could be read either, which is as good as an API
@@ -188,6 +191,7 @@ export async function runRound(
   // call that was stopped, and a second attempt does not undo one.
   let refused = 0;
   let held: RoundOutput = nothingReported;
+  let failed: FailedRequests | undefined;
   for (let attempts = 1; ; attempts += 1) {
     let ran: Attempt;
     let reviewerRan = false;
@@ -216,6 +220,7 @@ export async function runRound(
     }
     spent = plus(spent, ran.cost);
     refused += ran.refusals;
+    failed = alsoFailed(failed, ran.failedRequests);
     // Two attempts are two readings of the same change, so what the second
     // reported is what the first would have reported again. The first attempt's
     // reports stand only where the second got to none of its own.
@@ -233,7 +238,14 @@ export async function runRound(
       };
     }
     if (ran.kind === "killed") {
-      return { outcome: "timed-out", cost: spent, seconds, refusals: refused, ...held };
+      return {
+        outcome: "timed-out",
+        cost: spent,
+        seconds,
+        refusals: refused,
+        ...(failed === undefined ? {} : { failedRequests: failed }),
+        ...held,
+      };
     }
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
       return { outcome: "setup", cost: spent, reason: withModel(ran.reason, invocation, spent), refusals: refused, ...held };
@@ -264,6 +276,13 @@ export async function runRound(
 function withModel(reason: string, invocation: Invocation, spent: Spend): string {
   if (invocation.model === null || (spent?.messages ?? 0) > 0) return reason;
   return `${reason}; "model" in .squiz.json is "${invocation.model}", which the reviewer's CLI may not offer`;
+}
+
+/** The failed requests of two attempts, the later one's error being the last. */
+function alsoFailed(before: FailedRequests | undefined, now: FailedRequests | undefined): FailedRequests | undefined {
+  if (before === undefined) return now;
+  if (now === undefined) return before;
+  return { count: before.count + now.count, last: now.last };
 }
 
 /** No findings and no verdicts: what an attempt the reviewer told nothing carries. */
@@ -309,6 +328,7 @@ type Attempt = {
    * every other it is what an outcome carrying no review of its own keeps.
    */
   readonly reported: RoundOutput;
+  readonly failedRequests?: FailedRequests;
 } & (
   | RunResult
   /** The time bound passed with no review finished, and the process was stopped. */
@@ -450,6 +470,7 @@ async function attempt(
         cost: run.cost,
         refusals: progress.refusals,
         reported: reportedIn(progress),
+        ...failedBy(progress),
         ...run.result,
       }),
       // A read that failed left the rest of the file uncounted. A cost reported at
@@ -458,6 +479,7 @@ async function attempt(
         cost: adapter.costAtExit === true ? progress.cost : atLeast(progress.cost),
         refusals: progress.refusals,
         reported: reportedIn(progress),
+        ...failedBy(progress),
         kind: "unparsed",
         reason: `the reviewer's output could not be read: ${reasonFor(cause)}`,
       }),
@@ -616,10 +638,15 @@ function atTheBound(progress: RoundProgress, costAtExit: boolean): Attempt {
   const cost = costAtExit ? progress.cost : atLeast(progress.cost);
   const refusals = progress.refusals;
   const reported = reportedIn(progress);
+  const failed = failedBy(progress);
   const { broken } = progress;
-  if (broken !== undefined) return { cost, refusals, reported, kind: "unparsed", reason: broken };
-  if (!progress.finished) return { cost, refusals, reported, kind: "killed" };
-  return { cost, refusals, reported, kind: "reviewed", ...reported };
+  if (broken !== undefined) return { cost, refusals, reported, ...failed, kind: "unparsed", reason: broken };
+  if (!progress.finished) return { cost, refusals, reported, ...failed, kind: "killed" };
+  return { cost, refusals, reported, ...failed, kind: "reviewed", ...reported };
+}
+
+function failedBy(progress: RoundProgress): { readonly failedRequests?: FailedRequests } {
+  return progress.failedRequests === undefined ? {} : { failedRequests: progress.failedRequests };
 }
 
 /**
