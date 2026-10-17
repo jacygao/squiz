@@ -25,12 +25,16 @@ function repository(agents?: string): string {
   return realpathSync(root);
 }
 
-/** A home whose ~/.local/bin is on PATH, and a squiz to link, both under the scratch space. */
+/**
+ * A home with a ~/.claude, whose ~/.local/bin is on PATH, and a squiz to link,
+ * both under the scratch space.
+ */
 function linkable(): { environment: { PATH: string; HOME: string }; target: string; localBin: string } {
   made += 1;
   const home = join(scratch, `home-${made}`);
   const localBin = join(home, ".local", "bin");
   mkdirSync(localBin, { recursive: true });
+  mkdirSync(join(home, ".claude"));
   const plugin = join(scratch, `plugin-${made}`);
   mkdirSync(join(plugin, "bin"), { recursive: true });
   const target = join(plugin, "bin", "squiz");
@@ -118,7 +122,6 @@ test("squiz init allows the three commands in Claude Code's user settings (#707)
 test("settings squiz init cannot read leave the exit to the link, with the reason on stderr (#707)", () => {
   const root = repository();
   const { environment, target, localBin } = linkable();
-  mkdirSync(join(environment.HOME, ".claude"));
   writeFileSync(join(environment.HOME, ".claude", "settings.json"), "{ not json", "utf8");
 
   const printed = squizInit(root, environment, target);

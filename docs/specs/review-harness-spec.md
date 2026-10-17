@@ -2024,12 +2024,12 @@ taken for none.
 1. It links `squiz` into a directory already on `PATH`, for a coding agent whose
    shell does not have the plugin's `bin/` on its `PATH`.
 2. It allows the coding agent's three `squiz` commands in Claude Code's user
-   settings, `~/.claude/settings.json`, so that no project has to.
+   settings, so that no project has to.
 
 It exits 0 where the link is in place afterwards and 1 otherwise, with the
-link's line on stderr. Settings it could not change put their line on stderr
-too, and leave the exit as the link set it. It writes nothing in the repository
-it is run from, and runs outside one as well.
+link's line on stderr. A settings file it could not change puts its line on
+stderr too, and leaves the exit as the link set it. It writes nothing in the
+repository it is run from, and runs outside one as well.
 
 #### The link
 
@@ -2068,9 +2068,8 @@ squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a direc
 
 #### The permission rules
 
-`squiz init` adds these three rules to `permissions.allow` in
-`~/.claude/settings.json`, creating the file, the `permissions` object or the
-`allow` list where it is missing:
+`squiz init` adds these three rules to `permissions.allow` in the
+`settings.json` Claude Code reads its user settings from:
 
 ```
 Bash(squiz review *)
@@ -2078,6 +2077,16 @@ Bash(squiz threads)
 Bash(squiz reply *)
 ```
 
+- **The file is in Claude Code's configuration directory:**
+  `$CLAUDE_CONFIG_DIR` where that is set and not empty, and `~/.claude`
+  otherwise. Where `CLAUDE_CONFIG_DIR` is set, `~/.claude` is never used.
+- **Where that directory does not exist, nothing is written,** and the
+  directory is not created. The line, on stdout, says Claude Code's
+  configuration was not found and names the directory. A `CLAUDE_CONFIG_DIR`
+  that is not an absolute path, or no `CLAUDE_CONFIG_DIR` and no `HOME`, writes
+  nothing either, with the line on stderr.
+- **Inside the directory, a missing file, `permissions` object or `allow` list
+  is created.**
 - **Only a missing rule is added,** after the rules already there. Every other
   key and rule keeps its value, and a file that already has all three is not
   written.
@@ -2098,6 +2107,7 @@ squiz: allowed Bash(squiz reply *) in /Users/ana/.claude/settings.json
 squiz: /Users/ana/.claude/settings.json already allows Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *); nothing changed
 squiz: allowed nothing in /Users/ana/.claude/settings.json: it is not JSON (Expected property name or '}' in JSON at position 2 (line 1 column 3))
 squiz: allowed nothing in /Users/ana/.claude/settings.json: its permissions.allow is not a list
+squiz: allowed nothing: Claude Code's configuration was not found at /Users/ana/.claude
 ```
 
 ### The setup check
@@ -2578,8 +2588,9 @@ of git itself (§ 3 The state file).
 
 1. Allow the coding agent's three `squiz` commands, so it is not prompted every
    time it starts a round or works a thread. For Claude Code, `squiz init` has
-   already done this, once for every project, in the user's settings (§ 6
-   `squiz init`). A Copilot session is started with them allowed:
+   already done this, once for every project, in the user's settings in
+   `$CLAUDE_CONFIG_DIR` or `~/.claude` (§ 6 `squiz init`). A Copilot session is
+   started with them allowed:
 
    ```
    copilot --allow-tool='shell(squiz review:*)' --allow-tool='shell(squiz threads)' --allow-tool='shell(squiz reply:*)'

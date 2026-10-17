@@ -6,8 +6,8 @@
  * is left exactly as it is, and only rules that are missing are added.
  */
 
-import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { lstatSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 
 import { failureLine } from "../hook/report.ts";
 
@@ -15,12 +15,20 @@ const RULES = ["Bash(squiz review *)", "Bash(squiz threads)", "Bash(squiz reply 
 
 export type AllowPrinted = { readonly stdout: string; readonly stderr: string };
 
-/** Add the missing rules to `<home>/.claude/settings.json`, or say why none were added. Never throws. */
-export function allowSquizCommands(home: string | undefined): AllowPrinted {
-  if (home === undefined || !isAbsolute(home)) {
-    return { stdout: "", stderr: failureLine("allowed nothing: HOME is not set, so there is no ~/.claude/settings.json to write") };
+export type ClaudeEnvironment = { readonly HOME?: string | undefined; readonly CLAUDE_CONFIG_DIR?: string | undefined };
+
+/**
+ * Add the missing rules to the `settings.json` Claude Code reads, or say why
+ * none were added. Never creates the configuration directory, and never throws.
+ */
+export function allowSquizCommands(environment: ClaudeEnvironment): AllowPrinted {
+  const found = configDirectory(environment);
+  if (found.outcome === "unset") return { stdout: "", stderr: failureLine(`allowed nothing: ${found.reason}`) };
+  // A person without Claude Code has no use for its settings, so none are created.
+  if (!isDirectory(found.directory)) {
+    return { stdout: `squiz: allowed nothing: Claude Code's configuration was not found at ${found.directory}\n`, stderr: "" };
   }
-  const file = join(home, ".claude", "settings.json");
+  const file = join(found.directory, "settings.json");
   const refuse = (why: string): AllowPrinted => ({ stdout: "", stderr: failureLine(`allowed nothing in ${file}: ${why}`) });
 
   let text: string | undefined;
@@ -73,7 +81,7 @@ function write(file: string, text: string): void {
     real = realpathSync.native(file);
     mode = statSync(real).mode & 0o777;
   } catch {
-    mkdirSync(dirname(file), { recursive: true });
+    // No file yet: it is created in the directory the caller found.
   }
   const beside = `${real}.squiz-${process.pid}`;
   writeFileSync(beside, text, { encoding: "utf8", mode });
@@ -92,6 +100,35 @@ function kindOf(value: unknown): string {
 
 function listed(rules: readonly string[]): string {
   return rules.length === 1 ? rules[0] ?? "" : `${rules.slice(0, -1).join(", ")} and ${rules.at(-1) ?? ""}`;
+}
+
+/**
+ * The directory Claude Code reads its user settings from: `CLAUDE_CONFIG_DIR`
+ * where it is set, and `~/.claude` otherwise. An empty value counts as unset.
+ */
+function configDirectory(
+  environment: ClaudeEnvironment,
+): { readonly outcome: "found"; readonly directory: string } | { readonly outcome: "unset"; readonly reason: string } {
+  const configured = environment.CLAUDE_CONFIG_DIR;
+  if (configured !== undefined && configured !== "") {
+    if (!isAbsolute(configured)) {
+      return { outcome: "unset", reason: `CLAUDE_CONFIG_DIR is ${JSON.stringify(configured)}, which is not an absolute path` };
+    }
+    return { outcome: "found", directory: configured };
+  }
+  const home = environment.HOME;
+  if (home === undefined || !isAbsolute(home)) {
+    return { outcome: "unset", reason: "neither CLAUDE_CONFIG_DIR nor HOME is set, so Claude Code's configuration cannot be found" };
+  }
+  return { outcome: "found", directory: join(home, ".claude") };
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /** Whether anything is at `path` itself, a link included whatever it points at. */

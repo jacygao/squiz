@@ -61,7 +61,8 @@ squiz too, type `! squiz init` there instead of the last line.
 Let the coding agent run its three `squiz` commands without asking.
 
 Claude Code: `squiz init` has already done this, for every project. It adds
-these rules to your own `~/.claude/settings.json`, beside any rules already
+these rules to your own `~/.claude/settings.json`, or to
+`$CLAUDE_CONFIG_DIR/settings.json` if you set that, beside any rules already
 there:
 
 ```json
