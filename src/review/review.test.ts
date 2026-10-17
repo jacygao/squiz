@@ -552,6 +552,23 @@ test("a run on a closed episode prints the close, exiting as it did", async () =
   });
 });
 
+test("a run on a closed episode counts the entry an extra round after the cap once wrote as a round (#718)", async () => {
+  await withWorktree(async (fixture) => {
+    // The entry, the record and the mark that extra round wrote.
+    records(fixture, [
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closingRound: true } as StateRecord,
+    ], { closeReported: true, closingRoundDue: true, rounds: [NO_COST, NO_COST, { ...NO_COST, closing: true }] } as Partial<EpisodeState>);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }, [OPEN_THREAD]) }));
+
+    assert.equal(printed.exit, 3, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz's review of PR #41 closed after 3 rounds, with 1 thread open. No round runs again in this worktree.",
+    );
+  });
+});
+
 test("a run on an episode a round closed without its summary prints the recorded failure on stderr (#425)", async () => {
   await withWorktree(async (fixture) => {
     const problem = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
@@ -703,39 +720,5 @@ test("a round host whose start is unknown, with the deadline passed and no host 
 
     assert.equal(printed.exit, 1);
     assert.match(printed.stderr, /could not be told, and none has taken the review since/u);
-  });
-});
-
-test("a run whose queue lost the race for the first state after a cap close waits for the closing round, rather than printing the close (#587)", async () => {
-  await withWorktree(async (fixture) => {
-    const reviewedAt = (number: number) => ({ number, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" as const } });
-    const capClose: StateRecord = {
-      ...LATER,
-      status: "reviewed",
-      result: "exited",
-      exitStatus: 3,
-      openThreads: [OPEN_THREAD.id],
-      closedAt: "round cap",
-      round: reviewedAt(3),
-    };
-    const atCap = { closeReported: true, closingRoundDue: true as const, rounds: [NO_COST, NO_COST, NO_COST] };
-    // Another trigger queued the state first.
-    records(fixture, [capClose, queued(OWN)], atCap);
-    const finished = (async () => {
-      await sleep(POLL_MS * 3);
-      records(fixture, [
-        capClose,
-        { ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], closingRound: true, round: reviewedAt(4) },
-      ], { ...atCap, rounds: [...atCap.rounds, { ...NO_COST, closing: true }] });
-    })();
-
-    const won = decided(fixture, { outcome: "queue", startHost: false });
-    assert.equal(won.outcome, "decided");
-    const lost: Triggered = won.outcome === "decided" ? { ...won, queued: false } : won;
-    const printed = await runReview(request(fixture, { triggered: lost, threads: [{ ...OPEN_THREAD, isResolved: true }] }));
-    await finished;
-
-    assert.equal(printed.exit, 0, printed.stdout + printed.stderr);
-    assert.equal(printed.stdout.split("\n")[1], "Squiz reviewed PR #41 at 3f9c2e0: the closing round, after 3 of 3 rounds.");
   });
 });

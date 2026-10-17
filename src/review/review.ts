@@ -30,8 +30,7 @@ import { readComment } from "../findings/comment.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "../github/threads.ts";
 import type { GhCall } from "../github/gh.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
-import { cappedRounds, closingRoundRan, closingRoundRemains, episodeOver } from "../loop/closing-round.ts";
-import { readState, type EpisodeState } from "../loop/episode-state.ts";
+import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
 import { lastReviewed, namedStates } from "../loop/round-end.ts";
 import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
@@ -223,7 +222,7 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
  * for it has been written. `undefined` once the episode has closed.
  */
 function unqueuedSuccessor(state: EpisodeState, own: StateKey): StateKey | undefined {
-  if (state.closeReported === true && !closingRoundRemains(state)) return undefined;
+  if (state.closeReported === true) return undefined;
   const records = state.records ?? [];
   let record = recordFor(records, own);
   // The count of records ends a loop of states superseding each other.
@@ -407,7 +406,6 @@ function roundResult(
 ): ReviewResult {
   // A record from before records kept the round's number: the count of rounds stands in.
   const round = record.round?.number ?? state.rounds.length;
-  const closing = record.closingRound === true;
   const unposted = record.unposted;
   const lost =
     unposted === undefined
@@ -421,10 +419,8 @@ function roundResult(
     outcome: "reviewed" as const,
     pullRequest: waiting.pullRequest,
     commit: record.head.slice(0, 7),
-    // The closing round is named as one, after the rounds the cap counted.
-    round: closing ? cappedRounds(state.rounds) : round,
+    round,
     cap: waiting.cap,
-    ...(closing ? { closing } : {}),
     newFindings: record.newFindings ?? 0,
     threads: threads.filter((thread) => record.openThreads.includes(thread.id)),
     recorded: waiting.recorded,
@@ -461,8 +457,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
     outcome: "closed",
     pullRequest: context.pullRequest,
     exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
-    rounds: cappedRounds(state.rounds),
-    ...(closingRoundRan(state.rounds) ? { closing: true } : {}),
+    rounds: state.rounds.length,
     threads: left,
     problems: (closing === undefined ? first?.closed.problems : closing.problems) ?? [],
   };

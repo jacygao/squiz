@@ -42,9 +42,7 @@ export type FailureReport = {
  */
 export type ClosedBy =
   | { readonly bound: "round-cap"; readonly roundsRun: number; readonly cap: number }
-  | { readonly bound: "token-bound"; readonly tokens: number; readonly roundsRun: number }
-  /** The closing round has run, and its close posted the summary already. */
-  | { readonly bound: "closing-round" };
+  | { readonly bound: "token-bound"; readonly tokens: number; readonly roundsRun: number };
 
 /**
  * The marker the comment opens with. The dash is part of it: `**Squiz review`
@@ -74,7 +72,6 @@ export function renderFailure(report: FailureReport): string {
  * for a summary to count, so it is promised none.
  */
 export function closedLines(closed: ClosedBy, summary: string): string[] {
-  if (closed.bound === "closing-round") return ["The review is closed: its closing round has run.", "No round runs again."];
   const why =
     closed.bound === "round-cap"
       ? `it has run ${closed.roundsRun} ${closed.roundsRun === 1 ? "round" : "rounds"}, and the round cap allows ${closed.cap}`

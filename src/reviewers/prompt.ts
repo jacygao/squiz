@@ -30,8 +30,6 @@ export type UnderReview = {
    * answer that can disagree.
    */
   readonly threads: readonly ReviewThread[];
-  /** Whether this is the closing round, which asks for verdicts and no findings. */
-  readonly closing?: boolean;
 };
 
 /**
@@ -57,15 +55,9 @@ export function composePrompt(underReview: UnderReview): string {
     "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
     "## Diff",
     block(diff, "diff"),
-    ...(underReview.closing === true ? closingSection : []),
     ...threadSections(threads),
   ].join("\n\n");
 }
-
-const closingSection = [
-  "## Closing round",
-  "The round cap is spent, and this is the review's closing round. Return a verdict on every thread below, and report no findings: a finding reported in this round is not posted.",
-];
 
 /**
  * The threads and the one instruction that goes with them, or nothing at all.
