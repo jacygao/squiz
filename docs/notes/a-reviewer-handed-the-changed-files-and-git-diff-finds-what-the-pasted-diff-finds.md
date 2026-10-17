@@ -138,7 +138,7 @@ round granted then.
   review of a change of hundreds of files is not measured, beyond the one round
   on #714's head.
 - **`pi` is measured on 69 of 102 runs.** The DeepSeek account ran out of
-  balance during the runs: 33 ended on `402 Insufficient Balance` and one on
+  balance during the runs: 32 ended on `402 Insufficient Balance` and one on
   `429` for concurrency, unevenly across prompts. Its column supports the
   Copilot result and settles nothing alone.
 - **Matching a finding to a defect is a judgement.** Patterns over each
