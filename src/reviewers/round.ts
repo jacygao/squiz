@@ -38,7 +38,7 @@ import {
   type Spend,
   unspent,
 } from "./adapter.ts";
-import { type Deadline, deadlineIn } from "./deadline.ts";
+import { awakeDeadlineIn, type Deadline, deadlineIn } from "./deadline.ts";
 import { follow } from "./follow.ts";
 
 /**
@@ -56,7 +56,11 @@ const GRACE_MS = 2_000;
  * spent its window being refused returns the findings of one that had nothing to
  * say, and this is what tells the two apart.
  */
-export type Round = { readonly refusals: number } & (
+export type Round = {
+  readonly refusals: number;
+  /** The time the machine was seen asleep during the review, where it was seen asleep at all. */
+  readonly sleep?: Sleep;
+} & (
   /** The reviewer ran and returned a review. Empty findings is a review that found nothing. */
   | ({ readonly outcome: "reviewed"; readonly cost: Spend } & RoundOutput)
   /**
@@ -100,6 +104,9 @@ export type Round = { readonly refusals: number } & (
       readonly reason: string;
     } & RoundOutput));
 
+/** Milliseconds the machine slept through, and how many of them were added to the bound. */
+export type Sleep = { readonly slept: number; readonly added: number };
+
 /** Where the reviewer may run, and who is told where it did. */
 export type Sessions = {
   /**
@@ -117,7 +124,8 @@ export type Sessions = {
   readonly workspace?: string;
   /**
    * Told where each reviewer started, as soon as it has, with the moment its
-   * bound runs out in whole seconds since the epoch. A throw is ignored.
+   * bound runs out in whole seconds since the epoch, unless the machine sleeps.
+   * A throw is ignored.
    */
   readonly started?: (place: SessionPlace, boundEndsAt: number) => void;
   /** Told why a reviewer's pane could not be confirmed closed after it ended. */
@@ -138,11 +146,13 @@ const STARTS_MS = 15_000;
 const SESSION_BOUND_MS = 5_000;
 
 /**
- * Run one round, at most `seconds` of wall clock for the whole of it.
+ * Run one round, at most `seconds` of the time the machine is awake for the
+ * whole of it.
  *
  * The bound belongs to the round rather than to each attempt, so the retry runs
  * on what the first attempt left and a round that was killed is not tried
- * again. `now` is the clock the bound is read from.
+ * again. A sleep the bound sees while the reviewer runs is added back to it, up
+ * to `seconds` more. `now` is the clock the bound is read from.
  */
 export async function runRound(
   adapter: Adapter,
@@ -151,7 +161,20 @@ export async function runRound(
   sessions: Sessions = { name: "squiz-reviewer" },
   now: () => number = Date.now,
 ): Promise<Round> {
-  const bound = deadlineIn(seconds * 1_000, now);
+  const bound = awakeDeadlineIn(seconds * 1_000, now);
+  const round = await roundWithin(bound, adapter, handed, seconds, sessions, now);
+  const slept = bound.slept();
+  return slept === 0 ? round : { ...round, sleep: { slept, added: bound.added() } };
+}
+
+async function roundWithin(
+  bound: Deadline,
+  adapter: Adapter,
+  handed: Invocation,
+  seconds: number,
+  sessions: Sessions,
+  now: () => number,
+): Promise<Round> {
   const boundEndsAt = Math.ceil((now() + seconds * 1_000) / 1_000);
   // Absolute, so that the reviewer and the round name the same file whatever
   // directory either of them is in.

@@ -8,7 +8,7 @@
  */
 
 import type { FailedRequests } from "../reviewers/adapter.ts";
-import type { Round } from "../reviewers/round.ts";
+import type { Round, Sleep } from "../reviewers/round.ts";
 
 type TimedOut = Extract<Round, { readonly outcome: "timed-out" }>;
 
@@ -17,7 +17,7 @@ const ERROR_LIMIT = 120;
 
 /** The clauses, in the order the line gives them. Empty where squiz saw nothing it can say. */
 export function seenDuring(review: TimedOut): readonly string[] {
-  return [messagesOf(review), failuresOf(review.failedRequests)].filter(
+  return [messagesOf(review), failuresOf(review.failedRequests), sleepOf(review.sleep)].filter(
     (clause): clause is string => clause !== undefined,
   );
 }
@@ -43,6 +43,14 @@ function failuresOf(failed: FailedRequests | undefined): string | undefined {
   const counted = `its provider failed ${failed.count} ${failed.count === 1 ? "request" : "requests"}`;
   if (failed.last === undefined || failed.last.trim() === "") return counted;
   return `${counted}, the last with "${quoted(failed.last)}"`;
+}
+
+function sleepOf(sleep: Sleep | undefined): string | undefined {
+  if (sleep === undefined) return undefined;
+  const seconds = Math.round(sleep.slept / 1_000);
+  if (seconds < 60) return `the machine slept for ${seconds} ${seconds === 1 ? "second" : "seconds"} of the round`;
+  const minutes = Math.round(seconds / 60);
+  return `the machine slept for ${minutes} ${minutes === 1 ? "minute" : "minutes"} of the round`;
 }
 
 /** The error's first line, cut where a failure line could not carry the rest. */

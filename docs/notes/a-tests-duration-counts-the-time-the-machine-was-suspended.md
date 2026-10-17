@@ -21,9 +21,11 @@ recheck-when: Node's major version changes, or a long test duration turns up whi
   machine was suspended and the test was not running. Node counts suspended
   time in a test's duration on macOS, so the duration alone cannot tell the two
   apart.
-- **Leave the round's bounds alone for a suspend.** A round that resumes past its
-  posting reserve posts nothing and says so, as § 7 asks of a reserve that is
-  spent. A suspend spends the reserve the way a slow reviewer does.
+- **Leave the posting reserve alone for a suspend.** A round that resumes past
+  its posting reserve posts nothing and says so, as § 7 asks of a reserve that
+  is spent. A suspend spends the reserve the way a slow reviewer does. The
+  review's own time bound is the exception: a sleep during the review is added
+  back to it, as § 7 The review budget sets out.
 - **Leave the test as it is.** It failed because its clock moved 900 seconds
   while its reviewer ran, not because anything in the round waited.
 
