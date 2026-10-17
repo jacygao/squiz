@@ -23,8 +23,8 @@ const BOUND_MS = 10_000;
 const NUMBER = 41;
 const BRANCH = "feature-a";
 const HEAD = "3f9c2e0a1b2c3d4e5f60718293a4b5c6d7e8f901";
-const standInHost = fileURLToPath(new URL("host-stand-in.ts", import.meta.url));
-const racer = fileURLToPath(new URL("trigger-racer.ts", import.meta.url));
+const standInHost = fileURLToPath(new URL("../testing/host-stand-in.ts", import.meta.url));
+const racer = fileURLToPath(new URL("../testing/trigger-racer.ts", import.meta.url));
 const originalPath = process.env["PATH"] ?? "";
 
 /** A worktree on a branch, a `gh` on PATH answering for it, and where the stand-in host reports. */

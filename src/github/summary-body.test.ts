@@ -716,13 +716,6 @@ test("the reason the comment could not be posted stays out of the summary", () =
   assert.ok(!comment.includes("422"), `GitHub's own words reached the summary: ${comment}`);
 });
 
-/**
- * An episode can close having run no round: the gate found no pull request, or
- * the first round failed before the reviewer ran. There is then no spend to
- * report rather than a spend of nothing.
- */
-// A round the state file recorded with no figures, as a Copilot round the
-// bound stopped is.
 /** The line of a summary of `rounds` that names the reviewer, where there is one. */
 function reviewerLine(rounds: readonly RoundRecord[]): string | undefined {
   return renderSummary({ ...quiet, rounds })

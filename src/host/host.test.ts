@@ -44,7 +44,7 @@ const COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
 
 /** A round an earlier firing ran, as the state file holds it. */
 const EARLIER_ROUND: RoundRecord = { ...COST, reviewer: "pi", elapsedSeconds: 1, head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", raised: 0, ruled: { fixed: 0, withdrawn: 0, open: 0 } };
-const queueRacer = fileURLToPath(new URL("queue-racer.ts", import.meta.url));
+const queueRacer = fileURLToPath(new URL("../testing/queue-racer.ts", import.meta.url));
 
 /** The file under review at the base, ninety-one lines. */
 const BASE_CARD = Array.from({ length: 91 }, (_, at) => `// line ${at + 1}\n`).join("");

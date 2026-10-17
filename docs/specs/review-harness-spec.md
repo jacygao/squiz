@@ -2663,6 +2663,7 @@ src/
   github/                    the pull request, threads, replies, resolve and re-open, summary
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
   measure/                   the rig that runs the real reviewer once over a change with known defects, the changes it runs over, and its summary; no command reaches it
+  testing/                   the stand-ins and processes the tests run; no command reaches it
 docs/specs/                  this document
 docs/notes/                  durable facts learned by building
 ```

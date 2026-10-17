@@ -27,7 +27,7 @@ import { standIn } from "../testing/stand-in.ts";
 const hookModule = new URL("./hook.ts", import.meta.url).href;
 const triggerModule = new URL("../host/trigger.ts", import.meta.url).href;
 const episodeModule = new URL("../loop/episode.ts", import.meta.url).href;
-const standInHost = fileURLToPath(new URL("../host/host-stand-in.ts", import.meta.url));
+const standInHost = fileURLToPath(new URL("../testing/host-stand-in.ts", import.meta.url));
 
 const NUMBER = 41;
 const BRANCH = "feature-a";

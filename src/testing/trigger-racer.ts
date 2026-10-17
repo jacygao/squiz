@@ -12,7 +12,7 @@
 import { fileURLToPath } from "node:url";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { trigger } from "./trigger.ts";
+import { trigger } from "../host/trigger.ts";
 
 type Spec = {
   readonly directory: string;
