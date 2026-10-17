@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { deadlineAt, deadlineIn } from "./deadline.ts";
+import { awakeDeadlineIn, deadlineAt, deadlineIn } from "./deadline.ts";
 
 /**
  * How long a test waits for a bound of 150 ms before calling it unfired.
@@ -179,6 +179,70 @@ test("a loop that yields to nothing is not bounded by a timer", async () => {
     clearInterval(anchor);
   }
 });
+
+/**
+ * A machine that sleeps through a review, which the clock sees as one gap
+ * between two looks as long as the sleep. Seen on 2026-10-07: the round was
+ * killed within a second of waking, its bound spent asleep.
+ */
+test("a sleep the bound sees between two looks is added back to it (#665)", async () => {
+  const anchor = keepTheLoopOpen();
+  try {
+    let clock = 0;
+    const bound = awakeDeadlineIn(10_000, () => clock);
+    let fired = false;
+    const cancel = bound.whenPassed(() => {
+      fired = true;
+    });
+
+    clock = 10_000;
+    await forMilliseconds(LOOKED_MS);
+
+    assert.ok(!fired, "ten seconds asleep spent a bound of ten, which is the round killed on waking");
+    assert.equal(bound.slept(), 10_000);
+    assert.equal(bound.remaining(), 10_000, "the bound has all of its awake time left");
+    cancel();
+  } finally {
+    clearInterval(anchor);
+  }
+});
+
+test("no more than the bound itself is added back, however long the sleep (#665)", async () => {
+  const anchor = keepTheLoopOpen();
+  try {
+    let clock = 0;
+    const bound = awakeDeadlineIn(10_000, () => clock);
+    const fired = new Promise<boolean>((settle) => {
+      bound.whenPassed(() => settle(true));
+    });
+
+    clock = 25_000;
+
+    assert.ok(await Promise.race([fired, after(PATIENCE_MS, false)]), "a round ran past twice its bound");
+    assert.equal(bound.slept(), 25_000, "the sleep is what was seen, whatever was added back");
+    assert.equal(bound.added(), 10_000);
+  } finally {
+    clearInterval(anchor);
+  }
+});
+
+/**
+ * A review that ends on waking, before the watch looks again. The round cancels
+ * the watch as the review ends, and the sleep is still the review's.
+ */
+test("a sleep that ends as the watch is cancelled is still added back (#665)", () => {
+  let clock = 0;
+  const bound = awakeDeadlineIn(10_000, () => clock);
+  const cancel = bound.whenPassed(() => {});
+  clock = 8_000;
+  cancel();
+  assert.equal(bound.slept(), 8_000, "the gap since the last look was dropped when the watch was cancelled");
+  clock = 14_000;
+  assert.ok(!bound.passed(), "the review ended inside its awake time, and the posting reserve counts from there");
+});
+
+/** Long enough for a watch to look again, whose looks are at most 250 ms apart. */
+const LOOKED_MS = 600;
 
 /**
  * A handle that holds the process open.

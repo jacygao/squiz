@@ -2052,6 +2052,47 @@ test("a review whose stop ran past its bound leaves the posting what is left of 
   );
 });
 
+/**
+ * A reviewer that the machine sleeps through for `sleptMs` once the round is
+ * watching its bound, then runs on for `awakeMs` more, and returns `findings`.
+ *
+ * Each move of `clock` waits long enough for the bound to look between them, so
+ * the first is a gap the bound sees as a sleep.
+ */
+function sleptThrough(clock: Clock, sleptMs: number, awakeMs: number, findings: readonly Finding[]): Reviewer {
+  const looked = (): Promise<void> => new Promise((settle) => setTimeout(settle, 400));
+  return {
+    parse: async (reports, progressSoFar): Promise<ParsedRun> => {
+      await looked();
+      clock.at += sleptMs;
+      await looked();
+      clock.at += awakeMs;
+      await looked();
+      return reviews({ findings }).parse(reports, progressSoFar);
+    },
+  };
+}
+
+/**
+ * The review ends past the moment its bound first named, because the bound was
+ * moved on by the sleep. The reserve counts from the moved moment, so the sleep
+ * is not taken off the posting as a stop that overran.
+ */
+test("a round the machine slept through keeps its whole posting reserve (#665)", async () => {
+  const clock = stoppedClock();
+  const ran = await runInFixture({
+    clock,
+    config: { timeout: 10 },
+    postingMs: 1_000,
+    answers: POSTING,
+    reviewer: sleptThrough(clock, 8_000, 4_000, [finding("The flag is never read")]),
+  });
+
+  assert.equal(ran.conclusion.outcome, "block", "the sleep was taken off the posting reserve, so nothing was posted");
+  assert.ok(ran.conclusion.outcome === "block");
+  assert.deepEqual(ran.conclusion.posted, ["PRRT_new"]);
+});
+
 /** How many pages the threads listing is offered before it must stop itself. */
 const OFFERED_PAGES = 30;
 

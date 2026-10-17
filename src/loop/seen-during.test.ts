@@ -49,3 +49,17 @@ test("a failed request with no error is counted without a quote (#494)", () => {
   const [, failures] = seenDuring(killed({ failedRequests: { count: 2, last: undefined } }));
   assert.equal(failures, "its provider failed 2 requests");
 });
+
+test("a killed round the machine slept through names the sleep, last (#665)", () => {
+  assert.deepEqual(seenDuring(killed({ sleep: { slept: 780_400, added: 780_400 } })), [
+    "the reviewer's 21 messages took about 43 seconds each",
+    "the machine slept for 13 minutes of the round",
+  ]);
+});
+
+test("a sleep is named in seconds under a minute, and one minute in words (#665)", () => {
+  const [, short] = seenDuring(killed({ sleep: { slept: 42_000, added: 42_000 } }));
+  assert.equal(short, "the machine slept for 42 seconds of the round");
+  const [, minute] = seenDuring(killed({ sleep: { slept: 61_000, added: 61_000 } }));
+  assert.equal(minute, "the machine slept for 1 minute of the round");
+});

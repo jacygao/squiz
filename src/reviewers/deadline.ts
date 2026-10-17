@@ -56,14 +56,63 @@ export function deadlineIn(milliseconds: number, now: () => number = Date.now): 
  * number, and both sides read the same wall clock.
  */
 export function deadlineAt(at: number, now: () => number = Date.now): Deadline {
-  const passed = (): boolean => now() >= at;
-  const remaining = (): number => Math.max(0, at - now());
+  return watched(() => at, now, () => {});
+}
+
+/**
+ * The longest gap between two looks that is still time the process was running.
+ *
+ * Looks are at most `LOOK_INTERVAL_MS` apart, so a longer gap is a machine that
+ * stopped running anything. Node has no clock that stops while the machine
+ * sleeps: on macOS `Date.now()`, `process.hrtime` and the timers all count it.
+ */
+const SLEPT_GAP_MS = 5_000;
+
+/** A deadline that is not spent while the machine sleeps. */
+export type AwakeDeadline = Deadline & {
+  /** Milliseconds the machine was seen asleep while the deadline was watched. */
+  readonly slept: () => number;
+  /** Milliseconds added to the moment for that sleep, at most the deadline's own length. */
+  readonly added: () => number;
+};
+
+/**
+ * A deadline `milliseconds` from now, moved on by the time the machine sleeps.
+ *
+ * A sleep is seen only as a gap between two of `whenPassed`'s looks, so time
+ * asleep while nothing watches the deadline is spent. What is added back is at
+ * most `milliseconds`, so the deadline never runs past twice its length.
+ */
+export function awakeDeadlineIn(milliseconds: number, now: () => number = Date.now): AwakeDeadline {
+  const start = now() + milliseconds;
+  let slept = 0;
+  const added = (): number => Math.min(slept, milliseconds);
+  const deadline = watched(() => start + added(), now, (gap) => {
+    if (gap > SLEPT_GAP_MS) slept += gap;
+  });
+  return { ...deadline, slept: () => slept, added };
+}
+
+/**
+ * A deadline at the moment `at` returns, which `gapped` may move on.
+ *
+ * `gapped` is told the time since the watch's previous look, before each look
+ * after the first decides whether the moment has passed, and once more when the
+ * watch is cancelled.
+ */
+function watched(at: () => number, now: () => number, gapped: (gap: number) => void): Deadline {
+  const passed = (): boolean => now() >= at();
+  const remaining = (): number => Math.max(0, at() - now());
 
   const whenPassed = (act: () => void): (() => void) => {
     let timer: NodeJS.Timeout | undefined;
     let done = false;
+    let lookedAt: number | undefined;
     const look = (): void => {
       if (done) return;
+      const looking = now();
+      if (lookedAt !== undefined) gapped(looking - lookedAt);
+      lookedAt = looking;
       if (passed()) {
         done = true;
         act();
@@ -76,6 +125,9 @@ export function deadlineAt(at: number, now: () => number = Date.now): Deadline {
     };
     look();
     return (): void => {
+      // The time since the last look was watched too, and a sleep in it is the
+      // watched work's, however it ended.
+      if (!done && lookedAt !== undefined) gapped(now() - lookedAt);
       done = true;
       if (timer !== undefined) clearTimeout(timer);
     };

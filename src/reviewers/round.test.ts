@@ -15,7 +15,7 @@ import { grants } from "./pi/argv.ts";
 import { readReports as parse } from "./pi/reports.ts";
 import { REPORTS_VARIABLE } from "./report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
-import { type Round, runRound } from "./round.ts";
+import { type Round, runRound, type Sessions } from "./round.ts";
 
 /** The round's own `gh` configuration, named relative to the work tree as the harness names it. */
 const githubConfigDirectory = ".squiz/1/rounds/1/gh";
@@ -515,6 +515,48 @@ test("an attempt that ended past the bound is not tried again", async () => {
     assert.equal(round.outcome, "unavailable");
     assert.match(round.outcome === "unavailable" ? round.reason : "", /no time was left/u);
     assert.equal(starts, 1);
+  });
+});
+
+/**
+ * A clock that runs in real time and jumps `sleptMs` forward a moment after the
+ * reviewer starts, which is how a machine that slept through the review looks
+ * from inside the round.
+ */
+function sleepsOnceStarted(sleptMs: number): { readonly now: () => number; readonly sessions: Sessions } {
+  let offset = 0;
+  return {
+    now: () => Date.now() + offset,
+    sessions: {
+      name: "squiz-reviewer",
+      // Moved once the round watches its bound, which is after it is told the reviewer started.
+      started: () => {
+        setTimeout(() => {
+          offset += sleptMs;
+        }, 300);
+      },
+    },
+  };
+}
+
+test("a round the machine slept through reviews rather than being killed on waking (#665)", async () => {
+  await inATree(async (tree) => {
+    const asleep = sleepsOnceStarted(10_000);
+    const late = `setTimeout(() => { ${reviewing} }, 1_200);`;
+    const round = await runRound(reviewer(late).adapter, at(tree), 10, asleep.sessions, asleep.now);
+    assert.equal(round.outcome, "reviewed", "ten seconds asleep spent the whole of a ten-second bound");
+    assert.ok((round.sleep?.slept ?? 0) >= 10_000, `the round saw ${round.sleep?.slept ?? 0}ms of sleep`);
+    assert.equal(round.sleep?.added, 10_000);
+  });
+});
+
+test("a round adds back no more than its bound for a sleep, and is killed past twice its bound (#665)", async () => {
+  await inATree(async (tree) => {
+    const asleep = sleepsOnceStarted(25_000);
+    const round = await runRound(reviewer(silent).adapter, at(tree), 10, asleep.sessions, asleep.now);
+    assert.equal(round.outcome, "timed-out");
+    assert.equal(round.sleep?.added, 10_000);
+    assert.ok((round.sleep?.slept ?? 0) >= 25_000, "the line names the sleep that was seen, not the part added back");
   });
 });
 

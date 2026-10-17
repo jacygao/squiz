@@ -606,8 +606,8 @@ async function reviewOn(
   writeResume(setup.adapter, sessionDirectory, directory, join(ownDirectory, "resume.txt"), setup.resumeUnwritten);
 
   // Everything from here to the last post runs on the posting reserve, which
-  // starts as the review ends.
-  const reserve = startPosting(reviewStarted + seconds * 1_000);
+  // starts as the review ends. A sleep moved that moment on by what it added.
+  const reserve = startPosting(reviewStarted + seconds * 1_000 + (review.sleep?.added ?? 0));
 
   const rulings = rulingsOn(
     review.outcome === "reviewed" ? handedOver : ruledOn(handedOver, review.verdicts),
