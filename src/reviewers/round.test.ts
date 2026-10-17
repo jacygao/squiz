@@ -451,9 +451,14 @@ test("the retry runs on what the first attempt left of the round's bound", async
  * which is what a reader that starved the loop of its turns leaves behind: the
  * timer never ran, and no chunk arrived to read the clock against. There is no
  * round left to retry on, and the reason is the one the attempt gave.
+ *
+ * The round's clock stands still until the read moves it past the bound and
+ * returns in the same turn of the loop, so no timer can see the bound pass
+ * first, however long the reviewer took to start.
  */
 test("an attempt that ended past the bound is not tried again", async () => {
   await inATree(async (tree) => {
+    let clock = 0;
     let starts = 0;
     const starving: Adapter = {
       argv: (invocation) => {
@@ -467,15 +472,15 @@ test("an attempt that ended past the bound is not tried again", async () => {
         };
       },
       parse: async () => {
-        // Microtasks only: the loop never reaches the phase a timer runs on.
-        const until = Date.now() + 400;
-        while (Date.now() < until) await Promise.resolve();
+        // Moved once the round has set its timer, which would see an earlier move and stop the reviewer.
+        await Promise.resolve();
+        clock = 400;
         return { cost: unspent, result: { kind: "unparsed", reason: "nothing there" } };
       },
       confine: handsNothingOver,
       grants,
     };
-    const round = await runRound(starving, at(tree), 0.1);
+    const round = await runRound(starving, at(tree), 0.1, undefined, () => clock);
     assert.equal(round.outcome, "unavailable");
     assert.match(round.outcome === "unavailable" ? round.reason : "", /no time was left/u);
     assert.equal(starts, 1);
