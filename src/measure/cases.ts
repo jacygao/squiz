@@ -621,6 +621,13 @@ export const cases: Readonly<Record<string, Case>> = {
         defect: "No test reaches a valid range that no version matches, so the `null` branches are uncovered and the suite's 100% branch-coverage gate fails.",
         expected: "test",
       },
+      {
+        file: "ranges/max-satisfying.js",
+        line: 15,
+        defect:
+          "Taking the last of a stable sort returns the last of several equal-precedence versions, such as `1.2.3` and `1.2.3+build`, where the running best kept the first. Not planted: the first runs found it.",
+        expected: "reading",
+      },
     ],
   },
   "qs-allowed-keys": {
@@ -662,6 +669,12 @@ export const cases: Readonly<Record<string, Case>> = {
         file: "test/parse.js",
         line: 597,
         defect: "The test asserts only that a result exists and that `d` is not `'4'`, so it passes with the filter removed.",
+        expected: "reading",
+      },
+      {
+        file: "lib/parse.js",
+        line: 141,
+        defect: "An object passed to `parse` skips `parseValues`, so `allowedKeys` filters nothing. Not planted: the first runs found it.",
         expected: "reading",
       },
     ],
@@ -707,8 +720,16 @@ export const cases: Readonly<Record<string, Case>> = {
     description: "marked-config-env.md",
     test: MARKED_TEST,
     chosen:
-      "A command-line feature with no defect known, which tempts a security finding about input the user supplies: an environment variable names a file that is loaded as code, as `--config` already does. The suite passes.",
-    known: [],
+      "A command-line feature which tempts a security finding about input the user supplies: an environment variable names a file that is loaded as code, as `--config` already does. It was planted with no defect, and the first runs found the one listed. The suite passes.",
+    known: [
+      {
+        file: "test/unit/bin.test.js",
+        line: 133,
+        defect:
+          "The `MARKED_CONFIG` test expects the output the `-c` tests before it already configured on the shared `marked` instance, so it passes whether or not the variable's file is loaded.",
+        expected: "reading",
+      },
+    ],
   },
   "semver-options-env": {
     number: 9029,
@@ -717,8 +738,22 @@ export const cases: Readonly<Record<string, Case>> = {
     description: "semver-options-env.md",
     test: SEMVER_TEST,
     chosen:
-      "A command-line feature with no defect known, which tempts a security finding about input the user supplies: an environment variable is parsed as JSON. The suite passes.",
-    known: [],
+      "A command-line feature which tempts a security finding about input the user supplies: an environment variable is parsed as JSON. It was planted with no defect, and the first runs found the two listed. The suite passes.",
+    known: [
+      {
+        file: "test/bin/semver.js",
+        line: 11,
+        defect:
+          "Every CLI test now inherits `SEMVER_OPTIONS` from the environment the suite runs in, so a developer who sets it fails the snapshot tests.",
+        expected: "reading",
+      },
+      {
+        file: "bin/semver.js",
+        line: 20,
+        defect: "An empty `SEMVER_OPTIONS` is read as unset rather than refused as invalid JSON.",
+        expected: "reading",
+      },
+    ],
   },
   "squiz-page-size": {
     number: 9030,
@@ -727,8 +762,16 @@ export const cases: Readonly<Record<string, Case>> = {
     description: "squiz-page-size.md",
     test: SQUIZ_TEST,
     chosen:
-      "A change with no defect known whose reason is GitHub's behaviour, which the reviewer cannot check, and which tempts a finding asking the author to confirm it. The suite passes.",
-    known: [],
+      "A change whose reason is GitHub's behaviour, which the reviewer cannot check, and which tempts a finding asking the author to confirm it. It was planted with no defect, and the first runs found the one listed. The type check passes.",
+    known: [
+      {
+        file: "src/github/threads.ts",
+        line: 143,
+        defect:
+          "The fake `gh` in `src/loop/round.test.ts:759` and `src/host/host.test.ts:404` recognises a thread listing by `reviewThreads(first:100`, so both suites' rounds fail with the smaller page.",
+        expected: "reading",
+      },
+    ],
   },
   "squiz-no-mailmap": {
     number: 9031,

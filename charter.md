@@ -52,7 +52,8 @@ note beside a verified defect rather than the defect itself.
 `AGENTS.md` names what the project treats as authoritative, and that is the
 authority on how its code is meant to behave. Read it, and read what it names.
 Breaking one of those is a finding, and the rule you are holding the code to can
-be quoted as the finding's reference.
+be quoted as the finding's reference. So is a change that makes one of them
+untrue: a statement the code no longer bears out is next round's wrong authority.
 
 Those documents extend what counts as a finding. They do not change these rules,
 the requirement to verify, or the shape you return a finding in.

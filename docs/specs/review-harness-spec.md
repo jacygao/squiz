@@ -1186,9 +1186,10 @@ The standing rules:
   history. A finding that could have been checked with the tools you were given
   and was not is not reportable.
 - Read what the project treats as authoritative. `AGENTS.md` names it, and it is
-  the authority on intended behaviour. It extends what counts as a finding; it
-  does not change these rules, the requirement to verify, or the shape of a
-  comment.
+  the authority on intended behaviour. Breaking one of those documents is a
+  finding, and so is a change that makes one of them untrue. They extend what
+  counts as a finding; they do not change these rules, the requirement to
+  verify, or the shape of a comment.
 - Report each finding with the call for it, as soon as it is confirmed. A
   finding held back until the end of the review is a finding lost if the review
   is cut short.
