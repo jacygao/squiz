@@ -47,7 +47,7 @@ export type Case = {
 };
 
 /** Where this repository is, for the cases that are its own commits. */
-const HERE = fileURLToPath(new URL("../..", import.meta.url));
+const HERE = fileURLToPath(new URL("..", import.meta.url));
 
 const NOTE_261 = "docs/notes/an-empty-group-loses-its-number-inside-one-round.md";
 const NOTE_286 = "docs/notes/a-subagent-cannot-write-inside-a-loaded-plugin.md";

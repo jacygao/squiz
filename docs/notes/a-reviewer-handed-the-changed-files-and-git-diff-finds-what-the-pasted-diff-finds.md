@@ -107,10 +107,10 @@ no longer carries is 484,550, and it read the diff of all 13 changed files.
 
 ```sh
 export MEASURE_CACHE=/tmp/squiz-measure-cases
-node src/measure/review-once.ts prepare
-caffeinate -i node src/measure/review-once.ts qs-comma-limit copilot charter.md /tmp/runs/copilot-list-qs-comma-limit-1
-MEASURE_PROMPT=tool caffeinate -i node src/measure/review-once.ts qs-comma-limit copilot charter.md /tmp/runs/copilot-tool-qs-comma-limit-1
-node src/measure/table.ts /tmp/runs/*/
+node eval/review-once.ts prepare
+caffeinate -i node eval/review-once.ts qs-comma-limit copilot charter.md /tmp/runs/copilot-list-qs-comma-limit-1
+MEASURE_PROMPT=tool caffeinate -i node eval/review-once.ts qs-comma-limit copilot charter.md /tmp/runs/copilot-tool-qs-comma-limit-1
+node eval/table.ts /tmp/runs/*/
 ```
 
 The rig composes the prompt a round composes. `MEASURE_PROMPT=tool` takes the

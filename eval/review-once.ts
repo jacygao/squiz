@@ -2,8 +2,8 @@
  * Run the real reviewer once over one of the measured changes, outside the hook,
  * and summarise what it did.
  *
- *   node src/measure/review-once.ts <case> <pi|copilot> <charter-file> <out-directory>
- *   node src/measure/review-once.ts prepare
+ *   node eval/review-once.ts <case> <pi|copilot> <charter-file> <out-directory>
+ *   node eval/review-once.ts prepare
  *
  * The round is the one the round host runs: the adapter named, with the one
  * grant every round has, thinking `medium`, 900 seconds, in a snapshot of the
@@ -29,13 +29,13 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Reviewer } from "../config/config.ts";
-import { adapterFor } from "../reviewers/adapters.ts";
-import { deadlineIn } from "../reviewers/deadline.ts";
-import { gitDiff } from "../reviewers/git-tools.ts";
-import { composePrompt } from "../reviewers/prompt.ts";
-import { runRound } from "../reviewers/round.ts";
-import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
+import type { Reviewer } from "../src/config/config.ts";
+import { adapterFor } from "../src/reviewers/adapters.ts";
+import { deadlineIn } from "../src/reviewers/deadline.ts";
+import { gitDiff } from "../src/reviewers/git-tools.ts";
+import { composePrompt } from "../src/reviewers/prompt.ts";
+import { runRound } from "../src/reviewers/round.ts";
+import { addSnapshot, removeSnapshot } from "../src/worktree/snapshot.ts";
 import { prepareCase } from "./case-repository.ts";
 import { cases } from "./cases.ts";
 import { shimScript } from "./shim.ts";
@@ -74,7 +74,7 @@ if (
   outArgument === undefined
 ) {
   console.error(
-    `usage: node src/measure/review-once.ts <${Object.keys(cases).join("|")}> <pi|copilot> <charter-file> <out-directory>`,
+    `usage: node eval/review-once.ts <${Object.keys(cases).join("|")}> <pi|copilot> <charter-file> <out-directory>`,
   );
   process.exit(2);
 }
