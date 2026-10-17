@@ -488,8 +488,8 @@ after them.
   ends with a line counting the rest: ``3 more threads are open. `squiz review 41` prints them all.``
 - **A listing that fails leaves a pointer.** Where the threads cannot be listed,
   or the listing holds none of those the round left open, the note counts them
-  and points to `squiz review` instead, and `host.log` says why the listing
-  failed:
+  and points to `squiz review` instead. `host.log` says which of the two it
+  was, and for a failed listing, why it failed:
 
   ```
   text=Squiz reviewed PR #41 at 3f9c2e0: 2 threads are open. Run `squiz review 41` to read them.

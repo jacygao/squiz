@@ -72,7 +72,7 @@ function textOf(
       if (record.result === "clean, episode open") return undefined;
       const reviewed = `Squiz reviewed PR #${pullRequest} at ${at}`;
       if (record.openThreads.length === 0) return `${reviewed}: nothing is open, and the episode has closed. Run ${review} to read the close.`;
-      const open = (listed ?? []).filter((thread) => !thread.isResolved && record.openThreads.includes(thread.id));
+      const open = threadsToPrint(record.openThreads, listed ?? []);
       const counted = open.length > 0 ? open.length : record.openThreads.length;
       const heading =
         record.exitStatus === 2
@@ -97,6 +97,11 @@ function textOf(
     case "not reviewed":
       return `Squiz did not review PR #${pullRequest} at ${at}: ${sentence(record.reason)}`;
   }
+}
+
+/** The threads of `listed` that are among `openThreads` and still open, in the listing's order. */
+export function threadsToPrint(openThreads: readonly string[], listed: readonly ReviewThread[]): readonly ReviewThread[] {
+  return listed.filter((thread) => !thread.isResolved && openThreads.includes(thread.id));
 }
 
 function threads(count: number): string {

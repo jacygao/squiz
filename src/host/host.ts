@@ -58,7 +58,7 @@ import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
-import { ownerNote } from "./owner-note.ts";
+import { ownerNote, threadsToPrint } from "./owner-note.ts";
 import { wakeOwner } from "./wake.ts";
 
 // Each `ps` run that tells whether the lock's holder is still running.
@@ -296,6 +296,9 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
       log(`${named(record)}: the threads could not be listed for its note: ${listed.reason}`);
     }
     const threads = listed !== undefined && "threads" in listed ? listed.threads : undefined;
+    if (threads !== undefined && record.status === "reviewed" && record.result === "exited" && threadsToPrint(record.openThreads, threads).length === 0) {
+      log(`${named(record)}: none of the threads the round left open is open on PR #${episode.id}, so its note points to squiz review`);
+    }
     const note = ownerNote(Number(episode.id), record, name, closed, threads);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);

@@ -1139,6 +1139,21 @@ test("a round whose threads cannot be listed for the note writes one that points
   assert.match(ran.log, /the threads could not be listed for its note: .*no answer fixtured for node/u);
 });
 
+test("a round whose listing holds none of the threads it left open writes a note that points to squiz review, and host.log says why", async () => {
+  // The default listing is empty, so it never holds the thread the round opens.
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    findings: [[finding("The name says nothing.")]],
+  });
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz reviewed PR #${PULL_REQUEST} at ${short}: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
+  );
+  assert.match(ran.log, new RegExp(`${short}.*: none of the threads the round left open is open on PR #${PULL_REQUEST}, so its note points to squiz review`, "u"));
+});
+
 test("a round that closes the episode with nothing open writes its owner a note with no subagent field, which points to squiz review", async () => {
   const ran = await host({ records: (fixture) => [queued(fixture.head(), null, MAIN)] });
 
