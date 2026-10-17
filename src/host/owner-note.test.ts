@@ -9,7 +9,17 @@ const HEAD = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
 const OWNER: Owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
 
 function reviewed(exitStatus: 2 | 3, openThreads: readonly string[]): StateRecord {
-  return { head: HEAD, activity: null, owner: OWNER, status: "reviewed", result: "exited", exitStatus, openThreads };
+  return {
+    head: HEAD,
+    activity: null,
+    owner: OWNER,
+    status: "reviewed",
+    result: "exited",
+    exitStatus,
+    openThreads,
+    round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+    newFindings: openThreads.length,
+  };
 }
 
 function thread(id: string, line: number, headline: string, isResolved = false): ReviewThread {

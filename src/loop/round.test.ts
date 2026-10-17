@@ -211,6 +211,16 @@ type Ran = {
 
 const ANSWER_COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
 
+/** A round an earlier firing ran on the head, which raised and ruled nothing. */
+const EARLIER_ROUND: RoundRecord = {
+  ...ANSWER_COST,
+  reviewer: "pi",
+  elapsedSeconds: 1,
+  head: HEAD_SHA,
+  raised: 0,
+  ruled: { fixed: 0, withdrawn: 0, open: 0 },
+};
+
 /**
  * A reviewer that returns a review.
  *
@@ -752,7 +762,9 @@ function stateIn(source: string | null): EpisodeState | null {
  * The bound that cut a round short stays out too, and the tests about it read it
  * off the state itself.
  */
-function untimed(state: EpisodeState | null): EpisodeState | null {
+function untimed(
+  state: EpisodeState | null,
+): (Omit<EpisodeState, "rounds"> & { readonly rounds: readonly Partial<RoundCost>[] }) | null {
   if (state === null) return null;
   return {
     ...state,
@@ -1136,7 +1148,7 @@ test("a second episode's first round is handed the threads already on the pull r
  */
 test("a person's thread is not handed over, and an episode closes with one still open", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1175,7 +1187,7 @@ test("a person's thread is not handed over, and an episode closes with one still
  */
 test("a verdict naming a person's thread is reported unapplied and reaches nothing", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1248,7 +1260,7 @@ test("the reviewer's session directory exists before it starts", async () => {
 
 test("a later round hands over the reviewer's threads with their state and applies the verdicts", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1280,7 +1292,7 @@ test("a later round hands over the reviewer's threads with their state and appli
 
 test("a round that leaves nothing open closes the episode", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1311,7 +1323,7 @@ test("a last round posts one comment carrying the summary it composed", async ()
   const ran = await runInFixture({
     config: { rounds: 2 },
     // One round recorded, so this round is the second and the last the cap allows.
-    rounds: [{ ...ANSWER_COST, reviewer: "pi" }],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1349,8 +1361,7 @@ test("a last round posts one comment carrying the summary it composed", async ()
       "",
       "**Rounds**",
       "",
-      // The fixture's state names no work for the round it seeded.
-      "- Round 1: not recorded",
+      "- Round 1 at 0f1e2d3: found nothing new and ruled on nothing",
       `- Round 2 at ${(ran.state?.rounds[1]?.head ?? "").slice(0, 7)}: raised nothing, and ruled 1 open`,
       "",
       "**Notes**",
@@ -1439,7 +1450,7 @@ test("a round that blocks posts no summary", async () => {
  */
 test("a summary gh refused does not turn the close into a failed round", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     // No summary answer, so the fake exits 1 exactly as a gh that could not post.
     answers: {
       prlist: PR_LIST,
@@ -1510,8 +1521,8 @@ test("a second episode on the same pull request posts a second comment and edits
   };
   const reviewer = reviews({ verdicts: [{ thread: "PRRT_one", verdict: "fixed" }] });
 
-  const first = await runInFixture({ rounds: [ANSWER_COST], answers, reviewer });
-  const second = await runInFixture({ rounds: [ANSWER_COST], answers, reviewer });
+  const first = await runInFixture({ rounds: [EARLIER_ROUND], answers, reviewer });
+  const second = await runInFixture({ rounds: [EARLIER_ROUND], answers, reviewer });
 
   for (const [at, ran] of [first, second].entries()) {
     const episode = `episode ${at + 1}`;
@@ -1566,7 +1577,7 @@ test("a round that reached the token bound closes the episode", async () => {
     config: { rounds: 8, tokens: 400_000 },
     // A round under the bound already recorded, so the round that reaches it is
     // the one just run rather than the one the state file held.
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1801,7 +1812,7 @@ test("a round that posted what it salvaged is still a failed round", async () =>
 test("the verdicts a failed round reported are applied, and no other thread is touched", async () => {
   const ran = await runInFixture({
     config: { timeout: 1 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -1838,7 +1849,7 @@ test("a round that reported nothing before it failed posts only its failure comm
   const ran = await runInFixture({
     config: { timeout: 1 },
     // Round 2, so a thread was handed over for a verdict the reviewer never gave.
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       ...POSTING,
       threads: listed([{ id: "PRRT_two", isResolved: true }]),
@@ -2161,7 +2172,7 @@ test("the calls before the review share one deadline, and the part ends inside i
     preReviewMs: 1_000,
     delays: { prlist: "0.2", threads: "0.5" },
     // A round the listing runs for, which is every round after the first.
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: { ...POSTING, threads: listed([]) },
     sequences: {
       threads: Array.from({ length: OFFERED_PAGES }, (_, at) => listedPage(`cursor-${at + 1}`)),
@@ -2319,7 +2330,7 @@ test("a cap already spent closes the episode before a reviewer is started", asyn
     config: { rounds: 3 },
     // Three rounds recorded and the episode firing again, which is what an
     // interruption after a round recorded its cost leaves behind.
-    rounds: [ANSWER_COST, ANSWER_COST, ANSWER_COST],
+    rounds: [EARLIER_ROUND, EARLIER_ROUND, EARLIER_ROUND],
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
@@ -2398,7 +2409,7 @@ test("#606: a close before the review names the findings no thread holds that th
   const ran = await runInFixture({
     config: { rounds: 2 },
     stateSource: JSON.stringify({
-      rounds: [ANSWER_COST, ANSWER_COST],
+      rounds: [EARLIER_ROUND, EARLIER_ROUND],
       spentOutsideRounds: unspent,
       records: [
         {
@@ -2409,6 +2420,7 @@ test("#606: a close before the review names the findings no thread holds that th
           exitStatus: 2,
           openThreads: ["PRRT_new"],
           round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+          newFindings: 0,
           unthreaded: [left],
         },
         {
@@ -2439,7 +2451,7 @@ test("#606: a round that reviews and closes settles an earlier round's findings 
   const ran = await runInFixture({
     config: { rounds: 2 },
     stateSource: JSON.stringify({
-      rounds: [ANSWER_COST],
+      rounds: [EARLIER_ROUND],
       spentOutsideRounds: unspent,
       records: [
         {
@@ -2450,6 +2462,7 @@ test("#606: a round that reviews and closes settles an earlier round's findings 
           exitStatus: 2,
           openThreads: [],
           round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+          newFindings: 0,
           unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
         },
       ],
@@ -2517,7 +2530,7 @@ test("#627: a close before the review counts a thread an earlier round withdrew 
 test("#627: a round's rulings are on record before its verdicts reach the pull request", async () => {
   const ran = await runInFixture({
     config: { rounds: 3 },
-    stateSource: JSON.stringify({ rounds: [ANSWER_COST], spentOutsideRounds: unspent, rulings: { PRRT_argued: "fixed" } }),
+    stateSource: JSON.stringify({ rounds: [EARLIER_ROUND], spentOutsideRounds: unspent, rulings: { PRRT_argued: "fixed" } }),
     answers: { ...POSTING, threads: listed([{ id: "PRRT_argued", isResolved: true }]), resolve: RESOLVED },
     lockStateAfter: "resolve",
     reviewer: reviews({
@@ -2538,7 +2551,7 @@ test("#627: a round's rulings are on record before its verdicts reach the pull r
 test("#627: a close before the review counts a resolved thread with no fixed or withdrawn ruling on record apart", async () => {
   const ran = await runInFixture({
     config: { rounds: 1 },
-    stateSource: JSON.stringify({ rounds: [ANSWER_COST], spentOutsideRounds: unspent, rulings: { PRRT_kept: "open" } }),
+    stateSource: JSON.stringify({ rounds: [EARLIER_ROUND], spentOutsideRounds: unspent, rulings: { PRRT_kept: "open" } }),
     answers: {
       ...POSTING,
       threads: listed([
@@ -2642,7 +2655,7 @@ test("a bound spent before any round ran, with a thread of the reviewer's, posts
 test("a cap already spent whose threads cannot be listed fails, and records no close", async () => {
   const ran = await runInFixture({
     config: { rounds: 1 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: { ...POSTING, threads: "not a response" },
     postsFailure: false,
     reviewer: reviews({}),
@@ -2748,7 +2761,7 @@ test("a lock nobody can read runs no review, and says why", async () => {
 test("a firing after an episode closed below its cap reviews nothing, whatever the cap allows", async () => {
   const closed = await runInFixture({
     config: { rounds: 3 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -2791,7 +2804,7 @@ test("a firing after an episode closed below its cap reviews nothing, whatever t
 test("a close before the review records itself, and its summary is not posted twice", async () => {
   const first = await runInFixture({
     config: { rounds: 1 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: POSTING,
     reviewer: reviews({}),
   });
@@ -2826,7 +2839,7 @@ test("a close before the review records itself, and its summary is not posted tw
 test("a close that could not record itself posts no summary, and the next firing closes it", async () => {
   const ran = await runInFixture({
     config: { rounds: 2 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: POSTING,
     lockStateAfter: "lookup",
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
@@ -2870,7 +2883,7 @@ test("a close that could not record itself posts no summary, and the next firing
 test("a cap already spent whose close could not be recorded posts nothing, and the next firing closes it (#495)", async () => {
   const ran = await runInFixture({
     config: { rounds: 1 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: POSTING,
     lockStateAfter: "threads",
     heldByHost: true,
@@ -2898,10 +2911,10 @@ test("a cap already spent whose close could not be recorded posts nothing, and t
 });
 
 test("an exhausted cap whose last recorded round failed closes the episode too", async () => {
-  const killed: RoundCost = { dollars: 0, tokens: 0, messages: 0 };
+  const killed: RoundRecord = { ...EARLIER_ROUND, dollars: 0, tokens: 0, messages: 0 };
   const ran = await runInFixture({
     config: { rounds: 2 },
-    rounds: [ANSWER_COST, killed],
+    rounds: [EARLIER_ROUND, killed],
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
@@ -2918,7 +2931,7 @@ test("an exhausted cap whose last recorded round failed closes the episode too",
 test("a recorded round that reached the token bound closes the episode before a reviewer is started", async () => {
   const ran = await runInFixture({
     config: { rounds: 8, tokens: 400_000 },
-    rounds: [ANSWER_COST, { dollars: 0.5, tokens: 400_000, messages: 40 }],
+    rounds: [EARLIER_ROUND, { ...EARLIER_ROUND, dollars: 0.5, tokens: 400_000, messages: 40 }],
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
@@ -2931,7 +2944,7 @@ test("a recorded round that reached the token bound closes the episode before a 
 // A model no price catalogue covers reports its tokens against no dollars, which
 // is the configuration a dollar bound could not see at all.
 test("a round priced at nothing is bounded by its tokens all the same", async () => {
-  const unpriced: RoundCost = { dollars: 0, tokens: 400_000, messages: 40 };
+  const unpriced: RoundRecord = { ...EARLIER_ROUND, dollars: 0, tokens: 400_000, messages: 40 };
   const ran = await runInFixture({
     config: { rounds: 8, tokens: 400_000 },
     rounds: [unpriced],
@@ -3414,7 +3427,7 @@ test("a failed round posts one failure comment after what it salvaged, naming th
 test("#544: a failed round that was the last the cap allows says the review closed", async () => {
   const ran = await runInFixture({
     config: { timeout: 1, rounds: 2 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: FAILING,
     reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
   });
@@ -3627,7 +3640,7 @@ const MUTATION_REFUSED = included(
 test("a last round names in its summary each ruling it could not apply (#605)", async () => {
   const ran = await runInFixture({
     config: { rounds: 2 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -3657,7 +3670,7 @@ test("a last round names in its summary each ruling it could not apply (#605)", 
 test("a failed round names each ruling it could not apply in its failure comment and on stderr (#605)", async () => {
   const ran = await runInFixture({
     config: { timeout: 1 },
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -3703,7 +3716,7 @@ function replyBody(call: Call | undefined): string {
 
 test("a round replies on each thread it closes before resolving it, and records what it ruled (#586)", async () => {
   const ran = await runInFixture({
-    rounds: [ANSWER_COST],
+    rounds: [EARLIER_ROUND],
     answers: {
       prlist: PR_LIST,
      
@@ -3742,7 +3755,7 @@ test("a round replies on each thread it closes before resolving it, and records 
   assert.match(
     summary,
     new RegExp(
-      `\\*\\*Rounds\\*\\*\\n\\n- Round 1: not recorded\\n- Round 2 at ${short}: raised nothing, and ruled 1 fixed and 1 withdrawn$`,
+      `\\*\\*Rounds\\*\\*\\n\\n- Round 1 at 0f1e2d3: found nothing new and ruled on nothing\\n- Round 2 at ${short}: raised nothing, and ruled 1 fixed and 1 withdrawn$`,
       "u",
     ),
   );
@@ -3799,7 +3812,7 @@ test("a close lists an earlier round's refused closing replies from the state fi
   const lost =
     "`src/ui/card.ts:40` — The cap is never read (ruled fixed, and the reviewer's reply could not be posted on its thread)";
   const ran = await runInFixture({
-    rounds: [{ ...ANSWER_COST, head: HEAD_SHA, raised: 1, ruled: { fixed: 1, withdrawn: 0, open: 0 }, unpostedReplies: [lost] }],
+    rounds: [{ ...EARLIER_ROUND, raised: 1, ruled: { fixed: 1, withdrawn: 0, open: 0 }, unpostedReplies: [lost] }],
     answers: {
       prlist: PR_LIST,
      

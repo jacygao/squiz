@@ -20,7 +20,7 @@ import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 import { isReviewer, type Reviewer } from "../config/config.ts";
 import type { Verdict } from "../findings/status.ts";
-import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
+import type { RoundCost, Spend } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
 import { makeEpisodeDirectory } from "./state-directory.ts";
 import { type StateKey, type StateRecord, recordFrom, recordFor } from "./state-record.ts";
@@ -34,9 +34,6 @@ import { type StateKey, type StateRecord, recordFrom, recordFor } from "./state-
  * A round with no cost carries no figure of any kind, rather than zeros that
  * would read back as a round that spent nothing. It names no model either,
  * because a run names its models only where it reports its spend.
- *
- * A file written before the timings, the reviewer or the work were recorded
- * carries none of them, so a reader takes none as given.
  */
 export type RoundRecord = (RoundCost | NoCost) & Timings & RoundWork;
 
@@ -51,14 +48,14 @@ export type RulingCounts = { readonly fixed: number; readonly withdrawn: number;
  */
 export type RoundWork = {
   /** The full head commit of the state the round reviewed. */
-  readonly head?: string;
+  readonly head: string;
   /** How many findings the reviewer reported, posted or not. */
-  readonly raised?: number;
+  readonly raised: number;
   /**
    * The rulings the round set out to reply with: each thread it closed while
    * open, and each it kept open with a reason.
    */
-  readonly ruled?: RulingCounts;
+  readonly ruled: RulingCounts;
   /**
    * The Notes lines of the replies on threads the round closed that could not
    * be posted. Absent where none failed.
@@ -77,9 +74,9 @@ export type RoundWork = {
  */
 export type Timings = {
   /** The reviewer CLI the round ran, as `.squiz.json` names it. */
-  readonly reviewer?: Reviewer;
+  readonly reviewer: Reviewer;
   /** Wall-clock seconds from starting the reviewer to having it stopped, to a tenth. */
-  readonly elapsedSeconds?: number;
+  readonly elapsedSeconds: number;
   /**
    * The time bound, in whole seconds, where the bound ended a review the reviewer
    * had not finished. Absent on a review that finished on its own, including one
@@ -141,19 +138,16 @@ export type EpisodeState = {
    * Whether a firing of this episode has reported its close: the summary comment
    * posted, or the failure to post it announced.
    *
-   * Absent is no, which is what a file written before this field existed says.
-   * The rounds alone cannot stand in for it. A firing that finds the bound spent
-   * cannot tell an episode whose last round closed it from one whose last round
-   * left threads open under a cap that has since been lowered, and those two want
-   * opposite answers: silence, and a line saying the episode closed with no
-   * summary.
+   * Absent is no. The rounds alone cannot stand in for it. A firing that finds
+   * the bound spent cannot tell an episode whose last round closed it from one
+   * whose last round left threads open under a cap that has since been lowered,
+   * and those two want opposite answers: silence, and a line saying the episode
+   * closed with no summary.
    */
   readonly closeReported?: boolean;
   /**
    * One record for each state of the pull request a trigger has queued, oldest
-   * first. No two are for the same state.
-   *
-   * Absent is none, which is what a file written before records were kept holds.
+   * first. No two are for the same state. Absent is none.
    */
   readonly records?: readonly StateRecord[];
   /**
@@ -365,7 +359,7 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     rounds.push(round.round);
   }
 
-  const outside = spentOutsideRoundsIn(parsed, path);
+  const outside = spentOutsideRoundsIn(parsed);
   if ("problem" in outside) return unreadable(`${path}: ${outside.problem}`);
 
   const reported = parsed["closeReported"];
@@ -433,14 +427,12 @@ function recordsIn(parsed: Record<string, unknown>): ReadRecords {
 /**
  * What the file says was spent outside its rounds.
  *
- * Absent is nothing, which is what a file written before this figure existed
- * means. A figure that is there and cannot be read is a failure like any other:
+ * A figure that is missing or cannot be read is a failure like any other:
  * standing it in for zero would understate what the episode has spent, and the
  * token bound would then let it spend past a bound it had reached.
  */
-function spentOutsideRoundsIn(parsed: Record<string, unknown>, path: string): ReadCost {
+function spentOutsideRoundsIn(parsed: Record<string, unknown>): ReadCost {
   const spent = parsed["spentOutsideRounds"];
-  if (spent === undefined) return { cost: unspent };
   const read = costFrom(spent);
   if ("problem" in read) return { problem: `"spentOutsideRounds" ${read.problem}` };
   return read;
@@ -451,12 +443,11 @@ type ReadCost = { readonly cost: RoundCost } | { readonly problem: string };
 type ReadRound = { readonly round: RoundRecord } | { readonly problem: string };
 
 /**
- * One round's entry: its cost, and whatever timing the file carries for it.
+ * One round's entry: its cost, its timings and its work.
  *
- * Timing that is absent is a file written before it was recorded. Timing that is
- * there and cannot be read is a failure, because the cut it records is what the
- * summary reports, and dropping it would report a review cut short as one that
- * finished.
+ * A field the writer always writes that is missing, or any field that cannot be
+ * read, is a failure. The cut is what the summary reports, and dropping it would
+ * report a review cut short as one that finished.
  */
 function roundFrom(entry: unknown): ReadRound {
   if (!isRecord(entry)) return { problem: `is ${render(entry)} rather than a JSON object` };
@@ -464,7 +455,7 @@ function roundFrom(entry: unknown): ReadRound {
   if ("problem" in read) return read;
 
   const elapsed = entry["elapsedSeconds"];
-  if (elapsed !== undefined && !isAmount(elapsed)) {
+  if (!isAmount(elapsed)) {
     return { problem: `has "elapsedSeconds" as ${render(elapsed)}` };
   }
   const cut = entry["cutShortAtSeconds"];
@@ -476,7 +467,7 @@ function roundFrom(entry: unknown): ReadRound {
     return { problem: `has "postingSeconds" as ${render(posting)}` };
   }
   const reviewer = entry["reviewer"];
-  if (reviewer !== undefined && !isReviewer(reviewer)) {
+  if (!isReviewer(reviewer)) {
     return { problem: `has "reviewer" as ${render(reviewer)}` };
   }
 
@@ -485,8 +476,8 @@ function roundFrom(entry: unknown): ReadRound {
 
   return {
     round: roundRecord(read.cost, {
-      ...(reviewer === undefined ? {} : { reviewer }),
-      ...(elapsed === undefined ? {} : { elapsedSeconds: elapsed }),
+      reviewer,
+      elapsedSeconds: elapsed,
       ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
       ...(posting === undefined ? {} : { postingSeconds: posting }),
       ...work.work,
@@ -497,20 +488,19 @@ function roundFrom(entry: unknown): ReadRound {
 /**
  * What a round's entry says it reviewed and ruled.
  *
- * A field that is absent is a file written before it was recorded. One that is
- * there and cannot be read is a failure, because the summary would list the
- * round by a figure nobody wrote.
+ * A field that is missing or cannot be read is a failure, because the summary
+ * would list the round by a figure nobody wrote.
  */
 function workFrom(entry: Record<string, unknown>): { readonly work: RoundWork } | { readonly problem: string } {
   const head = entry["head"];
-  if (head !== undefined && (typeof head !== "string" || head === "")) {
+  if (typeof head !== "string" || head === "") {
     return { problem: `has "head" as ${render(head)}` };
   }
   const raised = entry["raised"];
-  if (raised !== undefined && !isTally(raised)) return { problem: `has "raised" as ${render(raised)}` };
+  if (!isTally(raised)) return { problem: `has "raised" as ${render(raised)}` };
 
   const ruled = entry["ruled"];
-  const counts = ruled === undefined ? undefined : rulingCountsFrom(ruled);
+  const counts = rulingCountsFrom(ruled);
   if (counts === null) return { problem: `has "ruled" as ${render(ruled)}` };
 
   const unposted = entry["unpostedReplies"];
@@ -526,9 +516,9 @@ function workFrom(entry: Record<string, unknown>): { readonly work: RoundWork } 
   }
   return {
     work: {
-      ...(head === undefined ? {} : { head }),
-      ...(raised === undefined ? {} : { raised }),
-      ...(counts === undefined ? {} : { ruled: counts }),
+      head,
+      raised,
+      ruled: counts,
       ...(unposted === undefined ? {} : { unpostedReplies: unposted as readonly string[] }),
       ...(unread === undefined ? {} : { unread: unread as readonly string[] }),
     },

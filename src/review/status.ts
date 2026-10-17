@@ -224,7 +224,7 @@ function lineOf(episode: Episode, record: StateRecord, options: StatusOptions, p
       const started = record.reviewer?.process.startedAt ?? record.host.startedAt;
       const { reviewer } = record;
       const session =
-        reviewer === undefined ? NONE : sessionOf(reviewer, episode, record.round?.number);
+        reviewer === undefined ? NONE : sessionOf(reviewer, episode, record.round.number);
       const presence = options.presence(record.host);
       const times = [record.host.startedAt, started];
       if (presence.outcome === "gone") {
@@ -278,10 +278,11 @@ function outcomeOf(record: StateRecord & { readonly status: "reviewed" }): strin
 /**
  * The backend and the label its pane or window was opened under,
  * `squiz-<number>-r<k>`. A person finds it by that label, never by the
- * backend's own id. Where the round is not known, the backend alone.
+ * backend's own id. A detached reviewer has no label, and is named by its
+ * backend alone.
  */
-function sessionOf(place: ReviewerPlace, episode: Episode, round: number | undefined): string {
-  if (place.backend === "detached" || round === undefined) return place.backend;
+function sessionOf(place: ReviewerPlace, episode: Episode, round: number): string {
+  if (place.backend === "detached") return place.backend;
   return `${place.backend} squiz-${episode.id}-r${round}`;
 }
 /**

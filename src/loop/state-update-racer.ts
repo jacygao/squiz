@@ -29,7 +29,7 @@ const self = read.identity;
 
 function recordFor(index: number): StateRecord {
   const state = { head: `${label}-${index}`, activity: null };
-  return status === "reviewing" ? { ...state, status: "reviewing", host: self } : { ...state, status: "queued" };
+  return status === "reviewing" ? { ...state, status: "reviewing", host: self, round: { number: index + 1 } } : { ...state, status: "queued" };
 }
 
 while (Date.now() < Number(at));

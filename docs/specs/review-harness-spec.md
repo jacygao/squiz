@@ -142,6 +142,16 @@ Each record has one of five statuses:
 A record of a round that started also holds what `squiz status` prints for it
 (§ 6).
 
+**A state file missing a field its writer always writes cannot be read**, and is
+treated as any state file that cannot be read is (§ 7). Those fields are
+`spentOutsideRounds`; each round's `reviewer`, `elapsedSeconds`, `head`, `raised`
+and `ruled` (§ 5); the number of a reviewing record's round; and a reviewed
+record's round and its count of new findings. The reason names the field:
+
+```
+/work/squiz/.squiz/41/state.json: round 1 has "raised" as undefined
+```
+
 **A trigger reads the record for the pull request's state before it queues
 anything.** It has looked up the pull request and listed its threads by then,
 because the state is read from them.
@@ -1701,7 +1711,8 @@ Reviewed by `pi` on `openai/gpt-5-mini`
 - The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
 ```
 
-Notes is omitted when there is nothing to report.
+Notes is omitted when there is nothing to report, and Rounds when the episode ran
+no round.
 
 Each round is written to the episode's local state file as the review finishes,
 before anything is posted. The closing replies it could not post are added when
@@ -1750,8 +1761,9 @@ it records its end, and its posting time once posting ends:
   review read every one, where the review did not finish, and where the
   reviewer's adapter could not say what it read.
 
-A field that is there and does not hold a value of the right kind makes the file
-unreadable, like any other.
+A field this list does not say can be absent that is missing, or a field that
+does not hold a value of the right kind, makes the file unreadable, as § 3 The
+state file sets out.
 
 **The spend line leads with the tokens**, which every reviewer reports. A round
 with no dollar figure, such as a model run on a subscription, adds none, and
@@ -2100,8 +2112,8 @@ Each column holds:
   minute. A reviewing record shows its reviewer's start once the reviewer has
   started, and its round host's start before then.
 - **Elapsed:** the time so far for a review that is running, and the time from
-  start to end for one that finished. A killed review, and a record that holds
-  no round times, show `—`.
+  start to end for one that finished. A killed review, a state no round has
+  started, and a state that failed before a round took it show `—`.
 - **Result:** for a failed state, the reason its failure comment gives. For a
   state not reviewed, why not. For a reviewed state, how many of the reviewer's
   threads it left open, and "review closed" where it closed the episode. Where

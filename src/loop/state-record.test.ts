@@ -21,12 +21,16 @@ const owner = {
   messagingSocket: "/tmp/claude-501/messaging-60517e1f.sock",
 };
 
+/** What every reviewed record carries: its round, and how many threads its findings opened. */
+const reviewed = {
+  round: { number: 1, startedAt: 1_791_000_000, endedAt: 1_791_000_160, reviewer: { backend: "detached" } },
+  newFindings: 0,
+} as const;
+
 /** One record in each of the five states, each carrying every field its state holds. */
 const everyState: readonly StateRecord[] = [
   { head, activity: null, status: "queued", owner, herdrWorkspace: "w2" },
   { head, activity: reply, status: "reviewing", host: { pid: 4012, startedAt: 1_791_000_000 }, round: { number: 3 } },
-  // Written before reviewing records kept the round's number.
-  { head, activity: reply, status: "reviewing", host: { pid: 4012, startedAt: 1_791_000_000 } },
   {
     head,
     activity: reply,
@@ -62,6 +66,7 @@ const everyState: readonly StateRecord[] = [
     exitStatus: 2,
     openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
     owner: { sessionId: owner.sessionId },
+    ...reviewed,
   },
   {
     head,
@@ -71,6 +76,7 @@ const everyState: readonly StateRecord[] = [
     exitStatus: 2,
     openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
     round: { number: 2, startedAt: 1_791_000_000, endedAt: 1_791_000_160, reviewer: { backend: "tmux", pane: "@14" } },
+    newFindings: 1,
   },
   {
     head,
@@ -78,6 +84,7 @@ const everyState: readonly StateRecord[] = [
     status: "reviewed",
     result: "clean, episode open",
     round: { number: 3, startedAt: 1_791_000_000, endedAt: 1_791_000_160, reviewer: { backend: "herdr", pane: "w1-p3" } },
+    newFindings: 0,
   },
   {
     head,
@@ -105,12 +112,12 @@ const everyState: readonly StateRecord[] = [
     result: "exited",
     exitStatus: 3,
     openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
+    ...reviewed,
     newFindings: 2,
     closedAt: "token bound",
     problems: ["the round closed the episode on PR #41 having failed to post the episode's summary: GitHub answered 502"],
   },
-  { head, activity: reply, status: "reviewed", result: "clean, episode open", newFindings: 0 },
-  { head, activity: reply, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1, unposted: { failed: 1, of: 2 } },
+  { head, activity: reply, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], ...reviewed, newFindings: 1, unposted: { failed: 1, of: 2 } },
   // A round that left the episode open, with the findings no thread holds.
   {
     head,
@@ -119,6 +126,7 @@ const everyState: readonly StateRecord[] = [
     result: "exited",
     exitStatus: 2,
     openThreads: ["PRRT_kwDOL7tYbc5abcd1"],
+    ...reviewed,
     newFindings: 1,
     unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
   },
@@ -131,8 +139,7 @@ const everyState: readonly StateRecord[] = [
     lines: ["the failure is posted on PR #41"],
   },
   { head, activity: null, status: "not reviewed", reason: "superseded by 3f9c2e0 with different replies", supersededBy: { head, activity: reply } },
-  // Written before records kept the round, as the next two are.
-  { head, activity: null, status: "reviewed", result: "clean, episode open" },
+  // Failed before a round took it.
   { head, activity: null, status: "failed", reason: "the round host died", ownerNoted: false },
   {
     head: laterHead,
@@ -163,7 +170,7 @@ function roundShape(round: FinishedRound | undefined): string {
 for (const record of everyState) {
   const shape =
     record.status === "reviewing"
-      ? `reviewing ${record.round === undefined ? "with no round number" : `round ${record.round.number}`}${record.reviewer === undefined ? "" : ` by a ${record.reviewer.backend} reviewer`}`
+      ? `reviewing round ${record.round.number}${record.reviewer === undefined ? "" : ` by a ${record.reviewer.backend} reviewer`}`
       : record.status === "reviewed" || record.status === "failed"
         ? `${record.status === "reviewed" ? `reviewed (${record.result})` : "failed"} ${roundShape(record.round)}`
         : record.status;
@@ -194,9 +201,10 @@ const malformed: readonly [string, unknown][] = [
   ["a numeric Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: 2 }],
   // The round host puts it on a herdr command line, where this would be read as a flag.
   ["a Herdr workspace that is not Herdr's shape", { head, activity: null, status: "queued", herdrWorkspace: "--focus" }],
-  ["a reviewing record with no host", { head, activity: null, status: "reviewing" }],
-  ["a host with no start time", { head, activity: null, status: "reviewing", host: { pid: 4012 } }],
-  ["a host whose pid is zero", { head, activity: null, status: "reviewing", host: { pid: 0, startedAt: 1 } }],
+  ["a reviewing record with no host", { head, activity: null, status: "reviewing", round: { number: 1 } }],
+  ["a host with no start time", { head, activity: null, status: "reviewing", host: { pid: 4012 }, round: { number: 1 } }],
+  ["a host whose pid is zero", { head, activity: null, status: "reviewing", host: { pid: 0, startedAt: 1 }, round: { number: 1 } }],
+  ["a reviewing record with no round", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 } }],
   // Status labels the reviewer's tab by this number, so a wrong one names another round's.
   ["a reviewing round that is not an object", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: 3 }],
   ["a reviewing round with no number", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: {} }],
@@ -205,31 +213,33 @@ const malformed: readonly [string, unknown][] = [
   ["a reviewing round numbered with a string", { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: "3" } }],
   [
     "a reviewer on an unknown backend",
-    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, reviewer: { backend: "screen", pane: "1", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },
+    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 1 }, reviewer: { backend: "screen", pane: "1", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },
   ],
   [
     "a tmux reviewer with no window",
-    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, reviewer: { backend: "tmux", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },
+    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 1 }, reviewer: { backend: "tmux", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },
   ],
   [
     "a detached reviewer naming a pane",
-    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, reviewer: { backend: "detached", pane: "1", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },
+    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 1 }, reviewer: { backend: "detached", pane: "1", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3, snapshot: "/t" } },
   ],
   [
     "a reviewer with no time bound",
-    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, reviewer: { backend: "detached", process: { pid: 2, startedAt: 2 }, snapshot: "/t" } },
+    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 1 }, reviewer: { backend: "detached", process: { pid: 2, startedAt: 2 }, snapshot: "/t" } },
   ],
   [
     "a reviewer with no snapshot",
-    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, reviewer: { backend: "detached", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3 } },
+    { head, activity: null, status: "reviewing", host: { pid: 1, startedAt: 1 }, round: { number: 1 }, reviewer: { backend: "detached", process: { pid: 2, startedAt: 2 }, boundEndsAt: 3 } },
   ],
-  ["a reviewed record with no result", { head, activity: null, status: "reviewed" }],
-  ["a reviewed record exiting 1", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 1, openThreads: [] }],
-  ["a reviewed record with no open threads listed", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0 }],
-  ["open threads that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [3] }],
+  ["a reviewed record with no round", { head, activity: null, status: "reviewed", result: "clean, episode open", newFindings: 0 }],
+  ["a reviewed record with no new findings counted", { head, activity: null, status: "reviewed", result: "clean, episode open", round: reviewed.round }],
+  ["a reviewed record with no result", { head, activity: null, ...reviewed, status: "reviewed" }],
+  ["a reviewed record exiting 1", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 1, openThreads: [] }],
+  ["a reviewed record with no open threads listed", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0 }],
+  ["open threads that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [3] }],
   // Clean, episode open has no exit status. One carrying it is a writer that
   // meant something else.
-  ["a clean, episode open record with an exit status", { head, activity: null, status: "reviewed", result: "clean, episode open", exitStatus: 0 }],
+  ["a clean, episode open record with an exit status", { head, activity: null, ...reviewed, status: "reviewed", result: "clean, episode open", exitStatus: 0 }],
   ["a round that is not an object", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: 7 }],
   ["a round starting before the epoch", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: -1, endedAt: 5 } }],
   ["a round ending at a fraction of a second", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, round: { number: 1, startedAt: 1, endedAt: 5.5 } }],
@@ -257,22 +267,22 @@ const malformed: readonly [string, unknown][] = [
   // that dropped it, and status would print no session for it.
   [
     "a reviewed round with no reviewer",
-    { head, activity: null, status: "reviewed", result: "clean, episode open", round: { number: 1, startedAt: 1, endedAt: 2 } },
+    { head, activity: null, ...reviewed, status: "reviewed", result: "clean, episode open", round: { number: 1, startedAt: 1, endedAt: 2 } },
   ],
   [
     "an exited round's reviewer on an unknown backend",
-    { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "screen", pane: "1" } } },
+    { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "screen", pane: "1" } } },
   ],
-  ["new findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: -1 }],
-  ["new findings counted with a fraction", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1.5 }],
-  ["a close at a bound that is neither", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "deadline" }],
+  ["new findings that are not a count", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: -1 }],
+  ["new findings counted with a fraction", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], newFindings: 1.5 }],
+  ["a close at a bound that is neither", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "deadline" }],
   ["a successor with no activity field", { head, activity: null, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: { head: laterHead } }],
   ["a successor that is not an object", { head, activity: null, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: "8d21a4f" }],
-  ["unposted findings that are not a count", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: "1", of: 1 } }],
+  ["unposted findings that are not a count", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: "1", of: 1 } }],
   // More failed than the round posted is a writer that counted something else.
-  ["more unposted findings than the round had", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: 2, of: 1 } }],
-  ["findings no thread holds that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], unthreaded: [1] }],
-  ["problems that are not strings", { head, activity: null, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
+  ["more unposted findings than the round had", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], unposted: { failed: 2, of: 1 } }],
+  ["findings no thread holds that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], unthreaded: [1] }],
+  ["problems that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
   ["failure lines that are not strings", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, lines: "posted" }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.
@@ -307,15 +317,6 @@ test("a field this reader has no name for is ignored", () => {
   });
 });
 
-// Earlier versions kept the move of `HEAD` a round's worktree comparison found.
-// Read, it would still be printed; unreadable, the episode's state would be too.
-test("a record holding a move of HEAD reads without it", () => {
-  const reviewed = { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [] };
-  for (const moved of ["from a detached HEAD at 3f9c2e0 to a detached HEAD at 8d21a4f", 1]) {
-    assert.deepEqual(recordFrom({ ...reviewed, moved }), { record: reviewed }, JSON.stringify(moved));
-  }
-});
-
 test("the same head and the same activity are the same state", () => {
   assert.equal(sameState({ head, activity: reply }, { head, activity: reply }), true);
   assert.equal(sameState({ head, activity: null }, { head, activity: null }), true);
@@ -336,7 +337,7 @@ test("a new commit is a new state, whatever the activity", () => {
 
 test("the record for a state is found by its head and its activity together", () => {
   const records: StateRecord[] = [
-    { head, activity: null, status: "reviewed", result: "clean, episode open" },
+    { head, activity: null, status: "reviewed", result: "clean, episode open", ...reviewed },
     { head, activity: reply, status: "queued" },
   ];
   const key: StateKey = { head, activity: reply };
@@ -346,10 +347,10 @@ test("the record for a state is found by its head and its activity together", ()
 });
 
 test("putting a record replaces the one for its state, in place, and leaves the rest", () => {
-  const first: StateRecord = { head, activity: null, status: "reviewed", result: "clean, episode open" };
+  const first: StateRecord = { head, activity: null, status: "reviewed", result: "clean, episode open", ...reviewed };
   const queued: StateRecord = { head, activity: reply, status: "queued" };
   const records = [first, queued];
-  const reviewing: StateRecord = { head, activity: reply, status: "reviewing", host: { pid: 9, startedAt: 9 } };
+  const reviewing: StateRecord = { head, activity: reply, status: "reviewing", host: { pid: 9, startedAt: 9 }, round: { number: 2 } };
 
   assert.deepEqual(putRecord(records, reviewing), [first, reviewing]);
   assert.deepEqual(records, [first, queued], "the records it was given must not change");

@@ -15,7 +15,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { renderComment } from "../findings/comment.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
-import { writeState, type EpisodeState } from "../loop/episode-state.ts";
+import { writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { StateKey, StateRecord } from "../loop/state-record.ts";
 import type { TriggerDecision } from "../loop/trigger-decision.ts";
@@ -27,6 +27,19 @@ const OWN: StateKey = { head: "3f9c2e0a1b2c3d4e5f60718293a4b5c6d7e8f901", activi
 const LATER: StateKey = { head: "8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258", activity: null };
 const POLL_MS = 20;
 const NO_COST = { dollars: 0, tokens: 0, messages: 0 };
+
+/** A round that spent nothing, raised nothing and ruled on nothing. */
+const ROUND: RoundRecord = {
+  ...NO_COST,
+  reviewer: "pi",
+  elapsedSeconds: 1,
+  head: OWN.head,
+  raised: 0,
+  ruled: { fixed: 0, withdrawn: 0, open: 0 },
+};
+
+/** Round `number` of a reviewed record, run by a detached reviewer. */
+const ran = (number: number) => ({ number, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" as const } });
 
 const OPEN_THREAD: ReviewThread = {
   id: "PRRT_kwDOL7tYbc5abcd1",
@@ -165,7 +178,7 @@ test("a round that ends after a few polls is the run's result, with its threads 
       await sleep(POLL_MS * 3);
       records(fixture, [
         { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-      ], { rounds: [NO_COST] });
+      ], { rounds: [ROUND] });
     })();
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "queue", startHost: false }), threads: [OPEN_THREAD] }));
@@ -182,7 +195,7 @@ test("a round that ends after a few polls is the run's result, with its threads 
 
 test("the run's deadline is the trigger's, so the gate and the listing count against it", async () => {
   await withWorktree(async (fixture) => {
-    records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [] }], { closeReported: true, rounds: [NO_COST] });
+    records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(1) }], { closeReported: true, rounds: [ROUND] });
     const handed: TriggerRequest[] = [];
     const until = deadlineIn(10_000);
 
@@ -199,7 +212,7 @@ test("a state already reviewed is returned at once, as a result the run did not 
   await withWorktree(async (fixture) => {
     records(fixture, [
       { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-    ], { rounds: [NO_COST] });
+    ], { rounds: [ROUND] });
     const started = Date.now();
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }, [OPEN_THREAD]) }));
@@ -222,7 +235,7 @@ const ALREADY_REVIEWED: StateRecord = {
 
 test("#745: a linked worktree takes the round cap from the main worktree's .squiz.json, never its own", async () => {
   await withLinkedWorktree('{"reviewer": "copilot", "rounds": 5}', '{"reviewer": "pi", "rounds": 2}', async (fixture) => {
-    records(fixture, [ALREADY_REVIEWED], { rounds: [NO_COST] });
+    records(fixture, [ALREADY_REVIEWED], { rounds: [ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }, [OPEN_THREAD]) }));
 
@@ -234,7 +247,7 @@ test("#745: a linked worktree takes the round cap from the main worktree's .squi
 
 test("#745: a run whose main worktree has no .squiz.json says on stderr that the defaults are in use, and keeps its outcome", async () => {
   await withLinkedWorktree(null, '{"reviewer": "copilot", "rounds": 5}', async (fixture) => {
-    records(fixture, [ALREADY_REVIEWED], { rounds: [NO_COST] });
+    records(fixture, [ALREADY_REVIEWED], { rounds: [ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }, [OPEN_THREAD]) }));
 
@@ -248,7 +261,7 @@ test("a newer state reviewed while the run waits is not the run's result, and th
   await withWorktree(async (fixture) => {
     records(fixture, [
       reviewing(OWN),
-      { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [] },
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(2) },
     ], { closeReported: false });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
@@ -277,13 +290,13 @@ test("a run whose state waits behind another's round exits 4 naming both", async
 
 test("a state reviewed clean with the episode open waits for the state queued behind it, and returns its threads", async () => {
   await withWorktree(async (fixture) => {
-    records(fixture, [{ ...OWN, status: "reviewed", result: "clean, episode open" }, reviewing(LATER)]);
+    records(fixture, [{ ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) }, reviewing(LATER)]);
     const finished = (async () => {
       await sleep(POLL_MS * 4);
       records(fixture, [
-        { ...OWN, status: "reviewed", result: "clean, episode open" },
+        { ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) },
         { ...LATER, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 2, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-      ], { rounds: [NO_COST, NO_COST] });
+      ], { rounds: [ROUND, ROUND] });
     })();
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
@@ -297,9 +310,9 @@ test("a state reviewed clean with the episode open waits for the state queued be
 test("a state reviewed clean with the episode open returns the close the queue ends on", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [
-      { ...OWN, status: "reviewed", result: "clean, episode open" },
+      { ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) },
       { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: { number: 2, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-    ], { closeReported: true, rounds: [NO_COST, NO_COST] });
+    ], { closeReported: true, rounds: [ROUND, ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
 
@@ -313,7 +326,7 @@ test("a state reviewed clean with the episode open returns the close the queue e
 
 test("a state reviewed clean whose wait runs out before the close exits 4, naming the state under review", async () => {
   await withWorktree(async (fixture) => {
-    records(fixture, [{ ...OWN, status: "reviewed", result: "clean, episode open" }, reviewing(LATER)]);
+    records(fixture, [{ ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) }, reviewing(LATER)]);
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
 
@@ -347,7 +360,7 @@ test("threads that cannot be listed after the round exit 1 with the reason, and 
   await withWorktree(async (fixture) => {
     records(fixture, [
       { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-    ], { rounds: [NO_COST] });
+    ], { rounds: [ROUND] });
 
     const printed = await runReview({
       ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }),
@@ -369,7 +382,7 @@ test("a state left not reviewed by the cap is handed the close, with the line sa
     records(fixture, [
       { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: { number: 3, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
       { ...OWN, status: "not reviewed", reason: "the episode closed at the round cap, after reviewing 8d21a4f" },
-    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
 
@@ -392,7 +405,7 @@ test("a state the cap stopped before a round took it is handed the close, naming
         reason: BEFORE_A_ROUND,
         closed: { exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap" },
       },
-    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
     const printed = await runReview(
       request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }),
@@ -417,7 +430,7 @@ test("a state queued behind the one the cap stopped is handed the same close, na
     records(fixture, [
       { ...taken, status: "not reviewed", reason: BEFORE_A_ROUND, closed: { exitStatus: 0, openThreads: [], closedAt: "round cap" } },
       { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
-    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
 
@@ -455,7 +468,7 @@ test("a state superseded before its round started follows to the state that supe
     records(fixture, [
       { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER },
       { ...LATER, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-    ], { rounds: [NO_COST] });
+    ], { rounds: [ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
 
@@ -503,7 +516,7 @@ test("a state superseded by one no trigger has queued triggers again, and return
       records(fixture, [
         { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER },
         { ...LATER, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-      ], { rounds: [NO_COST] });
+      ], { rounds: [ROUND] });
     })();
 
     const printed = await runReview(run);
@@ -560,7 +573,7 @@ test("a round some of whose findings failed to post keeps its status, and says h
   await withWorktree(async (fixture) => {
     records(fixture, [
       { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, unposted: { failed: 1, of: 2 }, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-    ], { rounds: [NO_COST] });
+    ], { rounds: [ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
 
@@ -586,7 +599,7 @@ test("#606: a round that left threads open prints each of its findings no thread
         ],
         round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
       },
-    ], { rounds: [NO_COST] });
+    ], { rounds: [ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
 
@@ -606,8 +619,8 @@ test("#606: a round that left threads open prints each of its findings no thread
 test("a run on a closed episode prints the close, exiting as it did", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [
-      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap" },
-    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap", newFindings: 0, round: ran(3) },
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }, [OPEN_THREAD]) }));
 
@@ -620,29 +633,12 @@ test("a run on a closed episode prints the close, exiting as it did", async () =
   });
 });
 
-test("a run on a closed episode counts the entry an extra round after the cap once wrote as a round (#718)", async () => {
-  await withWorktree(async (fixture) => {
-    // The entry, the record and the mark that extra round wrote.
-    records(fixture, [
-      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closingRound: true } as StateRecord,
-    ], { closeReported: true, closingRoundDue: true, rounds: [NO_COST, NO_COST, { ...NO_COST, closing: true }] } as Partial<EpisodeState>);
-
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }, [OPEN_THREAD]) }));
-
-    assert.equal(printed.exit, 3, printed.stdout + printed.stderr);
-    assert.equal(
-      printed.stdout.split("\n")[1],
-      "Squiz's review of PR #41 closed after 3 rounds, with 1 thread open. No round runs again in this worktree.",
-    );
-  });
-});
-
 test("a run on an episode a round closed without its summary prints the recorded failure on stderr (#425)", async () => {
   await withWorktree(async (fixture) => {
     const problem = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
     records(fixture, [
-      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap", problems: [problem] },
-    ], { closeReported: true, rounds: [NO_COST, NO_COST, NO_COST] });
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap", problems: [problem], newFindings: 0, round: ran(3) },
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }, [OPEN_THREAD]) }));
 
@@ -774,7 +770,7 @@ test("a round host whose start is unknown, and which holds the lock, is waited o
       await sleep(400);
       records(fixture, [
         { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } },
-      ], { rounds: [NO_COST] });
+      ], { rounds: [ROUND] });
     })();
 
     const printed = await runReview({

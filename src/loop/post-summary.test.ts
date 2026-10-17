@@ -23,6 +23,7 @@ import type { GhCall } from "../github/gh.ts";
 import { renderSummary } from "../github/summary-body.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
+import type { RoundRecord } from "./episode-state.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { PostedFindings } from "./post-findings.ts";
@@ -31,6 +32,8 @@ import { postEpisodeSummary, type EpisodeClose } from "./post-summary.ts";
 const PULL_REQUEST = 142;
 
 const COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
+
+const ROUND: RoundRecord = { ...COST, reviewer: "pi", elapsedSeconds: 1, head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", raised: 0, ruled: { fixed: 0, withdrawn: 0, open: 0 } };
 
 /** A response as `gh api --include` writes one: status line, headers, body. */
 function included(status: string, body: string): string {
@@ -178,7 +181,7 @@ const findings: PostedFindings = {
  */
 const closing: EpisodeClose = {
   pullRequest: PULL_REQUEST,
-  rounds: [{ ...COST, reviewer: "pi" }, { ...COST, reviewer: "pi" }],
+  rounds: [ROUND, ROUND],
   handedOver: [handedOver("PRRT_one", "The name says nothing")],
   verdicts: {
     threads: [{ thread: "PRRT_one", ruled: "open", outcome: "left-open" }],
@@ -257,6 +260,11 @@ test("the composed body carries the counts, the spend, what needs a person and t
         "**Needs a person**",
         "",
         "- `src/ui/card.ts:88` — The name says nothing (open)",
+        "",
+        "**Rounds**",
+        "",
+        "- Round 1 at 3f9c2e0: found nothing new and ruled on nothing",
+        "- Round 2 at 3f9c2e0: found nothing new and ruled on nothing",
         "",
         "**Notes**",
         "",

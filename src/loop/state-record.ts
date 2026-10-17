@@ -58,13 +58,7 @@ export type StartedRound = {
   readonly number: number;
 };
 
-/**
- * The round that reached a finished record, as `squiz status` prints it.
- *
- * A finished record without one was written before records kept it, and
- * nothing is known of which round reached it, when that round ran, or where
- * its reviewer was.
- */
+/** The round that reached a finished record, as `squiz status` prints it. */
 export type FinishedRound = StartedRound & {
   /** In whole seconds since the epoch, as is `endedAt`. */
   readonly startedAt: number;
@@ -82,16 +76,16 @@ export type ReviewedExit = 0 | 2 | 3;
 /** What closed an episode with threads still open. */
 export type ClosingBound = "round cap" | "token bound";
 
-/**
- * What a reviewed round did beside its result, as `squiz review` prints it.
- * Each is absent on a record written before records kept it.
- */
+/** What a reviewed round did beside its result, as `squiz review` prints it. */
 export type RoundReport = {
   /** How many threads the round's findings opened. */
-  readonly newFindings?: number;
-  /** What failed without changing the round's outcome, a line each. */
+  readonly newFindings: number;
+  /** What failed without changing the round's outcome, a line each. Absent where nothing did. */
   readonly problems?: readonly string[];
-  /** How many of the findings the round posted GitHub refused, of how many it posted. */
+  /**
+   * How many of the findings the round posted GitHub refused, of how many it
+   * posted. Absent where it refused none.
+   */
   readonly unposted?: { readonly failed: number; readonly of: number };
   /**
    * The findings of a round that left the episode open that no thread holds, as
@@ -114,15 +108,12 @@ export type StateRecord = Shared &
     | {
         readonly status: "reviewing";
         readonly host: ProcessIdentity;
-        /**
-         * The round under way, kept from the moment it starts. Absent only on a
-         * record written before reviewing records kept it.
-         */
-        readonly round?: StartedRound;
+        /** The round under way, kept from the moment it starts. */
+        readonly round: StartedRound;
         /** Absent until the reviewer's session has started. */
         readonly reviewer?: ReviewerSession;
       }
-    | ({ readonly status: "reviewed"; readonly round?: ReviewedRound } & RoundReport & (
+    | ({ readonly status: "reviewed"; readonly round: ReviewedRound } & RoundReport & (
         | {
             readonly result: "exited";
             readonly exitStatus: ReviewedExit;
@@ -141,6 +132,7 @@ export type StateRecord = Shared &
         readonly status: "failed";
         readonly reason: string;
         readonly ownerNoted: boolean;
+        /** Absent where the state failed before a round took it. */
         readonly round?: FinishedRound;
         /** What `squiz review` prints on stderr after the reason: where the failure comment went. */
         readonly lines?: readonly string[];
@@ -235,7 +227,8 @@ export function recordFrom(entry: unknown): ReadRecord {
       if (!isText(reason)) return { problem: `has "reason" as ${render(reason)}` };
       const noted = entry["ownerNoted"];
       if (typeof noted !== "boolean") return { problem: `has "ownerNoted" as ${render(noted)}` };
-      const round = roundFrom(entry["round"]);
+      const found = entry["round"];
+      const round = found === undefined ? { round: undefined } : roundFrom(found);
       if ("problem" in round) return round;
       const kept = round.round === undefined ? {} : { round: round.round };
       const lines = entry["lines"];
@@ -288,13 +281,13 @@ function ownerFrom(found: unknown): ReadOwner {
   };
 }
 
-type ReadRound = { readonly round: FinishedRound | undefined } | { readonly problem: string };
+type ReadRound = { readonly round: FinishedRound } | { readonly problem: string };
 
 function roundFrom(found: unknown): ReadRound {
   const started = startedRoundFrom(found);
   if ("problem" in started) return started;
   // Narrows `found` as well: a round that read is an object.
-  if (started.round === undefined || !isObject(found)) return { round: undefined };
+  if (!isObject(found)) return { problem: `has "round" as ${render(found)}` };
   const { number } = started.round;
   const startedAt = found["startedAt"];
   if (!isWholeSeconds(startedAt)) return { problem: `has "round.startedAt" as ${render(startedAt)}` };
@@ -309,10 +302,9 @@ function roundFrom(found: unknown): ReadRound {
   return { round: { number, startedAt, endedAt, reviewer: reviewer.place } };
 }
 
-type ReadStartedRound = { readonly round: StartedRound | undefined } | { readonly problem: string };
+type ReadStartedRound = { readonly round: StartedRound } | { readonly problem: string };
 
 function startedRoundFrom(found: unknown): ReadStartedRound {
-  if (found === undefined) return { round: undefined };
   if (!isObject(found)) return { problem: `has "round" as ${render(found)}` };
   const number = found["number"];
   if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
@@ -344,7 +336,7 @@ function reviewingFrom(entry: Record<string, unknown>, shared: Shared): ReadReco
   if (host === undefined) return { problem: `has "host" as ${render(entry["host"])}` };
   const round = startedRoundFrom(entry["round"]);
   if ("problem" in round) return round;
-  const under = { ...shared, status: "reviewing" as const, host, ...(round.round === undefined ? {} : { round: round.round }) };
+  const under = { ...shared, status: "reviewing" as const, host, round: round.round };
 
   const found = entry["reviewer"];
   if (found === undefined) return { record: under };
@@ -371,15 +363,11 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
   const read = roundFrom(entry["round"]);
   if ("problem" in read) return read;
   const { round } = read;
-  let kept: { round?: ReviewedRound } & RoundReport = {};
-  if (round !== undefined) {
-    const { reviewer } = round;
-    if (reviewer === undefined) return { problem: "is reviewed, and has a round with no reviewer" };
-    kept = { round: { ...round, reviewer } };
-  }
+  const { reviewer } = round;
+  if (reviewer === undefined) return { problem: "is reviewed, and has a round with no reviewer" };
   const report = reportFrom(entry);
   if ("problem" in report) return report;
-  kept = { ...kept, ...report.report };
+  const kept: { round: ReviewedRound } & RoundReport = { round: { ...round, reviewer }, ...report.report };
   const result = entry["result"];
   const exitStatus = entry["exitStatus"];
   if (result === "clean, episode open") {
@@ -430,7 +418,7 @@ type ReadReport = { readonly report: RoundReport } | { readonly problem: string 
 
 function reportFrom(entry: Record<string, unknown>): ReadReport {
   const newFindings = entry["newFindings"];
-  if (newFindings !== undefined && !(typeof newFindings === "number" && Number.isInteger(newFindings) && newFindings >= 0)) {
+  if (!(typeof newFindings === "number" && Number.isInteger(newFindings) && newFindings >= 0)) {
     return { problem: `has "newFindings" as ${render(newFindings)} rather than a whole number` };
   }
   const problems = entry["problems"];
@@ -454,7 +442,7 @@ function reportFrom(entry: Record<string, unknown>): ReadReport {
   return {
     report: {
       ...(unpostedRead === undefined ? {} : { unposted: unpostedRead }),
-      ...(newFindings === undefined ? {} : { newFindings }),
+      newFindings,
       ...(problems === undefined ? {} : { problems }),
       ...(unthreaded === undefined ? {} : { unthreaded }),
     },

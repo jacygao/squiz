@@ -14,11 +14,14 @@ import {
   type ClosingReason,
   type EpisodeBounds,
 } from "./round-decision.ts";
-import type { StateKey, StateRecord } from "./state-record.ts";
+import type { RoundReport, StateKey, StateRecord } from "./state-record.ts";
 
 export type QueuedRecord = Extract<StateRecord, { readonly status: "queued" }>;
 
-export type ReviewedRecord = Extract<StateRecord, { readonly status: "reviewed" }>;
+type Reviewed = Extract<StateRecord, { readonly status: "reviewed" }>;
+
+/** A reviewed record as the round's end decides it, before the round host adds the round and its report. */
+export type ReviewedRecord = Reviewed extends infer Each ? (Each extends unknown ? Omit<Each, "round" | keyof RoundReport> : never) : never;
 
 export type NotReviewedRecord = Extract<StateRecord, { readonly status: "not reviewed" }>;
 
@@ -49,8 +52,7 @@ export type LeftNotReviewed = {
  *
  * Read off the round's number rather than the record's place. A state that
  * `squiz review` retried keeps its place, so the last record reviewed need not
- * be the last state reviewed. A record with no number, written before records
- * kept one, ranks below every numbered one, and the later of two such wins.
+ * be the last state reviewed.
  */
 export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
   const reviewed = lastReviewedRecord(records);
@@ -58,14 +60,12 @@ export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
 }
 
 /** The record of the last state the episode reviewed, ranked as `lastReviewed` ranks it. */
-export function lastReviewedRecord(
-  records: readonly StateRecord[],
-): Extract<StateRecord, { readonly status: "reviewed" }> | undefined {
-  let reviewed: Extract<StateRecord, { readonly status: "reviewed" }> | undefined;
-  let highest = -1;
+export function lastReviewedRecord(records: readonly StateRecord[]): Reviewed | undefined {
+  let reviewed: Reviewed | undefined;
+  let highest = 0;
   for (const record of records) {
     if (record.status !== "reviewed") continue;
-    const number = record.round?.number ?? 0;
+    const { number } = record.round;
     if (number < highest) continue;
     reviewed = record;
     highest = number;
