@@ -1,6 +1,5 @@
 /**
- * What `pi` takes from settings files: the user's default model from its global
- * settings, and which of a project's own settings a review leaves unused.
+ * The user's default model, as `pi`'s global settings give it.
  *
  * A review runs `pi` with the project untrusted, so no project setting applies
  * and none is read as the model. Nothing here throws.
