@@ -488,11 +488,8 @@ test("the token bound names each state it left not reviewed, after nothing was l
   );
 });
 
-/**
- * A reply with no commit after it is a state of its own with the same head, so
- * each such state is told apart by how many before it share that head.
- */
-test("states that differ only in their replies are named apart from the commit and from each other", () => {
+// A reply with no commit after it is a state of its own with the same head.
+test("states that differ only in their replies are each named with different replies, uncounted (#721)", () => {
   const firstReply = { head: reviewed.head, activity: "PRRC_kwDOL7tYbc6OmQx7a" };
   const secondReply = { head: reviewed.head, activity: "PRRC_kwDOL7tYbc6OmQx9z" };
   const comment = renderSummary({
@@ -505,9 +502,9 @@ test("states that differ only in their replies are named apart from the commit a
   });
   assert.ok(
     comment.endsWith(
-      "and did not review 3f9c2e0 with different replies or 3f9c2e0 with different replies a second time",
+      "and did not review 3f9c2e0 with different replies or 3f9c2e0 with different replies",
     ),
-    `the replies were not told apart: ${comment}`,
+    `the states were not each named with different replies: ${comment}`,
   );
 });
 

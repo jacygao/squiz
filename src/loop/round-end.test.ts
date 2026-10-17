@@ -196,9 +196,7 @@ test("a state with the head of the reviewed state and a reply after it is named 
   ]);
 });
 
-// Two replies on one commit are two states, and a line naming both must not
-// read as one state named twice.
-test("states sharing a head are counted apart by how many before them share it", () => {
+test("states sharing a head with more than one state before them are named with different replies, uncounted (#721)", () => {
   assert.deepEqual(
     namedStates({ head: reviewedHead, activity: null }, [
       { head: laterHead, activity: null },
@@ -209,7 +207,7 @@ test("states sharing a head are counted apart by how many before them share it",
     [
       "8d21a4f",
       "8d21a4f with different replies",
-      "8d21a4f with different replies a second time",
+      "8d21a4f with different replies",
       "3f9c2e0 with different replies",
     ],
   );

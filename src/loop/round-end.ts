@@ -192,40 +192,20 @@ export function notReviewedBehind(
 
 /**
  * How a person is told each of `states` apart, in order: its short head commit,
- * and, where states before it share that head, how many times its replies
- * differ from theirs.
+ * followed by `with different replies` where a state before it shares that head.
  *
  * `after` is the state reviewed before them, and counts as before every one of
  * them. Where it is `null`, the first of `states` is named by its commit alone. A
  * state sharing a head with one before it differs from it only in its
  * replies, because no two records are for the same state. A reply added and a
  * reply deleted both do that, and nothing here can tell which, so the name says
- * only that they differ. Counting the states before it, rather than marking it
- * once, keeps two such states on one commit from reading as one state named
- * twice:
- *
- * - `8d21a4f`, where no state before it has that head
- * - `8d21a4f with different replies`, where one does
- * - `8d21a4f with different replies a second time`, where two do
+ * only that they differ. Two such states on one commit get the same name.
  */
 export function namedStates(after: StateKey | null, states: readonly StateKey[]): string[] {
   const earlier = after === null ? [] : [after];
   return states.map((state, index) => {
-    const before = [...earlier, ...states.slice(0, index)].filter((held) => held.head === state.head).length;
+    const repeated = [...earlier, ...states.slice(0, index)].some((held) => held.head === state.head);
     const commit = state.head.slice(0, 7);
-    if (before === 0) return commit;
-    if (before === 1) return `${commit} with different replies`;
-    return `${commit} with different replies a ${ordinal(before)} time`;
+    return repeated ? `${commit} with different replies` : commit;
   });
-}
-
-const ordinalWords = ["second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
-
-/** `2` as `second`, and so on, in figures past `tenth`. */
-function ordinal(n: number): string {
-  const word = ordinalWords[n - 2];
-  if (word !== undefined) return word;
-  const teen = n % 100 >= 11 && n % 100 <= 13;
-  const suffix = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
-  return `${n}${suffix}`;
 }
