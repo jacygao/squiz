@@ -38,29 +38,17 @@ export type Episode = {
 };
 
 /**
- * A key that is no pull request's number.
- *
- * The number arrives from GitHub, so reaching this means something handed over a
- * value no pull request has, and the round has no key to hold its state under.
- */
-export class EpisodeError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "EpisodeError";
-  }
-}
-
-/**
  * The episode of pull request `pullRequest`, and every path it owns, inside
  * `worktree`.
  *
- * Throws an `EpisodeError` for anything but a positive whole number a JavaScript
- * number holds exactly. A larger one would be spelled as some other number, or in
- * exponent notation.
+ * Throws for anything but a positive whole number a JavaScript number holds
+ * exactly. A larger one would be spelled as some other number, or in exponent
+ * notation. The number arrives from GitHub, so a throw means something handed
+ * over a value no pull request has.
  */
 export function episodeAt(worktree: string, pullRequest: number): Episode {
   if (typeof pullRequest !== "number" || !Number.isSafeInteger(pullRequest) || pullRequest < 1) {
-    throw new EpisodeError(
+    throw new Error(
       `${describe(pullRequest)} is no pull request's number, so no episode is keyed by it`,
     );
   }

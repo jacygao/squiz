@@ -7,6 +7,9 @@ import { test, type TestContext } from "node:test";
 import { type RoundCost, unspent } from "../reviewers/adapter.ts";
 import {
   type EpisodeState,
+  type RoundRecord,
+  type RoundWork,
+  type Timings,
   readState,
   recordRound,
   recordRulings,
@@ -18,8 +21,24 @@ import { type Episode, episodeAt } from "./episode.ts";
 
 const pullRequest = 41;
 
-const firstRound: RoundCost = { dollars: 0.0031744240000000003, tokens: 6697, messages: 2 };
-const secondRound: RoundCost = { dollars: 0.0142, tokens: 21043, messages: 7 };
+const firstCost: RoundCost = { dollars: 0.0031744240000000003, tokens: 6697, messages: 2 };
+const secondCost: RoundCost = { dollars: 0.0142, tokens: 21043, messages: 7 };
+
+/** What every round entry carries beside its cost. */
+const ran: Timings & RoundWork = {
+  reviewer: "pi",
+  elapsedSeconds: 41.3,
+  head: "3f9c2e0aa",
+  raised: 0,
+  ruled: { fixed: 0, withdrawn: 0, open: 0 },
+};
+
+const firstRound: RoundRecord = { ...firstCost, ...ran };
+const secondRound: RoundRecord = { ...secondCost, ...ran, head: "1b86987bb" };
+
+/** `ran` as the JSON of a round entry's fields, and no spend outside the rounds as the file's. */
+const RAN = `"reviewer": "pi", "elapsedSeconds": 41.3, "head": "3f9c2e0aa", "raised": 0, "ruled": {"fixed": 0, "withdrawn": 0, "open": 0}`;
+const NONE_OUTSIDE = `"spentOutsideRounds": {"dollars": 0, "tokens": 0, "messages": 0}`;
 
 /** A worktree of its own, holding one episode, removed when the test ends. */
 function episodeIn(t: TestContext): Episode {
@@ -106,7 +125,7 @@ test("a cost that is a floor comes back as a floor, in a round and outside the r
   const episode = episodeIn(t);
   const state: EpisodeState = {
     rounds: [firstRound, { ...secondRound, floor: true }],
-    spentOutsideRounds: { ...firstRound, floor: true },
+    spentOutsideRounds: { ...firstCost, floor: true },
   };
 
   assert.deepEqual(writeState(episode, state), { outcome: "written" });
@@ -116,7 +135,7 @@ test("a cost that is a floor comes back as a floor, in a round and outside the r
 test("AI credits come back as written, in a round and outside the rounds", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
-    rounds: [{ dollars: 0, tokens: 18_200, messages: 5, credits: 0.36 }],
+    rounds: [{ dollars: 0, tokens: 18_200, messages: 5, credits: 0.36, ...ran }],
     spentOutsideRounds: { dollars: 0, tokens: 900, messages: 1, credits: 0.02 },
   };
 
@@ -129,8 +148,8 @@ test("the reviewer and the models a round ran come back as written (#271)", (t) 
   const state: EpisodeState = {
     rounds: [
       { ...firstRound, reviewer: "pi", models: ["deepseek/deepseek-v4-pro"] },
-      { dollars: 0, tokens: 18_200, messages: 5, models: ["gpt-5-mini", "claude-haiku-4.5"], reviewer: "copilot" },
-      { elapsedSeconds: 900.4, reviewer: "copilot" },
+      { ...ran, dollars: 0, tokens: 18_200, messages: 5, models: ["gpt-5-mini", "claude-haiku-4.5"], reviewer: "copilot" },
+      { ...ran, elapsedSeconds: 900.4, reviewer: "copilot" },
     ],
     spentOutsideRounds: unspent,
   };
@@ -146,29 +165,12 @@ test("the reviewer and the models a round ran come back as written (#271)", (t) 
 test("a round with no cost is written with no figures and comes back with none", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
-    rounds: [firstRound, { elapsedSeconds: 900.4, cutShortAtSeconds: 900 }],
+    rounds: [firstRound, { ...ran, elapsedSeconds: 900.4, cutShortAtSeconds: 900 }],
     spentOutsideRounds: unspent,
   };
 
   assert.deepEqual(writeState(episode, state), { outcome: "written" });
   assert.deepEqual(readState(episode), { outcome: "read", state });
-});
-
-// A file written before credits and rounds with no cost existed.
-test("a round entry of dollars, tokens and messages alone reads as it always did", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(
-    episode.stateFile,
-    `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": 41.3}], "spentOutsideRounds": {"dollars": 0, "tokens": 0, "messages": 0}}`,
-  );
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: {
-      rounds: [{ dollars: 0.01, tokens: 100, messages: 1, elapsedSeconds: 41.3 }],
-      spentOutsideRounds: unspent,
-    },
-  });
 });
 
 test("spend outside the rounds adds up AI credits with the rest", () => {
@@ -183,8 +185,8 @@ test("spend outside the rounds adds up AI credits with the rest", () => {
 test("spend outside the rounds is a floor once any of it is", () => {
   const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
   const after = recordSpendOutsideRounds(
-    recordSpendOutsideRounds(start, { ...firstRound, floor: true }),
-    secondRound,
+    recordSpendOutsideRounds(start, { ...firstCost, floor: true }),
+    secondCost,
   );
   assert.equal(after.spentOutsideRounds.floor, true);
 });
@@ -233,20 +235,20 @@ const unreadableContents: readonly string[] = [
   `"142"`,
   `{}`,
   `{"rounds": {}}`,
-  `{"rounds": [3]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100}]}`,
-  `{"rounds": [{"dollars": "0.01", "tokens": 100, "messages": 1}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": -1, "messages": 1}]}`,
+  `{"rounds": [3], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": "0.01", "tokens": 100, "messages": 1}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": -1, "messages": 1}], ${NONE_OUTSIDE}}`,
   // A floor that is there and cannot be read must not stand in for a total.
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "floor": false}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "floor": "true"}]}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "floor": false}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "floor": "true"}], ${NONE_OUTSIDE}}`,
   // Credits that are there and cannot be read must not be dropped, and a round
   // with no cost carries no figure of any kind.
-  `{"rounds": [{"dollars": 0, "tokens": 100, "messages": 1, "credits": "0.36"}]}`,
-  `{"rounds": [{"dollars": 0, "tokens": 100, "messages": 1, "credits": -1}]}`,
-  `{"rounds": [{"credits": 0.36}]}`,
-  `{"rounds": [{"floor": true}]}`,
-  `{"rounds": [{"tokens": 100, "messages": 1}]}`,
+  `{"rounds": [{${RAN}, "dollars": 0, "tokens": 100, "messages": 1, "credits": "0.36"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0, "tokens": 100, "messages": 1, "credits": -1}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "credits": 0.36}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "floor": true}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "tokens": 100, "messages": 1}], ${NONE_OUTSIDE}}`,
   `{"rounds": [], "spentOutsideRounds": {}}`,
   // A spend that is there and cannot be read must not stand in for zero: the
   // token bound would then let the episode spend past a bound it had reached.
@@ -256,51 +258,51 @@ const unreadableContents: readonly string[] = [
   // A close that is there and cannot be read is neither yes nor no. Read as no,
   // the next firing announces a missing summary for an episode carrying one; read
   // as yes, it closes the episode in silence.
-  `{"rounds": [], "closeReported": "true"}`,
-  `{"rounds": [], "closeReported": 1}`,
+  `{"rounds": [], "closeReported": "true", ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "closeReported": 1, ${NONE_OUTSIDE}}`,
   // How long a round ran and posted, and the bound that cut it short, are the measurements a
   // later reading takes from this file. A figure that is there and cannot be read
   // would be a measurement nobody took.
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": "12"}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": -1}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 0}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 2.5}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": true}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": "4"}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": -1}]}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": "12"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "elapsedSeconds": -1}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 0}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": 2.5}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "cutShortAtSeconds": true}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": "4"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "postingSeconds": -1}], ${NONE_OUTSIDE}}`,
   // A reviewer or a model that is there and cannot be read would be named in
   // the summary as one nobody recorded.
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "reviewer": "claude"}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": "gpt-5-mini"}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": []}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [""]}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [" "]}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "models": [7]}]}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "reviewer": "claude"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "models": "gpt-5-mini"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "models": []}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "models": [""]}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "models": [" "]}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "models": [7]}], ${NONE_OUTSIDE}}`,
   // A model is named only by the spend it was reported against.
-  `{"rounds": [{"models": ["gpt-5-mini"]}]}`,
+  `{"rounds": [{${RAN}, "models": ["gpt-5-mini"]}], ${NONE_OUTSIDE}}`,
   // What a round reviewed and ruled is what the summary lists it by, and a
   // figure that is there and cannot be read would list a round nobody ran.
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "head": ""}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "raised": -1}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0}}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0, "open": "2"}}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": "a line"}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": [3]}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unread": "src/a.ts"}]}`,
-  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unread": [""]}]}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "head": ""}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "raised": -1}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0}}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0, "open": "2"}}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": "a line"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": [3]}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "unread": "src/a.ts"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [{${RAN}, "dollars": 0.01, "tokens": 100, "messages": 1, "unread": [""]}], ${NONE_OUTSIDE}}`,
   // A record dropped on reading is a state with no record, which a trigger queues
   // again, or a queued state that no round host ever takes.
-  `{"rounds": [], "records": {}}`,
-  `{"rounds": [], "records": [3]}`,
-  `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "postponed"}]}`,
-  `{"rounds": [], "records": [{"head": "3f9c2e0", "status": "queued"}]}`,
+  `{"rounds": [], "records": {}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "records": [3], ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "postponed"}], ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "records": [{"head": "3f9c2e0", "status": "queued"}], ${NONE_OUTSIDE}}`,
   // A ruling dropped or guessed on reading is a withdrawn finding counted some
   // other way by a close that runs no reviewer.
-  `{"rounds": [], "rulings": []}`,
-  `{"rounds": [], "rulings": {"PRRT_a": "resolved"}}`,
-  `{"rounds": [], "rulings": {"PRRT_a": null}}`,
+  `{"rounds": [], "rulings": [], ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "rulings": {"PRRT_a": "resolved"}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "rulings": {"PRRT_a": null}, ${NONE_OUTSIDE}}`,
   // Two records for one state leave no telling which of them is true.
-  `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}]}`,
+  `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}], ${NONE_OUTSIDE}}`,
 ];
 
 for (const contents of unreadableContents) {
@@ -355,11 +357,11 @@ test("a round's spend is appended, and the number of entries is the number of ro
 test("a round that spent nothing is still a round", (t) => {
   const episode = episodeIn(t);
   const start: EpisodeState = { rounds: [], spentOutsideRounds: unspent };
-  writeState(episode, recordRound(start, unspent));
+  writeState(episode, recordRound(start, { ...unspent, ...ran }));
 
   assert.deepEqual(readState(episode), {
     outcome: "read",
-    state: { rounds: [unspent], spentOutsideRounds: unspent },
+    state: { rounds: [{ ...unspent, ...ran }], spentOutsideRounds: unspent },
   });
 });
 
@@ -370,26 +372,15 @@ test("a round that spent nothing is still a round", (t) => {
  */
 test("spend recorded outside the rounds does not move the round count", () => {
   const start: EpisodeState = { rounds: [firstRound], spentOutsideRounds: unspent };
-  const after = recordSpendOutsideRounds(recordSpendOutsideRounds(start, firstRound), secondRound);
+  const after = recordSpendOutsideRounds(recordSpendOutsideRounds(start, firstCost), secondCost);
 
   assert.equal(after.rounds.length, 1, "no round was run, so the cap has nothing more to spend");
   assert.deepEqual(after.spentOutsideRounds, {
-    dollars: firstRound.dollars + secondRound.dollars,
-    tokens: firstRound.tokens + secondRound.tokens,
-    messages: firstRound.messages + secondRound.messages,
+    dollars: firstCost.dollars + secondCost.dollars,
+    tokens: firstCost.tokens + secondCost.tokens,
+    messages: firstCost.messages + secondCost.messages,
   });
   assert.deepEqual(start.spentOutsideRounds, unspent, "the state it was given must not change");
-});
-
-test("a state file naming no spend outside its rounds has spent none", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(episode.stateFile, `{"rounds": []}`);
-
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: { rounds: [], spentOutsideRounds: unspent },
-  });
 });
 
 test("a reported close is written and comes back, and one never written is absent", (t) => {
@@ -403,9 +394,9 @@ test("a reported close is written and comes back, and one never written is absen
   assert.deepEqual(writeState(episode, closed), { outcome: "written" });
   assert.deepEqual(readState(episode), { outcome: "read", state: closed });
 
-  // A file written before the field existed says the close was never reported,
-  // which is the answer that has the next firing announce the missing summary.
-  writeFileSync(episode.stateFile, `{"rounds": []}`);
+  // A file with no close says it was never reported, which is the answer that
+  // has the next firing announce the missing summary.
+  writeFileSync(episode.stateFile, `{"rounds": [], ${NONE_OUTSIDE}}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
 });
@@ -421,7 +412,7 @@ test("the reviewer's last ruling on each thread is written and comes back, and a
   assert.deepEqual(writeState(episode, ruled), { outcome: "written" });
   assert.deepEqual(readState(episode), { outcome: "read", state: ruled });
 
-  writeFileSync(episode.stateFile, `{"rounds": []}`);
+  writeFileSync(episode.stateFile, `{"rounds": [], ${NONE_OUTSIDE}}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.rulings : "unread", undefined);
 });
@@ -431,49 +422,27 @@ test("a ruling replaces the one before it on its thread, and leaves the others",
   assert.deepEqual(recordRulings(before, { PRRT_a: "withdrawn" }).rulings, { PRRT_a: "withdrawn", PRRT_b: "fixed" });
 });
 
-// Earlier versions compared the snapshot's tracked files and `HEAD` before and
-// after the reviewer, and kept what they found. Unreadable, the file would end
-// every round of that episode before the reviewer ran; read, what it held would
-// still be reported.
-test("a state file holding what the worktree comparison found reads without it", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  const found = [
-    {
-      changed: ["src/card.ts"],
-      moved: ["from refs/heads/review-me at 1111 to refs/heads/review-me at 2222"],
-      uncompared: ["the round had too little of its window left to read the worktree"],
-    },
-    { moved: "HEAD" },
-    [],
-  ];
-
-  for (const confinement of found) {
-    writeFileSync(
-      episode.stateFile,
-      JSON.stringify({ rounds: [firstRound], spentOutsideRounds: unspent, confinement }),
-    );
-    assert.deepEqual(
-      readState(episode),
-      { outcome: "read", state: { rounds: [firstRound], spentOutsideRounds: unspent } },
-      JSON.stringify(confinement),
-    );
-  }
-});
-
 test("the record for each state of the pull request is written and comes back", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
     rounds: [firstRound],
     spentOutsideRounds: unspent,
     records: [
-      { head: "3f9c2e0", activity: null, status: "reviewed", result: "clean, episode open" },
+      {
+        head: "3f9c2e0",
+        activity: null,
+        status: "reviewed",
+        result: "clean, episode open",
+        round: { number: 1, startedAt: 1_790_999_000, endedAt: 1_790_999_400, reviewer: { backend: "detached" } },
+        newFindings: 0,
+      },
       {
         head: "8d21a4f",
         activity: "PRRC_kwDOL7tYbc6OmQx7a",
         status: "reviewing",
         owner: { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb", subagent: "a402ef8f56c1b2ed1" },
         host: { pid: 4012, startedAt: 1_791_000_000 },
+        round: { number: 2 },
       },
       { head: "9e01b2c", activity: "PRRC_kwDOL7tYbc6OmQx7a", status: "queued" },
     ],
@@ -483,21 +452,22 @@ test("the record for each state of the pull request is written and comes back", 
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
-test("a state file written before records were kept reads with no records", (t) => {
-  const episode = episodeIn(t);
-  mkdirSync(episode.directory, { recursive: true });
-  writeFileSync(episode.stateFile, JSON.stringify({ rounds: [firstRound], spentOutsideRounds: unspent }));
-
-  assert.deepEqual(readState(episode), {
-    outcome: "read",
-    state: { rounds: [firstRound], spentOutsideRounds: unspent },
-  });
-});
-
 test("a record that cannot be read is named by its place in the file and what is wrong with it", (t) => {
   const reason = refusalOf(
     t,
-    `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "8d21a4f", "activity": null, "status": "postponed"}]}`,
+    `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "8d21a4f", "activity": null, "status": "postponed"}], ${NONE_OUTSIDE}}`,
   );
   assert.match(reason, /record 2 has "status" as "postponed"/u);
+});
+
+for (const field of ["reviewer", "elapsedSeconds", "head", "raised", "ruled"] as const) {
+  test(`a round with no "${field}" is refused, and the refusal names it`, (t) => {
+    const { [field]: _missing, ...rest } = firstRound;
+    const reason = refusalOf(t, JSON.stringify({ rounds: [rest], spentOutsideRounds: unspent }));
+    assert.match(reason, new RegExp(`round 1 has "${field}"`, "u"));
+  });
+}
+
+test("a state file with no spend outside its rounds is refused, and the refusal names it", (t) => {
+  assert.match(refusalOf(t, `{"rounds": []}`), /"spentOutsideRounds"/u);
 });

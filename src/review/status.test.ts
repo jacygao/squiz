@@ -98,6 +98,7 @@ test("a finished round prints every column § 6 shows, its resume line included"
         exitStatus: 2,
         openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
         round: { number: 2, startedAt: sevenOhSix, endedAt: sevenOhSix + 160, reviewer: { backend: "tmux", pane: "@14" } },
+        newFindings: 0,
       },
     ],
   });
@@ -117,13 +118,13 @@ test("a finished round prints every column § 6 shows, its resume line included"
 test("a reviewing record whose round host has gone is killed, and one nobody can check is not", () => {
   const root = worktree({
     41: [
-      { head, activity: null, status: "reviewing", host: { pid: 501, startedAt: sevenOhSix } },
+      { head, activity: null, status: "reviewing", host: { pid: 501, startedAt: sevenOhSix }, round: { number: 1 } },
     ],
     42: [
-      { head, activity: null, status: "reviewing", host: { pid: 502, startedAt: sevenOhSix } },
+      { head, activity: null, status: "reviewing", host: { pid: 502, startedAt: sevenOhSix }, round: { number: 1 } },
     ],
     43: [
-      { head, activity: null, status: "reviewing", host: { pid: 503, startedAt: sevenOhSix } },
+      { head, activity: null, status: "reviewing", host: { pid: 503, startedAt: sevenOhSix }, round: { number: 1 } },
     ],
   });
   const presence = presenceBy({
@@ -172,7 +173,7 @@ test("a failed state's result is its reason, and a state the episode closed befo
 test("elapsed is the time so far while a review runs, and — where a record keeps no times", () => {
   const root = worktree({
     41: [
-      { head, activity: null, status: "reviewed", result: "clean, episode open" },
+      { head, activity: null, status: "failed", reason: "the round host died", ownerNoted: false },
       {
         head: laterHead,
         activity: null,
@@ -194,7 +195,7 @@ test("elapsed is the time so far while a review runs, and — where a record kee
 
   assert.deepEqual(rows.slice(1).map((row) => row.slice(3, 8)), [
     ["reviewing", "07:06:02", "3m 12s", "—", "herdr squiz-41-r3"],
-    ["reviewed", "—", "—", "nothing open, episode open", "—"],
+    ["failed", "—", "—", "the round host died", "—"],
   ]);
 });
 
@@ -206,6 +207,7 @@ test("resume is — until the round is over, even where its file is already ther
         activity: null,
         status: "reviewing",
         host: { pid: 700, startedAt: sevenOhSix },
+        round: { number: 1 },
         reviewer: {
           backend: "tmux",
           pane: "@3",
@@ -246,6 +248,7 @@ test("newest first: an episode with a review waiting or running, then by the lat
         exitStatus: 0,
         openThreads: [],
         round: { number: 1, startedAt: sevenOhSix, endedAt: sevenOhSix + 60, reviewer: { backend: "detached" } },
+        newFindings: 0,
       },
     ],
   });
@@ -261,8 +264,9 @@ test("newest first: an episode with a review waiting or running, then by the lat
         exitStatus: 2,
         openThreads: ["a", "b"],
         round: { number: 1, startedAt: sevenOhSix - 7_200, endedAt: sevenOhSix - 7_000, reviewer: { backend: "detached" } },
+        newFindings: 0,
       },
-      { head: laterHead, activity: reply, status: "reviewing", host: { pid: 800, startedAt: sevenOhSix - 6_000 } },
+      { head: laterHead, activity: reply, status: "reviewing", host: { pid: 800, startedAt: sevenOhSix - 6_000 }, round: { number: 2 } },
       { head: latestHead, activity: reply, status: "queued" },
     ],
   });
@@ -348,6 +352,7 @@ test("session is the label squiz-<number>-r<k>, never the backend's own id, and 
         exitStatus: 2,
         openThreads: ["a"],
         round: { number: 2, startedAt: sevenOhSix - 600, endedAt: sevenOhSix - 400, reviewer: { backend: "tmux", pane: "@14" } },
+        newFindings: 0,
       },
       {
         head: latestHead,
@@ -363,27 +368,12 @@ test("session is the label squiz-<number>-r<k>, never the backend's own id, and 
           snapshot: "/somewhere/else",
         },
       },
-      // Written before reviewing records kept the round's number. Its snapshot's
-      // path is not read for one.
-      {
-        head: otherHead,
-        activity: null,
-        status: "reviewing",
-        host: { pid: 902, startedAt: sevenOhSix - 200 },
-        reviewer: {
-          backend: "herdr",
-          pane: "w2-p3",
-          process: { pid: 903, startedAt: sevenOhSix },
-          boundEndsAt: sevenOhSix + 480,
-          snapshot: "/tmp/squiz-501/5e1f0c2a9b3d7e64-41/rounds/4/tree",
-        },
-      },
     ],
   });
 
   const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
 
-  assert.deepEqual(rows.slice(1).map((row) => row[7]), ["herdr", "tmux squiz-41-r3", "tmux squiz-41-r2", "—"]);
+  assert.deepEqual(rows.slice(1).map((row) => row[7]), ["tmux squiz-41-r3", "tmux squiz-41-r2", "—"]);
 });
 
 test("started is the time of day for a review started today, and the date and time otherwise", () => {
@@ -397,7 +387,7 @@ test("started is the time of day for a review started today, and the date and ti
         ownerNoted: true,
         round: { number: 1, startedAt: sevenOhSix - 86_400, endedAt: sevenOhSix - 85_920, reviewer: { backend: "detached" } },
       },
-      { head: laterHead, activity: null, status: "reviewing", host: { pid: 1000, startedAt: sevenOhSix } },
+      { head: laterHead, activity: null, status: "reviewing", host: { pid: 1000, startedAt: sevenOhSix }, round: { number: 2 } },
     ],
   });
 
@@ -472,6 +462,8 @@ test("a last round's result names the bound that closed the review", () => {
     exitStatus: 3,
     openThreads: ["PRRT_kwDOL7tYbc5abcd2"],
     closedAt,
+    round: { number: 3, startedAt: sevenOhSix, endedAt: sevenOhSix + 60, reviewer: { backend: "detached" } },
+    newFindings: 0,
   });
   const root = worktree({ 41: [closing("round cap")], 42: [closing("token bound")] });
 
@@ -492,10 +484,22 @@ test("a round that could not post some of its findings says how many in its resu
         result: "exited",
         exitStatus: 2,
         openThreads: ["PRRT_kwDOL7tYbc5abcd2", "PRRT_kwDOL7tYbc5abcd3"],
+        round: { number: 1, startedAt: sevenOhSix, endedAt: sevenOhSix + 60, reviewer: { backend: "detached" } },
+        newFindings: 5,
         unposted: { failed: 2, of: 5 },
       },
     ],
-    42: [{ head, activity: null, status: "reviewed", result: "clean, episode open", unposted: { failed: 1, of: 1 } }],
+    42: [
+      {
+        head,
+        activity: null,
+        status: "reviewed",
+        result: "clean, episode open",
+        round: { number: 1, startedAt: sevenOhSix, endedAt: sevenOhSix + 60, reviewer: { backend: "detached" } },
+        newFindings: 1,
+        unposted: { failed: 1, of: 1 },
+      },
+    ],
   });
 
   const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
@@ -515,6 +519,8 @@ test("a round's problems are printed under its line, a line each, indented by tw
         result: "exited",
         exitStatus: 0,
         openThreads: [],
+        round: { number: 1, startedAt: sevenOhSix, endedAt: sevenOhSix + 60, reviewer: { backend: "detached" } },
+        newFindings: 0,
         problems: [
           "the review of PR #41 closed without its summary:\n  gh: HTTP 502",
           "the snapshot could not be removed",
@@ -534,20 +540,20 @@ test("a round's problems are printed under its line, a line each, indented by tw
   assert.equal(lines[4], "  the snapshot could not be removed");
 });
 
-test("a reviewed record with no problems, unposted findings or bound prints as it did before records kept them", () => {
+test("a reviewed record with no problems, unposted findings or bound prints its outcome alone", () => {
   const reviewed = (at: string, startedAt: number, rest: object): StateRecord =>
     ({
       head: at,
       activity: null,
       status: "reviewed",
       round: { number: 1, startedAt, endedAt: startedAt + 60, reviewer: { backend: "detached" } },
+      newFindings: 0,
       ...rest,
     }) as StateRecord;
   const root = worktree({
     41: [reviewed(head, sevenOhSix, { result: "exited", exitStatus: 2, openThreads: ["PRRT_kwDOL7tYbc5abcd2"] })],
     42: [reviewed(laterHead, sevenOhSix + 60, { result: "clean, episode open" })],
     43: [reviewed(latestHead, sevenOhSix + 120, { result: "exited", exitStatus: 0, openThreads: [] })],
-    44: [reviewed(otherHead, sevenOhSix + 180, { result: "exited", exitStatus: 3, openThreads: ["PRRT_kwDOL7tYbc5abcd2"], newFindings: 1 })],
   });
 
   const printed = composeStatus(collectStatus([root], { main: root, presence: running, now }));
@@ -555,11 +561,10 @@ test("a reviewed record with no problems, unposted findings or bound prints as i
   assert.equal(
     printed.stdout,
     [
-      "PR   Commit   Replies  State     Started   Elapsed  Result                        Session   Worktree  Resume",
-      "#44  a1b2c3d  —        reviewed  07:09:02  1m 00s   1 thread open, review closed  detached  .         —",
-      "#43  9e01b2c  —        reviewed  07:08:02  1m 00s   nothing open, review closed   detached  .         —",
-      "#42  8d21a4f  —        reviewed  07:07:02  1m 00s   nothing open, episode open    detached  .         —",
-      "#41  3f9c2e0  —        reviewed  07:06:02  1m 00s   1 thread open                 detached  .         —",
+      "PR   Commit   Replies  State     Started   Elapsed  Result                       Session   Worktree  Resume",
+      "#43  9e01b2c  —        reviewed  07:08:02  1m 00s   nothing open, review closed  detached  .         —",
+      "#42  8d21a4f  —        reviewed  07:07:02  1m 00s   nothing open, episode open   detached  .         —",
+      "#41  3f9c2e0  —        reviewed  07:06:02  1m 00s   1 thread open                detached  .         —",
       "",
     ].join("\n"),
   );

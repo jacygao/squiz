@@ -28,7 +28,7 @@ import { type Adapter, type ParsedRun, type RoundCost } from "../reviewers/adapt
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { startChild } from "../sessions/child.ts";
 import { identityOf, type ProcessIdentity } from "../sessions/process.ts";
-import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
+import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { putRecord, type Owner, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
@@ -41,6 +41,9 @@ const BRANCH = "review-me";
 const PULL_REQUEST = 142;
 const TRACKED = "src/ui/card.ts";
 const COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
+
+/** A round an earlier firing ran, as the state file holds it. */
+const EARLIER_ROUND: RoundRecord = { ...COST, reviewer: "pi", elapsedSeconds: 1, head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", raised: 0, ruled: { fixed: 0, withdrawn: 0, open: 0 } };
 const queueRacer = fileURLToPath(new URL("queue-racer.ts", import.meta.url));
 
 /** The file under review at the base, ninety-one lines. */
@@ -99,7 +102,7 @@ type Hosted = {
 type Arrangement = {
   /** The records on file before the host starts, oldest first. */
   readonly records?: (fixture: Fixture) => readonly StateRecord[];
-  readonly rounds?: readonly RoundCost[];
+  readonly rounds?: readonly RoundRecord[];
   readonly closeReported?: boolean;
   /** What each reviewer start reports, in order. An empty review where there is none. */
   readonly findings?: readonly (readonly Finding[])[];
@@ -452,7 +455,7 @@ test("a round the host runs reviews, rather than finding the host's own lock and
 
 test("the reviewing record names the host and the round's number before the reviewer starts", async () => {
   const self = ownIdentity();
-  const ran = await host({ records: atHead, rounds: [COST] });
+  const ran = await host({ records: atHead, rounds: [EARLIER_ROUND] });
 
   const [atStart] = ran.stateWhenStarted;
   const [record] = recordsOf(atStart ?? null);
@@ -725,7 +728,7 @@ test("a state queued while the summary is being posted is reviewed or refused, a
 });
 
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {
-  const ran = await host({ records: atHead, rounds: [COST], closeReported: true });
+  const ran = await host({ records: atHead, rounds: [EARLIER_ROUND], closeReported: true });
 
   assert.equal(ran.started, 0);
   assert.deepEqual(ran.kinds, [], "nothing should have been asked of GitHub");
@@ -801,7 +804,7 @@ const WORK_THE_THREADS = [
 test("a host that finds the cap spent posts the summary, and records the close on the state it took and the rest not reviewed", async () => {
   let head = "";
   const ran = await host({
-    rounds: [COST],
+    rounds: [EARLIER_ROUND],
     config: { rounds: 1 },
     records: (fixture) => {
       head = fixture.head();
@@ -858,7 +861,7 @@ test("#414: a last round whose summary GitHub refuses keeps the reason on its re
 
 test("#414: a close before any review whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
   const ran = await host({
-    rounds: [COST],
+    rounds: [EARLIER_ROUND],
     config: { rounds: 1 },
     records: atHead,
     before: (fixture) => {
@@ -1359,7 +1362,7 @@ test("a superseded state's owner gets a note naming the state that superseded it
 test("a state queued on a closed episode gets a note naming it as the state with different replies where its commit repeats", async () => {
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, PARENT), queued(fixture.head(), "PRRC_reply", MAIN)],
-    rounds: [COST],
+    rounds: [EARLIER_ROUND],
     closeReported: true,
   });
 

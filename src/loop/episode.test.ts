@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 
-import { EpisodeError, episodeAt, episodeNamed } from "./episode.ts";
+import { episodeAt, episodeNamed } from "./episode.ts";
 
 const number = 41;
 
@@ -39,16 +39,7 @@ const refused: readonly unknown[] = [
 
 for (const key of refused) {
   test(`the key ${String(key)} (${typeof key}) is refused before it becomes a path`, () => {
-    assert.throws(
-      () => episodeAt(worktree, key as number),
-      (error: unknown) => {
-        assert.ok(
-          error instanceof EpisodeError,
-          `refused with ${String(error)} rather than an EpisodeError`,
-        );
-        return true;
-      },
-    );
+    assert.throws(() => episodeAt(worktree, key as number), /is no pull request's number/u);
   });
 }
 

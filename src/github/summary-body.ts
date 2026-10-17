@@ -97,7 +97,7 @@ const alwaysCounted: ReadonlySet<CountedStatus> = new Set<ThreadStatus>(["fixed"
  * Four blocks: what was counted and spent, what needs a person, the rounds, and
  * Notes. The first two are always written, a review that found nothing
  * included. Notes is absent where there is nothing to report, and the rounds
- * where the state file recorded the work of none of them.
+ * where the episode ran none.
  *
  * Nothing here throws and nothing is refused. Every episode composes.
  */
@@ -112,19 +112,16 @@ export function renderSummary(episode: ClosedEpisode): string {
  * raised, and the rulings it replied with.
  *
  * Read from the state file and never from the pull request, so a round whose
- * replies GitHub refused is listed all the same. A file written before the work
- * was recorded lists no rounds at all, rather than a list of rounds it knows
- * nothing about.
+ * replies GitHub refused is listed all the same.
  */
 function roundsList(rounds: readonly RoundRecord[]): readonly string[] {
-  if (rounds.every((round) => round.raised === undefined || round.ruled === undefined)) return [];
+  if (rounds.length === 0) return [];
   return [`**Rounds**\n\n${rounds.map(roundLine).join("\n")}`];
 }
 
 /** One round of the list, numbered from 1. */
 function roundLine(round: RoundRecord, index: number): string {
-  const named = `- Round ${index + 1}${round.head === undefined ? "" : ` at ${round.head.slice(0, 7)}`}`;
-  if (round.raised === undefined || round.ruled === undefined) return `${named}: not recorded`;
+  const named = `- Round ${index + 1} at ${round.head.slice(0, 7)}`;
   const rulings = rulingsGiven(round.ruled);
   if (round.raised === 0 && rulings === null) return `${named}: found nothing new and ruled on nothing`;
   const raised = round.raised === 0 ? "raised nothing" : `raised ${counted(round.raised, "finding")}`;

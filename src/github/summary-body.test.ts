@@ -11,16 +11,25 @@ import { renderComment } from "../findings/comment.ts";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import type { ClassifiedThread } from "../loop/classify.ts";
-import type { RoundRecord, Timings } from "../loop/episode-state.ts";
+import type { RoundRecord, RoundWork, Timings } from "../loop/episode-state.ts";
 import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSummary, unappliedNotes, unpostedReplyNotes, type ClosedEpisode } from "./summary-body.ts";
 import type { ReviewThread } from "./threads.ts";
 
 /** A round of `pi` on one model, which is what most tests here need and none is about. */
-function round(dollars: number, tokens: number): RoundCost & Timings {
-  return { dollars, tokens, messages: 4, models: ["openai/gpt-5-mini"], reviewer: "pi" };
+function round(dollars: number, tokens: number): RoundCost & Timings & RoundWork {
+  return { dollars, tokens, messages: 4, models: ["openai/gpt-5-mini"], ...ran };
 }
+
+/** What every round entry carries beside its cost: a `pi` round at one commit that raised and ruled nothing. */
+const ran = {
+  reviewer: "pi",
+  elapsedSeconds: 60,
+  head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+  raised: 0,
+  ruled: { fixed: 0, withdrawn: 0, open: 0 },
+} as const satisfies Timings & RoundWork;
 
 function thread(
   status: ThreadStatus,
@@ -87,6 +96,10 @@ const quietOpens = [
   "",
   "Nothing needs a person.",
   "",
+  "**Rounds**",
+  "",
+  "- Round 1 at 3f9c2e0: found nothing new and ruled on nothing",
+  "",
   "**Notes**",
   "",
 ];
@@ -100,7 +113,17 @@ const quietOpens = [
  */
 test("the episode renders as the specification shows", () => {
   const episode: ClosedEpisode = {
-    rounds: [round(0.0061, 20_100), { ...round(0.0044, 16_400), cutShortAtSeconds: 900 }, round(0.0029, 11_700)],
+    rounds: [
+      { ...round(0.0061, 20_100), head: "3f9c2e0aa11", raised: 6 },
+      {
+        ...round(0.0044, 16_400),
+        cutShortAtSeconds: 900,
+        head: "1b86987bb22",
+        raised: 0,
+        ruled: { fixed: 2, withdrawn: 1, open: 3 },
+      },
+      { ...round(0.0029, 11_700), head: "8d21a4fcc33", raised: 1, ruled: { fixed: 0, withdrawn: 0, open: 3 } },
+    ],
     threads: [
       thread("open", "packages/sync/src/queue.ts:134", "Retry backoff resets on every enqueue"),
       thread("fixed", "packages/sync/src/queue.ts:88"),
@@ -138,6 +161,12 @@ test("the episode renders as the specification shows", () => {
       "- `packages/sync/src/session.ts:57` — Clock skew is read as token expiry (disputed)",
       "- `packages/sync/src/retry.ts` — Every path here is dead once the queue lands (open)",
       "",
+      "**Rounds**",
+      "",
+      "- Round 1 at 3f9c2e0: raised 6 findings",
+      "- Round 2 at 1b86987: raised nothing, and ruled 2 fixed, 1 withdrawn and 3 open",
+      "- Round 3 at 8d21a4f: raised 1 finding, and ruled 3 open",
+      "",
       "**Notes**",
       "",
       "- About the change as a whole: the retry queue duplicates the scheduler already in" +
@@ -166,6 +195,10 @@ test("an episode with nothing to report carries no Notes heading", () => {
       "**Needs a person**",
       "",
       "Nothing needs a person.",
+      "",
+      "**Rounds**",
+      "",
+      "- Round 1 at 3f9c2e0: found nothing new and ruled on nothing",
     ].join("\n"),
   );
   assert.ok(!comment.includes("Notes"), `a quiet episode carried a Notes heading: ${comment}`);
@@ -203,6 +236,10 @@ test("a finding about the change as a whole counts and carries no status", () =>
       "**Needs a person**",
       "",
       "Nothing needs a person.",
+      "",
+      "**Rounds**",
+      "",
+      "- Round 1 at 3f9c2e0: found nothing new and ruled on nothing",
       "",
       "**Notes**",
       "",
@@ -260,6 +297,10 @@ test("an earlier round's findings no thread holds are counted and named in Notes
       "",
       "Nothing needs a person.",
       "",
+      "**Rounds**",
+      "",
+      "- Round 1 at 3f9c2e0: found nothing new and ruled on nothing",
+      "",
       "**Notes**",
       "",
       "- `src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)",
@@ -311,7 +352,7 @@ test("a headline carrying newlines is one line of the summary, not two", () => {
     summary,
   );
   assert.equal(
-    summary.split("\n").filter((each) => each.startsWith("- ")).length,
+    summary.split("\n").filter((each) => each.startsWith("- ") && !each.startsWith("- Round ")).length,
     3,
     `three findings rendered as more than three bullets:\n${summary}`,
   );
@@ -561,6 +602,10 @@ test("a finding whose comment could not be posted is counted and named in Notes"
       "",
       "Nothing needs a person.",
       "",
+      "**Rounds**",
+      "",
+      "- Round 1 at 3f9c2e0: found nothing new and ruled on nothing",
+      "",
       "**Notes**",
       "",
       "- `src/queue.ts:134` — Retry backoff resets (raised, and its comment could not be posted)",
@@ -696,7 +741,7 @@ test("every round on one model names the reviewer and the model once (#271)", ()
 // none has nothing to name but that it is unknown.
 test("a round whose run reported no model reads as an unknown model (#271)", () => {
   assert.equal(
-    reviewerLine([{ dollars: 0.0061, tokens: 20_100, messages: 4, reviewer: "pi" }]),
+    reviewerLine([{ dollars: 0.0061, tokens: 20_100, messages: 4, ...ran }]),
     "Reviewed by `pi` on an unknown model",
   );
 });
@@ -710,7 +755,7 @@ test("rounds that ran different models name each model with its rounds (#271)", 
 });
 
 test("a round that reported no model is named among the rounds that did (#271)", () => {
-  const unreported: RoundRecord = { dollars: 0, tokens: 0, messages: 0, reviewer: "pi" };
+  const unreported: RoundRecord = { dollars: 0, tokens: 0, messages: 0, ...ran };
   assert.equal(
     reviewerLine([round(0.0061, 20_100), unreported, round(0.0044, 16_400), round(0.0044, 16_400)]),
     "Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1, 3 and 4, and on an unknown model in round 2",
@@ -727,14 +772,6 @@ test("rounds run by different reviewers name each reviewer with its rounds (#271
   assert.equal(
     reviewerLine([round(0.0061, 20_100), round(0.0044, 16_400), copilot]),
     "Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3",
-  );
-});
-
-// A state file written before the reviewer was recorded holds rounds with no name.
-test("a round recorded with no reviewer reads as an unknown reviewer (#271)", () => {
-  assert.equal(
-    reviewerLine([{ dollars: 0.0061, tokens: 20_100, messages: 4 }]),
-    "Reviewed by an unknown reviewer on an unknown model",
   );
 });
 
@@ -789,17 +826,6 @@ test("the summary lists each round with its commit, what it raised and what it r
       "- Round 3 at 8d21a4f: raised nothing, and ruled 1 fixed",
       "- Round 4 at 9a0b1c2: found nothing new and ruled on nothing",
     ].join("\n"),
-  );
-});
-
-test("a round whose work the state file does not hold is listed as not recorded (#586)", () => {
-  const comment = renderSummary({
-    ...quiet,
-    rounds: [round(0.001, 1_000), ruledRound("1b86987bb22", 1, nothingRuled)],
-  });
-  assert.ok(
-    comment.endsWith("**Rounds**\n\n- Round 1: not recorded\n- Round 2 at 1b86987: raised 1 finding"),
-    `the rounds were not listed: ${comment}`,
   );
 });
 

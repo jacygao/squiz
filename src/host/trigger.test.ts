@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { renderComment, renderReply } from "../findings/comment.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
-import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
+import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
@@ -195,6 +195,18 @@ function ownIdentity(): ProcessIdentity {
 }
 
 const state = { head: HEAD, activity: null };
+
+/** The round at a cap of one, on `state`. */
+const ROUND_AT_CAP: RoundRecord = {
+  dollars: 0,
+  tokens: 1200,
+  messages: 1,
+  reviewer: "pi",
+  elapsedSeconds: 1,
+  head: HEAD,
+  raised: 0,
+  ruled: { fixed: 0, withdrawn: 0, open: 0 },
+};
 
 test("a state with no record is queued with its owner and workspace, and a host is started", async () => {
   await withFixture(async (fixture) => {
@@ -398,7 +410,7 @@ test("a hook leaves a failed state failed, and squiz review queues it again", as
 test("a round whose host has gone is handed back for recovery, and nothing is changed", async () => {
   await withFixture((fixture) => {
     const gone = { pid: process.pid, startedAt: ownIdentity().startedAt - 1_000 };
-    const reviewing: StateRecord = { ...state, status: "reviewing", host: gone };
+    const reviewing: StateRecord = { ...state, status: "reviewing", host: gone, round: { number: 1 } };
     seed(fixture.episode, { records: [reviewing] });
 
     const result = decided(trigger(request(fixture)));
@@ -429,7 +441,7 @@ test("a host that took the state between the trigger's read and its queue keeps 
     // The host's record is written while it asks: after the read, before the queue.
     mkdirSync(fixture.episode.directory, { recursive: true });
     writeFileSync(join(fixture.episode.directory, "host.lock"), `${JSON.stringify({ pid: self.pid, startedAt: self.startedAt - 1_000 })}\n`);
-    const reviewing: StateRecord = { ...state, status: "reviewing", host: self };
+    const reviewing: StateRecord = { ...state, status: "reviewing", host: self, round: { number: 1 } };
 
     const result = decided(trigger(request(fixture, {
       presence: () => {
@@ -544,7 +556,7 @@ test("a trigger for a state still under review when the close is written leaves 
     // The round at the cap has written the close and is still posting its summary.
     seed(fixture.episode, {
       closeReported: true,
-      rounds: [{ dollars: 0, tokens: 1200, messages: 1 }],
+      rounds: [ROUND_AT_CAP],
       records: [{ ...state, status: "reviewing", host: ownIdentity(), round: { number: 1 } }],
     });
 
@@ -559,7 +571,7 @@ test("a trigger for a state queued behind the round at the cap leaves it in hand
     const other = { head: "8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258", activity: null };
     seed(fixture.episode, {
       closeReported: true,
-      rounds: [{ dollars: 0, tokens: 1200, messages: 1 }],
+      rounds: [ROUND_AT_CAP],
       records: [
         { ...other, status: "reviewing", host: ownIdentity(), round: { number: 1 } },
         { ...state, status: "queued" },
@@ -569,23 +581,6 @@ test("a trigger for a state queued behind the round at the cap leaves it in hand
     const result = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
 
     assert.notDeepEqual(result.decision, { outcome: "closed" }, "a run on a queued state would print the close without saying why it was not reviewed");
-  });
-});
-
-test("a closed episode whose state file still marks an extra round after the cap queues nothing (#718)", async () => {
-  await withFixture((fixture) => {
-    // The mark a close at the cap with threads open once wrote, for a round after it.
-    seed(fixture.episode, {
-      closeReported: true,
-      closingRoundDue: true,
-      rounds: [{ dollars: 0, tokens: 1200, messages: 1 }],
-    } as Partial<EpisodeState>);
-
-    const result = decided(trigger(request(fixture)));
-
-    assert.deepEqual(result.decision, { outcome: "closed" }, "the old mark gave a closed episode another round");
-    assert.deepEqual(records(fixture.episode), []);
-    assert.deepEqual(hostLines(fixture), []);
   });
 });
 

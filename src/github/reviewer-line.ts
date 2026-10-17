@@ -12,7 +12,7 @@ import type { Reviewer } from "../config/config.ts";
 
 /** What a round recorded about who reviewed it. */
 export type ReviewedBy = {
-  readonly reviewer?: Reviewer;
+  readonly reviewer: Reviewer;
   readonly models?: readonly string[];
 };
 
@@ -23,8 +23,8 @@ type Ran = { readonly reviewer: string; readonly model: string; readonly rounds:
  * The reviewer line for an episode whose rounds are `rounds`, as one line with
  * no trailing newline, or `null` where no round ran.
  *
- * A reviewer or a model a round did not record is named as unknown. Where every
- * round ran the same reviewer on the same models, the line names them once.
+ * A model a round did not record is named as unknown. Where every round ran
+ * the same reviewer on the same models, the line names them once.
  * Otherwise each model is named with the rounds that ran on it, under the
  * reviewer that ran them, in the order the rounds first named each.
  */
@@ -33,7 +33,7 @@ export function renderReviewerLine(rounds: readonly ReviewedBy[]): string | null
 
   const ran: Ran[] = [];
   rounds.forEach((round, index) => {
-    const reviewer = round.reviewer === undefined ? "an unknown reviewer" : `\`${round.reviewer}\``;
+    const reviewer = `\`${round.reviewer}\``;
     const models = round.models === undefined || round.models.length === 0
       ? ["an unknown model"]
       : round.models.map(codeSpan);

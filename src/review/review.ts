@@ -331,8 +331,8 @@ function notReviewed(
 ): Settled | undefined {
   const records = state.records ?? [];
   if (supersededName(record) !== undefined) {
-    // Followed by its full key alone. A record from before records kept it is
-    // waited out, because the reason names only a commit other states can share.
+    // Followed by its full key alone, because the reason names only a commit
+    // other states can share.
     const newer = record.supersededBy === undefined ? undefined : recordFor(records, record.supersededBy);
     if (newer === undefined || hops >= records.length) return undefined;
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
@@ -419,8 +419,7 @@ function roundResult(
   threads: readonly ReviewThread[],
   left?: { readonly state: string; readonly closedAt: ClosingBound },
 ): ReviewResult {
-  // A record from before records kept the round's number: the count of rounds stands in.
-  const round = record.round?.number ?? state.rounds.length;
+  const round = record.round.number;
   const unposted = record.unposted;
   const lost =
     unposted === undefined
@@ -436,7 +435,7 @@ function roundResult(
     commit: record.head.slice(0, 7),
     round,
     cap: waiting.cap,
-    newFindings: record.newFindings ?? 0,
+    newFindings: record.newFindings,
     threads: threads.filter((thread) => record.openThreads.includes(thread.id)),
     recorded: waiting.recorded,
     problems,

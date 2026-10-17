@@ -16,9 +16,10 @@ const key = { head: "3f9c2e0", activity: null };
 const host = { pid: 4242, startedAt: 1_791_000_000 };
 
 const queued: StateRecord = { ...key, status: "queued" };
-const reviewing: StateRecord = { ...key, status: "reviewing", host };
-const reviewed: StateRecord = { ...key, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["PRRT_1"] };
-const reviewedClean: StateRecord = { ...key, status: "reviewed", result: "clean, episode open" };
+const round = { number: 1, startedAt: 1_791_000_000, endedAt: 1_791_000_160, reviewer: { backend: "detached" } } as const;
+const reviewing: StateRecord = { ...key, status: "reviewing", host, round: { number: 1 } };
+const reviewed: StateRecord = { ...key, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["PRRT_1"], round, newFindings: 1 };
+const reviewedClean: StateRecord = { ...key, status: "reviewed", result: "clean, episode open", round, newFindings: 0 };
 const failed: StateRecord = { ...key, status: "failed", reason: "the round host died", ownerNoted: true };
 const notReviewed: StateRecord = { ...key, status: "not reviewed", reason: "the episode closed at the round cap" };
 
