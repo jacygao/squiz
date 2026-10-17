@@ -57,7 +57,10 @@ function subagentStopPayload(cwd: string, over: Readonly<Record<string, unknown>
 type Place = {
   readonly worktree: string;
   readonly bin: string;
-  /** Where the stand-in hosts write `took <pid>`, and a recording trigger its request. */
+  /**
+   * Where the trigger writes `asked` as it starts a stand-in host, the host
+   * `took <pid>` or what it found instead, and a recording trigger its request.
+   */
   readonly log: string;
 };
 
@@ -118,6 +121,10 @@ function reported(place: Place): string {
   return existsSync(place.log) ? readFileSync(place.log, "utf8") : "";
 }
 
+function hostsAsked(place: Place): number {
+  return reported(place).split("\n").filter((line) => line === "asked").length;
+}
+
 function hostsThatTook(place: Place): number[] {
   return reported(place).split("\n").filter((line) => line.startsWith("took ")).map((line) => Number(line.slice(5)));
 }
@@ -152,7 +159,7 @@ function triggerSource(place: Place, trigger: TriggerAs): string {
       const host =
         "hostCommand" in trigger
           ? `() => ({ command: ${JSON.stringify(trigger.hostCommand)}, args: [] })`
-          : `(number) => ({ command: process.execPath, args: [${JSON.stringify(standInHost)}, episodeAt(${JSON.stringify(place.worktree)}, number).directory, ${log}] })`;
+          : `(number) => { appendFileSync(${log}, "asked\\n"); return { command: process.execPath, args: [${JSON.stringify(standInHost)}, episodeAt(${JSON.stringify(place.worktree)}, number).directory, ${log}] }; }`;
       return `(request) => trigger({ ...request, host: ${host} })`;
     }
     case "recording":
@@ -173,7 +180,7 @@ async function fire(place: Place, firing: HookFiring): Promise<Fired> {
   await writeFile(
     source,
     [
-      `import { writeFileSync } from "node:fs";`,
+      `import { appendFileSync, writeFileSync } from "node:fs";`,
       `import { Readable } from "node:stream";`,
       `import { runHook } from ${JSON.stringify(hookModule)};`,
       `import { trigger } from ${JSON.stringify(triggerModule)};`,
@@ -518,7 +525,7 @@ test("a state file that cannot be read queues nothing, starts no host, posts no 
     );
     assert.equal(fired.stderr.split("\n").length, 2, "one line, and nothing else");
     assert.equal(readFileSync(episode.stateFile, "utf8"), "{ not json", "the hook wrote over the file it could not read");
-    assert.deepEqual(hostsThatTook(place), [], "a host was started for a state nothing queued");
+    assert.equal(hostsAsked(place), 0, "a host was started for a state nothing queued");
     const calls = readFileSync(join(place.bin, "calls.log"), "utf8");
     assert.match(calls, /^pr list /mu, "the stand-in gh was never reached");
     assert.doesNotMatch(calls, /\/comments/u, "a comment was posted on the pull request");
@@ -549,4 +556,18 @@ test("a place's clean-up leaves no host the firing started running, one that has
   for (const directory of directories) {
     assert.deepEqual(processesNaming(directory), [], `a process naming ${directory} outlived the clean-up that removed it`);
   }
+});
+
+test("probe old: a firing that starts a host", async () => {
+  await withPlace(async (place) => {
+    await fire(place, { payload: stopPayload(place.worktree) });
+    assert.deepEqual(hostsThatTook(place), [], "OLD assertion caught the host");
+  });
+});
+
+test("probe new: a firing that starts a host", async () => {
+  await withPlace(async (place) => {
+    await fire(place, { payload: stopPayload(place.worktree) });
+    assert.equal(hostsAsked(place), 0, "NEW assertion caught the host");
+  });
 });
