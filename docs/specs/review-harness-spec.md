@@ -984,7 +984,8 @@ The adapter `reviewer` chooses by default. It must:
   The adapter writes none of `pi`'s settings. `pi` loads `AGENTS.md` and
   `CLAUDE.md` itself, which is how the project's conventions reach the reviewer.
 - **Set the thinking level on every run**, so that it never comes from the
-  user's own settings.
+  user's own settings. A model that does not offer that level runs at another,
+  which `squiz doctor` names (§ 6 The setup check).
 - **Run `pi` interactively in a pane, and in print mode with no standard input
   when detached.**
 - **End the reviewer**, because interactive `pi` waits for input once its agent
@@ -2061,7 +2062,7 @@ Node 24.6.0
 tmux: not found. Not required: without tmux or Herdr, reviews run detached
 Herdr 0.9.3
 squiz link: /Users/ana/.local/bin/squiz already links to this squiz
-Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default
+Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default: warning: thinking medium runs at high on this model, which offers only off, high and max
 ```
 
 Each line is at one of three levels, and only `failed` changes the exit status:
@@ -2091,7 +2092,7 @@ The rows, in the order they print:
 | tmux, Herdr | No | It answers. |
 | The `squiz` link | No, and never a failure | `PATH` holds a link to this squiz, read as `squiz init` reads it. Anything `squiz init` would refuse or change is a warning. |
 | Copilot's copies of squiz | No, and printed only where Copilot has one | Each copy under `<COPILOT_HOME>/installed-plugins/` is this squiz's version. A different one is a warning naming the older, since Copilot's hook runs its own copy and two versions would write one state file. |
-| The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, and for Copilot the sign-in prompt succeeds. |
+| The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, for Copilot the sign-in prompt succeeds, and for `pi` the model runs at the configured thinking level. |
 | The project's `pi` settings | No, and printed only where the reviewer is `pi` and there are any | Never: the row names what a review does not use. |
 
 **The reviewer is the one `reviewer` names in `.squiz.json`** at the root
@@ -2103,6 +2104,24 @@ or else the user's default from the reviewer CLI's own settings, as § 4 sets ou
 for each adapter. Where neither names one, the model is unknown. Settings that
 cannot be read are a warning for `pi`, which starts without them, and a failure
 for Copilot, whose round fails on them.
+
+**For `pi`, the row ends with the thinking level a round runs at**, wherever it
+names a model. `pi` runs a model at the nearest level that model offers, looking
+above the configured level first, and says nothing. DeepSeek V4 Pro offers off,
+high and max, so `medium` runs at high. The check starts `pi` in RPC mode, with
+the round's level and model and with the project untrusted, and asks for the
+level it settled on and the levels the model offers:
+
+```
+pi --mode rpc --no-session --no-approve --no-extensions --thinking medium --model deepseek/deepseek-v4-pro
+{"id":"levels","type":"get_available_thinking_levels"}
+{"id":"state","type":"get_state"}
+```
+
+`pi` answers both before any prompt, so the check makes no model request. A
+level that matches ends the line, as `; thinking medium`. A level that differs
+is a warning naming the configured level, the level it runs at and the levels
+the model offers. A level `pi` does not report is a warning with the reason.
 
 **Copilot's sign-in is checked with one prompt, which spends one request**, since
 no `copilot` command reports a sign-in without reaching the model:

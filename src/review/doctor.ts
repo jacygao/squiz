@@ -9,7 +9,9 @@
  * It starts each tool once to ask its version, `gh` a second time for its
  * sign-in, and `git` a second time for the repository whose `.squiz.json`
  * names the reviewer, which every row that reads the repository shares. Where
- * that reviewer is Copilot, it sends Copilot one prompt to test its sign-in. It
+ * that reviewer is `pi`, it starts `pi` a second time to ask the thinking level
+ * a round runs at, which sends no prompt. Where the reviewer is Copilot, it
+ * sends Copilot one prompt to test its sign-in. It
  * reads settings files and plugin manifests, and writes nothing but the
  * temporary directory that prompt runs in, which it removes.
  */
@@ -506,15 +508,33 @@ const reviewer: Check = (context) => {
   if (found.outcome === "failed") return { level: "failed", line: `${label}: could not be run: ${found.reason}` };
   const installed = `${label} ${found.version}`;
   const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : { level: "present", line });
+  const onModel = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : withThinking(line, config, context));
 
-  if (config.model !== null) return usable(`${installed}, model ${config.model}, from ${configFileName}`);
+  if (config.model !== null) return onModel(`${installed}, model ${config.model}, from ${configFileName}`);
   const cli = config.reviewer === "pi" ? "pi" : "Copilot";
   const user = adapterFor(config.reviewer).userModel?.(context.environment);
-  if (typeof user === "string") return usable(`${installed}, model ${user}, ${cli}'s default`);
+  if (typeof user === "string") return onModel(`${installed}, model ${user}, ${cli}'s default`);
+  // The levels on offer are a model's, so with no model named there is no level to report.
   if (user === undefined) return usable(`${installed}, model unknown: neither ${configFileName} nor ${cli}'s settings name one`);
   if (user.failsTheRound) return { level: "failed", line: `${installed}: model unknown: ${user.problem}` };
   return { level: "warning", line: `${installed}: warning: model unknown: ${user.problem}` };
 };
+
+/**
+ * `line`, ending with the thinking level a round runs at. A model can change the
+ * configured level without saying so, which is a warning, since the round
+ * still runs. So is a level the reviewer's CLI could not report.
+ */
+function withThinking(line: string, config: Config, context: DoctorContext): Row {
+  const runsAt = adapterFor(config.reviewer).runsAt;
+  if (runsAt === undefined) return { level: "present", line };
+  const asked = config.thinking;
+  const runs = runsAt({ directory: context.directory, environment: context.environment, thinking: asked, model: config.model, boundMs: context.boundMs });
+  if (runs.outcome === "unknown") return { level: "warning", line: `${line}: warning: thinking level unknown: ${runs.reason}` };
+  if (runs.level === asked) return { level: "present", line: `${line}; thinking ${asked}` };
+  const offered = runs.offered.length < 2 ? runs.offered.join("") : `${runs.offered.slice(0, -1).join(", ")} and ${runs.offered.at(-1)}`;
+  return { level: "warning", line: `${line}: warning: thinking ${asked} runs at ${runs.level} on this model, which offers only ${offered}` };
+}
 
 // The cheapest model the prompt was measured on, whatever model a round runs.
 const SIGN_IN_MODEL = "gpt-5-mini";
