@@ -55,15 +55,48 @@ const OPEN_THREAD: ReviewThread = {
 
 type Fixture = { readonly worktree: string; readonly episode: Episode };
 
+/** A repository with a `.squiz.json` of its own, so that no run adds the line saying the defaults are in use. */
 async function withWorktree(body: (fixture: Fixture) => Promise<void>): Promise<void> {
   // Real paths, because git answers the toplevel with symlinks resolved.
   const worktree = realpathSync(mkdtempSync(join(tmpdir(), "squiz-review-")));
   try {
     const made = spawnSync("git", ["init", "--quiet", "--initial-branch", "feature-a"], { cwd: worktree });
     assert.equal(made.status, 0);
+    writeFileSync(join(worktree, ".squiz.json"), "{}");
     await body({ worktree, episode: episodeAt(worktree, NUMBER) });
   } finally {
     rmSync(worktree, { recursive: true, force: true });
+  }
+}
+
+/**
+ * A worktree made by `git worktree add`, holding `linkedSquizJson` as its own
+ * `.squiz.json`, beside a main worktree holding `mainSquizJson`, or none where
+ * it is null.
+ */
+async function withLinkedWorktree(
+  mainSquizJson: string | null,
+  linkedSquizJson: string,
+  body: (fixture: Fixture & { readonly main: string }) => Promise<void>,
+): Promise<void> {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "squiz-review-linked-")));
+  const main = join(base, "main");
+  const worktree = join(base, "linked");
+  try {
+    mkdirSync(main);
+    for (const args of [
+      ["init", "--quiet", "--initial-branch", "main"],
+      ["commit", "--quiet", "--allow-empty", "-m", "first"],
+      ["worktree", "add", "--quiet", "-b", "feature-a", worktree],
+    ]) {
+      const ran = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: main, encoding: "utf8" });
+      assert.equal(ran.status, 0, ran.stderr);
+    }
+    if (mainSquizJson !== null) writeFileSync(join(main, ".squiz.json"), mainSquizJson);
+    writeFileSync(join(worktree, ".squiz.json"), linkedSquizJson);
+    await body({ worktree, main, episode: episodeAt(worktree, NUMBER) });
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 }
 
@@ -173,6 +206,40 @@ test("a state already reviewed is returned at once, as a result the run did not 
     assert.equal(printed.exit, 2);
     assert.equal(printed.stdout.split("\n")[1], "Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 1 new finding.");
     assert.ok(Date.now() - started < 2_000, "a recorded result was waited for");
+  });
+});
+
+const ALREADY_REVIEWED: StateRecord = {
+  ...OWN,
+  status: "reviewed",
+  result: "exited",
+  exitStatus: 2,
+  openThreads: [OPEN_THREAD.id],
+  newFindings: 1,
+  round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+};
+
+test("#745: a linked worktree takes the round cap from the main worktree's .squiz.json, never its own", async () => {
+  await withLinkedWorktree('{"reviewer": "copilot", "rounds": 5}', '{"reviewer": "pi", "rounds": 2}', async (fixture) => {
+    records(fixture, [ALREADY_REVIEWED], { rounds: [NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }, [OPEN_THREAD]) }));
+
+    assert.equal(printed.exit, 2, printed.stderr);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 5, 1 new finding.");
+    assert.equal(printed.stderr, "");
+  });
+});
+
+test("#745: a run whose main worktree has no .squiz.json says on stderr that the defaults are in use, and keeps its outcome", async () => {
+  await withLinkedWorktree(null, '{"reviewer": "copilot", "rounds": 5}', async (fixture) => {
+    records(fixture, [ALREADY_REVIEWED], { rounds: [NO_COST] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }, [OPEN_THREAD]) }));
+
+    assert.equal(printed.exit, 2);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 1 new finding.");
+    assert.equal(printed.stderr, `squiz: no .squiz.json was found in the main worktree, ${fixture.main}, so the defaults are in use\n`);
   });
 });
 

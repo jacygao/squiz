@@ -8,7 +8,7 @@
 
 import { fileURLToPath } from "node:url";
 
-import { loadConfig } from "../config/config.ts";
+import { defaultsLine, findProjectConfig } from "../config/config.ts";
 import { reportFailure } from "../hook/report.ts";
 import type { HookExit } from "../hook/trap.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
@@ -36,21 +36,24 @@ export async function hostCommand(args: readonly string[], directory: string): P
     return 0;
   }
 
-  let config;
+  let project;
   try {
-    config = loadConfig(worktree.path);
+    project = findProjectConfig(worktree.path);
   } catch (cause) {
     // The settings refuse a value they cannot use by throwing.
     reportFailure(`no round host started: ${cause instanceof Error ? cause.message : String(cause)}`);
     return 0;
   }
+  const { config } = project;
 
+  const note = defaultsLine(project);
   // The trigger that started the host ran in the coding agent's terminal, and
   // its environment names the Herdr or tmux server the reviewer's pane opens on.
   await runHost({
     worktree: worktree.path,
     pullRequest,
     round: { config, adapter: adapterFor(config.reviewer), charterFile, sessionEnvironment: process.env },
+    ...(note === undefined ? {} : { note }),
   });
   return 0;
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,6 +10,8 @@ import {
   ConfigError,
   configFileName,
   defaultConfig,
+  defaultsLine,
+  findProjectConfig,
   loadConfig,
 } from "./config.ts";
 
@@ -346,5 +349,59 @@ test("a .squiz.json that is there and cannot be read is not read as absent", () 
     assert.ok(error.message.includes(configFileName));
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Every worktree of a repository reads the main worktree's `.squiz.json`, so a
+// file git ignores is never missed in a worktree that did not copy it (#745).
+
+/** A main worktree and a linked one beside it, each holding the `.squiz.json` given, or none where it is null. */
+function linkedPair(main: string | null, linked: string | null): { main: string; linked: string; base: string } {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "squiz-config-pair-")));
+  const mainRoot = join(base, "main");
+  const linkedRoot = join(base, "linked");
+  mkdirSync(mainRoot);
+  const git = (...args: string[]): void => {
+    const ran = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: mainRoot, encoding: "utf8" });
+    assert.equal(ran.status, 0, ran.stderr);
+  };
+  git("init", "--quiet");
+  git("commit", "--quiet", "--allow-empty", "-m", "first");
+  git("worktree", "add", "--quiet", "--detach", linkedRoot);
+  if (main !== null) writeFileSync(join(mainRoot, configFileName), main);
+  if (linked !== null) writeFileSync(join(linkedRoot, configFileName), linked);
+  return { main: mainRoot, linked: linkedRoot, base };
+}
+
+test("#745: a linked worktree reads the main worktree's .squiz.json, never its own", () => {
+  const pair = linkedPair(`{"reviewer": "copilot"}`, `{"reviewer": "pi"}`);
+  try {
+    const found = findProjectConfig(pair.linked);
+    assert.equal(found.config.reviewer, "copilot", "the main worktree's reviewer, not the linked worktree's pi");
+    assert.equal(found.file, join(pair.main, configFileName));
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
+  }
+});
+
+test("#745: a linked worktree whose main worktree has no .squiz.json runs on the defaults, whatever its own file says", () => {
+  const pair = linkedPair(null, `{"reviewer": "copilot"}`);
+  try {
+    const found = findProjectConfig(pair.linked);
+    assert.deepEqual(found.config, defaultConfig);
+    assert.equal(found.file, null);
+    assert.equal(defaultsLine(found), `no .squiz.json was found in the main worktree, ${pair.main}, so the defaults are in use`);
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
+  }
+});
+
+test("#745: a main worktree's .squiz.json that is refused fails, though the linked worktree's own is valid", () => {
+  const pair = linkedPair(`{"reviewer": "claude"}`, `{"reviewer": "pi"}`);
+  try {
+    const error = rejectionOf(() => findProjectConfig(pair.linked), "an invalid .squiz.json in the main worktree");
+    assert.ok(error.message.startsWith(join(pair.main, configFileName)), error.message);
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
   }
 });

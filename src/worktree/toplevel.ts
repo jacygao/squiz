@@ -10,8 +10,10 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { basename, dirname, resolve } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
+import { runGit } from "./git.ts";
 
 /** Where the worktree's root is, or why git could not say. */
 export type ToplevelLookup =
@@ -55,6 +57,28 @@ export function worktreeToplevel(directory: string, until?: Deadline): ToplevelL
   // there is nothing here to run a round against.
   if (path === "") return failed("git named no worktree for this directory");
   return { outcome: "resolved", path };
+}
+
+/** Where the repository's main worktree is, `undefined` where it has none, or why git could not say. */
+export type MainWorktreeLookup =
+  | { readonly outcome: "resolved"; readonly path: string | undefined }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/** Ask git for the main worktree of the repository holding `directory`. Never throws. */
+export function mainWorktree(directory: string, until?: Deadline): MainWorktreeLookup {
+  const asked = runGit(directory, ["rev-parse", "--git-common-dir"], { until, ranOut: RAN_OUT });
+  if (!asked.ran) return { outcome: "failed", reason: asked.reason };
+  // Git answers relative to the directory it ran in wherever it can.
+  return { outcome: "resolved", path: mainWorktreeOf(resolve(directory, asked.stdout.trim())) };
+}
+
+/**
+ * The main worktree is the directory holding the common `.git`. A common
+ * directory by any other name, a bare repository's or a submodule's, has no
+ * worktree beside it.
+ */
+export function mainWorktreeOf(commonDirectory: string): string | undefined {
+  return basename(commonDirectory) === ".git" ? dirname(commonDirectory) : undefined;
 }
 
 /** What a call killed at its bound says, which is never that there is no worktree. */

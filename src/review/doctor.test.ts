@@ -381,7 +381,7 @@ test("with copilot both the reviewer and installed, the coding agent's row says 
 
   assert.deepEqual(
     printed.stdout.split("\n").filter((line) => /copilot/iu.test(line) && !/cannot listen/u.test(line)),
-    ["copilot 1.2.0, experimental features on", "Reviewer copilot 1.2.0, model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini"],
+    ["copilot 1.2.0, experimental features on", `Reviewer copilot 1.2.0 (${squizFile()}), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini`],
   );
 });
 
@@ -395,7 +395,20 @@ function repository(squizJson?: string): string {
   const init = spawnSync("git", ["init", "--quiet"], { cwd: root, encoding: "utf8" });
   assert.equal(init.status, 0, init.stderr);
   if (squizJson !== undefined) writeFileSync(join(root, ".squiz.json"), squizJson, "utf8");
+  lastRepository = root;
   return root;
+}
+
+let lastRepository = "";
+
+/** The `.squiz.json` of the repository `repository` made last, which the reviewer's row names where it was read. */
+function squizFile(): string {
+  return join(lastRepository, ".squiz.json");
+}
+
+/** The reviewer's line in `stdout`. */
+function reviewerLine(stdout: string): string {
+  return stdout.split("\n").find((row) => row.startsWith("Reviewer")) ?? "no reviewer line";
 }
 
 /** Write `settings` as the JSON file at `path` under `root`, making its directories. */
@@ -421,7 +434,7 @@ test("with no reviewer set, the row names pi and the default model in pi's own s
 
   const printed = squizDoctor({ ...base, directory: repository() });
 
-  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model deepseek\/deepseek-v4-pro, pi's default; thinking medium$/mu);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer pi 0.85.1 (no ${squizFile()}), model deepseek/deepseek-v4-pro, pi's default; thinking medium`);
   assert.equal(printed.exit, 0);
 });
 
@@ -431,7 +444,7 @@ test("a model .squiz.json names is the one the row names, over pi's own default"
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"pi","model":"openai/gpt-5-mini"}') });
 
-  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model openai\/gpt-5-mini, from \.squiz\.json; thinking medium$/mu);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer pi 0.85.1 (${squizFile()}), model openai/gpt-5-mini, from .squiz.json; thinking medium`);
 });
 
 test("a thinking level the model does not offer is a warning naming the level pi runs it at and the levels the model offers (#709)", () => {
@@ -440,9 +453,9 @@ test("a thinking level the model does not offer is a warning naming the level pi
 
   const printed = squizDoctor({ ...base, directory: repository() });
 
-  assert.match(
-    printed.stdout,
-    /^Reviewer pi 0\.85\.1, model deepseek\/deepseek-v4-pro, pi's default: warning: thinking medium runs at high on this model, which offers only off, high and max$/mu,
+  assert.equal(
+    reviewerLine(printed.stdout),
+    `Reviewer pi 0.85.1 (no ${squizFile()}), model deepseek/deepseek-v4-pro, pi's default: warning: thinking medium runs at high on this model, which offers only off, high and max`,
   );
   assert.equal(printed.exit, 0, "the round still runs, so the row is a warning and not a failure");
 });
@@ -457,7 +470,7 @@ test("the level .squiz.json sets and its model are the ones pi is asked about", 
 
   const row = reviewerRow({ ...EVERY_FAKE, pi: recording }, project);
 
-  assert.equal(row.line, "Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json; thinking low");
+  assert.equal(row.line, `Reviewer pi 0.85.1 (${squizFile()}), model openai/gpt-5-mini, from .squiz.json; thinking low`);
   assert.match(readFileSync(asked, "utf8"), /--thinking low --model openai\/gpt-5-mini $/u);
 });
 
@@ -468,7 +481,7 @@ test("a thinking level pi does not report is a warning with the reason, and not 
 
   assert.equal(
     row.line,
-    "Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json: warning: thinking level unknown: pi did not report its thinking level",
+    `Reviewer pi 0.85.1 (${squizFile()}), model openai/gpt-5-mini, from .squiz.json: warning: thinking level unknown: pi did not report its thinking level`,
   );
   assert.equal(row.exit, 0);
 });
@@ -476,7 +489,7 @@ test("a thinking level pi does not report is a warning with the reason, and not 
 test("with no model anywhere, the row says nothing of thinking, since pi has no model to report a level for", () => {
   const row = reviewerRow({ ...EVERY_FAKE, pi: piAnswering(["off"], "off") }, repository());
 
-  assert.equal(row.line, "Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one");
+  assert.equal(row.line, `Reviewer pi 0.85.1 (no ${squizFile()}), model unknown: neither .squiz.json nor pi's settings name one`);
 });
 
 test("pi's default is read from PI_CODING_AGENT_DIR where it is set", () => {
@@ -485,7 +498,7 @@ test("pi's default is read from PI_CODING_AGENT_DIR where it is set", () => {
 
   const row = reviewerRow(EVERY_FAKE, repository(), { PI_CODING_AGENT_DIR: agent });
 
-  assert.equal(row.line, "Reviewer pi 0.85.1, model openrouter/qwen/qwen3-coder, pi's default; thinking medium");
+  assert.equal(row.line, `Reviewer pi 0.85.1 (no ${squizFile()}), model openrouter/qwen/qwen3-coder, pi's default; thinking medium`);
 });
 
 test("a project's own .pi/settings.json is not read as the model, because a review does not apply it", () => {
@@ -494,7 +507,7 @@ test("a project's own .pi/settings.json is not read as the model, because a revi
 
   const row = reviewerRow(EVERY_FAKE, project);
 
-  assert.equal(row.line, "Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one");
+  assert.equal(row.line, `Reviewer pi 0.85.1 (no ${squizFile()}), model unknown: neither .squiz.json nor pi's settings name one`);
 });
 
 test("pi settings that are not JSON leave the model unknown with the reason, as a warning", () => {
@@ -506,7 +519,7 @@ test("pi settings that are not JSON leave the model unknown with the reason, as 
 
   assert.match(
     printed.stdout,
-    new RegExp(`^Reviewer pi 0\\.85\\.1: warning: model unknown: pi's settings ${home}/\\.pi/agent/settings\\.json are not JSON: .+$`, "mu"),
+    new RegExp(`^Reviewer pi 0\\.85\\.1 \\(no ${squizFile()}\\): warning: model unknown: pi's settings ${home}/\\.pi/agent/settings\\.json are not JSON: .+$`, "mu"),
   );
   assert.equal(printed.exit, 0);
 });
@@ -516,7 +529,7 @@ test("a pi that is not installed fails the row and names pi", () => {
 
   const row = reviewerRow(rest, repository());
 
-  assert.equal(row.line, "Reviewer pi: not found");
+  assert.equal(row.line, `Reviewer pi (no ${squizFile()}): not found`);
   assert.equal(row.exit, 1);
 });
 
@@ -526,7 +539,7 @@ test("with copilot as the reviewer, the row names Copilot and its default model,
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
 
-  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-6-astra, Copilot's default\. Signed in; the check spent one request on gpt-5-mini$/mu);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.92 (${squizFile()}), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini`);
   assert.doesNotMatch(printed.stdout, /^Reviewer pi/mu);
   assert.equal(printed.exit, 0);
 });
@@ -534,7 +547,7 @@ test("with copilot as the reviewer, the row names Copilot and its default model,
 test("Copilot's default is COPILOT_MODEL where the environment sets it", () => {
   const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, repository('{"reviewer":"copilot"}'), { COPILOT_MODEL: "claude-sonnet-5" });
 
-  assert.equal(row.line, "Reviewer copilot 1.0.92, model claude-sonnet-5, Copilot's default. Signed in; the check spent one request on gpt-5-mini");
+  assert.equal(row.line, `Reviewer copilot 1.0.92 (${squizFile()}), model claude-sonnet-5, Copilot's default. Signed in; the check spent one request on gpt-5-mini`);
 });
 
 test("with copilot as the reviewer and no model anywhere, the model is unknown", () => {
@@ -542,7 +555,7 @@ test("with copilot as the reviewer and no model anywhere, the model is unknown",
 
   assert.equal(
     row.line,
-    "Reviewer copilot 1.0.92, model unknown: neither .squiz.json nor Copilot's settings name one. Signed in; the check spent one request on gpt-5-mini",
+    `Reviewer copilot 1.0.92 (${squizFile()}), model unknown: neither .squiz.json nor Copilot's settings name one. Signed in; the check spent one request on gpt-5-mini`,
   );
 });
 
@@ -552,7 +565,8 @@ test("Copilot settings a round could not read fail the row, because the round wo
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
 
-  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92: model unknown: the user's Copilot settings .+ are not an object$/mu);
+  assert.match(reviewerLine(printed.stdout), /: model unknown: the user's Copilot settings .+ are not an object$/u);
+  assert.ok(reviewerLine(printed.stdout).startsWith(`Reviewer copilot 1.0.92 (${squizFile()}): `), reviewerLine(printed.stdout));
   assert.equal(printed.exit, 1);
 });
 
@@ -562,14 +576,14 @@ test("a model .squiz.json names leaves Copilot's own settings unread, as a round
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot","model":"gpt-5-mini"}') });
 
-  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.92, model gpt-5-mini, from \.squiz\.json\. Signed in; the check spent one request on gpt-5-mini$/mu);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.92 (${squizFile()}), model gpt-5-mini, from .squiz.json. Signed in; the check spent one request on gpt-5-mini`);
   assert.equal(printed.exit, 0);
 });
 
 test("a Copilot that is not installed fails the row and names copilot, though pi is installed", () => {
   const row = reviewerRow(EVERY_FAKE, repository('{"reviewer":"copilot"}'));
 
-  assert.equal(row.line, "Reviewer copilot: not found");
+  assert.equal(row.line, `Reviewer copilot (${squizFile()}): not found`);
   assert.equal(row.exit, 1);
 });
 
@@ -666,7 +680,7 @@ To authenticate, you can use any of the following methods:
 test("a Copilot that answers the prompt is signed in, and the line says the check spent a request", () => {
   const row = signInRow("echo OK");
 
-  assert.equal(row.line, "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini");
+  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini`);
   assert.equal(row.exit, 0);
 });
 
@@ -712,7 +726,7 @@ test("a copilot found through a relative PATH entry is the one sent the sign-in 
 
   const printed = squizDoctor({ ...base, directory, environment: { ...base.environment, PATH: `tools:${String(base.environment.PATH)}` } });
 
-  assert.match(printed.stdout, /^Reviewer copilot 1\.0\.93, model gpt-6-astra, from \.squiz\.json\. Signed in; the check spent one request on gpt-5-mini$/mu);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini`);
 });
 
 test("the sign-in check's scratch directory is gone once the row is printed", () => {
@@ -730,7 +744,7 @@ test("a Copilot with no login fails the row with the first line it printed", () 
 
   assert.equal(
     row.line,
-    "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: No authentication information found.",
+    `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: No authentication information found.`,
   );
   assert.equal(row.exit, 1);
 });
@@ -740,7 +754,7 @@ test("a token Copilot could not validate fails the row with the reason GitHub ga
 
   assert.equal(
     row.line,
-    "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: Authentication token found but could not be validated. Failed to fetch PAT user login (401): GitHub returned: Bad credentials",
+    `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: Authentication token found but could not be validated. Failed to fetch PAT user login (401): GitHub returned: Bad credentials`,
   );
   assert.equal(row.exit, 1);
 });
@@ -748,7 +762,7 @@ test("a token Copilot could not validate fails the row with the reason GitHub ga
 test("a sign-in check that outlasts its bound fails the row, and leaves no scratch directory", () => {
   const row = signInRow("/bin/sleep 5", { signInBoundMs: 300 });
 
-  assert.equal(row.line, "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot did not answer within 0.3 seconds");
+  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Its sign-in check failed: copilot did not answer within 0.3 seconds`);
   assert.equal(row.exit, 1);
   const home = valueOf(row.started, "COPILOT_HOME") ?? "";
   assert.notEqual(home, "");
@@ -758,7 +772,7 @@ test("a sign-in check that outlasts its bound fails the row, and leaves no scrat
 test("the sign-in check is bounded by its own bound, not a version probe's", () => {
   const row = signInRow("/bin/sleep 1\necho OK", { boundMs: 300 });
 
-  assert.equal(row.line, "Reviewer copilot 1.0.93, model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini");
+  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-5-mini`);
 });
 
 test("a .squiz.json the configuration refuses is reported as refused, naming the setting, and is not checked as pi", () => {
@@ -816,7 +830,42 @@ test("the .squiz.json read is the one at the repository's root, from a directory
 
   const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, below);
 
-  assert.match(row.line, /^Reviewer copilot 1\.0\.92, /u);
+  assert.ok(row.line.startsWith(`Reviewer copilot 1.0.92 (${project}/.squiz.json), `), row.line);
+});
+
+/**
+ * A worktree made by `git worktree add` from a repository holding `mainJson` as
+ * its `.squiz.json`, holding `linkedJson` as its own.
+ */
+function linkedWorktree(mainJson: string, linkedJson: string): { main: string; linked: string } {
+  const main = repository(mainJson);
+  const linked = `${main}-linked`;
+  for (const args of [
+    ["commit", "--quiet", "--allow-empty", "-m", "first"],
+    ["worktree", "add", "--quiet", "--detach", linked],
+  ]) {
+    const ran = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: main, encoding: "utf8" });
+    assert.equal(ran.status, 0, ran.stderr);
+  }
+  writeFileSync(join(linked, ".squiz.json"), linkedJson, "utf8");
+  return { main, linked };
+}
+
+test("#745: in a linked worktree the row reads the main worktree's .squiz.json, never its own, and names it", () => {
+  const { main, linked } = linkedWorktree('{"reviewer":"copilot"}', '{"reviewer":"pi"}');
+
+  const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, linked);
+
+  assert.ok(row.line.startsWith(`Reviewer copilot 1.0.92 (${main}/.squiz.json), `), row.line);
+});
+
+test("#745: a .squiz.json the main worktree holds and the configuration refuses fails the row, naming that file", () => {
+  const { main, linked } = linkedWorktree('{"reviewer":"claude"}', '{"reviewer":"pi"}');
+
+  const row = reviewerRow(EVERY_FAKE, linked);
+
+  assert.equal(row.line, `Reviewer: .squiz.json refused: ${main}/.squiz.json: "reviewer" is "claude", but it must be "pi" or "copilot"`);
+  assert.equal(row.exit, 1);
 });
 
 // The row naming the project's pi settings a review does not use.
