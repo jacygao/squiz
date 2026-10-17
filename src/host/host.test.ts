@@ -1006,16 +1006,22 @@ test("a host whose worktree is gone exits, and makes nothing where it was", asyn
 });
 
 test("a host whose worktree goes during a round takes nothing more", async () => {
+  let pushed = "";
   const ran = await host({
     records: atHead,
     onStart: (_index, fixture) => {
-      queueNow(fixture.episode, queued(fixture.push()));
+      pushed = fixture.push();
       rmSync(fixture.episode.worktree, { recursive: true, force: true });
+      // Queued after the removal, so the state file comes back without the
+      // repository, and a host that took it would show it taken.
+      queueNow(fixture.episode, queued(pushed));
     },
   });
 
-  assert.deepEqual(ran.end, { outcome: "worktree gone" });
-  assert.equal(ran.started, 1);
+  assert.equal(ran.started, 1, `the host started a reviewer after its worktree went; host.log:\n${ran.log}`);
+  const left = recordsOf(ran.state).find((record) => record.head === pushed);
+  assert.equal(left?.status, "queued", `the state queued after the worktree went is ${JSON.stringify(left)}; host.log:\n${ran.log}`);
+  assert.deepEqual(ran.end, { outcome: "worktree gone" }, `host.log:\n${ran.log}`);
 });
 
 test("a host whose state file cannot be read exits naming it in host.log, and asks nothing of GitHub", async () => {
