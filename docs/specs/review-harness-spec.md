@@ -1637,7 +1637,10 @@ in its failure comment instead (§ 7 The failure comment).
 
 **A round whose finished review never read the diff of a changed file is a
 line of its own**, naming the files, the first ten of them where there are more.
-It is read from the round's entry in the state file. A round the time bound cut
+It is read from the round's entry in the state file. Each name is one code span
+on the line: a control character in it is shown escaped, a line break as `\n`,
+and the span's fence is one backtick longer than any run of backticks in the
+name. A round the time bound cut
 short has no such line, because its own line says the review did not finish:
 
 ```markdown

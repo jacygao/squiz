@@ -369,11 +369,12 @@ async function changedIn(
   range: string,
   signal: AbortSignal | undefined,
 ): Promise<readonly Changed[] | HistoryResult> {
-  const statuses = await runGit(snapshot, [...DIFF_ARGUMENTS, "-z", "--name-status", range], signal);
+  // Read whole, because a list cut short would leave files the harness never
+  // counts and a reviewer can never open. What the reviewer reads is cut later.
+  const statuses = await runGit(snapshot, [...DIFF_ARGUMENTS, "-z", "--name-status", range], signal, Infinity);
   if (!statuses.ran) return refused(statuses.reason);
-  const counts = await runGit(snapshot, [...DIFF_ARGUMENTS, "-z", "--numstat", range], signal);
+  const counts = await runGit(snapshot, [...DIFF_ARGUMENTS, "-z", "--numstat", range], signal, Infinity);
   if (!counts.ran) return refused(counts.reason);
-  if (statuses.cut || counts.cut) return refused(`the list of changed files ran past ${OUTPUT_CAP} bytes`);
 
   const names = statuses.stdout.split("\0");
   const numbers = counts.stdout.split("\0");
@@ -392,6 +393,13 @@ async function changedIn(
     changed.push({ status, path, from, added: lineCount(added), removed: lineCount(removed) });
   }
   return changed;
+}
+
+/** `text` as git's output would arrive under the cap: whole lines up to it, and whether it was cut. */
+function capped(text: string): Ran {
+  if (Buffer.byteLength(text) <= OUTPUT_CAP) return { ran: true, stdout: text, cut: false };
+  const head = new TextDecoder("utf-8").decode(Buffer.from(text).subarray(0, OUTPUT_CAP));
+  return { ran: true, stdout: head.slice(0, head.lastIndexOf("\n") + 1), cut: true };
 }
 
 function lineCount(field: string | undefined): number | undefined {
@@ -444,7 +452,7 @@ export const gitDiff: HistoryTool = {
     if (typeof range !== "string") return range;
     const changed = await changedIn(snapshot, range, signal);
     if ("failed" in changed) return changed;
-    if (path === undefined) return { text: listing(changed), failed: false };
+    if (path === undefined) return answer(gitDiff.name, capped(listing(changed)));
 
     const file = changed.find((each) => each.path === path || each.from === path);
     if (file === undefined) {

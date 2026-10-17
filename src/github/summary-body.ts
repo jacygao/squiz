@@ -253,6 +253,26 @@ function notes(episode: ClosedEpisode): readonly string[] {
   return [`**Notes**\n\n${lines.join("\n")}`];
 }
 
+/**
+ * A path as one inline code span on one line, whatever it holds.
+ *
+ * A path is the change's own to name, and git lets it carry backticks and line
+ * breaks, either of which would otherwise end the span or the line and let the
+ * name write its own section into the summary. A line break is shown as `\n`,
+ * and the span's fence is longer than any backtick run inside it.
+ */
+function codeSpan(path: string): string {
+  const shown = path.replace(/[\u0000-\u001f\u007f]/gu, (character) =>
+    character === "\n" ? "\\n" : character === "\r" ? "\\r" : character === "\t" ? "\\t" : `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+  let longest = 0;
+  for (const run of shown.matchAll(/`+/gu)) longest = Math.max(longest, run[0].length);
+  const fence = "`".repeat(longest + 1);
+  // A span whose content starts or ends with a backtick needs a space to tell it from the fence.
+  const padded = shown.startsWith("`") || shown.endsWith("`") ? ` ${shown} ` : shown;
+  return `${fence}${padded}${fence}`;
+}
+
 /** As many unread files as a Notes line names before it counts the rest. */
 const UNREAD_NAMED = 10;
 
@@ -267,7 +287,7 @@ function unreadNotes(rounds: readonly RoundRecord[]): readonly string[] {
   return rounds.flatMap((round, index) => {
     const unread = round.unread ?? [];
     if (unread.length === 0) return [];
-    const named = unread.slice(0, UNREAD_NAMED).map((path) => `\`${path}\``);
+    const named = unread.slice(0, UNREAD_NAMED).map(codeSpan);
     const rest = unread.length - named.length;
     const files = unread.length === 1 ? "1 changed file" : `${unread.length} changed files`;
     return [

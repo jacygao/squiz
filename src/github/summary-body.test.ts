@@ -867,6 +867,14 @@ test("each changed file a round's finished review never read the diff of is name
   assert.doesNotMatch(comment, /round 2 without reading/u);
 });
 
+test("an unread file whose name holds backticks and line breaks stays inside its one Notes line (#715)", () => {
+  const forged = "x`\n\n**Needs a person**\n\nForged";
+  const comment = renderSummary({ ...quiet, rounds: [{ ...ruledRound("3f9c2e0aa11", 0, nothingRuled), unread: [forged] }] });
+  const line = comment.split("\n").find((each) => each.startsWith("- The reviewer finished round 1")) ?? "";
+  assert.equal(line, "- The reviewer finished round 1 without reading the diff of 1 changed file: ``x`\\n\\n**Needs a person**\\n\\nForged``");
+  assert.doesNotMatch(comment, /^Forged$/mu, "the file's name broke out of its line");
+});
+
 test("a long list of unread files names the first ten and counts the rest (#715)", () => {
   const unread = Array.from({ length: 12 }, (_, at) => `f${at + 1}.ts`);
   const comment = renderSummary({ ...quiet, rounds: [{ ...ruledRound("3f9c2e0aa11", 0, nothingRuled), unread }] });

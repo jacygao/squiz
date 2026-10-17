@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 import { BASE_REF } from "../worktree/snapshot.ts";
-import { changeDiff, gitBlame, gitDiff, gitLogSearch, gitShow, historyTools, OUTPUT_CAP } from "./git-tools.ts";
+import { changedFiles, changeDiff, gitBlame, gitDiff, gitLogSearch, gitShow, historyTools, OUTPUT_CAP } from "./git-tools.ts";
 
 /** Run git in `directory` and return its stdout, failing the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): string {
@@ -420,6 +420,31 @@ test("git_diff shows a renamed file as a rename, named by either of its paths", 
     assert.match(result.text, /^rename from old\.txt$/mu, path);
     assert.match(result.text, /^\+line 21$/mu, path);
   }
+});
+
+test("a change whose list of files runs past the cap is listed whole to the harness, and cut for the reviewer", async () => {
+  const many = await mkdtemp(join(root, "many-"));
+  git(many, "init", "--quiet", "--initial-branch", "main");
+  await writeFile(join(many, "keep.txt"), "kept\n");
+  const base = commit(many, "the base");
+  // 400 names of over 200 bytes each, past the 65,536 bytes a tool answers with.
+  const directory = join(many, "d".repeat(100), "e".repeat(100));
+  await mkdir(directory, { recursive: true });
+  for (let at = 1; at <= 400; at += 1) await writeFile(join(directory, `file-${at}.txt`), `${at}\n`);
+  commit(many, "four hundred files");
+  git(many, "update-ref", BASE_REF, base);
+
+  const files = await changedFiles(many);
+  assert.ok(Array.isArray(files), JSON.stringify(files));
+  assert.equal((files as readonly string[]).length, 400);
+  const listed = await gitDiff.run(many, {});
+  assert.equal(listed.failed, false, listed.text.slice(0, 200));
+  assert.ok(listed.text.length < OUTPUT_CAP + 500, `the listing ran to ${listed.text.length} characters`);
+  assert.match(listed.text, /cut at 65,536 bytes/u);
+  const last = (files as readonly string[]).at(-1) ?? "";
+  const shown = await gitDiff.run(many, { path: last });
+  assert.equal(shown.failed, false, shown.text);
+  assert.equal(shown.read, last);
 });
 
 test("git_diff says the snapshot names no base where it has none, rather than diffing against something else", async () => {
