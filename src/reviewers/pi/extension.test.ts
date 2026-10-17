@@ -11,13 +11,15 @@
  */
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { historyTools } from "../git-tools.ts";
-import { REPORTS_VARIABLE } from "../report-file.ts";
+import { BASE_REF } from "../../worktree/snapshot.ts";
+import { reportFileAt, REPORTS_VARIABLE } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
 import { grants } from "./argv.ts";
 import reportAsYouGo, {
@@ -756,6 +758,31 @@ test("a history tool's result is the call's answer", async () => {
   const answer = await toolOf(historyLoaded(), "git_show").execute("call_1", { commit: "HEAD" });
   const [content] = answer.content;
   assert.ok(content !== undefined && content.text.startsWith("commit "), JSON.stringify(answer));
+});
+
+test("a changed file whose diff git_diff showed is recorded as read, and a listing records nothing", async (t) => {
+  const reports = reportsFile(t);
+  const tree = mkdtempSync(join(tmpdir(), "squiz-extension-diff-"));
+  t.after(() => rmSync(tree, { recursive: true, force: true }));
+  const git = (...args: string[]): string =>
+    execFileSync("git", ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", ...args], {
+      cwd: tree,
+      encoding: "utf8",
+    }).trim();
+  git("init", "--quiet");
+  writeFileSync(join(tree, "a.txt"), "one\n");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "base");
+  git("update-ref", BASE_REF, "HEAD");
+  writeFileSync(join(tree, "a.txt"), "two\n");
+  git("commit", "--quiet", "--all", "-m", "change");
+
+  const { pi, loaded: extension } = registrar();
+  serveHistoryTools(pi, tree, reportFileAt(reports));
+  await toolOf(extension, "git_diff").execute("call_1", {});
+  assert.deepEqual(linesIn(reports), [], "a listing is no file read");
+  await toolOf(extension, "git_diff").execute("call_2", { path: "a.txt" });
+  assert.deepEqual(linesIn(reports), [{ type: "read", path: "a.txt" }]);
 });
 
 test("the signal pi hands a call reaches the runner", async () => {

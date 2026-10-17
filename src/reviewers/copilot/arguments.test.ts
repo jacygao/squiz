@@ -8,6 +8,7 @@ const valid: Readonly<Record<string, unknown>> = {
   git_log_search: { term: "margin" },
   git_blame: { file: "src/place.ts", line: 12 },
   git_show: { commit: "HEAD~1" },
+  git_diff: { path: "src/place.ts" },
 };
 
 // A keyword the check does not know would refuse every call to the tool.

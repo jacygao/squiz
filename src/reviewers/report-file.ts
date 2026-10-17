@@ -56,13 +56,16 @@ export type UsageLine = {
   readonly usage?: unknown;
 };
 
+/** The reviewer read one changed file's diff through `git_diff`, named as it is after the change. */
+export type ReadLine = { readonly type: "read"; readonly path: string };
+
 /** The reviewer finished the review. */
 export type FinishLine = { readonly type: "finish" };
 
 /** The reviewer stopped with no finish recorded. */
 export type UnfinishedLine = { readonly type: "unfinished" };
 
-export type Line = ReportLine | RefusedLine | UsageLine | FinishLine | UnfinishedLine;
+export type Line = ReportLine | RefusedLine | UsageLine | ReadLine | FinishLine | UnfinishedLine;
 
 export type ReportFile = {
   /** Append the line. Throws where the file cannot be written. */

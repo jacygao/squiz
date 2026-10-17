@@ -24,6 +24,7 @@ const pullRequest: PullRequest = {
   baseRef: "main",
   headRef: "cards/placement",
   headSha: "655997442d7a69aec2903665478883e71dac5da0",
+  baseSha: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
   description: "Adds the placement pass.",
 };
 

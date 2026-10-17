@@ -104,7 +104,7 @@ async function withPlace(body: (place: Place) => Promise<void>): Promise<void> {
     git(worktree, "init", "--quiet", "--initial-branch", BRANCH);
     git(worktree, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false",
       "commit", "--quiet", "--allow-empty", "--message", "a commit to hang a branch off");
-    const row = { number: NUMBER, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName: BRANCH, headRefOid: HEAD, body: "", isDraft: false };
+    const row = { number: NUMBER, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName: BRANCH, headRefOid: HEAD, baseRefOid: "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c", body: "", isDraft: false };
     writeFileSync(join(bin, "list.out"), JSON.stringify([row]), "utf8");
     standIn(bin, "gh", fakeGh(bin));
     await body(place);

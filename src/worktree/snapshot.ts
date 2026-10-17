@@ -65,19 +65,20 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * Add the round's snapshot of `worktree`, the coding agent's worktree root, at
  * the path `snapshotPath` gives.
  *
- * Where the repository lacks the commit it is fetched from `origin` first, and
- * checked for again before anything is added: a snapshot of anything else is
- * worse than none.
+ * Where the repository lacks the commit or the base, the missing ones are
+ * fetched from `origin` first, and checked for again before anything is added:
+ * a snapshot of anything else is worse than none. The base is written into the
+ * snapshot as `BASE_REF`.
  *
  * `until` bounds every git call, and a call with nothing left on it is not
  * started. Fails where:
  *
- * - the commit is not a full object name;
+ * - the commit or the base is not a full object name;
  * - the snapshots directory cannot be made, or is not this user's alone;
  * - anything already stands at the path, which is a killed round's snapshot
  *   for recovery to remove;
- * - the fetch fails, or finishes without bringing the commit;
- * - git refuses the clone or the checkout, or the deadline passes.
+ * - the fetch fails, or finishes without bringing a commit it fetched;
+ * - git refuses the clone, the checkout or the ref, or the deadline passes.
  *
  * A checkout can fail after the clone is made, so a failed addition that left
  * anything at the path says so in `leftBehind`. Nothing here removes it, because

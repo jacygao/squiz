@@ -33,5 +33,5 @@ test("the adapter reads the report file the reporting server writes", async () =
   async function* file(): AsyncGenerator<string> {
     yield '{"type":"finish"}\n';
   }
-  assert.deepEqual((await copilot.parse(file())).result, { kind: "reviewed", findings: [], verdicts: [] });
+  assert.deepEqual((await copilot.parse(file())).result, { kind: "reviewed", findings: [], verdicts: [], read: [] });
 });

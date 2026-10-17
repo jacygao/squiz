@@ -70,7 +70,7 @@ function fakeGh(directory: string): string {
 
 function pullRequestRow(headRefName: string = BRANCH, number: number = NUMBER): string {
   return JSON.stringify([
-    { number, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName, headRefOid: HEAD, body: "", isDraft: false },
+    { number, id: "PR_kwDOUEd2qM8AAAABDNPXSA", baseRefName: "main", headRefName, headRefOid: HEAD, baseRefOid: "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c", body: "", isDraft: false },
   ]);
 }
 

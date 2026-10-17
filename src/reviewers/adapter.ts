@@ -142,6 +142,12 @@ export type RoundOutput = {
   readonly findings: readonly Finding[];
   /** Only the threads the reviewer ruled on. A thread it passed over has no entry. */
   readonly verdicts: readonly ThreadVerdict[];
+  /**
+   * The changed files whose diff the reviewer read through `git_diff`, each
+   * once, in the order it first read them. Absent where the adapter cannot
+   * tell, which is not a review that read nothing.
+   */
+  readonly read?: readonly string[];
 };
 
 /** What the reviewer has reported, and whether it has said the review is done. */

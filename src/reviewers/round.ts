@@ -258,6 +258,7 @@ async function roundWithin(
         refusals: refused,
         findings: ran.findings,
         verdicts: ran.verdicts,
+        ...(ran.read === undefined ? {} : { read: ran.read }),
       };
     }
     if (ran.kind === "killed") {

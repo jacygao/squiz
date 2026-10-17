@@ -245,11 +245,35 @@ function notes(episode: ClosedEpisode): readonly string[] {
       ...episode.rounds.flatMap((round) => round.unpostedReplies ?? []),
       ...episode.unapplied,
     ].map((note) => `- ${note}`),
+    ...unreadNotes(episode.rounds),
     ...cutShort(episode.rounds),
     ...closedEarly(episode.because, episode.leftNotReviewed),
   ];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
+}
+
+/** As many unread files as a Notes line names before it counts the rest. */
+const UNREAD_NAMED = 10;
+
+/**
+ * One line per round whose finished review never read the diff of some changed
+ * file, naming them.
+ *
+ * The prompt lists the changed files and carries no diff, so a review that
+ * skipped one reports nothing about it, and nothing else says it went unread.
+ */
+function unreadNotes(rounds: readonly RoundRecord[]): readonly string[] {
+  return rounds.flatMap((round, index) => {
+    const unread = round.unread ?? [];
+    if (unread.length === 0) return [];
+    const named = unread.slice(0, UNREAD_NAMED).map((path) => `\`${path}\``);
+    const rest = unread.length - named.length;
+    const files = unread.length === 1 ? "1 changed file" : `${unread.length} changed files`;
+    return [
+      `- The reviewer finished round ${index + 1} without reading the diff of ${files}: ${named.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`,
+    ];
+  });
 }
 
 /**

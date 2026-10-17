@@ -22,6 +22,7 @@ import { standIn } from "../../testing/stand-in.ts";
 import type { Invocation } from "../adapter.ts";
 import { historyTools } from "../git-tools.ts";
 import { type Round, runRound } from "../round.ts";
+import { BASE_REF } from "../../worktree/snapshot.ts";
 import { pi } from "./adapter.ts";
 
 const charterFile = fileURLToPath(new URL("../../../charter.md", import.meta.url));
@@ -44,6 +45,7 @@ test("a round calls each history tool once and gets its result back", async () =
     assert.match(answered["git_log_search"]?.text ?? "", /Add lastSaid/u);
     assert.match(answered["git_blame"]?.text ?? "", /comments\[comments\.length\]/u);
     assert.match(answered["git_show"]?.text ?? "", /^commit [0-9a-f]{40}/u);
+    assert.match(answered["git_diff"]?.text ?? "", /^diff --git a\/src\/threads\.ts b\/src\/threads\.ts$/mu);
   });
 });
 
@@ -91,6 +93,8 @@ async function inTheFixture(run: (tree: string) => Promise<void>): Promise<void>
     );
     git(["add", "--all"], tree);
     git(["commit", "--quiet", "--message", "Add lastSaid"], tree);
+    // The round host names the base in the snapshot; this tree stands in for one.
+    git(["update-ref", BASE_REF, "HEAD~1"], tree);
 
     const bin = join(under, "bin");
     mkdirSync(bin);
@@ -154,6 +158,7 @@ const calls = {
   git_log_search: { term: "comments.length" },
   git_blame: { file: "src/threads.ts", line: 2 },
   git_show: { commit: "HEAD" },
+  git_diff: { path: "src/threads.ts" },
 };
 
 async function review() {

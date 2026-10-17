@@ -64,13 +64,20 @@ test("a finished review comes back with its findings, its verdicts and its cost"
   const { run } = await read(reviewed);
   assert.deepEqual(run, {
     cost: { dollars: 0.003, tokens: 200, messages: 2 },
-    result: { kind: "reviewed", findings: [finding], verdicts: [verdict] },
+    result: { kind: "reviewed", findings: [finding], verdicts: [verdict], read: [] },
   });
+});
+
+test("the changed files whose diff the reviewer read come back with the review, each once", async () => {
+  const { run } = await read(
+    fileOf({ type: "read", path: "src/a.ts" }, { type: "read", path: "src/b.ts" }, { type: "read", path: "src/a.ts" }, usage("stop", 0.001), finish),
+  );
+  assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [], read: ["src/a.ts", "src/b.ts"] });
 });
 
 test("a review that reported nothing and finished is an empty review rather than a failure", async () => {
   const { run } = await read(fileOf(usage("toolUse", 0.002), finish, usage("stop", 0.001)));
-  assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [] });
+  assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [], read: [] });
 });
 
 /** An empty file is a reviewer that reported nothing at all, never a clean review. */
@@ -96,7 +103,7 @@ test("errored messages among the working ones leave the run reviewed", async () 
 /** The declaration is read before any stop reason. */
 test("a finished review is a review though no message stopped for an answer", async () => {
   const { run } = await read(fileOf(usage("toolUse", 0.002), findingLine, finish, usage("error", 0, "gone")));
-  assert.deepEqual(run.result, { kind: "reviewed", findings: [finding], verdicts: [] });
+  assert.deepEqual(run.result, { kind: "reviewed", findings: [finding], verdicts: [], read: [] });
 });
 
 test("a reviewer that stopped without finishing names how much it got through", async () => {
@@ -129,7 +136,7 @@ test("the findings come back in order, and a second ruling on one thread leaves 
       finish,
     ),
   );
-  assert.deepEqual(run.result, { kind: "reviewed", findings: [finding, second], verdicts: [verdict] });
+  assert.deepEqual(run.result, { kind: "reviewed", findings: [finding, second], verdicts: [verdict], read: [] });
 });
 
 test("a call stopped before it ran is counted, and a report the call refused is not", async () => {

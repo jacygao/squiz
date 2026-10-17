@@ -61,6 +61,7 @@ test("a finish is a review, and its cost is the usage line's tokens, requests, A
     kind: "reviewed",
     findings: [finding],
     verdicts: [{ thread: "PRRT_1", verdict: "fixed" }],
+    read: [],
   });
   assert.deepEqual(run.cost, {
     dollars: 0,
@@ -69,6 +70,17 @@ test("a finish is a review, and its cost is the usage line's tokens, requests, A
     credits: 0.53597,
     models: ["gpt-5-mini", "claude-haiku-4.5"],
   });
+});
+
+test("the changed files whose diff the reviewer read come back with the review, each once", async () => {
+  const run = await read(
+    JSON.stringify({ type: "read", path: "src/a.ts" }),
+    JSON.stringify({ type: "read", path: "src/b.ts" }),
+    JSON.stringify({ type: "read", path: "src/a.ts" }),
+    finished,
+    usage,
+  );
+  assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [], read: ["src/a.ts", "src/b.ts"] });
 });
 
 // A model named with no request against it served none of the run.

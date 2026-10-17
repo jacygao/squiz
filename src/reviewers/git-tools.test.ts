@@ -364,6 +364,12 @@ test("git_diff with a path shows that file's hunks, and runs no program the repo
   ranNothing();
 });
 
+test("git_diff names the changed file whose diff it showed, under its name after the change, and none for a listing", async () => {
+  assert.equal((await gitDiff.run(repo, { path: "code.txt" })).read, "code.txt");
+  assert.equal((await gitDiff.run(repo, {})).read, undefined);
+  assert.equal((await gitDiff.run(repo, { path: ".gitattributes" })).read, undefined);
+});
+
 test("git_diff shows a link's change as the link, never the file it points at", async () => {
   const result = await gitDiff.run(repo, { path: "link.txt" });
   assert.equal(result.failed, false, result.text);

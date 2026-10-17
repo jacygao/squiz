@@ -1,6 +1,6 @@
 /**
  * The pull request whose head is a branch, and what a round needs to know about
- * it: its number, its refs, its head sha, its description and its diff. The
+ * it: its number, its refs, its head and base shas, and its description. The
  * lookup also says whether it is a draft, which a trigger reads and a round
  * does not.
  *
@@ -35,6 +35,8 @@ export type PullRequest = {
    * A caller that reached for the wrong sha would be told the anchor was wrong.
    */
   readonly headSha: string;
+  /** The commit the base ref names, which the change is diffed against. */
+  readonly baseSha: string;
   readonly description: string;
 };
 
@@ -50,9 +52,6 @@ export type PullRequestLookup =
 /** The `PR_` node id GitHub gave for a pull request's number. */
 export type NodeIdLookup = { readonly outcome: "found"; readonly nodeId: string } | Failure;
 
-/** The diff GitHub served for a pull request. */
-export type DiffFetch = { readonly outcome: "fetched"; readonly diff: string } | Failure;
-
 // One branch has one pull request, so one row is the whole answer.
 const query = [
   "pr",
@@ -60,13 +59,10 @@ const query = [
   "--state",
   "open",
   "--json",
-  "number,id,baseRefName,headRefName,headRefOid,body,isDraft",
+  "number,id,baseRefName,headRefName,headRefOid,baseRefOid,body,isDraft",
   "--limit",
   "1",
 ] as const;
-
-/** What turns the answer from JSON describing a pull request into the diff itself. */
-const diffHeader = "Accept: application/vnd.github.v3.diff";
 
 /**
  * Ask `gh` for the open pull request whose head is `branch`.
@@ -88,31 +84,6 @@ export function findPullRequestForBranch(branch: string, call: GhCall): PullRequ
   const run = runGh([...query, "--head", branch], call);
   if (run.outcome !== "ran") return failed(run.reason);
   return read(run.stdout);
-}
-
-/**
- * Fetch the diff GitHub serves for pull request `number`.
- *
- * What arrives is byte for byte what `git diff` writes for the same range: a
- * path holding a space carries a trailing tab, and a path outside ASCII is
- * quoted one octal escape per byte. The anchor validator reads it as it stands.
- *
- * `call` carries the directory and the bound, as the lookup's does.
- *
- * Never throws, and an empty answer is a failure rather than an empty diff: a
- * `gh` that succeeded and printed nothing establishes nothing.
- *
- * `api` rather than `pr diff`, which spends a GraphQL call to find a number the
- * caller is holding.
- */
-export function fetchDiff(number: number, call: GhCall): DiffFetch {
-  // `gh` fills `{owner}` and `{repo}` in from the remotes of the directory it
-  // runs in, which is the same repository the lookup asked.
-  const path = `repos/{owner}/{repo}/pulls/${number}`;
-  const run = runGh(["api", path, "--header", diffHeader], call);
-  if (run.outcome !== "ran") return failed(run.reason);
-  if (run.stdout === "") return failed("gh answered with an empty diff");
-  return { outcome: "fetched", diff: run.stdout };
 }
 
 /**
@@ -168,6 +139,9 @@ function read(stdout: string): PullRequestLookup {
   const headSha = textOf(row["headRefOid"]);
   if (headSha === null) return incomplete("head sha", stdout);
 
+  const baseSha = textOf(row["baseRefOid"]);
+  if (baseSha === null) return incomplete("base sha", stdout);
+
   // An empty body is a pull request nobody described, which is an answer. Only
   // a body that is not a string is a row this cannot read.
   const description: unknown = row["body"];
@@ -176,7 +150,7 @@ function read(stdout: string): PullRequestLookup {
   const draft: unknown = row["isDraft"];
   if (typeof draft !== "boolean") return incomplete("draft flag", stdout);
 
-  return { outcome: "found", number, nodeId, baseRef, headRef, headSha, description, draft };
+  return { outcome: "found", number, nodeId, baseRef, headRef, headSha, baseSha, description, draft };
 }
 
 /** A row read as its fields, or `null` where it is not an object at all. */

@@ -29,7 +29,7 @@ import { createInterface } from "node:readline";
 
 import { type HistoryTool, historyTools } from "../git-tools.ts";
 import { type ReportCalls, reportCalls } from "../report-calls.ts";
-import { reportFileAt, REPORTS_VARIABLE } from "../report-file.ts";
+import { type ReportFile, reportFileAt, REPORTS_VARIABLE } from "../report-file.ts";
 import { mismatchOf } from "./arguments.ts";
 
 /** The variable naming the charter file, which the server hands Copilot as its instructions. */
@@ -68,7 +68,8 @@ type Running = Map<Id, AbortController>;
 
 /** Answer every request on standard input, and nothing else, on standard output. */
 function serve(setting: Setting): void {
-  const reporting = reportCalls(reportFileAt(setting.reports));
+  const reportFile = reportFileAt(setting.reports);
+  const reporting = reportCalls(reportFile);
   const running: Running = new Map();
   const write = (message: Message): void => {
     process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -99,7 +100,7 @@ function serve(setting: Setting): void {
       warn(`${method} carries an id that is neither a string nor a number`);
       return;
     }
-    const outcome = outcomeOf(method, message["params"], reporting, setting, running, id);
+    const outcome = outcomeOf(method, message["params"], reporting, reportFile, setting, running, id);
     if (!(outcome instanceof Promise)) {
       write({ jsonrpc: "2.0", id, ...outcome });
       return;
@@ -143,6 +144,7 @@ function outcomeOf(
   method: string,
   params: unknown,
   reporting: ReportCalls,
+  reportFile: ReportFile,
   setting: Setting,
   running: Running,
   id: Id,
@@ -168,7 +170,7 @@ function outcomeOf(
         if (tool === undefined) return called(params, reporting);
         const controller = new AbortController();
         running.set(id, controller);
-        return historyCalled(tool, setting.snapshot, fieldOf(params, "arguments"), controller.signal);
+        return historyCalled(tool, setting.snapshot, fieldOf(params, "arguments"), controller.signal, reportFile);
       }
       default:
         return { error: { code: METHOD_NOT_FOUND, message: `no method ${method}` } };
@@ -240,12 +242,14 @@ function called(params: unknown, reporting: ReportCalls): Outcome {
 /**
  * The answer to a history tool's call: refused where no snapshot is named or
  * its arguments do not match its schema, and run in the snapshot where they do.
+ * A changed file whose diff the call showed is recorded in `reports` as read.
  */
 async function historyCalled(
   tool: HistoryTool,
   snapshot: string | undefined,
   args: unknown,
   signal: AbortSignal,
+  reports: ReportFile,
 ): Promise<Outcome> {
   let text: string;
   let isError: boolean;
@@ -261,6 +265,13 @@ async function historyCalled(
       const result = await tool.run(snapshot, args, signal);
       text = result.text;
       isError = result.failed;
+      // A read the file refused is a file the summary names as unread, which
+      // costs a note rather than the reviewer's answer.
+      if (result.read !== undefined) {
+        try {
+          reports.record({ type: "read", path: result.read });
+        } catch {}
+      }
     } catch (cause) {
       // The tools never throw, so this is the server's own bug, answered rather than left unanswered.
       text = `${tool.name} failed: ${cause instanceof Error ? cause.message : String(cause)}`;

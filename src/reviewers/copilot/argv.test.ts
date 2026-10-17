@@ -50,6 +50,7 @@ test("the grant is the three reading tools, and the reporting calls and history 
     "squiz-git_log_search",
     "squiz-git_blame",
     "squiz-git_show",
+    "squiz-git_diff",
   ]);
 });
 

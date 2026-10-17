@@ -43,21 +43,8 @@ const TRACKED = "src/ui/card.ts";
 const COST: RoundCost = { dollars: 0.04, tokens: 1200, messages: 3 };
 const queueRacer = fileURLToPath(new URL("queue-racer.ts", import.meta.url));
 
-const DIFF = `
-diff --git a/src/ui/card.ts b/src/ui/card.ts
-index d3d0cb2..6db135b 100644
---- a/src/ui/card.ts
-+++ b/src/ui/card.ts
-@@ -85,7 +85,7 @@
- // line 85
- // line 86
- // line 87
--// line 88
-+// line 88 CHANGED
- // line 89
- // line 90
- // line 91
-`.slice(1);
+/** The file under review at the base, ninety-one lines. */
+const BASE_CARD = Array.from({ length: 91 }, (_, at) => `// line ${at + 1}\n`).join("");
 
 type Kind = "prlist" | "diff" | "node" | "threads" | "create" | "lookup" | "summary" | "failure";
 
@@ -151,9 +138,13 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     git(worktree, ["config", "user.name", "Squiz"]);
     await writeFile(join(worktree, ".gitignore"), ".squiz/\n", "utf8");
     await mkdir(join(worktree, "src", "ui"), { recursive: true });
-    await writeFile(join(worktree, TRACKED), "// line 1\n", "utf8");
+    await writeFile(join(worktree, TRACKED), BASE_CARD, "utf8");
     git(worktree, ["add", "."]);
-    git(worktree, ["commit", "--quiet", "--message", "the change under review"]);
+    git(worktree, ["commit", "--quiet", "--message", "the base"]);
+    const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" }).trim();
+    // Line 88 is the line a finding threads on.
+    await writeFile(join(worktree, TRACKED), BASE_CARD.replace("// line 88\n", "// line 88 CHANGED\n"), "utf8");
+    git(worktree, ["commit", "--quiet", "--all", "--message", "the change under review"]);
 
     const listed = arranged.listedNumber ?? PULL_REQUEST;
     const episode = episodeAt(worktree, PULL_REQUEST);
@@ -163,7 +154,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     for (const [kind, answer] of Object.entries(answers(listed))) {
       writeFileSync(join(binaries, `answer-${kind}`), answer, "utf8");
     }
-    const answerHead = (head: string): void => writeFileSync(join(binaries, "answer-prlist"), prList(listed, head), "utf8");
+    const answerHead = (head: string): void => writeFileSync(join(binaries, "answer-prlist"), prList(listed, head, base), "utf8");
     const head = (): string => execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" }).trim();
     answerHead(head());
     const fixture: Fixture = {
@@ -346,15 +337,14 @@ function included(status: string, body: string): string {
   return `HTTP/2.0 ${status}\nContent-Type: application/json; charset=utf-8\r\n\r\n${body}`;
 }
 
-function prList(listed: number, head: string): string {
+function prList(listed: number, head: string, base: string): string {
   return JSON.stringify([
-    { number: listed, id: "PR_pull", baseRefName: "main", headRefName: BRANCH, headRefOid: head, body: "What this changes.", isDraft: false },
+    { number: listed, id: "PR_pull", baseRefName: "main", headRefName: BRANCH, headRefOid: head, baseRefOid: base, body: "What this changes.", isDraft: false },
   ]);
 }
 
 function answers(listed: number): Partial<Record<Kind, string>> {
   return {
-    diff: DIFF,
     node: included("200 OK", JSON.stringify({ number: listed, node_id: "PR_pull" })),
     threads: included(
       "200 OK",
@@ -720,7 +710,7 @@ test("a state queued while the summary is being posted is reviewed or refused, a
           `cd '${worktree}' || exit 1`,
           "git commit --quiet --allow-empty --message 'a push during the summary'",
           'sha=$(git rev-parse HEAD)',
-          `printf '[{"number":${PULL_REQUEST},"id":"PR_pull","baseRefName":"main","headRefName":"${BRANCH}","headRefOid":"%s","body":"x","isDraft":false}]' "$sha" > '${fixture.binaries}/answer-prlist'`,
+          `printf '[{"number":${PULL_REQUEST},"id":"PR_pull","baseRefName":"main","headRefName":"${BRANCH}","headRefOid":"%s","baseRefOid":"%s","body":"x","isDraft":false}]' "$sha" "$(git rev-list --max-parents=0 HEAD)" > '${fixture.binaries}/answer-prlist'`,
           `'${process.execPath}' '${queueRacer}' '${worktree}' ${PULL_REQUEST} "$sha"`,
           "",
         ].join("\n"),

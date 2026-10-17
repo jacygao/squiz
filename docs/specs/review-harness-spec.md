@@ -30,7 +30,8 @@ the reviewer runs detached, and a log holds its progress.
 
 The harness must be able to:
 
-- Read a pull request: its diff, its description, and its base and head refs
+- Read a pull request: its description, its base and head refs, and the
+  commit each names
 - List the existing review threads and whether each one is resolved
 - Create a review comment anchored to a file and a line
 - Create a review comment on a file as a whole, carrying no line
@@ -598,24 +599,44 @@ Five things are handed to it:
 | | |
 |---|---|
 | **A working directory** | A snapshot of the pull request's head commit, in a clone of its own (The snapshot, below). The reviewer runs with this as its current directory. |
-| **The pull request** | Its number, its base and head refs, its description, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness fetches all of this and passes it in. |
+| **The pull request** | Its number, its base and head refs, its description, the files it changes, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness reads all of this and passes it in. The diff itself is not passed in: the reviewer reads it through `git_diff` (Tools, below). |
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
 | **A model** | The model the project configured, in the reviewer CLI's own spelling, or none, which leaves the CLI on the user's default. |
 
 The tools it may call are the same every round, as Tools below sets out.
 
-**The prompt tells the reviewer what the history tools are for.** Every prompt
-carries this section between the description and the diff:
+**The prompt tells the reviewer what the history tools are for, and lists the
+files the pull request changes.** Every prompt carries these two sections after
+the description. The list is `git_diff`'s own, one file a line, with its status
+and the lines it adds and removes, a count of zero left out:
 
 ```markdown
 ## History
 
 Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.
+
+## Changes
+
+The diff is not in this prompt. Call `git_diff` with a file's path to read that file's change. The pull request changes these files, each with its status and the lines it adds and removes:
+
+```
+M  src/reviewers/prompt.ts            +12 -3
+A  docs/specs/review-harness/loop.md  +755
+D  docs/specs/review-harness-spec.md  -3899
+R  src/old.ts -> src/new.ts           +1 -1
+```
 ```
 
+A binary file is listed with `binary` in place of its counts.
+
+**The prompt's size does not grow with the diff.** A pull request that changes
+3,899 lines of one file adds one line to the prompt.
+
 **There is no file-selection or budgeting stage.** The reviewer decides what to
-open, one read at a time.
+open, one call at a time: each changed file's diff through `git_diff`, and any
+file through the reading tools. The summary names each changed file whose diff a
+finished review never read (§ 5).
 
 ### The reviewer session
 
@@ -735,10 +756,31 @@ git -c core.hooksPath=/dev/null checkout --quiet --detach 3f9c2e07b1d4a8c6e5f092
 The source is the repository's shared git directory, which
 `git rev-parse --git-common-dir` names from the coding agent's worktree. The
 commit is the one GitHub reports as the pull request's head. Where the
-repository does not have it yet, because it was pushed from elsewhere, the round
-host fetches it into the repository first, writing no ref and no `FETCH_HEAD`.
-The fetch, the clone and the checkout run in the part of the round before the
-review, under its 30 seconds (§ 7 The review budget).
+repository does not have it, or the commit GitHub reports as the pull request's
+base, because either was pushed from elsewhere, the round host fetches the
+missing ones into the repository first in one fetch, writing no ref and no
+`FETCH_HEAD`. The fetch, the clone and the checkout run in the part of the round
+before the review, under its 30 seconds (§ 7 The review budget).
+
+**The snapshot names the base in a ref of its own**, `refs/squiz/base`, which the
+round host writes in the clone after the checkout:
+
+```
+git update-ref refs/squiz/base 7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9
+```
+
+**The diff of the change is read from the snapshot, never downloaded.** Once the
+snapshot is made, the round host reads `git diff refs/squiz/base...HEAD` there,
+with the restrictions the history tools run under (Tools). It is byte for byte
+the diff GitHub serves for the pull request, so the anchor validator reads it as
+it would GitHub's (Findings), and no size of change is one GitHub refuses. The
+same read lists the changed files for the prompt. A diff that cannot be read,
+because the base and the head share no history or for any other reason, fails
+the round before the review, and the snapshot is removed:
+
+```
+no review ran: the diff of PR #142 could not be read: git exited 128: fatal: 7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9...HEAD: no merge base
+```
 
 **The snapshot borrows the repository's objects and shares nothing else.**
 `--shared` lets the clone read every object the repository has without copying
@@ -836,9 +878,10 @@ the grant. It holds three kinds of tool, under each adapter's own names:
 |---|---|---|
 | Reading | `read`, `grep`, `find`, `ls` | `view`, `grep`, `glob` |
 | Reporting | `report_finding`, `report_verdict`, `finish_review` | `squiz-report_finding`, `squiz-report_verdict`, `squiz-finish_review` |
-| History | `git_log_search`, `git_blame`, `git_show` | `squiz-git_log_search`, `squiz-git_blame`, `squiz-git_show` |
+| History | `git_log_search`, `git_blame`, `git_show`, `git_diff` | `squiz-git_log_search`, `squiz-git_blame`, `squiz-git_show`, `squiz-git_diff` |
 
-The history tools answer whether a line was meant. The reporting calls are how
+The history tools answer whether a line was meant, and `git_diff` is how the
+reviewer reads the change itself. The reporting calls are how
 the reviewer returns what it found, as Findings sets out. Copilot names a call an
 MCP server serves `<server>-<call>`, and the server the Copilot adapter ships is
 `squiz`. Nothing else is granted: no tool that writes, and no shell
@@ -853,6 +896,7 @@ arguments as separate words:
 | `git_log_search` | A term | `git log -S<term> HEAD`: the commits that added or removed the term, newest first, each with its message and the files it changed. The term is matched as literal text. |
 | `git_blame` | A file and a line | `git blame -L <line>,<line> HEAD -- <file>`: the commit that last changed that line, with its author and date. |
 | `git_show` | A commit | `git show` on the one commit the name resolves to: its author, date, message and change. A range, a tree or a file at a revision is refused. |
+| `git_diff` | A path, or nothing | `git diff refs/squiz/base...HEAD`, the pull request's own range, which the reviewer cannot change. With no path, the list of changed files the prompt carries. With the path of a changed file, under either of its names where it was renamed, that file's diff. A path the list does not hold is answered with a line saying so, and never reaches `git`. |
 
 **The history tools are hardened against the repository they read**, whose
 tracked files are the code under review's to set:
@@ -864,8 +908,8 @@ tracked files are the code under review's to set:
   a `..` path that climbs out, and a path whose links resolve outside the
   snapshot.
 - **No setting runs a program.** `log` and `show` take `--no-textconv`,
-  `--no-ext-diff` and `--no-show-signature`, and `blame` takes `--no-textconv`
-  and `--no-ignore-revs-file`. Every call passes `--no-pager` and
+  `--no-ext-diff` and `--no-show-signature`, `diff` takes `--no-textconv` and
+  `--no-ext-diff`, and `blame` takes `--no-textconv` and `--no-ignore-revs-file`. Every call passes `--no-pager` and
   `--literal-pathspecs`, and sets `core.fsmonitor=false`,
   `core.attributesFile=/dev/null`, `log.showSignature=false` and
   `color.ui=false` on its command line.
@@ -881,6 +925,15 @@ tracked files are the code under review's to set:
 
 A refused argument and a `git` that failed are the call's error, which the
 reviewer reads and can call again with something else.
+
+**Each changed file whose diff `git_diff` shows is recorded in the round's report
+file**, as a line of its own under the file's name after the change:
+
+```json
+{"type":"read","path":"src/reviewers/prompt.ts"}
+```
+
+A read the file refuses is not retried, and the file then counts as unread.
 
 **The reviewer's environment carries no GitHub token and no `gh` login, for
 either adapter.** The round sets four variables empty and points `gh` at a
@@ -1548,6 +1601,8 @@ Four blocks, in this order.
      location, headline and ruling;
    - a ruling of the last round that could not be applied, with what the
      reviewer ruled;
+   - a round whose finished review never read the diff of a changed file, with
+     the round's number and the files;
    - a round whose review the time bound cut short, with the round's number and
      the bound;
    - a cap or bound that ended the episode early, with each queued state it left
@@ -1579,6 +1634,16 @@ finished settles them, because it reads the whole change again. So only a close
 that ran no reviewer lists an earlier round's, those of the last round that
 reached a result, first in Notes. A failed round lists the findings it salvaged
 in its failure comment instead (§ 7 The failure comment).
+
+**A round whose finished review never read the diff of a changed file is a
+line of its own**, naming the files, the first ten of them where there are more.
+It is read from the round's entry in the state file. A round the time bound cut
+short has no such line, because its own line says the review did not finish:
+
+```markdown
+- The reviewer finished round 1 without reading the diff of 2 changed files: `src/queue.ts`, `docs/a file.md`
+- The reviewer finished round 2 without reading the diff of 12 changed files: `f1.ts`, `f2.ts`, `f3.ts`, `f4.ts`, `f5.ts`, `f6.ts`, `f7.ts`, `f8.ts`, `f9.ts`, `f10.ts`, and 2 more
+```
 
 **A round whose review the time bound cut short is a line of its own**, written
 by the round that later closes the episode, from the episode's state:
@@ -1631,7 +1696,7 @@ before anything is posted. The closing replies it could not post are added when
 it records its end, and its posting time once posting ends:
 
 ```json
-{ "reviewer": "pi", "dollars": 0.0134, "tokens": 20100, "messages": 9, "models": ["openai/gpt-5-mini"], "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3, "head": "1b86987c4f0e2d6a9b3c5e7f8a1d2c3b4e5f6a7b", "raised": 0, "ruled": { "fixed": 2, "withdrawn": 1, "open": 3 }, "unpostedReplies": ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)"] }
+{ "reviewer": "pi", "dollars": 0.0134, "tokens": 20100, "messages": 9, "models": ["openai/gpt-5-mini"], "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3, "head": "1b86987c4f0e2d6a9b3c5e7f8a1d2c3b4e5f6a7b", "raised": 0, "ruled": { "fixed": 2, "withdrawn": 1, "open": 3 }, "unpostedReplies": ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)"], "unread": ["docs/a file.md"] }
 ```
 
 - `reviewer` is the reviewer CLI the round ran, as `reviewer` in Configuration
@@ -1668,6 +1733,10 @@ it records its end, and its posting time once posting ends:
 - `unpostedReplies` is the Notes line of each reply on a thread the round
   closed that GitHub refused, and is absent where none was refused. A round
   that fails records none, and lists them in its failure comment.
+- `unread` is each changed file whose diff the round's finished review never
+  read through `git_diff`, by its name after the change. It is absent where the
+  review read every one, where the review did not finish, and where the
+  reviewer's adapter could not say what it read.
 
 A field that is there and does not hold a value of the right kind makes the file
 unreadable, like any other.
@@ -2468,7 +2537,7 @@ three parts, each bounded on its own:
 
 | Part | How long | What runs in it |
 |---|---|---|
-| Before the review | At most 30 seconds | The pull request lookup, the threads listing, the diff, and the fetch, clone and checkout that make the snapshot |
+| Before the review | At most 30 seconds | The pull request lookup, the threads listing, the fetch, clone and checkout that make the snapshot, and the diff read from it |
 | The review | The time bound | The reviewer |
 | Posting | A reserve of 60 seconds | The findings, the verdicts, the summary comment and the failure comment |
 

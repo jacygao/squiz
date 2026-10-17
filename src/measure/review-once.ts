@@ -7,8 +7,9 @@
  *
  * The round is the one the round host runs: the adapter named, with the one
  * grant every round has, thinking `medium`, 900 seconds, in a snapshot of the
- * change's head made as a round makes it, handed the change's diff and its
- * description and no threads. The model is handed to the round directly, as the
+ * change's head made as a round makes it, handed the list of the files the
+ * change touches, its description and no threads. `MEASURE_PROMPT=tool` leaves
+ * the list out, so the reviewer finds the files through `git_diff` alone. The model is handed to the round directly, as the
  * round host hands it over, so nothing here reads `.squiz.json`.
  *
  * The reviewer's CLI must be on `PATH` and signed in, and each run spends real
@@ -18,8 +19,8 @@
  * clones every case once, which has to happen before runs go side by side.
  *
  * The out-directory gets `stream.jsonl`, the CLI's JSON events as they arrived;
- * `granted.txt`, the CLI's arguments; `round.json`, what the
- * round returned; and `summary.json`, which is also printed.
+ * `granted.txt`, the CLI's arguments; `prompt.md`, the prompt; `round.json`,
+ * what the round returned; and `summary.json`, which is also printed.
  */
 
 import { execFileSync } from "node:child_process";
@@ -125,6 +126,7 @@ const pullRequest = {
   baseRef: "main",
   headRef: measured.headRef,
   headSha: prepared.head,
+  baseSha: prepared.base,
   description: readFileSync(join(patches, measured.description), "utf8"),
 };
 

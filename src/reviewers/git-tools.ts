@@ -1,13 +1,15 @@
 /**
- * The three history tools every reviewer is granted, as any CLI's server of
- * them runs them: `git_log_search`, `git_blame` and `git_show`.
+ * The git tools every reviewer is granted, as any CLI's server of them runs
+ * them: `git_log_search`, `git_blame` and `git_show`, which read the history,
+ * and `git_diff`, which reads the change under review. The harness reads the
+ * whole diff here too.
  *
  * Each runs its one git subcommand in the snapshot, by `execFile` with an
  * argument array, never through a shell. The repository under review is
  * hostile: its tracked files are the code under review's to set. So:
  *
  * - no argument the reviewer sends can be read as an option or as anything
- *   but the one commit, term or file it is meant as;
+ *   but the one commit, term, file or path it is meant as;
  * - no setting git reads from the environment, the user's config or the
  *   repository's config can make git run a program, fetch, or read a file
  *   outside the repository into what it prints;
@@ -23,8 +25,12 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { BASE_REF } from "../worktree/snapshot.ts";
 
-/** What a call answers with. `failed` marks `text` as the call's error rather than its result. */
-export type HistoryResult = { readonly text: string; readonly failed: boolean };
+/**
+ * What a call answers with. `failed` marks `text` as the call's error rather than its result.
+ * `read` names the changed file whose diff `git_diff` showed, which is how the
+ * round learns which files the reviewer read.
+ */
+export type HistoryResult = { readonly text: string; readonly failed: boolean; readonly read?: string };
 
 /** One history tool. `parameters` is the JSON Schema the CLI validates against. */
 export type HistoryTool = {
@@ -451,9 +457,23 @@ export const gitDiff: HistoryTool = {
     // from disk or as an option. Both names of a rename go, or git reads the
     // new one alone as an added file.
     const paths = file.from === undefined ? [file.path] : [file.from, file.path];
-    return answer(gitDiff.name, await runGit(snapshot, [...DIFF_ARGUMENTS, range, "--", ...paths], signal));
+    const shown = answer(gitDiff.name, await runGit(snapshot, [...DIFF_ARGUMENTS, range, "--", ...paths], signal));
+    return shown.failed ? shown : { ...shown, read: file.path };
   },
 };
+
+/**
+ * The files the change under review touches, each by its name after the
+ * change, which is the name `git_diff` reports a read under. For the harness
+ * rather than the reviewer.
+ */
+export async function changedFiles(snapshot: string, signal?: AbortSignal): Promise<readonly string[] | HistoryResult> {
+  const range = await rangeIn(snapshot, signal);
+  if (typeof range !== "string") return range;
+  const changed = await changedIn(snapshot, range, signal);
+  if ("failed" in changed) return changed;
+  return changed.map((file) => file.path);
+}
 
 /**
  * The whole diff of the change under review, for the harness rather than the
