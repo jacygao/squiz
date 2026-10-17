@@ -1,6 +1,8 @@
 /**
  * The pull request whose head is a branch, and what a round needs to know about
- * it: its number, its refs, its head sha, its description and its diff.
+ * it: its number, its refs, its head sha, its description and its diff. The
+ * lookup also says whether it is a draft, which a trigger reads and a round
+ * does not.
  *
  * A `gh` that could not answer stays distinguishable from an answer of none all
  * the way out to the caller, the time left for GitHub running out included. An
@@ -41,7 +43,7 @@ type Failure = { readonly outcome: "failed"; readonly reason: string };
 
 /** What asking `gh` established. */
 export type PullRequestLookup =
-  | ({ readonly outcome: "found" } & PullRequest)
+  | ({ readonly outcome: "found"; readonly draft: boolean } & PullRequest)
   | { readonly outcome: "none" }
   | Failure;
 
@@ -58,7 +60,7 @@ const query = [
   "--state",
   "open",
   "--json",
-  "number,id,baseRefName,headRefName,headRefOid,body",
+  "number,id,baseRefName,headRefName,headRefOid,body,isDraft",
   "--limit",
   "1",
 ] as const;
@@ -171,7 +173,10 @@ function read(stdout: string): PullRequestLookup {
   const description: unknown = row["body"];
   if (typeof description !== "string") return incomplete("description", stdout);
 
-  return { outcome: "found", number, nodeId, baseRef, headRef, headSha, description };
+  const draft: unknown = row["isDraft"];
+  if (typeof draft !== "boolean") return incomplete("draft flag", stdout);
+
+  return { outcome: "found", number, nodeId, baseRef, headRef, headSha, description, draft };
 }
 
 /** A row read as its fields, or `null` where it is not an object at all. */

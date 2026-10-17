@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -634,6 +634,37 @@ test("a gate that stops the trigger exits 1 with its reason and nothing on stdou
       "squiz: no review ran: no open pull request has \"feature-a\" as its head\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
     );
+  });
+});
+
+const DRAFT_LINE = "PR #41 is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.\n";
+
+test("a draft exits 0 with one line on stdout saying so, nothing on stderr, and no output file (#720)", async () => {
+  await withWorktree(async (fixture) => {
+    const printed = await runReview(request(fixture, { triggered: { outcome: "draft", pullRequest: NUMBER } }));
+
+    assert.deepEqual(printed, { exit: 0, stdout: DRAFT_LINE, stderr: "" });
+    assert.equal(existsSync(join(fixture.worktree, ".squiz")), false, "a run on a draft wrote into .squiz");
+  });
+});
+
+test("a pull request made a draft while the run waits ends the wait with the draft line, rather than as a review that could not run (#720)", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }]);
+    const handed: TriggerRequest[] = [];
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }) }),
+      trigger: (asked) => {
+        handed.push(asked);
+        if (handed.length === 1) return decided(fixture, { outcome: "result" });
+        return { outcome: "draft", pullRequest: NUMBER };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(handed.length, 2, "the run did not trigger again");
+    assert.deepEqual(printed, { exit: 0, stdout: DRAFT_LINE, stderr: "" });
   });
 });
 

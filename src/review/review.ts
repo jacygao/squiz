@@ -99,6 +99,7 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
       ...(request.host === undefined ? {} : { host: request.host }),
     });
   const first = triggerNow();
+  if (first.outcome === "draft") return printReview({ outcome: "draft", pullRequest }, directory);
   if (first.outcome !== "decided") return notRun(first.reason);
 
   const { episode } = first;
@@ -182,6 +183,7 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     const unqueued = unqueuedSuccessor(state, context.own);
     if (unqueued !== undefined && !until.passed()) {
       const again = triggerNow();
+      if (again.outcome === "draft") return printReview({ outcome: "draft", pullRequest }, directory);
       if (again.outcome !== "decided") {
         // A trigger the run's own deadline cut off is the deadline arriving, not a review that could not run.
         return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);

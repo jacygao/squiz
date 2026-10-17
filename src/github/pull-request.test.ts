@@ -104,6 +104,7 @@ const row = {
   headRefName: "feature",
   headRefOid: "3a1937e729dbab0f618ef761c833a7e2d3675b80",
   body: "## Intent\n\nWhat this is for.",
+  isDraft: false,
 };
 
 /** The row as `gh` prints it: a list holding it, one line. */
@@ -164,7 +165,17 @@ test("a branch with an open pull request comes back with everything the round ne
       headRef: "feature",
       headSha: "3a1937e729dbab0f618ef761c833a7e2d3675b80",
       description: "## Intent\n\nWhat this is for.",
+      draft: false,
     });
+  });
+});
+
+test("a draft pull request is found, and says it is a draft (#720)", async () => {
+  await withFakeGh({ stdout: listing({ ...row, isDraft: true }) }, () => {
+    const result = findPullRequestForBranch("feature", { directory: tmpdir() });
+
+    assert.equal(result.outcome, "found", JSON.stringify(result));
+    assert.equal(result.outcome === "found" ? result.draft : null, true);
   });
 });
 
@@ -293,7 +304,7 @@ test("a row carrying no usable number is a failure", async () => {
 });
 
 test("a row missing any field the round needs is a failure", async () => {
-  for (const field of ["id", "baseRefName", "headRefName", "headRefOid", "body"]) {
+  for (const field of ["id", "baseRefName", "headRefName", "headRefOid", "body", "isDraft"]) {
     const missing: Record<string, unknown> = { ...row };
     delete missing[field];
 
@@ -322,7 +333,7 @@ test("the branch reaches gh as one argument, whatever git let into it", async ()
       "--state",
       "open",
       "--json",
-      "number,id,baseRefName,headRefName,headRefOid,body",
+      "number,id,baseRefName,headRefName,headRefOid,body,isDraft",
       "--limit",
       "1",
       "--head",

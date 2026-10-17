@@ -125,6 +125,9 @@ type Failed = About & {
 /** A run that failed before any round, exit 1. */
 type NotRun = About & { readonly outcome: "not run"; readonly reason: string };
 
+/** A draft, which no trigger queues, exit 0. */
+type Draft = About & { readonly outcome: "draft" };
+
 /** A round whose findings could not be posted, exit 1. */
 type Unposted = About & {
   readonly outcome: "unposted";
@@ -141,7 +144,8 @@ export type ReviewResult =
   | ClosedUnreviewed
   | Failed
   | NotRun
-  | Unposted;
+  | Unposted
+  | Draft;
 
 /** What the run ends with. `stderr` is whole lines, newlines included, or empty. */
 export type Printed = {
@@ -159,14 +163,15 @@ export function reviewOutputPath(worktree: string, pullRequest: number): string 
  * Compose the output for `result`, and write its stdout to the review's output
  * file in `worktree`, replacing what was there.
  *
- * A run that exits 1 prints nothing on stdout and writes no file. A write that
+ * A run that exits 1 prints nothing on stdout and writes no file, and neither
+ * does a draft, whose one line is all there is to read. A write that
  * fails adds a line on stderr and changes nothing else: the outcome stands, and
  * it is printed whole on stdout either way.
  */
 export function printReview(result: ReviewResult, worktree: string): Printed {
   const path = reviewOutputPath(worktree, result.pullRequest);
   const printed = composeReview(result, path);
-  if (printed.exit === 1) return printed;
+  if (printed.exit === 1 || result.outcome === "draft") return printed;
 
   try {
     makeEpisodeDirectory(episodeAt(resolve(worktree), result.pullRequest));
@@ -199,6 +204,12 @@ export function composeReview(result: ReviewResult, path: string): Printed {
       return { exit: 1, stdout: "", stderr: failureLine(`no review ran: ${result.reason}`) + problems + NOT_AGAIN };
     case "unposted":
       return { exit: 1, stdout: "", stderr: failureLine(unpostedLine(result)) + problems + NOT_AGAIN };
+    case "draft":
+      return {
+        exit: 0,
+        stdout: `PR #${result.pullRequest} is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.\n`,
+        stderr: problems,
+      };
   }
 }
 

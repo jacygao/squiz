@@ -72,7 +72,7 @@ function ownerOf(firing: Firing): Owner {
  * nothing to say.
  *
  * A state the trigger chose not to queue says nothing: a turn that pushed
- * nothing, or a state already queued or reviewed, is the common case. A host
+ * nothing, a state already queued or reviewed, or a draft, is the common case. A host
  * that did not start is said, because the state it was started for waits on the
  * next trigger.
  */
@@ -80,6 +80,8 @@ function lineFor(triggered: Triggered): string | null {
   switch (triggered.outcome) {
     case "no review":
       return `no review ran: ${triggered.reason}`;
+    case "draft":
+      return null;
     case "failed":
       return `nothing was queued: ${triggered.reason}`;
     case "decided": {
