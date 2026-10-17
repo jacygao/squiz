@@ -16,6 +16,7 @@ import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { BASE_REF } from "../../worktree/snapshot.ts";
 import { historyTools } from "../git-tools.ts";
 import { reportCalls } from "../report-calls.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
@@ -452,6 +453,25 @@ test("each history tool runs its git subcommand in the snapshot the server's env
   const shown = toolAnswer(await server.request(3, "tools/call", call("git_show", { commit: "HEAD" })));
   assert.equal(shown.isError, false, shown.text);
   assert.match(shown.text, /Keep the card clear of the edge/);
+});
+
+test("a changed file whose diff git_diff showed is recorded as read in the report file", async (t) => {
+  const at = place(t);
+  git(at.snapshot, "update-ref", BASE_REF, "HEAD");
+  writeFileSync(join(at.snapshot, "place.ts"), "export const margin = 16;\n");
+  git(at.snapshot, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "commit", "--quiet", "--all", "-m", "wider");
+  const reports = join(at.scratch, "reports.jsonl");
+  const server = started(t, at.scratch, { [SNAPSHOT_VARIABLE]: at.snapshot, [REPORTS_VARIABLE]: reports });
+
+  const listed = toolAnswer(await server.request(1, "tools/call", call("git_diff", {})));
+  assert.equal(listed.isError, false, listed.text);
+  const shown = toolAnswer(await server.request(2, "tools/call", call("git_diff", { path: "place.ts" })));
+  assert.equal(shown.isError, false, shown.text);
+  assert.match(shown.text, /^\+export const margin = 16;$/mu);
+  assert.deepEqual(
+    readFileSync(reports, "utf8").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as unknown),
+    [{ type: "read", path: "place.ts" }],
+  );
 });
 
 // Copilot hands the server each call exactly as the model sent it.

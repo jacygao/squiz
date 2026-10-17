@@ -119,6 +119,7 @@ function decided(
       baseRef: "main",
       headRef: "feature-a",
       headSha: OWN.head,
+      baseSha: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
       description: "",
     },
     episode: fixture.episode,

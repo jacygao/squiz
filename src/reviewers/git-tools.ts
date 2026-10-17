@@ -1,13 +1,15 @@
 /**
- * The three history tools every reviewer is granted, as any CLI's server of
- * them runs them: `git_log_search`, `git_blame` and `git_show`.
+ * The git tools every reviewer is granted, as any CLI's server of them runs
+ * them: `git_log_search`, `git_blame` and `git_show`, which read the history,
+ * and `git_diff`, which reads the change under review. The harness reads the
+ * whole diff here too.
  *
  * Each runs its one git subcommand in the snapshot, by `execFile` with an
  * argument array, never through a shell. The repository under review is
  * hostile: its tracked files are the code under review's to set. So:
  *
  * - no argument the reviewer sends can be read as an option or as anything
- *   but the one commit, term or file it is meant as;
+ *   but the one commit, term, file or path it is meant as;
  * - no setting git reads from the environment, the user's config or the
  *   repository's config can make git run a program, fetch, or read a file
  *   outside the repository into what it prints;
@@ -21,8 +23,14 @@ import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
-/** What a call answers with. `failed` marks `text` as the call's error rather than its result. */
-export type HistoryResult = { readonly text: string; readonly failed: boolean };
+import { BASE_REF } from "../worktree/snapshot.ts";
+
+/**
+ * What a call answers with. `failed` marks `text` as the call's error rather than its result.
+ * `read` names the changed file whose diff `git_diff` showed, which is how the
+ * round learns which files the reviewer read.
+ */
+export type HistoryResult = { readonly text: string; readonly failed: boolean; readonly read?: string };
 
 /** One history tool. `parameters` is the JSON Schema the CLI validates against. */
 export type HistoryTool = {
@@ -97,7 +105,12 @@ type Ran =
       readonly silent: boolean;
     };
 
-function runGit(snapshot: string, args: readonly string[], signal: AbortSignal | undefined): Promise<Ran> {
+function runGit(
+  snapshot: string,
+  args: readonly string[],
+  signal: AbortSignal | undefined,
+  cap: number = OUTPUT_CAP,
+): Promise<Ran> {
   return new Promise((done) => {
     execFile(
       "git",
@@ -106,7 +119,7 @@ function runGit(snapshot: string, args: readonly string[], signal: AbortSignal |
         cwd: snapshot,
         env: gitEnvironment(),
         encoding: "buffer",
-        maxBuffer: OUTPUT_CAP,
+        maxBuffer: cap,
         timeout: TIME_LIMIT_MS,
         ...(signal === undefined ? {} : { signal }),
       },
@@ -316,5 +329,195 @@ export const gitShow: HistoryTool = {
   },
 };
 
+// Neither a diff driver nor an external diff runs, whatever the repository names.
+const DIFF_ARGUMENTS: readonly string[] = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
+
+/**
+ * The range under review, `<base>...HEAD`, with the base by its full name, or
+ * why there is none.
+ *
+ * The base is the snapshot's own ref, which the round host writes. The reviewer
+ * cannot name another, so the range is the pull request's and nothing else.
+ */
+async function rangeIn(snapshot: string, signal: AbortSignal | undefined): Promise<string | HistoryResult> {
+  const resolved = await runGit(snapshot, ["rev-parse", "--verify", "--quiet", `${BASE_REF}^{commit}`], signal);
+  if (!resolved.ran && !resolved.silent) return refused(resolved.reason);
+  const base = resolved.ran ? resolved.stdout.trim() : "";
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(base)) {
+    return refused(`the snapshot names no base commit to diff against: ${BASE_REF} is not set`);
+  }
+  return `${base}...HEAD`;
+}
+
+/** One changed file. `from` is the name it had before a rename or a copy. */
+type Changed = {
+  readonly status: string;
+  readonly path: string;
+  readonly from: string | undefined;
+  /** Undefined for a binary file, which git counts no lines of. */
+  readonly added: number | undefined;
+  readonly removed: number | undefined;
+};
+
+/**
+ * The files the range changes, read from `--name-status` and `--numstat`,
+ * which git writes in the same order. Both are NUL-separated, so a path is
+ * read as it is, whatever bytes it holds.
+ */
+async function changedIn(
+  snapshot: string,
+  range: string,
+  signal: AbortSignal | undefined,
+): Promise<readonly Changed[] | HistoryResult> {
+  // Read whole, because a list cut short would leave files the harness never
+  // counts and a reviewer can never open. What the reviewer reads is cut later.
+  const statuses = await runGit(snapshot, [...DIFF_ARGUMENTS, "-z", "--name-status", range], signal, Infinity);
+  if (!statuses.ran) return refused(statuses.reason);
+  const counts = await runGit(snapshot, [...DIFF_ARGUMENTS, "-z", "--numstat", range], signal, Infinity);
+  if (!counts.ran) return refused(counts.reason);
+
+  const names = statuses.stdout.split("\0");
+  const numbers = counts.stdout.split("\0");
+  const changed: Changed[] = [];
+  let at = 0;
+  let counted = 0;
+  while (at < names.length && names[at] !== "") {
+    const status = (names[at] ?? "").charAt(0);
+    const paired = status === "R" || status === "C";
+    const from = paired ? names[at + 1] : undefined;
+    const path = names[at + (paired ? 2 : 1)] ?? "";
+    at += paired ? 3 : 2;
+    // A paired entry's counts end in a tab, and its two names follow on their own.
+    const [added, removed] = (numbers[counted] ?? "").split("\t");
+    counted += paired ? 3 : 1;
+    changed.push({ status, path, from, added: lineCount(added), removed: lineCount(removed) });
+  }
+  return changed;
+}
+
+function lineCount(field: string | undefined): number | undefined {
+  return field === undefined || field === "-" ? undefined : Number(field);
+}
+
+/**
+ * One page of the listing the reviewer reads, one file a line, starting at the
+ * `from`th file:
+ *
+ *     M  src/a.ts         +12 -3
+ *     R  old.ts -> new.ts +1
+ *
+ * A page holds as many whole lines as fit under the cap, and where files are
+ * left it ends with the `from` that lists them, so every name is reachable.
+ */
+function listing(changed: readonly Changed[], from: number): string {
+  if (changed.length === 0) return "The pull request changes no file.\n";
+  const files = changed.length === 1 ? "1 file" : `${changed.length} files`;
+  if (from > changed.length) return `The pull request changes ${files}, so there is no file ${from}.\n`;
+  const named = changed.map((file) => (file.from === undefined ? file.path : `${file.from} -> ${file.path}`));
+  const width = Math.max(...named.map((name) => name.length));
+  const lines = changed.map((file, at) => {
+    const counts =
+      file.added === undefined
+        ? "binary"
+        : [file.added > 0 ? `+${file.added}` : "", (file.removed ?? 0) > 0 ? `-${file.removed}` : ""]
+            .filter((count) => count !== "")
+            .join(" ");
+    return `${`${file.status}  ${(named[at] ?? "").padEnd(width)}  ${counts}`.trimEnd()}\n`;
+  });
+  // Room is kept for the line that points at the next page.
+  const room = OUTPUT_CAP - 200;
+  let text = "";
+  let size = 0;
+  let at = from - 1;
+  // The first line goes in whatever its length, so a page never lists nothing.
+  do {
+    const line = lines[at] ?? "";
+    text += line;
+    size += Buffer.byteLength(line);
+    at += 1;
+  } while (at < lines.length && size + Buffer.byteLength(lines[at] ?? "") <= room);
+  if (at < lines.length) {
+    text += `[Files ${from} to ${at} of ${lines.length} are listed. To list the rest, call git_diff with from: ${at + 1}.]\n`;
+  }
+  return text;
+}
+
+export const gitDiff: HistoryTool = {
+  name: "git_diff",
+  description:
+    "Read the pull request's change. With no path, list the files it changes, each with its status (A added, M modified, D deleted, R renamed) and its lines added and removed; a long list comes in pages, each ending with the `from` that lists the rest. With a path, show that file's diff. Runs `git diff <base>...HEAD`, the range GitHub shows for the pull request.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "A changed file's path, relative to the repository root. Leave it out to list the changed files.",
+      },
+      from: {
+        type: "integer",
+        minimum: 1,
+        description: "Where there is no path, the file to start the list at, counting from 1. The first page starts at 1.",
+      },
+    },
+  },
+  run: async (snapshot, params, signal) => {
+    const given = typeof params === "object" && params !== null ? (params as Record<string, unknown>)["path"] : undefined;
+    const path = given === undefined ? undefined : stringArgument(params, "path");
+    if (typeof path === "object") return refused(path.reason);
+    const from = typeof params === "object" && params !== null ? (params as Record<string, unknown>)["from"] : undefined;
+    if (from !== undefined && (typeof from !== "number" || !Number.isInteger(from) || from < 1)) {
+      return refused("from must be a whole number from 1");
+    }
+
+    const range = await rangeIn(snapshot, signal);
+    if (typeof range !== "string") return range;
+    const changed = await changedIn(snapshot, range, signal);
+    if ("failed" in changed) return changed;
+    if (path === undefined) return { text: listing(changed, from ?? 1), failed: false };
+
+    const file = changed.find((each) => each.path === path || each.from === path);
+    if (file === undefined) {
+      return {
+        text: `\`${path}\` is not among the files this pull request changes. Call git_diff with no path to list them.`,
+        failed: false,
+      };
+    }
+    // Only names git listed reach git, so no path the reviewer sends is read
+    // from disk or as an option. Both names of a rename go, or git reads the
+    // new one alone as an added file.
+    const paths = file.from === undefined ? [file.path] : [file.from, file.path];
+    const shown = answer(gitDiff.name, await runGit(snapshot, [...DIFF_ARGUMENTS, range, "--", ...paths], signal));
+    return shown.failed ? shown : { ...shown, read: file.path };
+  },
+};
+
+/**
+ * The files the change under review touches, each by its name after the
+ * change, which is the name `git_diff` reports a read under. For the harness
+ * rather than the reviewer.
+ */
+export async function changedFiles(snapshot: string, signal?: AbortSignal): Promise<readonly string[] | HistoryResult> {
+  const range = await rangeIn(snapshot, signal);
+  if (typeof range !== "string") return range;
+  const changed = await changedIn(snapshot, range, signal);
+  if ("failed" in changed) return changed;
+  return changed.map((file) => file.path);
+}
+
+/**
+ * The whole diff of the change under review, for the harness rather than the
+ * reviewer: `git diff <base>...HEAD` in `snapshot`, uncut.
+ *
+ * It is byte for byte what GitHub serves for the pull request, because the
+ * user's config and the environment's are kept away as they are from the tools.
+ */
+export async function changeDiff(snapshot: string, signal?: AbortSignal): Promise<HistoryResult> {
+  const range = await rangeIn(snapshot, signal);
+  if (typeof range !== "string") return range;
+  const ran = await runGit(snapshot, [...DIFF_ARGUMENTS, range], signal, Infinity);
+  if (!ran.ran) return refused(ran.reason);
+  return { text: ran.stdout, failed: false };
+}
+
 /** In the order the grant carries them. */
-export const historyTools: readonly HistoryTool[] = Object.freeze([gitLogSearch, gitBlame, gitShow]);
+export const historyTools: readonly HistoryTool[] = Object.freeze([gitLogSearch, gitBlame, gitShow, gitDiff]);

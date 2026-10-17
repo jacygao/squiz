@@ -20,8 +20,12 @@ import type { ReviewThread, ThreadComment } from "../github/threads.ts";
 /** What the reviewer is told about the change it is reading. */
 export type UnderReview = {
   readonly pullRequest: PullRequest;
-  /** The diff GitHub served for it. */
-  readonly diff: string;
+  /**
+   * The files the pull request changes, as `git_diff` lists them. The diff
+   * itself is not carried: a large change would make a prompt the reviewer's
+   * CLI cannot take, so the reviewer reads each file's change through the tool.
+   */
+  readonly changes: string;
   /**
    * Every thread of this review already on the pull request.
    *
@@ -45,7 +49,7 @@ export type UnderReview = {
  * it is, because a round with a thin description is still a round to review.
  */
 export function composePrompt(underReview: UnderReview): string {
-  const { pullRequest, diff, threads } = underReview;
+  const { pullRequest, changes, threads } = underReview;
   return [
     `# Review pull request #${pullRequest.number}`,
     `Head \`${pullRequest.headRef}\`, base \`${pullRequest.baseRef}\`.`,
@@ -53,8 +57,9 @@ export function composePrompt(underReview: UnderReview): string {
     described(pullRequest.description),
     "## History",
     "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
-    "## Diff",
-    block(diff, "diff"),
+    "## Changes",
+    "The diff is not in this prompt. Call `git_diff` with a file's path to read that file's change. The pull request changes these files, each with its status and the lines it adds and removes:",
+    block(changes, ""),
     ...threadSections(threads),
   ].join("\n\n");
 }
@@ -129,7 +134,7 @@ function described(description: string): string {
 /**
  * Text fenced so that it cannot be read as part of the prompt around it.
  *
- * A diff of a markdown file carries fences of its own, and a comment body is
+ * A changed file's path can hold a fence, and a comment body is
  * markdown a person or an agent wrote. Either could otherwise close its block
  * early and leave the rest reading as a heading of the prompt's own — as a
  * thread, say, that no verdict can be applied to.

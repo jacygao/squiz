@@ -30,7 +30,7 @@ const levels: readonly Thinking[] = ["off", "minimal", "low", "medium", "high", 
 
 const terminals = ["pane", "none"] as const;
 
-const grant = "read,grep,find,ls,report_finding,report_verdict,finish_review,git_log_search,git_blame,git_show";
+const grant = "read,grep,find,ls,report_finding,report_verdict,finish_review,git_log_search,git_blame,git_show,git_diff";
 
 function line(): CommandLine {
   return argv(invocation);
@@ -176,6 +176,7 @@ test("the grant is the reading tools, the reporting calls and the history tools"
     "git_log_search",
     "git_blame",
     "git_show",
+    "git_diff",
   ]);
 });
 

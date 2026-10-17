@@ -49,7 +49,7 @@ test("the adapter reads the report file, not pi's output", async () => {
     usage: { totalTokens: 100, cost: { total: 0.001 } },
   };
   const run = await pi.parse(oneChunk(`${JSON.stringify(usage)}\n{"type":"finish"}\n`));
-  assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [] });
+  assert.deepEqual(run.result, { kind: "reviewed", findings: [], verdicts: [], read: [] });
   assert.equal(run.cost?.tokens, 100);
 });
 

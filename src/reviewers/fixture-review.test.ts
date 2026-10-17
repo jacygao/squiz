@@ -149,6 +149,7 @@ const pullRequest: PullRequest = {
   baseRef: "main",
   headRef: "threads/last-said",
   headSha: "9a3f1c4e5b6d7a8f9012345678abcdef01234567",
+  baseSha: "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c",
   description: "Add `lastSaid`, so the summary can quote the end of a thread.",
 };
 
@@ -288,7 +289,7 @@ function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, diff: diffOf(tree), threads: [thread] }),
+    prompt: composePrompt({ pullRequest, changes: changedFilesOf(tree), threads: [thread] }),
     sessionDirectory,
     promptFile: ".squiz/104/rounds/1/prompt.md",
     reportsFile,
@@ -352,6 +353,11 @@ async function inTheFixture(run: (fixture: Fixture) => Promise<void>): Promise<v
 /** The diff of the change under review, which is git's own output for it. */
 function diffOf(tree: string): string {
   return git(["diff", "HEAD~1", "HEAD"], tree);
+}
+
+/** The files the change under review touches, one a line with its status. */
+function changedFilesOf(tree: string): string {
+  return git(["diff", "--name-status", "HEAD~1", "HEAD"], tree);
 }
 
 function write(tree: string, files: Tree): void {
@@ -510,7 +516,7 @@ function review() {
   if (!/^# Review pull request #\\d+$/.test(heading)) refuse("the prompt names no pull request");
   const ruled = /^### (PRRT_\\S+)$/m.exec(prompt);
   if (ruled === null) refuse("the prompt carries no thread to rule on");
-  if (!prompt.includes(defect)) refuse("the prompt carries no diff of the defect");
+  if (!prompt.includes(reviewedFile)) refuse("the prompt names no changed file");
 
   const read = path.join(process.cwd(), reviewedFile);
   const lines = fs.readFileSync(read, "utf8").split("\\n");

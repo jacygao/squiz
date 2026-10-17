@@ -64,6 +64,11 @@ export type RoundWork = {
    * be posted. Absent where none failed.
    */
   readonly unpostedReplies?: readonly string[];
+  /**
+   * The changed files whose diff the round's finished review never read through
+   * `git_diff`. Absent where it read every one, or the reviewer could not say.
+   */
+  readonly unread?: readonly string[];
 };
 
 /**
@@ -515,12 +520,17 @@ function workFrom(entry: Record<string, unknown>): { readonly work: RoundWork } 
   ) {
     return { problem: `has "unpostedReplies" as ${render(unposted)}` };
   }
+  const unread = entry["unread"];
+  if (unread !== undefined && !(Array.isArray(unread) && unread.every((path: unknown) => typeof path === "string" && path !== ""))) {
+    return { problem: `has "unread" as ${render(unread)}` };
+  }
   return {
     work: {
       ...(head === undefined ? {} : { head }),
       ...(raised === undefined ? {} : { raised }),
       ...(counts === undefined ? {} : { ruled: counts }),
       ...(unposted === undefined ? {} : { unpostedReplies: unposted as readonly string[] }),
+      ...(unread === undefined ? {} : { unread: unread as readonly string[] }),
     },
   };
 }

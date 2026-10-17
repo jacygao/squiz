@@ -60,6 +60,8 @@ type Tally = {
   lastFailure: string | undefined;
   findings: Finding[];
   verdicts: ThreadVerdict[];
+  /** The changed files whose diff the reviewer read, each once. */
+  read: string[];
   ruled: Set<string>;
   refusals: number;
   finished: boolean;
@@ -91,6 +93,7 @@ export async function readReports(
     lastFailure: undefined,
     findings: [],
     verdicts: [],
+    read: [],
     ruled: new Set(),
     refusals: 0,
     finished: false,
@@ -212,6 +215,15 @@ function take(tally: Tally, text: string, number: number): void {
       tally.owed = false;
       return;
     }
+    case "read": {
+      const { path } = line;
+      if (typeof path !== "string") {
+        unreadable("a read names no file");
+        return;
+      }
+      if (!tally.read.includes(path)) tally.read.push(path);
+      return;
+    }
     case "finish":
       tally.finished = true;
       tally.owed = true;
@@ -245,7 +257,7 @@ function markUnreadable(tally: Tally, reason: string): void {
 function resultOf(tally: Tally): RunResult {
   if (tally.broken !== undefined) return { kind: "unparsed", reason: tally.broken };
   if (tally.finished) {
-    return { kind: "reviewed", findings: [...tally.findings], verdicts: [...tally.verdicts] };
+    return { kind: "reviewed", findings: [...tally.findings], verdicts: [...tally.verdicts], read: [...tally.read] };
   }
   if (!tally.stopped) {
     return { kind: "incomplete", reason: tally.reason ?? "the reviewer completed no message" };

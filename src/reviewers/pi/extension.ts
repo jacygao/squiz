@@ -28,7 +28,7 @@
 
 import { historyTools } from "../git-tools.ts";
 import { reportCalls } from "../report-calls.ts";
-import { reportFileAt, REPORTS_VARIABLE, type UsageLine } from "../report-file.ts";
+import { type ReportFile, reportFileAt, REPORTS_VARIABLE, type UsageLine } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "../reporting.ts";
 import { refuseRead } from "./reads.ts";
 import { GRANT_VARIABLE, grantIn, type Refusal, refuse, type ToolCall } from "./refusals.ts";
@@ -126,6 +126,7 @@ const historyLabels: Readonly<Record<string, string>> = {
   git_log_search: "Search history",
   git_blame: "Blame line",
   git_show: "Show commit",
+  git_diff: "Read diff",
 };
 
 /**
@@ -135,11 +136,14 @@ const historyLabels: Readonly<Record<string, string>> = {
  */
 export default function reportAsYouGo(pi: Registrar): void {
   reportInto(pi, process.env[REPORTS_VARIABLE], process.cwd(), grantIn(process.env[GRANT_VARIABLE]));
-  serveHistoryTools(pi, process.cwd());
+  serveHistoryTools(pi, process.cwd(), reportFileAt(process.env[REPORTS_VARIABLE]));
 }
 
-/** Register the history tools, each run in `snapshot`. */
-export function serveHistoryTools(pi: Registrar, snapshot: string): void {
+/**
+ * Register the history tools, each run in `snapshot`, recording into `reports`
+ * each changed file whose diff a call showed.
+ */
+export function serveHistoryTools(pi: Registrar, snapshot: string, reports: ReportFile = reportFileAt(undefined)): void {
   for (const tool of historyTools) {
     const label = historyLabels[tool.name];
     if (label === undefined) throw new Error(`${tool.name} has no label to show in pi`);
@@ -149,7 +153,14 @@ export function serveHistoryTools(pi: Registrar, snapshot: string): void {
       description: tool.description,
       parameters: tool.parameters,
       execute: async (_toolCallId, params, signal) => {
-        const { text, failed } = await tool.run(snapshot, params, signal);
+        const { text, failed, read } = await tool.run(snapshot, params, signal);
+        // A read the file refused is a file the summary names as unread, which
+        // costs a note rather than the reviewer's answer.
+        if (read !== undefined) {
+          try {
+            reports.record({ type: "read", path: read });
+          } catch {}
+        }
         // `pi` reads a call's answer as an error only where `execute` throws.
         if (failed) throw new Error(text);
         return { content: [{ type: "text", text }] };

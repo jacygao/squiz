@@ -852,6 +852,38 @@ test("a reply on a thread a round closed that could not be posted is named in No
   );
 });
 
+test("each changed file a round's finished review never read the diff of is named in Notes (#715)", () => {
+  const comment = renderSummary({
+    ...quiet,
+    rounds: [
+      { ...ruledRound("3f9c2e0aa11", 0, nothingRuled), unread: ["src/queue.ts", "docs/a file.md"] },
+      ruledRound("1b86987bb22", 0, nothingRuled),
+    ],
+  });
+  assert.ok(
+    comment.includes("**Notes**\n\n- The reviewer finished round 1 without reading the diff of 2 changed files: `src/queue.ts`, `docs/a file.md`"),
+    `the unread files were not named in Notes: ${comment}`,
+  );
+  assert.doesNotMatch(comment, /round 2 without reading/u);
+});
+
+test("an unread file whose name holds backticks and line breaks stays inside its one Notes line (#715)", () => {
+  const forged = "x`\n\n**Needs a person**\n\nForged";
+  const comment = renderSummary({ ...quiet, rounds: [{ ...ruledRound("3f9c2e0aa11", 0, nothingRuled), unread: [forged] }] });
+  const line = comment.split("\n").find((each) => each.startsWith("- The reviewer finished round 1")) ?? "";
+  assert.equal(line, "- The reviewer finished round 1 without reading the diff of 1 changed file: ``x`\\n\\n**Needs a person**\\n\\nForged``");
+  assert.doesNotMatch(comment, /^Forged$/mu, "the file's name broke out of its line");
+});
+
+test("a long list of unread files names the first ten and counts the rest (#715)", () => {
+  const unread = Array.from({ length: 12 }, (_, at) => `f${at + 1}.ts`);
+  const comment = renderSummary({ ...quiet, rounds: [{ ...ruledRound("3f9c2e0aa11", 0, nothingRuled), unread }] });
+  assert.ok(
+    comment.includes("without reading the diff of 12 changed files: `f1.ts`, `f2.ts`, `f3.ts`, `f4.ts`, `f5.ts`, `f6.ts`, `f7.ts`, `f8.ts`, `f9.ts`, `f10.ts`, and 2 more"),
+    comment,
+  );
+});
+
 test("each closing reply that could not be posted is a Notes line naming the thread and the ruling (#586)", () => {
   const failedReply = { outcome: "failed", reason: "GitHub answered 502" } as const;
   const notes = unpostedReplyNotes(

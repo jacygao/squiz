@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 
-import { gitBlame, gitLogSearch, gitShow, historyTools, OUTPUT_CAP } from "./git-tools.ts";
+import { BASE_REF } from "../worktree/snapshot.ts";
+import { changedFiles, changeDiff, gitBlame, gitDiff, gitLogSearch, gitShow, historyTools, OUTPUT_CAP } from "./git-tools.ts";
 
 /** Run git in `directory` and return its stdout, failing the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): string {
@@ -96,6 +97,8 @@ before(async () => {
   git(repo, "update-ref", "refs/heads/main", signed);
   // The signed commit replaces the second on the branch, so it is the one history names.
   second = signed;
+  // The change under review is everything from the first commit to the head.
+  git(repo, "update-ref", BASE_REF, first);
 
   const hostile: Record<string, string> = {
     "core.pager": `${mark} pager`,
@@ -324,6 +327,7 @@ test("a tool whose signal is aborted stops git and says so", async () => {
     [gitLogSearch, { term: "two" }],
     [gitBlame, { file: "code.txt", line: 1 }],
     [gitShow, { commit: "HEAD" }],
+    [gitDiff, { path: "code.txt" }],
   ] as const) {
     const stop = new AbortController();
     stop.abort();
@@ -332,13 +336,181 @@ test("a tool whose signal is aborted stops git and says so", async () => {
   }
 });
 
-test("the three tools are named as the grant names them, each with an object schema", () => {
+test("the four tools are named as the grant names them, each with an object schema", () => {
   assert.deepEqual(
     historyTools.map((tool) => tool.name),
-    ["git_log_search", "git_blame", "git_show"],
+    ["git_log_search", "git_blame", "git_show", "git_diff"],
   );
   for (const tool of historyTools) {
     assert.equal((tool.parameters as { type: string }).type, "object");
     assert.ok(tool.description.length > 0);
   }
+});
+
+test("git_diff with no path lists each changed file with its status and its lines added and removed", async () => {
+  const result = await gitDiff.run(repo, {});
+  assert.equal(result.failed, false, result.text);
+  assert.equal(result.text, "M  code.txt  +1 -1\nA  link.txt  +1\n");
+  ranNothing();
+});
+
+test("git_diff with a path shows that file's hunks, and runs no program the repository's config names", async () => {
+  const result = await gitDiff.run(repo, { path: "code.txt" });
+  assert.equal(result.failed, false, result.text);
+  assert.match(result.text, /^diff --git a\/code\.txt b\/code\.txt$/mu);
+  assert.match(result.text, /^-three$/mu);
+  assert.match(result.text, /^\+three -p$/mu);
+  assert.doesNotMatch(result.text, /link\.txt/u, "a path narrows the diff to that file");
+  ranNothing();
+});
+
+test("git_diff names the changed file whose diff it showed, under its name after the change, and none for a listing", async () => {
+  assert.equal((await gitDiff.run(repo, { path: "code.txt" })).read, "code.txt");
+  assert.equal((await gitDiff.run(repo, {})).read, undefined);
+  assert.equal((await gitDiff.run(repo, { path: ".gitattributes" })).read, undefined);
+});
+
+test("git_diff shows a link's change as the link, never the file it points at", async () => {
+  const result = await gitDiff.run(repo, { path: "link.txt" });
+  assert.equal(result.failed, false, result.text);
+  assert.match(result.text, /^new file mode 120000$/mu);
+  assert.doesNotMatch(result.text, /SECRET-CONTENT/u);
+});
+
+test("git_diff says so where the path is not among the files the pull request changes", async () => {
+  const result = await gitDiff.run(repo, { path: ".gitattributes" });
+  assert.equal(result.failed, false, result.text);
+  assert.match(result.text, /^`\.gitattributes` is not among the files this pull request changes/u);
+});
+
+test("git_diff reads no path outside the change, and none that looks like an option", async () => {
+  const target = join(outside, "diffed");
+  for (const path of [secret, "../outside/secret.txt", `--output=${target}`]) {
+    const result = await gitDiff.run(repo, { path });
+    assert.match(result.text, /is not among the files/u, path);
+    assert.doesNotMatch(result.text, /SECRET-CONTENT/u);
+  }
+  assert.equal(existsSync(target), false, "git diff wrote where the path said");
+});
+
+test("git_diff refuses a path of the wrong shape", async () => {
+  for (const params of [{ path: 7 }, { path: "" }, { path: "a\0b" }]) {
+    const result = await gitDiff.run(repo, params);
+    assert.equal(result.failed, true, result.text);
+    assert.match(result.text, /^path must /u);
+  }
+});
+
+test("git_diff refuses a from that is not a whole number from 1, and one past the list says so", async () => {
+  for (const params of [{ from: 0 }, { from: 1.5 }, { from: "2" }]) {
+    const result = await gitDiff.run(repo, params);
+    assert.equal(result.failed, true, result.text);
+    assert.match(result.text, /^from must /u);
+  }
+  const past = await gitDiff.run(repo, { from: 3 });
+  assert.equal(past.failed, false, past.text);
+  assert.equal(past.text, "The pull request changes 2 files, so there is no file 3.\n");
+});
+
+test("git_diff shows a renamed file as a rename, named by either of its paths", async () => {
+  const moved = await mkdtemp(join(root, "moved-"));
+  git(moved, "init", "--quiet", "--initial-branch", "main");
+  const lines = Array.from({ length: 20 }, (_, at) => `line ${at + 1}`);
+  await writeFile(join(moved, "old.txt"), `${lines.join("\n")}\n`);
+  const base = commit(moved, "the base");
+  await rm(join(moved, "old.txt"));
+  await writeFile(join(moved, "new.txt"), `${lines.join("\n")}\nline 21\n`);
+  commit(moved, "the move");
+  git(moved, "update-ref", BASE_REF, base);
+
+  const listed = await gitDiff.run(moved, {});
+  assert.equal(listed.text, "R  old.txt -> new.txt  +1\n");
+  for (const path of ["new.txt", "old.txt"]) {
+    const result = await gitDiff.run(moved, { path });
+    assert.equal(result.failed, false, result.text);
+    assert.match(result.text, /^rename from old\.txt$/mu, path);
+    assert.match(result.text, /^\+line 21$/mu, path);
+  }
+});
+
+test("a change whose list of files runs past the cap is listed whole to the harness, and in pages to the reviewer", async () => {
+  const many = await mkdtemp(join(root, "many-"));
+  git(many, "init", "--quiet", "--initial-branch", "main");
+  await writeFile(join(many, "keep.txt"), "kept\n");
+  const base = commit(many, "the base");
+  // 400 names of over 200 bytes each, past the 65,536 bytes a tool answers with.
+  const directory = join(many, "d".repeat(100), "e".repeat(100));
+  await mkdir(directory, { recursive: true });
+  for (let at = 1; at <= 400; at += 1) await writeFile(join(directory, `file-${at}.txt`), `${at}\n`);
+  commit(many, "four hundred files");
+  git(many, "update-ref", BASE_REF, base);
+
+  const files = await changedFiles(many);
+  assert.ok(Array.isArray(files), JSON.stringify(files));
+  assert.equal((files as readonly string[]).length, 400);
+  // Every name, found the way the reviewer finds them: a page, then the page its last line points to.
+  const seen: string[] = [];
+  let from: number | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const listed = await gitDiff.run(many, from === undefined ? {} : { from });
+    assert.equal(listed.failed, false, listed.text.slice(0, 200));
+    assert.ok(Buffer.byteLength(listed.text) <= OUTPUT_CAP + 200, `a page ran to ${listed.text.length} characters`);
+    seen.push(...[...listed.text.matchAll(/^A {2}(\S+)/gmu)].map((match) => match[1] ?? ""));
+    const next = /call git_diff with from: (\d+)/u.exec(listed.text);
+    if (next === null) break;
+    from = Number(next[1]);
+  }
+  assert.deepEqual(seen, files, "the pages did not list every file once, in order");
+  const last = seen.at(-1) ?? "";
+  const shown = await gitDiff.run(many, { path: last });
+  assert.equal(shown.failed, false, shown.text);
+  assert.equal(shown.read, last);
+});
+
+test("git_diff says the snapshot names no base where it has none, rather than diffing against something else", async () => {
+  const unbased = await mkdtemp(join(root, "unbased-"));
+  git(unbased, "init", "--quiet", "--initial-branch", "main");
+  await writeFile(join(unbased, "a.txt"), "a\n");
+  commit(unbased, "only");
+  const result = await gitDiff.run(unbased, {});
+  assert.equal(result.failed, true);
+  assert.match(result.text, /names no base/u);
+});
+
+test("changeDiff is git's three-dot diff from the base, whole, whatever the user's config says", async () => {
+  const big = await mkdtemp(join(root, "whole-"));
+  git(big, "init", "--quiet", "--initial-branch", "main");
+  await writeFile(join(big, "keep.txt"), "kept\n");
+  const base = commit(big, "the base");
+  // Past the cap a tool's answer is cut at, which the harness's own read must not be.
+  await writeFile(join(big, "big.txt"), ("y".repeat(99) + "\n").repeat(3000));
+  commit(big, "a large change");
+  git(big, "update-ref", BASE_REF, base);
+  const expected = spawnSync("git", ["diff", `${base}...HEAD`], {
+    cwd: big,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    maxBuffer: 16 * 1024 * 1024,
+  }).stdout;
+
+  const saved = process.env["GIT_CONFIG_GLOBAL"];
+  const global = join(outside, "global-config");
+  await writeFile(global, "[diff]\n\tnoprefix = true\n\trenames = false\n[color]\n\tui = always\n");
+  process.env["GIT_CONFIG_GLOBAL"] = global;
+  try {
+    const result = await changeDiff(big);
+    assert.equal(result.failed, false, result.text);
+    assert.ok(result.text.length > OUTPUT_CAP, "the whole diff, not a cut one");
+    assert.equal(result.text, expected);
+  } finally {
+    if (saved === undefined) delete process.env["GIT_CONFIG_GLOBAL"];
+    else process.env["GIT_CONFIG_GLOBAL"] = saved;
+  }
+});
+
+test("changeDiff runs no program the repository's config names", async () => {
+  const result = await changeDiff(repo);
+  assert.equal(result.failed, false, result.text);
+  assert.match(result.text, /^\+three -p$/mu);
+  ranNothing();
 });

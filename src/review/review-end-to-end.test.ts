@@ -37,15 +37,6 @@ const hostFixture = fileURLToPath(new URL("host-fixture.ts", import.meta.url));
 const runner = fileURLToPath(new URL("review-runner.ts", import.meta.url));
 const originalPath = process.env["PATH"] ?? "";
 
-const DIFF = `diff --git a/${FILE} b/${FILE}
-index d3d0cb2..6db135b 100644
---- a/${FILE}
-+++ b/${FILE}
-@@ -1,1 +1,2 @@
- // line 1
-+// line 2
-`;
-
 const FINDING: Finding = {
   scope: "line",
   file: FILE,
@@ -88,7 +79,7 @@ function answer(body) {
   if (argv[0] === "pr") {
     const head = (state.staleHeads ?? []).shift() ?? state.head;
     save();
-    return JSON.stringify([{ number: state.number, id: "PR_pull", baseRefName: "main", headRefName: state.branch, headRefOid: head, body: "", isDraft: state.draft === true }]);
+    return JSON.stringify([{ number: state.number, id: "PR_pull", baseRefName: "main", headRefName: state.branch, headRefOid: head, baseRefOid: state.base, body: "", isDraft: state.draft === true }]);
   }
   if (argv[1] === "graphql") {
     const request = JSON.parse(body);
@@ -151,7 +142,7 @@ function answer(body) {
     save();
     return http("201 Created", { id: 9000 + n, node_id: "PRRC_" + n, html_url: "https://github.com/o/r/pull/41#discussion_r" + (9000 + n) });
   }
-  return state.diff;
+  return "";
 }
 
 const chunks = [];
@@ -174,7 +165,8 @@ type GhState = {
   readonly staleHeads?: readonly string[];
   /** Whether the pull request is a draft. */
   readonly draft?: boolean;
-  readonly diff: string;
+  /** The base commit, which the change is diffed against. */
+  readonly base: string;
   threads: { id: string; isResolved: boolean; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
   readonly issueComments: string[];
   /** Whether GitHub refuses every review comment the round creates. */
@@ -218,9 +210,12 @@ async function withPullRequest(
   git("config", "user.name", "Squiz");
   git("config", "commit.gpgsign", "false");
   if (squizInGitignore) writeFileSync(join(worktree, ".gitignore"), ".squiz/\n", "utf8");
-  writeFileSync(join(worktree, FILE), "// line 1\n// line 2\n", "utf8");
+  writeFileSync(join(worktree, FILE), "// line 1\n", "utf8");
   git("add", ".");
-  git("commit", "--quiet", "--message", "the change under review");
+  git("commit", "--quiet", "--message", "the base");
+  const base = git("rev-parse", "HEAD");
+  writeFileSync(join(worktree, FILE), "// line 1\n// line 2\n", "utf8");
+  git("commit", "--quiet", "--all", "--message", "the change under review");
   // A file of its own, so that no run adds the line saying the defaults are in
   // use. Kept out of git as this repository keeps its own.
   writeFileSync(join(worktree, ".squiz.json"), "{}", "utf8");
@@ -228,7 +223,7 @@ async function withPullRequest(
 
   const ghFile = join(bin, "gh-state.json");
   const setGh = (state: GhState): void => writeFileSync(ghFile, JSON.stringify(state), "utf8");
-  setGh({ number: NUMBER, branch: BRANCH, head: git("rev-parse", "HEAD"), diff: DIFF, threads: [], issueComments: [] });
+  setGh({ number: NUMBER, branch: BRANCH, head: git("rev-parse", "HEAD"), base, threads: [], issueComments: [] });
   standIn(bin, "gh", GH, "node");
   const charterFile = join(root, "charter.md");
   writeFileSync(charterFile, "What a good review is.\n", "utf8");

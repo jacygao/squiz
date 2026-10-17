@@ -20,6 +20,9 @@ GitHub does with a diff too large to serve is not established.
 - **The diff is fetched with one `gh api` call carrying the diff media type.**
   `gh pr diff <number>` reaches the same endpoint with the same `Accept` header,
   but spends a GraphQL call first to find a number the harness already holds.
+  2026-10-17: superseded. The round reads `git diff <base sha>...<head sha>`
+  in its snapshot instead, which this note's finding makes the same bytes, and
+  asks GitHub for no diff (#715).
 - **The head sha comes from `headRefOid` in the same `gh pr list --json` call as
   the number, the refs and the body.** It is the value `.head.sha` returns, and
   it is the one an anchored comment is posted against.
@@ -61,9 +64,9 @@ The lookup asks for every field in one call:
 gh pr list --state open --json number,baseRefName,headRefName,headRefOid,body --limit 1 --head <branch>
 ```
 
-`headRefOid` is the head sha. There is no `baseRefOid` in that list, and there
-is no need for one: the base sha is refused as a *path* error when it is sent as
-`commit_id`.
+`headRefOid` is the head sha. The base sha is refused as a *path* error when it
+is sent as `commit_id`. 2026-10-17: the lookup now asks for `baseRefOid` too,
+the base sha the snapshot's diff is read against (#715).
 
 The two path shapes, exactly as both `git diff` and GitHub write them:
 

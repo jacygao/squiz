@@ -80,6 +80,7 @@ test("what each round reviewed, raised and ruled comes back as written (#586)", 
         raised: 0,
         ruled: { fixed: 2, withdrawn: 1, open: 0 },
         unpostedReplies: ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)"],
+        unread: ["src/queue.ts", "docs/a file.md"],
       },
     ],
     spentOutsideRounds: unspent,
@@ -285,6 +286,8 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "ruled": {"fixed": 1, "withdrawn": 0, "open": "2"}}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": "a line"}]}`,
   `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unpostedReplies": [3]}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unread": "src/a.ts"}]}`,
+  `{"rounds": [{"dollars": 0.01, "tokens": 100, "messages": 1, "unread": [""]}]}`,
   // A record dropped on reading is a state with no record, which a trigger queues
   // again, or a queued state that no round host ever takes.
   `{"rounds": [], "records": {}}`,

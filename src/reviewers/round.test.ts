@@ -1089,6 +1089,18 @@ test("the AI credits of two attempts are added up with the rest of their cost", 
   });
 });
 
+test("a reviewed round carries the changed files whose diff the reviewer read", async () => {
+  await inATree(async (tree) => {
+    const reading: Adapter = {
+      ...reviewer(sayingNothing).adapter,
+      parse: async () => ({ cost: undefined, result: { kind: "reviewed", findings: [], verdicts: [], read: ["src/a.ts"] } }),
+    };
+    const round = await runRound(reading, at(tree), 10);
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.deepEqual(round.outcome === "reviewed" ? round.read : undefined, ["src/a.ts"]);
+  });
+});
+
 /**
  * Copilot reports its cost once, as it exits by itself, so one stopped at the
  * bound reported none. A zero marked a floor would read as "unknown" in the

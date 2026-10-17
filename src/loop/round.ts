@@ -33,7 +33,7 @@ import type { GhCall } from "../github/gh.ts";
 import type { ClosedBy } from "../github/failure-body.ts";
 import type { CommentPosting } from "../github/summary.ts";
 import { unappliedNotes, unpostedReplyNotes } from "../github/summary-body.ts";
-import { fetchDiff, findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
+import { findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
 import {
@@ -44,6 +44,7 @@ import {
   type ThreadVerdict,
 } from "../reviewers/adapter.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
+import { changedFiles, changeDiff, gitDiff } from "../reviewers/git-tools.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
 import type { Backends, SessionPlace } from "../sessions/session.ts";
@@ -517,6 +518,30 @@ type AfterTheGate = {
   readonly stopwatch: Stopwatch;
 };
 
+/**
+ * The change under review, read in its snapshot: the whole diff, which findings
+ * are anchored against, the list of changed files the prompt carries, and their
+ * paths, which the files the reviewer read are counted against.
+ *
+ * Both run under the part of the round before the review, and neither throws.
+ */
+async function readChange(
+  tree: string,
+  until: Deadline,
+): Promise<
+  { readonly diff: string; readonly listing: string; readonly files: readonly string[] } | { readonly unread: string }
+> {
+  if (until.passed()) return { unread: "the time before the review ran out" };
+  const signal = AbortSignal.timeout(Math.max(1, until.remaining()));
+  const diff = await changeDiff(tree, signal);
+  if (diff.failed) return { unread: diff.text };
+  const listing = await gitDiff.run(tree, {}, signal);
+  if (listing.failed) return { unread: listing.text };
+  const files = await changedFiles(tree, signal);
+  if ("failed" in files) return { unread: files.text };
+  return { diff: diff.text, listing: listing.text, files };
+}
+
 /** Everything a round does once the gate has found its pull request. */
 async function reviewOn(
   pullRequest: PullRequest,
@@ -543,14 +568,6 @@ async function reviewOn(
     return { outcome: "superseded", pullRequest: pullRequest.number, by: now };
   }
 
-  const fetched = fetchDiff(pullRequest.number, preReview);
-  if (fetched.outcome !== "fetched") {
-    return failed(
-      "harness",
-      `no review ran: the diff of ${named(pullRequest)} could not be fetched: ${fetched.reason}`,
-    );
-  }
-
   const ordinal = state.rounds.length + 1;
   const ownDirectory = roundDirectory(episode, ordinal);
   const sessionDirectory = join(ownDirectory, "session");
@@ -561,7 +578,12 @@ async function reviewOn(
   // gets a tree of its own.
   const snapshot = addSnapshot(
     directory,
-    { pullRequest: pullRequest.number, round: ordinal, commit: setup.state?.head ?? pullRequest.headSha },
+    {
+      pullRequest: pullRequest.number,
+      round: ordinal,
+      commit: setup.state?.head ?? pullRequest.headSha,
+      base: pullRequest.baseSha,
+    },
     preReview.until,
   );
   if (snapshot.outcome === "failed") {
@@ -571,6 +593,13 @@ async function reviewOn(
   opened.snapshot = snapshot.path;
   const tree = snapshot.path;
 
+  // Read from the snapshot rather than downloaded, so no size of change is one
+  // GitHub refuses, and the diff is of the commit the reviewer reads.
+  const change = await readChange(tree, preReview.until);
+  if ("unread" in change) {
+    return failed("harness", `no review ran: the diff of ${named(pullRequest)} could not be read: ${change.unread}`);
+  }
+
   const clock = stopwatch.now;
   const seconds = config.timeout;
   const reviewStarted = clock();
@@ -579,7 +608,7 @@ async function reviewOn(
     {
       directory: tree,
       charterFile: setup.charterFile,
-      prompt: composePrompt({ pullRequest, diff: fetched.diff, threads: handedOver }),
+      prompt: composePrompt({ pullRequest, changes: change.listing, threads: handedOver }),
       sessionDirectory,
       promptFile: join(ownDirectory, "prompt.md"),
       reportsFile: join(ownDirectory, "reports.jsonl"),
@@ -621,7 +650,14 @@ async function reviewOn(
     episode,
     state,
     review,
-    { ran: { reviewer: config.reviewer, elapsedSeconds }, ruledAt, handedOver },
+    {
+      ran: { reviewer: config.reviewer, elapsedSeconds },
+      ruledAt,
+      handedOver,
+      // Only a finished review is held to having read everything. A cut one is
+      // named as cut, and a reviewer that cannot say what it read is not guessed at.
+      unread: review.outcome === "reviewed" && review.read !== undefined ? change.files.filter((file) => !review.read?.includes(file)) : [],
+    },
     rulings,
   );
   if ("ended" in recording) return recording.ended;
@@ -630,7 +666,7 @@ async function reviewOn(
 
   const posting: Posting = {
     pullRequest,
-    diff: fetched.diff,
+    diff: change.diff,
     directory,
     reserve,
     stopwatch,
@@ -1049,6 +1085,7 @@ function withSpend(state: EpisodeState, review: Review, measured: Measured): Epi
         head: measured.ruledAt.commit,
         raised: review.findings.length,
         ruled: countRulings(rulingsReplied(measured.handedOver, review.verdicts)),
+        ...(measured.unread.length === 0 ? {} : { unread: measured.unread }),
       }),
     );
   }
@@ -1063,6 +1100,8 @@ type Measured = {
   readonly ran: Timings;
   readonly ruledAt: RuledAt;
   readonly handedOver: readonly ReviewThread[];
+  /** The changed files the round's finished review never read the diff of. */
+  readonly unread: readonly string[];
 };
 
 function countRulings(rulings: readonly ThreadVerdict[]): RulingCounts {
