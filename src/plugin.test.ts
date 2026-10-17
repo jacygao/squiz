@@ -69,8 +69,8 @@ function commandsOn(event: string): readonly unknown[] {
 // root instead.
 const command = '"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook';
 
-test("Stop runs the binary through the plugin root, in the background, for as long as a day", () => {
-  assert.deepEqual(commandsOn("Stop"), [{ type: "command", command, asyncRewake: true, timeout: 86_400 }]);
+test("Stop runs the binary through the plugin root, under the runtime's own timeout", () => {
+  assert.deepEqual(commandsOn("Stop"), [{ type: "command", command }]);
 });
 
 test("SubagentStop runs the binary through the plugin root, under the runtime's own timeout", () => {

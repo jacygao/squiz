@@ -5,9 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook",
-            "asyncRewake": true,
-            "timeout": 86400
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook"
           }
         ]
       }

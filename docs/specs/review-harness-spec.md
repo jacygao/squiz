@@ -390,7 +390,7 @@ worktree.
 
 ```json
 "Stop": [
-  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook", "asyncRewake": true, "timeout": 86400 } ] }
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
 ],
 "SubagentStop": [
   { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
@@ -425,11 +425,8 @@ the empty string.
 - **A `CLAUDE_CODE_MESSAGING_SOCKET` in the hook's environment is never
   recorded.** Copilot puts no socket there.
 
-Under Claude Code the `Stop` registration runs in the background, so the session
-does not wait on it. After it has queued, it stays to deliver a note, as The
-report sets out. The `SubagentStop` hook returns as soon as it has queued, and
-so does the `Stop` hook under Copilot, which waits for every hook to end before
-the session goes idle.
+Both hooks return as soon as they have queued, under Claude Code and Copilot
+alike. The result reaches the owner later, through the wake The report sets out.
 
 **A `SubagentStop` firing whose `agent_type` is empty is no subagent's work.** In
 an interactive session, Claude Code fires several of them after a turn ends, each
@@ -519,19 +516,12 @@ text=Squiz could not review PR #41 at 3f9c2e0: the reviewer could not run: the p
 Where no round remains, the text ends as the failure comment does, saying the
 review is closed and which bound closed it (§ 7 The failure comment).
 
-**Then it wakes a Claude Code owner, one of two ways.** Whichever delivers a note
-moves it into `delivered/` beside it, so the other does not deliver it again.
-
-- **The messaging socket.** Where the hook recorded a socket for the owner, the
-  round host posts the text to it, and an idle session starts a turn with it.
-  The post is one JSON line,
-  `{"type":"user","message":{"role":"user","content":"<text>"}}`, on a
-  connection the host ends, and nothing is read back.
-- **The `asyncRewake` waiter.** The `Stop` hook, once it has queued, waits while
-  any state its session owns is queued or under review. When a note for its
-  session arrives it writes the text to stderr and exits 2, which starts a turn.
-  It delivers any note already waiting for its session first. Of several waiters
-  for one session, only the newest delivers, and the others exit 0.
+**Then it wakes a Claude Code owner through its messaging socket.** Where the
+hook recorded a socket for the owner, the round host moves the note into
+`delivered/` beside it and posts the text to the socket, and an idle session
+starts a turn with it. The post is one JSON line,
+`{"type":"user","message":{"role":"user","content":"<text>"}}`, on a connection
+the host ends, and nothing is read back.
 
 **A Copilot owner is woken through the plugin's extension.** Copilot loads
 extensions only with its experimental features on, so squiz's Copilot support
@@ -557,8 +547,7 @@ background wakes it when it exits.
 
 **A note no wake reached stays where it was written.** The owner learns the
 result by running `squiz review` or `squiz status`, and the pull request holds it
-in any case. A note for a session that was closed is delivered only by that
-session's next `Stop` waiter.
+in any case.
 
 ### Parallel coding agents
 
