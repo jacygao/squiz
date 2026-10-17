@@ -1,6 +1,6 @@
 # Review Harness Specification: A Local Review Loop That Lives on the Pull Request
 
-**Version:** 1.30 (draft)
+**Version:** 1.31 (draft)
 
 ## 1. Purpose
 
