@@ -24,16 +24,12 @@
  * Node's default, which a handler for either would replace.
  */
 
-import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 import { type HistoryTool, historyTools } from "../git-tools.ts";
 import { type ReportCalls, reportCalls } from "../report-calls.ts";
 import { type ReportFile, reportFileAt, REPORTS_VARIABLE } from "../report-file.ts";
 import { mismatchOf } from "./arguments.ts";
-
-/** The variable naming the charter file, which the server hands Copilot as its instructions. */
-export const CHARTER_VARIABLE = "SQUIZ_CHARTER";
 
 /** The variable in the server's MCP `env` naming the snapshot, by absolute path. */
 export const SNAPSHOT_VARIABLE = "SQUIZ_SNAPSHOT";
@@ -56,9 +52,8 @@ type Outcome =
   | { readonly result: unknown }
   | { readonly error: { readonly code: number; readonly message: string } };
 
-/** Where the server reads its charter, writes its reports and runs the history tools. */
+/** Where the server writes its reports and runs the history tools. */
 type Setting = {
-  readonly charter: string | undefined;
   readonly reports: string | undefined;
   readonly snapshot: string | undefined;
 };
@@ -152,7 +147,7 @@ function outcomeOf(
   try {
     switch (method) {
       case "initialize":
-        return initialized(params, setting.charter);
+        return initialized(params);
       case "ping":
         return { result: {} };
       case "tools/list":
@@ -182,27 +177,11 @@ function outcomeOf(
   }
 }
 
-/**
- * The answer to `initialize`, carrying the charter as the instructions.
- *
- * A charter named and unreadable refuses the whole session rather than serving
- * the calls to a reviewer that was never told what to review for.
- */
-function initialized(params: unknown, charterPath: string | undefined): Outcome {
+/** The answer to `initialize`. */
+function initialized(params: unknown): Outcome {
   const asked = fieldOf(params, "protocolVersion");
   const protocolVersion =
     typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0];
-
-  let instructions: string | undefined;
-  if (charterPath !== undefined && charterPath !== "") {
-    try {
-      instructions = readFileSync(charterPath, "utf8");
-    } catch (cause) {
-      const reason = cause instanceof Error ? cause.message : String(cause);
-      warn(`the charter could not be read: ${reason}`);
-      return { error: { code: INTERNAL_ERROR, message: `the charter could not be read: ${reason}` } };
-    }
-  }
 
   return {
     result: {
@@ -210,7 +189,6 @@ function initialized(params: unknown, charterPath: string | undefined): Outcome 
       capabilities: { tools: {} },
       // The protocol requires a name and a version. Neither is the release's.
       serverInfo: { name: "squiz", version: "1" },
-      ...(instructions === undefined ? {} : { instructions }),
     },
   };
 }
@@ -293,7 +271,6 @@ function warn(text: string): void {
 
 if (import.meta.main) {
   serve({
-    charter: process.env[CHARTER_VARIABLE],
     reports: process.env[REPORTS_VARIABLE],
     snapshot: process.env[SNAPSHOT_VARIABLE],
   });

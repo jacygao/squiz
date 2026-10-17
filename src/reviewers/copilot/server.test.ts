@@ -21,7 +21,7 @@ import { historyTools } from "../git-tools.ts";
 import { reportCalls } from "../report-calls.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT, reportingTools } from "../reporting.ts";
-import { CHARTER_VARIABLE, SNAPSHOT_VARIABLE } from "./server.ts";
+import { SNAPSHOT_VARIABLE } from "./server.ts";
 
 const serverPath = fileURLToPath(new URL("./server.ts", import.meta.url));
 
@@ -173,11 +173,8 @@ function call(name: string, args: unknown): Message {
   return { name, arguments: args };
 }
 
-test("initialize answers with the charter as the server's instructions", async (t) => {
-  const directory = scratch(t);
-  const charter = join(directory, "charter.md");
-  writeFileSync(charter, "# Charter\n\nReview the change as a careful colleague.\n");
-  const server = started(t, directory, { [CHARTER_VARIABLE]: charter });
+test("initialize answers with the protocol version asked for and the tools capability", async (t) => {
+  const server = started(t, scratch(t));
 
   const result = resultOf(
     await server.request(1, "initialize", {
@@ -187,7 +184,6 @@ test("initialize answers with the charter as the server's instructions", async (
     }),
   );
 
-  assert.equal(result["instructions"], "# Charter\n\nReview the change as a careful colleague.\n");
   assert.equal(result["protocolVersion"], "2025-06-18");
   assert.deepEqual(result["capabilities"], { tools: {} });
 });
@@ -198,18 +194,6 @@ test("initialize answers with a protocol version it knows where the client asks 
     await server.request(1, "initialize", { protocolVersion: "1999-01-01", capabilities: {} }),
   );
   assert.equal(result["protocolVersion"], "2025-11-25");
-});
-
-test("initialize is refused where the charter named cannot be read", async (t) => {
-  const directory = scratch(t);
-  const server = started(t, directory, { [CHARTER_VARIABLE]: join(directory, "missing.md") });
-  const answer = await server.request(1, "initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-  });
-  const error = answer["error"] as Message | undefined;
-  assert.ok(error !== undefined, "a reviewer was offered the calls with no charter");
-  assert.match(String(error["message"]), /charter/);
 });
 
 test("the server lists the reporting calls and then the history tools, each with its own schema", async (t) => {
