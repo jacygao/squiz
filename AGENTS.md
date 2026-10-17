@@ -111,6 +111,15 @@ milestone and one priority label:
   own CI, will hit it.
 - **`P2`** waits in `Backlog` until a release's theme pulls it in.
 
+Each open issue also carries one or more area labels, naming the part of squiz
+it touches:
+
+- **`harness`**: squiz's own loop, round host, review, summary and commands.
+- **`claude-code`**: Claude Code as the coding agent, its hooks, socket and
+  settings.
+- **`copilot`**: the GitHub Copilot CLI, as the coding agent or the reviewer.
+- **`pi`**: the `pi` reviewer adapter.
+
 The version is in `package.json`, `package-lock.json`,
 `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 
