@@ -11,7 +11,7 @@
 import { createInterface } from "node:readline";
 
 import { identityOf, stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
-import { takeHostLock } from "./lock.ts";
+import { takeHostLock } from "../host/lock.ts";
 
 const BOUND_MS = 5_000;
 

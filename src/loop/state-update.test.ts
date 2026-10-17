@@ -30,7 +30,7 @@ function episodeIn(t: TestContext): Episode {
 function racer(episode: Episode, label: string, count: number, status: string, at: number): Promise<string> {
   const child = spawn(
     process.execPath,
-    [join(import.meta.dirname, "state-update-racer.ts"), episode.worktree, String(pullRequest), label, String(count), status, String(at)],
+    [join(import.meta.dirname, "../testing/state-update-racer.ts"), episode.worktree, String(pullRequest), label, String(count), status, String(at)],
     { stdio: ["ignore", "pipe", "inherit"] },
   );
   let printed = "";

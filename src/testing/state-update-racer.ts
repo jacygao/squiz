@@ -10,9 +10,9 @@
 
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf } from "../sessions/process.ts";
-import { episodeAt } from "./episode.ts";
-import { putRecord, type StateRecord } from "./state-record.ts";
-import { updateState } from "./state-update.ts";
+import { episodeAt } from "../loop/episode.ts";
+import { putRecord, type StateRecord } from "../loop/state-record.ts";
+import { updateState } from "../loop/state-update.ts";
 
 // Far longer than another writer holds the lock, however loaded the machine.
 const LONG_MS = 120_000;

@@ -24,7 +24,7 @@ import type { Finding } from "../findings/finding.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { standIn } from "../testing/stand-in.ts";
-import type { Plan, PlannedStart } from "./host-fixture.ts";
+import type { Plan, PlannedStart } from "../testing/host-fixture.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { runReview } from "./review.ts";
@@ -33,8 +33,8 @@ import { squizStatus } from "./status.ts";
 const NUMBER = 41;
 const BRANCH = "feature-a";
 const FILE = "src/ui/card.ts";
-const hostFixture = fileURLToPath(new URL("host-fixture.ts", import.meta.url));
-const runner = fileURLToPath(new URL("review-runner.ts", import.meta.url));
+const hostFixture = fileURLToPath(new URL("../testing/host-fixture.ts", import.meta.url));
+const runner = fileURLToPath(new URL("../testing/review-runner.ts", import.meta.url));
 const originalPath = process.env["PATH"] ?? "";
 
 const FINDING: Finding = {

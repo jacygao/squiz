@@ -190,7 +190,7 @@ test("a host that finds a live taker replacing a dead holder's lock is told the 
 type Racer = { readonly child: ChildProcess; readonly next: () => Promise<string> };
 
 function startRacer(): Racer {
-  const child = spawn(process.execPath, [join(import.meta.dirname, "lock-racer.ts")], {
+  const child = spawn(process.execPath, [join(import.meta.dirname, "../testing/lock-racer.ts")], {
     stdio: ["pipe", "pipe", "inherit"],
   });
   const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();

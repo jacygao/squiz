@@ -8,7 +8,7 @@
 
 import { appendFileSync } from "node:fs";
 
-import { takeHostLock } from "./lock.ts";
+import { takeHostLock } from "../host/lock.ts";
 
 const [directory = "", log = ""] = process.argv.slice(2);
 

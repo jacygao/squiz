@@ -7,7 +7,7 @@
 
 import { fileURLToPath } from "node:url";
 
-import { runReview } from "./review.ts";
+import { runReview } from "../review/review.ts";
 
 const hostFixture = fileURLToPath(new URL("host-fixture.ts", import.meta.url));
 const [number = "", planFile = ""] = process.argv.slice(2);
