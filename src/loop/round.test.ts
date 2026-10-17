@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -272,12 +272,26 @@ function hangs(cost: RoundCost, reported: Partial<RoundOutput> = {}): Reviewer {
 /** What a reviewer that reported nothing has reported. */
 const nothingReported: RoundOutput = { findings: [], verdicts: [] };
 
-/** A clock that stands still until the test moves it. */
-type Clock = { at: number; readonly now: () => number };
+/**
+ * A clock that stands still until the test moves it.
+ *
+ * Once `since` is set it runs on from `at` in real time, for a stop that has to
+ * take as long as it really takes.
+ */
+type Clock = { at: number; since?: number; readonly now: () => number };
 
 function stoppedClock(): Clock {
-  const clock: Clock = { at: 0, now: () => clock.at };
+  const clock: Clock = {
+    at: 0,
+    now: () => (clock.since === undefined ? clock.at : clock.at + Date.now() - clock.since),
+  };
   return clock;
+}
+
+/** Set `clock` running in real time from `atMs`. */
+function runFrom(clock: Clock, atMs: number): void {
+  clock.at = atMs;
+  clock.since = Date.now();
 }
 
 /**
@@ -300,20 +314,51 @@ function hangsUntil(clock: Clock, atMs: number, findings: readonly Finding[] = [
 }
 
 /**
+ * A shell that ignores the signal that would stop it, and the file it creates
+ * once its trap is set.
+ */
+function holding(): { readonly args: readonly string[]; readonly trapped: string } {
+  const trapped = join(mkdtempSync(join(tmpdir(), "squiz-holds-")), "trapped");
+  return {
+    // The wait is short and repeated, because a shell blocked in one long sleep
+    // reaches its trap only once that sleep is over.
+    args: ["-c", `trap '' TERM; : > "$1"; while :; do sleep 0.2; done`, "sh", trapped],
+    trapped,
+  };
+}
+
+/**
+ * Wait for the reviewer's trap, then set `clock` running from the review's bound.
+ *
+ * A signal that arrives before the trap stops the reviewer at once, and the round
+ * then spends nothing stopping it. The clock stands still until the trap is set,
+ * so the bound cannot pass first however slowly the reviewer starts.
+ */
+async function holdsFrom(trapped: string, clock: Clock, boundMs: number): Promise<void> {
+  // A guard against a reviewer that never started. Nothing the test decides waits on it.
+  const givesUpAt = Date.now() + 30_000;
+  while (!existsSync(trapped)) {
+    if (Date.now() > givesUpAt) assert.fail("the reviewer never set its trap");
+    await new Promise((settle) => setTimeout(settle, 10));
+  }
+  rmSync(dirname(trapped), { recursive: true, force: true });
+  runFrom(clock, boundMs);
+}
+
+/**
  * A reviewer that answers inside its bound and then holds on through the round's
  * cleanup.
  *
  * It finishes its review at once, so the round holding the declaration is left
  * with findings to post. It then ignores the signal that would stop it, so the
  * round spends the grace and the kill after the moment the review had to be
- * over by.
+ * over by, which is `boundMs` on `clock`.
  */
-function answersThenHolds(findings: readonly Finding[]): Reviewer {
+function answersThenHolds(clock: Clock, boundMs: number, findings: readonly Finding[]): Reviewer {
+  const shell = holding();
   return {
     command: "/bin/sh",
-    // The wait is short and repeated, because a shell blocked in one long sleep
-    // reaches its trap only once that sleep is over.
-    args: ["-c", "trap '' TERM; while :; do sleep 0.2; done"],
+    args: shell.args,
     parse: async (reports, progressSoFar): Promise<ParsedRun> => {
       progressSoFar?.({
         cost: ANSWER_COST,
@@ -323,25 +368,28 @@ function answersThenHolds(findings: readonly Finding[]): Reviewer {
         finished: true,
         broken: undefined,
       });
+      await holdsFrom(shell.trapped, clock, boundMs);
       return reviews({ findings }).parse(reports, progressSoFar);
     },
   };
 }
 
 /**
- * A reviewer that reports findings and then ignores both its bound and the signal
- * that would stop it.
+ * A reviewer that reports findings and then ignores both its bound, `boundMs` on
+ * `clock`, and the signal that would stop it.
  *
  * The round spends the grace and the kill after the moment the review had to be
  * over by, and that comes out of the posting reserve.
  */
-function reportsThenHolds(cost: RoundCost, findings: readonly Finding[]): Reviewer {
+function reportsThenHolds(clock: Clock, boundMs: number, cost: RoundCost, findings: readonly Finding[]): Reviewer {
+  const shell = holding();
   return {
     command: "/bin/sh",
-    // The wait is short and repeated, because a shell blocked in one long sleep
-    // reaches its trap only once that sleep is over.
-    args: ["-c", "trap '' TERM; while :; do sleep 0.2; done"],
-    parse: hangs(cost, { findings }).parse,
+    args: shell.args,
+    parse: async (reports, progressSoFar): Promise<ParsedRun> => {
+      await holdsFrom(shell.trapped, clock, boundMs);
+      return hangs(cost, { findings }).parse(reports, progressSoFar);
+    },
   };
 }
 
@@ -1802,11 +1850,13 @@ test("a round that reported nothing before it failed posts only its failure comm
  * smaller here than the grace alone.
  */
 test("a salvaged round's reserve loses what stopping the reviewer took past its bound", async () => {
+  const clock = stoppedClock();
   const ran = await runInFixture({
+    clock,
     postingMs: 500,
     config: { timeout: 2 },
     answers: POSTING,
-    reviewer: reportsThenHolds(ANSWER_COST, [finding("The flag is never read")]),
+    reviewer: reportsThenHolds(clock, 2_000, ANSWER_COST, [finding("The flag is never read")]),
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
@@ -1975,12 +2025,14 @@ test("the posting reserve bounds every call the round makes after the review", a
  * would send, so it is the first thing a spent reserve costs.
  */
 test("a review whose stop ran past its bound leaves the posting what is left of the reserve", async () => {
+  const clock = stoppedClock();
   const ran = await runInFixture({
+    clock,
     // A bound the reviewer's own cleanup runs past by more than the reserve.
     config: { timeout: 1 },
     postingMs: 500,
     answers: POSTING,
-    reviewer: answersThenHolds([finding("The flag is never read")]),
+    reviewer: answersThenHolds(clock, 1_000, [finding("The flag is never read")]),
   });
 
   assert.ok(ran.conclusion.outcome === "failed", "a round that could not post is never a clean round");
@@ -3393,11 +3445,13 @@ test("a caller that asks for no failure comment gets none, and the round is fail
 });
 
 test("a failed round whose posting time is spent attempts no failure comment, and says why", async () => {
+  const clock = stoppedClock();
   const ran = await runInFixture({
+    clock,
     postingMs: 500,
     config: { timeout: 2 },
     answers: FAILING,
-    reviewer: reportsThenHolds(ANSWER_COST, [finding("The flag is never read")]),
+    reviewer: reportsThenHolds(clock, 2_000, ANSWER_COST, [finding("The flag is never read")]),
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
