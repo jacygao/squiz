@@ -1,8 +1,8 @@
 ---
 settles: "§ 3 — whether the hook registration can name the `squiz` binary directly; § 6 and § 9 — whether a marketplace install puts the plugin's bin/ on the Bash tool's PATH"
-issue: [39, 54]
+issue: [39, 54, 662]
 recorded: 2026-09-09
-versions: { claude-code: 2.1.263 and 2.1.285, node: 24.15.0 }
+versions: { claude-code: "2.1.263, 2.1.285 and 2.1.302", copilot: 1.0.98, node: 24.15.0 }
 recheck-when: Claude Code changes how a plugin's bin/ reaches PATH
 ---
 
@@ -18,9 +18,12 @@ exited 0.
 
 ## Decisions
 
-- **The registration is `${CLAUDE_PLUGIN_ROOT}/bin/squiz hook`, exactly.** The
-  runtime sets `CLAUDE_PLUGIN_ROOT` to the plugin root for the hook, so the
+- **The registration is `"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook`, exactly.**
+  The runtime sets `CLAUDE_PLUGIN_ROOT` to the plugin root for the hook, so the
   registration still writes down no install path.
+- **The placeholder is quoted.** Claude Code runs a shell-form hook command
+  under `/bin/sh` and Copilot under `/bin/bash`. Unquoted, a plugin root with a
+  space in its path splits into several words, and the hook exits 127.
 - **A hook that cannot resolve its command looks exactly like a hook with
   nothing to say.** Both leave an empty transcript. Nothing about the plugin
   loading says the command will run, so the two are told apart by the exit code
@@ -42,8 +45,26 @@ Claude Code hooks, on `Stop` as well as `SubagentStop`.
 ### The command that runs
 
 ```
-${CLAUDE_PLUGIN_ROOT}/bin/squiz hook
+"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook
 ```
+
+### A plugin root with a space in its path
+
+A stand-in plugin whose root was `…/plugin root`, with squiz's `hooks.json` and
+a `bin/squiz` that recorded its call, fired `Stop` and `SubagentStop` in a
+`claude -p` run. Unquoted, each `hook_response` was:
+
+```json
+{"hook_name":"SubagentStop","stderr":"/bin/sh: …/before/plugin: No such file or directory\n","exit_code":127,"outcome":"error"}
+```
+
+Quoted, each was `"exit_code":0,"outcome":"success"` with both streams empty,
+and the stand-in recorded `argv` `…/plugin root/bin/squiz hook`. A `copilot -p`
+run with the same stand-in logged `/bin/bash: …/before/plugin: No such file or
+directory` unquoted, and recorded the same `argv` quoted.
+
+`claude plugin validate --strict .` reports the unquoted form as a warning on
+each hook, and passes the quoted one.
 
 ### The hook's environment, as observed
 
@@ -129,7 +150,7 @@ what puts the firing in the stream, and it was there.
 - **The install was declared at `local` scope.** Whether `user` scope resolves
   `CLAUDE_PLUGIN_ROOT` differently was not tested.
 - **Whether `${CLAUDE_PLUGIN_ROOT}` is expanded by the runtime or by the shell
-  it runs the command under was not distinguished.** Both would work for this
-  registration; a command that quoted it differently might not.
+  it runs the command under was not distinguished by a run.** Either way the
+  quoted registration holds, for any root without a `"`, `$` or backtick in it.
 - **One machine, print mode, one subagent per run, `claude-sonnet-5`.** Three
   runs on macOS for the `--plugin-dir` findings and one for the install.

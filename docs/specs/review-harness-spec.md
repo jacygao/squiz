@@ -380,12 +380,16 @@ worktree.
 
 ```json
 "Stop": [
-  { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook", "asyncRewake": true, "timeout": 86400 } ] }
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook", "asyncRewake": true, "timeout": 86400 } ] }
 ],
 "SubagentStop": [
-  { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook" } ] }
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
 ]
 ```
+
+**The plugin root is quoted in the command, so a root with a space in its path
+stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under
+`/bin/bash`, and the registration has to hold under both.
 
 | Event | The owner of the work it records |
 |---|---|
