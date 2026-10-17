@@ -2296,7 +2296,6 @@ The rows, in the order they print:
 | The `squiz` link | No, and never a failure | `PATH` holds a link to this squiz, read as `squiz init` reads it. Anything `squiz init` would refuse or change is a warning. |
 | Copilot's copies of squiz | No, and printed only where Copilot has one | Each copy under `<COPILOT_HOME>/installed-plugins/` is this squiz's version. A different one is a warning naming the older, since Copilot's hook runs its own copy and two versions would write one state file. |
 | The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, for Copilot the sign-in prompt succeeds, and for `pi` the model runs at the configured thinking level. |
-| The project's `pi` settings | No, and printed only where the reviewer is `pi` and there are any | Never: the row names what a review does not use. |
 
 **The reviewer is the one `reviewer` names in `.squiz.json`**, read from the
 main worktree as § 9 Configuration sets out, or `pi` outside a repository or
@@ -2345,14 +2344,6 @@ the user's own `<COPILOT_HOME>/settings.json`, since a session without them is
 never woken by its review (§ 9 Getting started). **Its socket path fits** where
 `<COPILOT_HOME>/session-state/<session id>/squiz.sock` is at most 104 bytes on
 macOS and 108 on Linux.
-
-**The project's `pi` settings row** names each of `.pi/settings.json`,
-`.pi/extensions`, `.pi/skills`, `.pi/prompts`, `.pi/themes`, `.pi/SYSTEM.md`,
-`.pi/APPEND_SYSTEM.md` and `.agents/skills` that the repository's root holds,
-since `pi` takes none of them from a project it does not trust (§ 4 The `pi`
-adapter). It ends with the context file that still reaches the reviewer, where
-there is one. It reads the working tree rather than the head commit a round
-reads, and its list is the one `pi` 0.85.1 requires trust for.
 
 ## 7. Failure modes
 

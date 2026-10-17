@@ -614,36 +614,6 @@ function withIndentedDetail(output: string): string {
 }
 
 /**
- * The project's own reviewer settings that a review leaves unused, and the
- * context file that reaches the reviewer all the same.
- *
- * It reports configuration only: that the files exist where the reviewer would
- * look. Whether the reviewer leaves them unused is not tested here. Nothing
- * prints for a reviewer whose adapter reads no project settings, outside a
- * repository, or where the reviewer's row failed on the repository and already
- * said why.
- */
-const projectSettings: Check = (context) => {
-  const project = projectOf(context);
-  if (project.outcome === "failed" || project.root === undefined) return [];
-  const { reviewer } = project.config;
-  const read = adapterFor(reviewer).projectSettings;
-  if (read === undefined) return [];
-  const { unused, contextFile } = read(project.root);
-  if (unused.length === 0) return [];
-  const named = unused.map(({ path, keys }) => (keys.length === 0 ? path : `${path} (${keys.join(", ")})`));
-  const reaches = contextFile === undefined ? "" : `. ${contextFile} still reaches the reviewer`;
-  return {
-    level: "present",
-    line: `${reviewer} project settings: a review does not use ${inProse(named)}, and takes your own ${reviewer} settings instead${reaches}`,
-  };
-};
-
-function inProse(items: readonly string[]): string {
-  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
-}
-
-/**
  * The worktree's root and the main worktree's, each `undefined` outside a
  * repository, the configuration read as a round reads it, and the file it came
  * from: `null` for the defaults.
@@ -719,7 +689,6 @@ export const CHECKS: readonly Check[] = [
   pathLink(),
   copilotCopies(),
   reviewer,
-  projectSettings,
 ];
 
 function firstLine(output: string): string {
