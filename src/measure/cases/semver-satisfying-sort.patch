@@ -1,0 +1,88 @@
+diff --git a/ranges/max-satisfying.js b/ranges/max-satisfying.js
+--- a/ranges/max-satisfying.js
++++ b/ranges/max-satisfying.js
+@@ -1,27 +1,17 @@
+ 'use strict'
+ 
+-const SemVer = require('../classes/semver')
+ const Range = require('../classes/range')
++const compare = require('../functions/compare')
+ 
+ const maxSatisfying = (versions, range, options) => {
+-  let max = null
+-  let maxSV = null
+   let rangeObj = null
+   try {
+     rangeObj = new Range(range, options)
+   } catch (er) {
+     return null
+   }
+-  versions.forEach((v) => {
+-    if (rangeObj.test(v)) {
+-      // satisfies(v, range, options)
+-      if (!max || maxSV.compare(v) === -1) {
+-        // compare(max, v, true)
+-        max = v
+-        maxSV = new SemVer(max, options)
+-      }
+-    }
+-  })
+-  return max
++  const matching = versions.filter((v) => rangeObj.test(v))
++  matching.sort((a, b) => compare(a, b))
++  return matching.length ? matching[matching.length - 1] : null
+ }
+ module.exports = maxSatisfying
+diff --git a/ranges/min-satisfying.js b/ranges/min-satisfying.js
+--- a/ranges/min-satisfying.js
++++ b/ranges/min-satisfying.js
+@@ -1,26 +1,15 @@
+ 'use strict'
+ 
+-const SemVer = require('../classes/semver')
+-const Range = require('../classes/range')
++const satisfies = require('../functions/satisfies')
++const compare = require('../functions/compare')
++const validRange = require('./valid')
++
+ const minSatisfying = (versions, range, options) => {
+-  let min = null
+-  let minSV = null
+-  let rangeObj = null
+-  try {
+-    rangeObj = new Range(range, options)
+-  } catch (er) {
++  if (!validRange(range, options)) {
+     return null
+   }
+-  versions.forEach((v) => {
+-    if (rangeObj.test(v)) {
+-      // satisfies(v, range, options)
+-      if (!min || minSV.compare(v) === 1) {
+-        // compare(min, v, true)
+-        min = v
+-        minSV = new SemVer(min, options)
+-      }
+-    }
+-  })
+-  return min
++  const matching = versions.filter((v) => satisfies(v, range))
++  matching.sort((a, b) => compare(a, b, options))
++  return matching.length ? matching[0] : null
+ }
+ module.exports = minSatisfying
+diff --git a/test/ranges/max-satisfying.js b/test/ranges/max-satisfying.js
+--- a/test/ranges/max-satisfying.js
++++ b/test/ranges/max-satisfying.js
+@@ -20,6 +20,11 @@
+   t.end()
+ })
+ 
++test('max satisfying picks the highest of several', (t) => {
++  t.ok(maxSatisfying(['1.2.5', '1.2.3', '1.2.4'], '1.2'))
++  t.end()
++})
++
+ test('bad ranges in max satisfying', (t) => {
+   const r = 'some frogs and sneks-v2.5.6'
+   t.equal(maxSatisfying([], r), null)

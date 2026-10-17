@@ -1,0 +1,31 @@
+diff --git a/src/reviewers/git-tools.ts b/src/reviewers/git-tools.ts
+--- a/src/reviewers/git-tools.ts
++++ b/src/reviewers/git-tools.ts
+@@ -184,6 +184,7 @@
+         "--no-textconv",
+         "--no-ext-diff",
+         "--no-show-signature",
++        "--no-mailmap",
+         "--no-decorate",
+         "--no-abbrev-commit",
+         "--format=medium",
+@@ -304,6 +305,7 @@
+         "--no-textconv",
+         "--no-ext-diff",
+         "--no-show-signature",
++        "--no-mailmap",
+         "--no-decorate",
+         "--format=medium",
+         "--date=iso",
+diff --git a/docs/specs/review-harness-spec.md b/docs/specs/review-harness-spec.md
+--- a/docs/specs/review-harness-spec.md
++++ b/docs/specs/review-harness-spec.md
+@@ -805,6 +805,8 @@
+ - **No argument reads as an option.** The term is joined to `-S`, a commit is
+   resolved to its full name before `git show` is given it, and a file follows
+   `--`. An empty argument, and one holding a NUL, are refused.
++- **An author is the one the commit records.** `log` and `show` take
++  `--no-mailmap`, so a `.mailmap` in the change cannot rename one.
+ - **A file is confined to the snapshot.** `git_blame` refuses an absolute path,
+   a `..` path that climbs out, and a path whose links resolve outside the
+   snapshot.

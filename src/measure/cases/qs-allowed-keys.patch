@@ -1,0 +1,69 @@
+diff --git a/lib/parse.js b/lib/parse.js
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -10,6 +10,7 @@
+     allowEmptyArrays: false,
+     allowPrototypes: false,
+     allowSparse: false,
++    allowedKeys: null,
+     arrayLimit: 20,
+     charset: 'utf-8',
+     charsetSentinel: false,
+@@ -137,6 +138,15 @@
+             }
+         }
+ 
++        if (options.allowedKeys && key !== null) {
++            var rootKey = key.split('[')[0];
++            if (options.allowedKeys.indexOf(rootKey) > 0) {
++                // listed: keep it
++            } else {
++                continue;
++            }
++        }
++
+         if (val && options.interpretNumericEntities && charset === 'iso-8859-1') {
+             val = interpretNumericEntities(String(val));
+         }
+@@ -367,6 +377,7 @@
+         allowEmptyArrays: typeof opts.allowEmptyArrays === 'boolean' ? !!opts.allowEmptyArrays : defaults.allowEmptyArrays,
+         allowPrototypes: typeof opts.allowPrototypes === 'boolean' ? opts.allowPrototypes : defaults.allowPrototypes,
+         allowSparse: typeof opts.allowSparse === 'boolean' ? opts.allowSparse : defaults.allowSparse,
++        allowedKeys: opts.allowedKeys || defaults.allowedKeys,
+         arrayLimit: typeof opts.arrayLimit === 'number' ? opts.arrayLimit : defaults.arrayLimit,
+         charset: charset,
+         charsetSentinel: typeof opts.charsetSentinel === 'boolean' ? opts.charsetSentinel : defaults.charsetSentinel,
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -250,6 +250,13 @@
+ 
+ It also works when the charset has been detected in `charsetSentinel` mode.
+ 
++To keep only some top-level keys, pass them as `allowedKeys`. Every other parameter is dropped before it is parsed, so a listed key's nested keys are kept and an unlisted key never reaches the result:
++
++```javascript
++var only = qs.parse('a=1&b[c]=2&d=3', { allowedKeys: ['a', 'b'] });
++assert.deepEqual(only, { a: '1', b: { c: '2' } });
++```
++
+ ### Parsing Arrays
+ 
+ **qs** can also parse arrays using a similar `[]` notation:
+diff --git a/test/parse.js b/test/parse.js
+--- a/test/parse.js
++++ b/test/parse.js
+@@ -592,6 +592,13 @@
+         st.end();
+     });
+ 
++    t.test('keeps only allowedKeys', function (st) {
++        var result = qs.parse('a=1&b[c]=2&d=3', { allowedKeys: ['x', 'b'] });
++        st.ok(result, 'parses');
++        st.notOk(result.d === '4', 'an unlisted key is not kept');
++        st.end();
++    });
++
+     t.test('allows setting the parameter limit to Infinity', function (st) {
+         st.deepEqual(qs.parse('a=b&c=d', { parameterLimit: Infinity }), { a: 'b', c: 'd' });
+         st.end();

@@ -1,0 +1,22 @@
+diff --git a/src/github/threads.ts b/src/github/threads.ts
+--- a/src/github/threads.ts
++++ b/src/github/threads.ts
+@@ -131,8 +131,16 @@
+   | { readonly outcome: "unreadable"; readonly reason: string }
+   | GhFailure;
+ 
+-/** What GitHub serves in one page of either connection. */
+-const PAGE_SIZE = 100;
++/**
++ * How many threads, and comments on each, one page asks for.
++ *
++ * Half of the 100 GitHub allows. A page of 100 threads with 100 comments each
++ * asks GitHub for 10,000 comments at once, which it has answered with a
++ * timeout on a long-running pull request. Every connection is followed to its
++ * last page, so a smaller page changes how many calls a listing takes and
++ * nothing else.
++ */
++const PAGE_SIZE = 50;
+ 
+ const commentFields = `nodes { id databaseId author { login } body createdAt }`;
+ 

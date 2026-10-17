@@ -1,0 +1,12 @@
+diff --git a/src/reviewers/git-tools.ts b/src/reviewers/git-tools.ts
+--- a/src/reviewers/git-tools.ts
++++ b/src/reviewers/git-tools.ts
+@@ -37,7 +37,7 @@
+ };
+ 
+ /** The most of git's output a call hands back, in bytes. */
+-export const OUTPUT_CAP = 65_536;
++export const OUTPUT_CAP = 262_144;
+ 
+ // Well inside the round's own time bound, so one slow search cannot spend it.
+ const TIME_LIMIT_MS = 120_000;

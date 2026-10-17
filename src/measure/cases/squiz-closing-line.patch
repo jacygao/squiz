@@ -1,0 +1,75 @@
+diff --git a/src/review/output.ts b/src/review/output.ts
+--- a/src/review/output.ts
++++ b/src/review/output.ts
+@@ -271,7 +271,7 @@
+   }
+ }
+ 
+-const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";
++const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is posted on the pull request.";
+ 
+ /**
+  * What a close at a bound with threads open tells the coding agent to do.
+diff --git a/src/review/review-end-to-end.test.ts b/src/review/review-end-to-end.test.ts
+--- a/src/review/review-end-to-end.test.ts
++++ b/src/review/review-end-to-end.test.ts
+@@ -282,7 +282,7 @@
+ const KEPT_OPEN = "A fixture still needs a line saying what it is for. Add one, or show where the header says it.";
+ 
+ const rulings: readonly [ThreadVerdict, number, string][] = [
+-  [{ thread: "PRRT_1", verdict: "withdrawn", reason: "The header already says it." }, 0, "Nothing is open. The review is closed, and its summary is on the pull request."],
++  [{ thread: "PRRT_1", verdict: "withdrawn", reason: "The header already says it." }, 0, "Nothing is open. The review is closed, and its summary is posted on the pull request."],
+   [{ thread: "PRRT_1", verdict: "open", reason: KEPT_OPEN }, 2, "1 thread is open:"],
+ ];
+ 
+@@ -763,7 +763,7 @@
+     assert.deepEqual(closing.stdout.split("\n").slice(1, 4), [
+       `Squiz reviewed PR #41 at ${fixed}: the closing round, after 1 of 1 round.`,
+       "",
+-      "Nothing is open. The review is closed, and its summary is on the pull request.",
++      "Nothing is open. The review is closed, and its summary is posted on the pull request.",
+     ]);
+     const dropped =
+       "`src/ui/card.ts:2` — A finding the closing round may not raise (reported in the closing round, which raises no findings, so it was not posted)";
+diff --git a/src/review/review.test.ts b/src/review/review.test.ts
+--- a/src/review/review.test.ts
++++ b/src/review/review.test.ts
+@@ -238,7 +238,7 @@
+     assert.equal(printed.exit, 0);
+     assert.equal(
+       printed.stdout,
+-      `${PATH_LINE(fixture)}\nSquiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.\n\nNothing is open. The review is closed, and its summary is on the pull request.\n`,
++      `${PATH_LINE(fixture)}\nSquiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.\n\nNothing is open. The review is closed, and its summary is posted on the pull request.\n`,
+     );
+   });
+ });
+@@ -357,7 +357,7 @@
+     assert.deepEqual(printed.stdout.split("\n").slice(1, 4), [
+       `Squiz did not review PR #41 at 3f9c2e0 with different replies: ${BEFORE_A_ROUND}.`,
+       "",
+-      "Nothing is open. The review is closed, and its summary is on the pull request.",
++      "Nothing is open. The review is closed, and its summary is posted on the pull request.",
+     ]);
+   });
+ });
+diff --git a/src/review/output.test.ts b/src/review/output.test.ts
+--- a/src/review/output.test.ts
++++ b/src/review/output.test.ts
+@@ -153,7 +153,7 @@
+     `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+ Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
+ 
+-Nothing is open. The review is closed, and its summary is on the pull request.
++Nothing is open. The review is closed, and its summary is posted on the pull request.
+ `,
+   );
+ });
+@@ -429,7 +429,7 @@
+     `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+ Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap before a round took this state.
+ 
+-Nothing is open. The review is closed, and its summary is on the pull request.
++Nothing is open. The review is closed, and its summary is posted on the pull request.
+ `,
+   );
+ });
