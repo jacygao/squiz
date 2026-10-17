@@ -5,8 +5,8 @@
 ## 1. Purpose
 
 **Squiz automates code review between agents.** Whenever a coding agent
-finishes a piece of work, a reviewer agent reviews it. The reviewer runs a
-different model from the coding agent, and can run in a different harness. The
+finishes a piece of work, a reviewer agent reviews it. The reviewer can run a
+different model from the coding agent, and a different harness. The
 two agents work through the findings over as many rounds as it takes to settle
 them. Everything they say to each other is kept as review comments on the pull
 request, where a person, or an agent trusted to merge, can see how each finding
@@ -20,7 +20,7 @@ Squiz runs on the developer's machine, and needs all three of these:
 |---|---|---|
 | GitHub repository | `git`, and `gh` signed in | The pull request is where the review happens and is recorded. |
 | Runtime | Claude Code / GitHub Copilot CLI | Runs the coding agent, and starts a review when the agent finishes its work. Copilot support is experimental (§ 3 The report). |
-| Reviewer | `pi` / GitHub Copilot CLI | Reviews the change. It must run a different model from the coding agent. Only the one `reviewer` names has to be installed. |
+| Reviewer | `pi` / GitHub Copilot CLI | Reviews the change. It should run a different model from the coding agent, so that no model reviews its own work, but that is the user's choice, and squiz does not check it. Only the one `reviewer` names has to be installed. |
 
 A terminal multiplexer is optional. Where tmux or Herdr is running, each
 reviewer runs in a pane of it, where a person can watch it. Where neither is,
@@ -1109,8 +1109,8 @@ with the variables the round hands it, refuses the model as a detached run does.
 A `settings.json` that is there and cannot be read, or does not hold a JSON
 object, fails `confine`. Where the user has neither, `confine` returns
 `COPILOT_MODEL` set empty, so that one a pane's server carries never reaches
-`--model`. The round then runs on whatever Copilot falls back to, and nothing
-makes sure that is a different model from the coding agent's, as § 2 requires.
+`--model`. The round then runs on whatever Copilot falls back to, which may be
+the coding agent's own model.
 
 #### The reporting server
 
