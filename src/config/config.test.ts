@@ -406,6 +406,32 @@ test("#745: a main worktree's .squiz.json that is refused fails, though the link
   }
 });
 
+test("#745: a main worktree whose path holds a newline is read at that path", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "squiz-config-newline-")));
+  const main = join(base, "ma\nin");
+  const linked = join(base, "linked");
+  try {
+    mkdirSync(main);
+    for (const args of [
+      ["init", "--quiet"],
+      ["commit", "--quiet", "--allow-empty", "-m", "first"],
+      ["worktree", "add", "--quiet", "--detach", linked],
+    ]) {
+      const ran = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: main, encoding: "utf8" });
+      assert.equal(ran.status, 0, ran.stderr);
+    }
+    writeFileSync(join(main, configFileName), `{"reviewer": "copilot"}`);
+    writeFileSync(join(linked, configFileName), `{"reviewer": "pi"}`);
+
+    const found = findProjectConfig(linked);
+
+    assert.equal(found.config.reviewer, "copilot");
+    assert.equal(found.file, join(main, configFileName));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("#745: a linked worktree of a bare repository named .git runs on the defaults, never reading the directory beside it", () => {
   const pair = linkedPair(null, null);
   const project = join(pair.base, "project");

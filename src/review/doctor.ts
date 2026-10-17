@@ -697,7 +697,7 @@ function repositoryRoot(context: DoctorContext): Root {
   }
   const root = asked.stdout.trim();
   if (root === "") return { outcome: "failed", reason: "git named no worktree for this directory" };
-  const listed = probe("git", ["worktree", "list", "--porcelain"], untranslated);
+  const listed = probe("git", ["worktree", "list", "--porcelain", "-z"], untranslated);
   if (listed.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
   if (listed.outcome === "failed") return { outcome: "failed", reason: listed.reason };
   return { outcome: "found", path: root, main: mainWorktreeIn(listed.stdout) };

@@ -65,20 +65,20 @@ export type MainWorktreeLookup =
 
 /** Ask git for the main worktree of the repository holding `directory`. Never throws. */
 export function mainWorktree(directory: string, until?: Deadline): MainWorktreeLookup {
-  const asked = runGit(directory, ["worktree", "list", "--porcelain"], { until, ranOut: RAN_OUT });
+  const asked = runGit(directory, ["worktree", "list", "--porcelain", "-z"], { until, ranOut: RAN_OUT });
   if (!asked.ran) return { outcome: "failed", reason: asked.reason };
   return { outcome: "resolved", path: mainWorktreeIn(asked.stdout) };
 }
 
 /**
- * The main worktree in what `git worktree list --porcelain` printed: the first
+ * The main worktree in what `git worktree list --porcelain -z` printed: the first
  * entry, which is the one the common `.git` belongs to. A bare repository's
  * first entry is marked `bare`, and it has no worktree to read.
  */
 export function mainWorktreeIn(porcelain: string): string | undefined {
-  const first = porcelain.split("\n\n", 1)[0]?.split("\n") ?? [];
+  const first = porcelain.split("\0\0", 1)[0]?.split("\0") ?? [];
   if (first.includes("bare")) return undefined;
-  const path = first.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
+  const path = first.find((field) => field.startsWith("worktree "))?.slice("worktree ".length);
   return path === undefined || path === "" ? undefined : path;
 }
 
