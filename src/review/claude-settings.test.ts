@@ -115,6 +115,24 @@ test("a permissions that is not an object, or an allow that is not a list, is le
   refused('{"permissions":{"allow":"Bash(squiz threads)"}}', /its permissions\.allow is not a list/u);
 });
 
+test("a permissions or allow that is null is refused rather than replaced (#707)", () => {
+  refused('{"permissions":null}', /its permissions is not an object/u);
+  refused('{"permissions":{"allow":null}}', /its permissions\.allow is not a list/u);
+});
+
+test("a settings symlink whose target is missing is left a link, and named with why (#707)", () => {
+  const { home: root, file } = home();
+  mkdirSync(join(root, ".claude"));
+  const target = join(root, "dotfiles", "claude-settings.json");
+  symlinkSync(target, file);
+
+  const printed = allowSquizCommands(root);
+
+  assert.equal(printed.stdout, "");
+  assert.ok(printed.stderr.startsWith(`squiz: allowed nothing in ${file}: it could not be read: `), printed.stderr);
+  assert.ok(lstatSync(file).isSymbolicLink(), "the link was replaced by a file");
+});
+
 test("a settings file that cannot be read is left untouched, and named with why (#707)", () => {
   const { home: root, file } = home();
   mkdirSync(file, { recursive: true });

@@ -6,7 +6,7 @@
  * is left exactly as it is, and only rules that are missing are added.
  */
 
-import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 import { failureLine } from "../hook/report.ts";
@@ -27,7 +27,8 @@ export function allowSquizCommands(home: string | undefined): AllowPrinted {
   try {
     text = readFileSync(file, "utf8");
   } catch (error) {
-    if (!isMissing(error)) return refuse(`it could not be read: ${describe(error)}`);
+    // A link to a missing file is the person's, and writing here would replace it.
+    if (!isMissing(error) || exists(file)) return refuse(`it could not be read: ${describe(error)}`);
   }
 
   let settings: Record<string, unknown> = {};
@@ -42,9 +43,9 @@ export function allowSquizCommands(home: string | undefined): AllowPrinted {
     settings = parsed;
   }
 
-  const permissions = settings["permissions"] ?? {};
+  const permissions = "permissions" in settings ? settings["permissions"] : {};
   if (!isObject(permissions)) return refuse("its permissions is not an object");
-  const allow = permissions["allow"] ?? [];
+  const allow = "allow" in permissions ? permissions["allow"] : [];
   if (!Array.isArray(allow)) return refuse("its permissions.allow is not a list");
 
   const missing = RULES.filter((rule) => !allow.includes(rule));
@@ -91,6 +92,16 @@ function kindOf(value: unknown): string {
 
 function listed(rules: readonly string[]): string {
   return rules.length === 1 ? rules[0] ?? "" : `${rules.slice(0, -1).join(", ")} and ${rules.at(-1) ?? ""}`;
+}
+
+/** Whether anything is at `path` itself, a link included whatever it points at. */
+function exists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isMissing(error: unknown): boolean {
