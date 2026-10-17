@@ -46,12 +46,16 @@ export type SnapshotRemoval =
   | { readonly outcome: "removed" }
   | { readonly outcome: "failed"; readonly reason: string };
 
-/** Which round the snapshot is for, and the head commit GitHub reports for it. */
+/** Which round the snapshot is for, the head commit under review, and the pull request's base commit. */
 export type SnapshotOf = {
   readonly pullRequest: number;
   readonly round: number;
   readonly commit: string;
+  readonly base: string;
 };
+
+/** The snapshot's ref naming the pull request's base commit, which the change is diffed against. */
+export const BASE_REF = "refs/squiz/base";
 
 // A full object name, SHA-1 or SHA-256. Anything else may name a branch that
 // moves, or reach git as an option.
@@ -80,8 +84,8 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * removal grows with the snapshot and does not belong before the review.
  */
 export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): SnapshotAddition {
-  if (!FULL_COMMIT_NAME.test(of.commit)) {
-    return failed(`${JSON.stringify(of.commit)} is not a full commit name`);
+  for (const name of [of.commit, of.base]) {
+    if (!FULL_COMMIT_NAME.test(name)) return failed(`${JSON.stringify(name)} is not a full commit name`);
   }
   const unowned = ownSnapshotsDirectory();
   if (unowned !== null) return failed(unowned);
@@ -90,20 +94,27 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
   // is not enough to keep a leftover from being reused.
   if (existsSync(path)) return failed(`something already stands at ${path}`);
 
-  const present = hasCommit(worktree, of.commit, until);
-  if (!present.known) return failed(`whether ${of.commit} is here could not be told: ${present.reason}`);
+  const missing: string[] = [];
+  for (const name of new Set([of.commit, of.base])) {
+    const present = hasCommit(worktree, name, until);
+    if (!present.known) return failed(`whether ${name} is here could not be told: ${present.reason}`);
+    if (!present.has) missing.push(name);
+  }
 
-  if (!present.has) {
+  if (missing.length > 0) {
+    const named = missing.join(" and ");
     const fetched = runGit(
       worktree,
       // FETCH_HEAD is shared with the coding agent, so it is left as it was.
-      ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", of.commit],
+      ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", ...missing],
       { until },
     );
-    if (!fetched.ran) return failed(`${of.commit} could not be fetched: ${fetched.reason}`);
-    const arrived = hasCommit(worktree, of.commit, until);
-    if (!arrived.known) return failed(`whether ${of.commit} arrived could not be told: ${arrived.reason}`);
-    if (!arrived.has) return failed(`the fetch finished without bringing ${of.commit}`);
+    if (!fetched.ran) return failed(`${named} could not be fetched: ${fetched.reason}`);
+    for (const name of missing) {
+      const arrived = hasCommit(worktree, name, until);
+      if (!arrived.known) return failed(`whether ${name} arrived could not be told: ${arrived.reason}`);
+      if (!arrived.has) return failed(`the fetch finished without bringing ${name}`);
+    }
   }
 
   const common = runGit(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"], { until });
@@ -139,7 +150,9 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
     runGit(path, ["-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", of.commit], { until }),
   );
   if (checkedOut !== null) return checkedOut;
-  return { outcome: "added", path, fetched: !present.has };
+  const based = madeAt(path, runGit(path, ["update-ref", BASE_REF, of.base], { until }));
+  if (based !== null) return based;
+  return { outcome: "added", path, fetched: missing.length > 0 };
 }
 
 /**

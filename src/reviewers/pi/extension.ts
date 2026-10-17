@@ -126,6 +126,7 @@ const historyLabels: Readonly<Record<string, string>> = {
   git_log_search: "Search history",
   git_blame: "Blame line",
   git_show: "Show commit",
+  git_diff: "Read diff",
 };
 
 /**

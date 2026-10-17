@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import type { Reviewer } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { gitDiff } from "../reviewers/git-tools.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound } from "../reviewers/round.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
@@ -109,7 +110,7 @@ process.env["PATH"] = `${bin}:${process.env["PATH"] ?? ""}`;
 // Each run's own snapshot, so that runs of one case side by side do not meet.
 const snapshot = addSnapshot(
   prepared.repository,
-  { pullRequest: measured.number, round: process.pid, commit: prepared.head },
+  { pullRequest: measured.number, round: process.pid, commit: prepared.head, base: prepared.base },
   deadlineIn(120_000),
 );
 if (snapshot.outcome === "failed") {
@@ -127,13 +128,20 @@ const pullRequest = {
   description: readFileSync(join(patches, measured.description), "utf8"),
 };
 
+const listed = await gitDiff.run(tree, {});
+if (listed.failed) {
+  console.error(listed.text);
+  process.exit(1);
+}
+const prompt = composePrompt({ pullRequest, changes: listed.text, threads: [] });
+
 const started = Date.now();
 const round = await runRound(
   adapterFor(reviewerName as Reviewer),
   {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, diff: prepared.diff, threads: [] }),
+    prompt: process.env["MEASURE_PROMPT"] === "tool" ? withoutTheList(prompt) : prompt,
     sessionDirectory: join(own, "session"),
     promptFile: join(own, "prompt.md"),
     reportsFile: join(own, "reports.jsonl"),
@@ -154,6 +162,17 @@ const summary = {
   ...summarise(run, readFileSync(stream, "utf8"), prepared.diff),
 };
 writeFileSync(join(out, "round.json"), `${JSON.stringify(run, null, 2)}\n`);
+writeFileSync(join(out, "prompt.md"), readFileSync(join(own, "prompt.md"), "utf8"));
 writeFileSync(join(out, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 console.log(JSON.stringify(summary, null, 2));
 removeSnapshot(tree);
+
+/**
+ * The prompt with its list of changed files taken out, so the reviewer finds
+ * the files through `git_diff` alone. The list is the prompt's last section
+ * where no thread is handed over, as none is here.
+ */
+function withoutTheList(composed: string): string {
+  const at = composed.indexOf("## Changes");
+  return `${composed.slice(0, at)}## Changes\n\nThe diff is not in this prompt. Call \`git_diff\` with no path to list the files the pull request changes, and with a file's path to read that file's change.`;
+}
