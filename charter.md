@@ -77,6 +77,9 @@ the defect is somewhere the change did not touch, the finding is still scoped to
 and line in the reasoning. Do not go looking for the untouched line to anchor
 to.
 
+Where the defect is one rule broken in more than one place, report it once, at
+the place a reader would point at, and name every other place in the reasoning.
+
 An anchor is one line. Where a defect spans several, name the line a reader
 would point at while explaining it, which is where the defect is visible rather
 than where the construct begins or ends.

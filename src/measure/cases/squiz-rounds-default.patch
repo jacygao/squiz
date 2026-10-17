@@ -1,0 +1,33 @@
+diff --git a/src/config/config.ts b/src/config/config.ts
+--- a/src/config/config.ts
++++ b/src/config/config.ts
+@@ -38,7 +38,7 @@
+ // Every setting has a default, so a project that writes no file still runs.
+ export const defaultConfig: Readonly<Config> = Object.freeze({
+   reviewer: "pi",
+-  rounds: 3,
++  rounds: 4,
+   timeout: 900,
+   // Well above the widest round a legitimate review has been measured spending,
+   // so a reviewer that reads widely does not reach it.
+diff --git a/src/config/config.test.ts b/src/config/config.test.ts
+--- a/src/config/config.test.ts
++++ b/src/config/config.test.ts
+@@ -48,7 +48,7 @@
+ test("an absent .squiz.json is not an error, and yields the six defaults", () => {
+   assert.deepEqual(load(null), {
+     reviewer: "pi",
+-    rounds: 3,
++    rounds: 4,
+     timeout: 900,
+     tokens: 10_000_000,
+     thinking: "medium",
+@@ -63,7 +63,7 @@
+ test("the loaded defaults are a fresh object, so a caller cannot alter them", () => {
+   const loaded = load(null);
+   loaded.rounds = 8;
+-  assert.equal(defaultConfig.rounds, 3);
++  assert.equal(defaultConfig.rounds, 4);
+ });
+ 
+ test("every setting the file names is read", () => {

@@ -1208,6 +1208,8 @@ The standing rules:
   a line the change touched. This is the normal case. Where the defect is
   somewhere the change did not touch, anchor to the changed line that caused it
   and name the other location in the body.
+- Report one rule broken in more than one place as one finding, at the place a
+  reader would point at, and name every other place in the body.
 - Scope a finding to `file` only where no single line owns the defect, or where
   the change touched the file but left no line to anchor to. It carries the file
   and no line.

@@ -1,0 +1,146 @@
+diff --git a/bin/semver.js b/bin/semver.js
+--- a/bin/semver.js
++++ b/bin/semver.js
+@@ -11,6 +11,8 @@
+ 
+ const range = []
+ 
++const match = []
++
+ let inc = null
+ 
+ const version = require('../package.json').version
+@@ -73,6 +75,9 @@
+       case '-r': case '--range':
+         range.push(argv.shift())
+         break
++      case '-m': case '--match':
++        match.push(argv.shift())
++        break
+       case '-n':
+         identifierBase = argv.shift()
+         if (identifierBase === 'false') {
+@@ -114,6 +119,18 @@
+   if (!versions.length) {
+     return fail()
+   }
++
++  let patterns
++  try {
++    patterns = match.map(p => new RegExp(p))
++  } catch (er) {
++    console.error(`Invalid value for --match: ${er.message}`)
++    return fail()
++  }
++  versions = versions.filter(v => patterns.every(p => p.test(v)))
++  if (!versions.length) {
++    return fail()
++  }
+   if (inc && (versions.length !== 1 || range.length)) {
+     return failInc()
+   }
+@@ -153,6 +170,11 @@
+ -r --range <range>
+         Print versions that match the specified range.
+ 
++-m --match <pattern>
++        Print versions whose text matches the regular expression
++        <pattern>.  May be given more than once; a version must
++        match every pattern.
++
+ -i --increment [<level>]
+         Increment a version by the specified level.  Level can
+         be one of: major, minor, patch, premajor, preminor,
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -98,6 +98,11 @@
+ -r --range <range>
+         Print versions that match the specified range.
+ 
++-m --match <pattern>
++        Print versions whose text matches the regular expression
++        <pattern>.  May be given more than once; a version must
++        match every pattern.
++
+ -i --increment [<level>]
+         Increment a version by the specified level.  Level can
+         be one of: major, minor, patch, premajor, preminor,
+diff --git a/tap-snapshots/test/bin/semver.js.test.cjs b/tap-snapshots/test/bin/semver.js.test.cjs
+--- a/tap-snapshots/test/bin/semver.js.test.cjs
++++ b/tap-snapshots/test/bin/semver.js.test.cjs
+@@ -67,6 +67,11 @@
+     -r --range <range>
+             Print versions that match the specified range.
+     
++    -m --match <pattern>
++            Print versions whose text matches the regular expression
++            <pattern>.  May be given more than once; a version must
++            match every pattern.
++    
+     -i --increment [<level>]
+             Increment a version by the specified level.  Level can
+             be one of: major, minor, patch, premajor, preminor,
+@@ -127,6 +132,11 @@
+     Options:
+     -r --range <range>
+             Print versions that match the specified range.
++    
++    -m --match <pattern>
++            Print versions whose text matches the regular expression
++            <pattern>.  May be given more than once; a version must
++            match every pattern.
+     
+     -i --increment [<level>]
+             Increment a version by the specified level.  Level can
+@@ -188,6 +198,11 @@
+     Options:
+     -r --range <range>
+             Print versions that match the specified range.
++    
++    -m --match <pattern>
++            Print versions whose text matches the regular expression
++            <pattern>.  May be given more than once; a version must
++            match every pattern.
+     
+     -i --increment [<level>]
+             Increment a version by the specified level.  Level can
+@@ -250,6 +265,11 @@
+     -r --range <range>
+             Print versions that match the specified range.
+     
++    -m --match <pattern>
++            Print versions whose text matches the regular expression
++            <pattern>.  May be given more than once; a version must
++            match every pattern.
++    
+     -i --increment [<level>]
+             Increment a version by the specified level.  Level can
+             be one of: major, minor, patch, premajor, preminor,
+diff --git a/test/bin/semver.js b/test/bin/semver.js
+--- a/test/bin/semver.js
++++ b/test/bin/semver.js
+@@ -38,6 +38,23 @@
+   ['-i', 'invalid', '1.0.0'], // invalid -i value, should warn
+ ].map(args => t.resolveMatchSnapshot(run(args), args.join(' ')))))
+ 
++t.test('match filters versions by pattern', async t => {
++  const both = await run(['1.2.3', '2.0.0-beta.1', '2.0.0', '-m', '^2\\.'])
++  t.equal(both.out, '2.0.0-beta.1\n2.0.0\n')
++  t.equal(both.code, 0)
++
++  const every = await run(['1.2.3', '2.0.0-beta.1', '2.0.0', '-m', '^2\\.', '--match', 'beta'])
++  t.equal(every.out, '2.0.0-beta.1\n')
++
++  const none = await run(['1.2.3', '-m', '^9'])
++  t.equal(none.out, '')
++  t.equal(none.code, 1)
++
++  const invalid = await run(['1.2.3', '-m', '('])
++  t.equal(invalid.code, 1)
++  t.match(invalid.err, /^Invalid value for --match: /)
++})
++
+ t.test('help output', t => Promise.all([
+   ['-h'],
+   ['-?'],
