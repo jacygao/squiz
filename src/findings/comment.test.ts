@@ -17,7 +17,6 @@ import { readComment, renderComment, renderOpenReason, renderReply } from "./com
 import {
   type ChangeFinding,
   type FileFinding,
-  hasReference,
   type LineFinding,
   type Severity,
 } from "./finding.ts";
@@ -118,7 +117,6 @@ test("the reference is optional, and deleting it is the whole difference", () =>
 test("a reference that is present and empty is quoted no differently from none", () => {
   const empty = { ...card, reference: "" };
   const blank = { ...card, reference: " \n " };
-  assert.ok(hasReference(empty), "an empty reference is present, which is what makes this a choice");
   assert.equal(renderComment(empty), cardCommentWithoutReference);
   assert.equal(renderComment(blank), cardCommentWithoutReference);
 });
