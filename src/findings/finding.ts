@@ -99,7 +99,7 @@ const rank: Readonly<Record<Severity, number>> = { high: 0, medium: 1, low: 2 };
  * Two findings of one severity compare equal. The tie is deliberately not
  * broken by `file:line`, which not every scope carries.
  */
-export function bySeverity(a: Finding, b: Finding): number {
+function bySeverity(a: Finding, b: Finding): number {
   return rank[a.severity] - rank[b.severity];
 }
 
@@ -112,9 +112,4 @@ export function bySeverity(a: Finding, b: Finding): number {
  */
 export function orderBySeverity(findings: readonly Finding[]): Finding[] {
   return findings.toSorted(bySeverity);
-}
-
-/** Whether the finding carries a reference, which the quote block is emitted for. */
-export function hasReference(finding: Finding): boolean {
-  return finding.reference !== undefined;
 }

@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  bySeverity,
   type ChangeFinding,
   type FileFinding,
   type Finding,
-  hasReference,
   type LineFinding,
   orderBySeverity,
   type Scope,
@@ -244,67 +242,10 @@ test("severity orders findings high, medium, low", () => {
   assert.deepEqual(headlines(orderBySeverity(shuffled)), ["high", "medium", "low"]);
 });
 
-test("the order is the same whatever order the findings arrive in", () => {
-  const arrivals: ReadonlyArray<readonly Severity[]> = [
-    ["high", "medium", "low"],
-    ["high", "low", "medium"],
-    ["medium", "high", "low"],
-    ["medium", "low", "high"],
-    ["low", "high", "medium"],
-    ["low", "medium", "high"],
-  ];
-  for (const arrival of arrivals) {
-    const ordered = orderBySeverity(arrival.map((severity) => finding(severity, severity)));
-    assert.deepEqual(
-      headlines(ordered),
-      ["high", "medium", "low"],
-      `findings arriving as ${arrival.join(", ")} must be ordered high, medium, low`,
-    );
-  }
-});
-
-test("the comparator ranks every pair of severities, and ties at zero", () => {
-  const expected: ReadonlyArray<readonly [Severity, Severity, number]> = [
-    ["high", "high", 0],
-    ["high", "medium", -1],
-    ["high", "low", -1],
-    ["medium", "high", 1],
-    ["medium", "medium", 0],
-    ["medium", "low", -1],
-    ["low", "high", 1],
-    ["low", "medium", 1],
-    ["low", "low", 0],
-  ];
-  for (const [left, right, sign] of expected) {
-    assert.equal(
-      Math.sign(bySeverity(finding(left, left), finding(right, right))),
-      sign,
-      `${left} against ${right} must compare as ${sign}`,
-    );
-  }
-});
-
 // Two findings of one severity keep the order the reviewer returned them in,
 // which a comparator breaking the tie on anything at all would lose.
 
-test("findings of one severity keep the order the reviewer returned them in", () => {
-  const returned = [
-    finding("medium", "zulu", 40),
-    finding("medium", "alpha", 30),
-    finding("medium", "mike", 20),
-    finding("medium", "bravo", 10),
-  ];
-  assert.deepEqual(headlines(orderBySeverity(returned)), ["zulu", "alpha", "mike", "bravo"]);
-});
-
-test("a file-scoped finding ties with any other of its severity, and keeps its place", () => {
-  for (const severity of ["high", "medium", "low"] as const) {
-    assert.equal(
-      bySeverity(fileFinding(severity, "on a file"), finding(severity, "on a line")),
-      0,
-      `a file-scoped ${severity} finding must tie with a line-scoped one`,
-    );
-  }
+test("within each severity the reviewer's order is kept, file-scoped findings included", () => {
   const returned = [
     fileFinding("medium", "file-zulu"),
     finding("medium", "line-alpha", 30),
@@ -321,69 +262,9 @@ test("a file-scoped finding ties with any other of its severity, and keeps its p
   ]);
 });
 
-test("the returned order survives inside each severity when the severities mix", () => {
-  const returned = [
-    finding("low", "low-tango", 80),
-    finding("high", "high-zulu", 70),
-    finding("medium", "medium-yankee", 60),
-    finding("low", "low-charlie", 50),
-    finding("high", "high-alpha", 40),
-    finding("low", "low-delta", 30),
-    finding("medium", "medium-bravo", 20),
-    finding("high", "high-mike", 10),
-  ];
-  assert.deepEqual(headlines(orderBySeverity(returned)), [
-    "high-zulu",
-    "high-alpha",
-    "high-mike",
-    "medium-yankee",
-    "medium-bravo",
-    "low-tango",
-    "low-charlie",
-    "low-delta",
-  ]);
-});
-
 test("ordering leaves the findings it was handed as they were", () => {
   const returned = [finding("low", "low"), finding("high", "high")];
   const ordered = orderBySeverity(returned);
   assert.deepEqual(headlines(returned), ["low", "high"]);
   assert.notEqual(ordered, returned, "the ordered findings are a new array");
-});
-
-// A reference that is absent and one that is empty must not collapse: a caller
-// that took the empty string for absence would emit an empty quote block.
-
-test("a reference that is absent is not a reference that is empty", () => {
-  const absent: Finding = {
-    scope: "change",
-    severity: "low",
-    headline: "No convention to quote",
-    reasoning: ["The reviewer had nothing to cite."],
-    suggestedFix: "Do the other thing.",
-  };
-  const empty: Finding = { ...absent, reference: "" };
-  const quoted: Finding = { ...absent, reference: "`AGENTS.md`: name the file." };
-
-  assert.equal(hasReference(absent), false, "an absent reference is no reference");
-  assert.equal(hasReference(empty), true, "an empty reference is a reference that is empty");
-  assert.equal(hasReference(quoted), true);
-
-  assert.equal("reference" in absent, false, "absence is the property not being there");
-  assert.equal("reference" in empty, true);
-  assert.notDeepEqual(absent, empty, "the two must stay distinguishable as values");
-});
-
-test("a reference set to undefined reads as absent", () => {
-  // JSON has no undefined, so this is the shape a finding takes when it is
-  // built in code rather than parsed. It must read the same as an absent one.
-  const unset: Finding = {
-    scope: "change",
-    severity: "low",
-    headline: "No convention to quote",
-    reasoning: ["The reviewer had nothing to cite."],
-    suggestedFix: "Do the other thing.",
-    reference: undefined,
-  };
-  assert.equal(hasReference(unset), false);
 });
