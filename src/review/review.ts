@@ -30,7 +30,7 @@ import { readComment } from "../findings/comment.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "../github/threads.ts";
 import type { GhCall } from "../github/gh.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
-import { readState, type EpisodeState } from "../loop/episode-state.ts";
+import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
 import { lastReviewed, namedStates } from "../loop/round-end.ts";
 import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
@@ -153,7 +153,7 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
         if (decision.outcome === "queue" && !triggered.queued) {
           const state = read();
           if (typeof state === "string") return notRun(state);
-          if (state.closeReported === true) return print(closedResult(context, state, threads));
+          if (episodeOver(state, context.own)) return print(closedResult(context, state, threads));
         }
         return undefined;
     }

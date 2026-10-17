@@ -23,7 +23,7 @@ import type { Verdict } from "../findings/status.ts";
 import { unspent, type RoundCost, type Spend } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
 import { makeEpisodeDirectory } from "./state-directory.ts";
-import { type StateRecord, recordFrom, recordFor } from "./state-record.ts";
+import { type StateKey, type StateRecord, recordFrom, recordFor } from "./state-record.ts";
 
 /**
  * One round as the state file keeps it: which reviewer ran it, what it spent and
@@ -180,6 +180,21 @@ export type StateRead =
 export type StateWrite =
   | { readonly outcome: "written" }
   | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * Whether the episode is over for `key`: its close is reported, and `key` is
+ * not a state the episode accepted and has yet to give a result.
+ *
+ * The close is written before the summary is posted, and the records of the
+ * round that wrote it, and of the states queued behind it, only after. A state
+ * still queued or under review waits for its record rather than reading the
+ * close before it.
+ */
+export function episodeOver(state: EpisodeState, key: StateKey): boolean {
+  if (state.closeReported !== true) return false;
+  const status = recordFor(state.records ?? [], key)?.status;
+  return status !== "queued" && status !== "reviewing";
+}
 
 /**
  * Read the episode's state.
