@@ -239,6 +239,26 @@ export type UnusedSetting = { readonly path: string; readonly keys: readonly str
  */
 export type ProjectSettings = { readonly unused: readonly UnusedSetting[]; readonly contextFile: string | undefined };
 
+/** What a round would hand the CLI that bears on how hard it thinks, and where it would run. */
+export type ThinkingAsked = {
+  readonly directory: string;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly thinking: Thinking;
+  /** As `Invocation.model`: `null` leaves the CLI on its own default. */
+  readonly model: string | null;
+  /** How long the CLI may take to answer before it is killed. */
+  readonly boundMs: number;
+};
+
+/**
+ * The level the CLI runs a round at, which a model can move off the level it
+ * was asked for, and every level that model offers. `unknown` carries why the
+ * CLI could not say.
+ */
+export type RunsAt =
+  | { readonly outcome: "known"; readonly level: Thinking; readonly offered: readonly Thinking[] }
+  | { readonly outcome: "unknown"; readonly reason: string };
+
 /** The parts of driving one reviewer CLI. */
 export type Adapter = {
   /** Build the command line for one round, from what the harness set for it. */
@@ -296,4 +316,6 @@ export type Adapter = {
   readonly userModel?: (environment: NodeJS.ProcessEnv) => UserModel;
   /** What of the project at the repository root `root` a review leaves unused. It reads and never writes. */
   readonly projectSettings?: (root: string) => ProjectSettings;
+  /** The level a round asked for `asked.thinking` runs at. It makes no model request and never throws. */
+  readonly runsAt?: (asked: ThinkingAsked) => RunsAt;
 };

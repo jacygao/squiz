@@ -32,8 +32,25 @@ const EVERY_FAKE: Fakes = {
   claude: 'echo "2.4.1 (Claude Code)"',
   tmux: 'echo "tmux 3.7b"',
   herdr: 'echo "herdr 0.9.3"',
-  pi: 'echo "0.85.1"',
+  pi: piAnswering(["off", "minimal", "low", "medium", "high", "xhigh", "max"]),
 };
+
+/**
+ * A `pi` that prints its version, and in RPC mode answers that the model offers
+ * `offered` and that the round runs at `runs`, or at the level `--thinking`
+ * asked for where `runs` is left out. It reads its stdin with a builtin, since
+ * nothing but the fakes is on `PATH`.
+ */
+function piAnswering(offered: readonly string[], runs?: string): string {
+  const levels = JSON.stringify({ id: "levels", type: "response", success: true, data: { levels: offered } });
+  return [
+    'if [ "$1" = "--version" ]; then echo "0.85.1"; exit 0; fi',
+    'asked=; previous=; for each in "$@"; do [ "$previous" = "--thinking" ] && asked=$each; previous=$each; done',
+    "while read -r _; do :; done",
+    `printf '%s\\n' '${levels}'`,
+    `printf '{"id":"state","type":"response","success":true,"data":{"thinkingLevel":"%s"}}\\n' "${runs ?? "$asked"}"`,
+  ].join("\n");
+}
 
 /** A `gh` that prints its version, and answers `gh auth status --json hosts --active` with `json`. */
 function ghAnswering(json: string): string {
@@ -404,7 +421,7 @@ test("with no reviewer set, the row names pi and the default model in pi's own s
 
   const printed = squizDoctor({ ...base, directory: repository() });
 
-  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model deepseek\/deepseek-v4-pro, pi's default$/mu);
+  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model deepseek\/deepseek-v4-pro, pi's default; thinking medium$/mu);
   assert.equal(printed.exit, 0);
 });
 
@@ -414,7 +431,52 @@ test("a model .squiz.json names is the one the row names, over pi's own default"
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"pi","model":"openai/gpt-5-mini"}') });
 
-  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model openai\/gpt-5-mini, from \.squiz\.json$/mu);
+  assert.match(printed.stdout, /^Reviewer pi 0\.85\.1, model openai\/gpt-5-mini, from \.squiz\.json; thinking medium$/mu);
+});
+
+test("a thinking level the model does not offer is a warning naming the level pi runs it at and the levels the model offers (#709)", () => {
+  const base = context({ ...EVERY_FAKE, pi: piAnswering(["off", "high", "max"], "high") });
+  settingsAt(String(base.environment.HOME), ".pi/agent/settings.json", '{"defaultProvider":"deepseek","defaultModel":"deepseek-v4-pro"}');
+
+  const printed = squizDoctor({ ...base, directory: repository() });
+
+  assert.match(
+    printed.stdout,
+    /^Reviewer pi 0\.85\.1, model deepseek\/deepseek-v4-pro, pi's default: warning: thinking medium runs at high on this model, which offers only off, high and max$/mu,
+  );
+  assert.equal(printed.exit, 0, "the round still runs, so the row is a warning and not a failure");
+});
+
+test("the level .squiz.json sets and its model are the ones pi is asked about", () => {
+  const project = repository('{"reviewer":"pi","model":"openai/gpt-5-mini","thinking":"low"}');
+  const asked = join(project, ".git", "pi-asked");
+  const recording = [
+    `if [ "$1" != "--version" ]; then printf '%s ' "$@" > '${asked}'; fi`,
+    piAnswering(["minimal", "low", "medium", "high"]),
+  ].join("\n");
+
+  const row = reviewerRow({ ...EVERY_FAKE, pi: recording }, project);
+
+  assert.equal(row.line, "Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json; thinking low");
+  assert.match(readFileSync(asked, "utf8"), /--thinking low --model openai\/gpt-5-mini $/u);
+});
+
+test("a thinking level pi does not report is a warning with the reason, and not read as the level asked", () => {
+  const project = repository('{"reviewer":"pi","model":"openai/gpt-5-mini"}');
+
+  const row = reviewerRow({ ...EVERY_FAKE, pi: 'echo "0.85.1"' }, project);
+
+  assert.equal(
+    row.line,
+    "Reviewer pi 0.85.1, model openai/gpt-5-mini, from .squiz.json: warning: thinking level unknown: pi did not report its thinking level",
+  );
+  assert.equal(row.exit, 0);
+});
+
+test("with no model anywhere, the row says nothing of thinking, since pi has no model to report a level for", () => {
+  const row = reviewerRow({ ...EVERY_FAKE, pi: piAnswering(["off"], "off") }, repository());
+
+  assert.equal(row.line, "Reviewer pi 0.85.1, model unknown: neither .squiz.json nor pi's settings name one");
 });
 
 test("pi's default is read from PI_CODING_AGENT_DIR where it is set", () => {
@@ -423,7 +485,7 @@ test("pi's default is read from PI_CODING_AGENT_DIR where it is set", () => {
 
   const row = reviewerRow(EVERY_FAKE, repository(), { PI_CODING_AGENT_DIR: agent });
 
-  assert.equal(row.line, "Reviewer pi 0.85.1, model openrouter/qwen/qwen3-coder, pi's default");
+  assert.equal(row.line, "Reviewer pi 0.85.1, model openrouter/qwen/qwen3-coder, pi's default; thinking medium");
 });
 
 test("a project's own .pi/settings.json is not read as the model, because a review does not apply it", () => {
