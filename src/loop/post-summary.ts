@@ -17,7 +17,7 @@
  */
 
 import type { GhCall } from "../github/gh.ts";
-import { renderSummary, unappliedNotes, type ClosingRoundSummary } from "../github/summary-body.ts";
+import { renderSummary, unappliedNotes } from "../github/summary-body.ts";
 import { postSummary, type CommentPosting } from "../github/summary.ts";
 import type { ReviewThread } from "../github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
@@ -84,8 +84,6 @@ export type EpisodeClose = {
    * stopped them, as the round's end decided. `null` where nothing was queued.
    */
   readonly leftNotReviewed: LeftNotReviewed | null;
-  /** Present where this round is the closing round, which the summary names. */
-  readonly closingRound?: ClosingRoundSummary;
 };
 
 /**
@@ -102,12 +100,9 @@ export function postEpisodeSummary(closing: EpisodeClose, call: GhCall): Comment
     threads: classifyAtClose(closing),
     findings: closing.findings,
     earlier: closing.earlier,
-    // The closing round's rulings are read against the threads it was handed,
-    // so one naming a resolved thread reads as one it was never handed.
-    unapplied: unappliedNotes(closing.closingRound?.ruledOn ?? closing.handedOver, closing.verdicts),
+    unapplied: unappliedNotes(closing.handedOver, closing.verdicts),
     because: closing.because,
     leftNotReviewed: closing.leftNotReviewed,
-    ...(closing.closingRound === undefined ? {} : { closingRound: closing.closingRound }),
   });
   return postSummary(closing.pullRequest, body, call);
 }

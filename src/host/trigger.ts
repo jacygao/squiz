@@ -23,7 +23,6 @@ import { latestActivity } from "../findings/activity.ts";
 import { findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
 import { listReviewThreads, type ReviewThread } from "../github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
-import { episodeOver } from "../loop/closing-round.ts";
 import { readState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
@@ -108,7 +107,7 @@ export function trigger(request: TriggerRequest): Triggered {
   const record = recordFor(found?.records ?? [], state);
 
   const decision = decideTrigger({
-    closed: found !== undefined && episodeOver(found, state),
+    closed: found?.closeReported === true,
     record,
     host: hostPresence(episode, record, request),
     trigger: request.trigger,
@@ -130,7 +129,7 @@ export function trigger(request: TriggerRequest): Triggered {
         const now = recordFor(current.records ?? [], state);
         // A record or a close written since the read came from another trigger or
         // a host, and the decision no longer applies.
-        if (episodeOver(current, state) || now?.status !== record?.status) return current;
+        if (current.closeReported === true || now?.status !== record?.status) return current;
         queued = true;
         return { ...current, records: putRecord(current.records ?? [], fresh) };
       },

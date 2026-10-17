@@ -87,8 +87,6 @@ export type Timings = {
    * posting ended.
    */
   readonly postingSeconds?: number;
-  /** Present on the closing round's entry alone, which the round cap does not count. */
-  readonly closing?: true;
 };
 
 /** The figures of a round with no cost, every one of them absent. */
@@ -146,11 +144,6 @@ export type EpisodeState = {
    * summary.
    */
   readonly closeReported?: boolean;
-  /**
-   * Whether the close was a round reaching the cap with threads open, which
-   * leaves the closing round. Written in the update that writes the close.
-   */
-  readonly closingRoundDue?: true;
   /**
    * One record for each state of the pull request a trigger has queued, oldest
    * first. No two are for the same state.
@@ -362,12 +355,6 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     return unreadable(`${path}: "closeReported" is ${render(reported)} rather than true or false`);
   }
 
-  const due = parsed["closingRoundDue"];
-  // Read as absent, it would drop the closing round a fix after the cap is owed.
-  if (due !== undefined && due !== true) {
-    return unreadable(`${path}: "closingRoundDue" is ${render(due)} rather than true`);
-  }
-
   const kept = recordsIn(parsed);
   if ("problem" in kept) return unreadable(`${path}: ${kept.problem}`);
 
@@ -384,7 +371,6 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       rounds,
       spentOutsideRounds: outside.cost,
       ...(reported === undefined ? {} : { closeReported: reported }),
-      ...(due === undefined ? {} : { closingRoundDue: due }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
       ...(rulings === undefined ? {} : { rulings }),
     },
@@ -477,12 +463,6 @@ function roundFrom(entry: unknown): ReadRound {
   const work = workFrom(entry);
   if ("problem" in work) return work;
 
-  const closing = entry["closing"];
-  // Read as absent, it would hand the episode a second closing round.
-  if (closing !== undefined && closing !== true) {
-    return { problem: `has "closing" as ${render(closing)}` };
-  }
-
   return {
     round: roundRecord(read.cost, {
       ...(reviewer === undefined ? {} : { reviewer }),
@@ -490,7 +470,6 @@ function roundFrom(entry: unknown): ReadRound {
       ...(cut === undefined ? {} : { cutShortAtSeconds: cut }),
       ...(posting === undefined ? {} : { postingSeconds: posting }),
       ...work.work,
-      ...(closing === undefined ? {} : { closing }),
     }),
   };
 }

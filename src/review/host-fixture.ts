@@ -20,8 +20,6 @@ export type PlannedStart = {
   readonly findings: readonly Finding[];
   readonly verdicts: readonly ThreadVerdict[];
   readonly holdSeconds?: number;
-  /** Where present, the start never runs a reviewer, and the round fails for this reason before one starts. */
-  readonly refuse?: string;
 };
 
 export type Plan = {
@@ -39,17 +37,10 @@ const plan = JSON.parse(readFileSync(planFile, "utf8")) as Plan;
 const countFile = `${planFile}.started`;
 
 let current: PlannedStart = { findings: [], verdicts: [] };
-const startCount = (): number => (existsSync(countFile) ? Number(readFileSync(countFile, "utf8")) : 0);
 const adapter: Adapter = {
-  confine: () => {
-    const started = startCount();
-    const refused = plan.starts[started]?.refuse;
-    if (refused === undefined) return { outcome: "prepared", environment: {} };
-    writeFileSync(countFile, String(started + 1), "utf8");
-    return { outcome: "failed", reason: refused };
-  },
+  confine: () => ({ outcome: "prepared", environment: {} }),
   argv: (invocation) => {
-    const started = startCount();
+    const started = existsSync(countFile) ? Number(readFileSync(countFile, "utf8")) : 0;
     writeFileSync(countFile, String(started + 1), "utf8");
     current = plan.starts[started] ?? { findings: [], verdicts: [] };
     return {

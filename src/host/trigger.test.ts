@@ -493,20 +493,19 @@ test("the host a trigger starts outlives the trigger's process group", async () 
   });
 });
 
-test("a trigger for the state the closing round is reviewing leaves it in hand, rather than reading the episode as over (#587)", async () => {
+test("a closed episode whose state file still marks an extra round after the cap queues nothing (#718)", async () => {
   await withFixture((fixture) => {
-    // The closing round has recorded its entry and is still posting, so the
-    // episode leaves no closing round to start, and this state's own is running.
-    const cost = { dollars: 0, tokens: 1200, messages: 1 };
+    // The mark a close at the cap with threads open once wrote, for a round after it.
     seed(fixture.episode, {
       closeReported: true,
       closingRoundDue: true,
-      rounds: [cost, { ...cost, closing: true }],
-      records: [{ ...state, status: "reviewing", host: ownIdentity(), round: { number: 2 } }],
-    });
+      rounds: [{ dollars: 0, tokens: 1200, messages: 1 }],
+    } as Partial<EpisodeState>);
 
-    const result = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+    const result = decided(trigger(request(fixture)));
 
-    assert.deepEqual(result.decision, { outcome: "in-hand" }, "a run on the running closing round's state would print the old close");
+    assert.deepEqual(result.decision, { outcome: "closed" }, "the old mark gave a closed episode another round");
+    assert.deepEqual(records(fixture.episode), []);
+    assert.deepEqual(hostLines(fixture), []);
   });
 });

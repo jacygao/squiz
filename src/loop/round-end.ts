@@ -176,7 +176,7 @@ function exited(round: EndedRound, exitStatus: 0 | 2 | 3): ReviewedRecord {
  * The queued states a close at `bound` leaves not reviewed, each with the reason
  * naming the state `round` reviewed, or `null` where nothing was queued.
  */
-export function notReviewedBehind(
+function notReviewedBehind(
   queued: readonly QueuedRecord[],
   bound: StoppingBound,
   round: EndedRound,
