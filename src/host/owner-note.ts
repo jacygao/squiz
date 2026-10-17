@@ -2,13 +2,15 @@
  * The note the round host leaves for the session that owns a state, once the
  * state's result is recorded.
  *
- * A note points at the result and carries no finding: what the review found is
- * read with `squiz review`, from the pull request as it stands then.
+ * A note for open threads carries them, so that a woken session has its work in
+ * front of it.
  *
- * Nothing here touches the filesystem.
+ * Nothing here touches the filesystem or GitHub.
  */
 
 import { closedLines, type ClosedBy } from "../github/failure-body.ts";
+import type { ReviewThread } from "../github/threads.ts";
+import { printedThread, workTheThreads } from "../review/output.ts";
 import type { NoteFields } from "../sessions/notes.ts";
 import type { StateRecord } from "../loop/state-record.ts";
 
@@ -21,12 +23,23 @@ import type { StateRecord } from "../loop/state-record.ts";
  *
  * `closed` is the bound that leaves no round after a failed one. Without it, the
  * note for a failed state promises a retry.
+ *
+ * `listed` is the review threads on the pull request as they stand. A note for
+ * open threads prints those of them the round left open and that are still
+ * open. Where it is absent, or holds none of them, the note points to
+ * `squiz review`.
  */
-export function ownerNote(pullRequest: number, record: StateRecord, name: string, closed?: ClosedBy): OwnerNote | undefined {
+export function ownerNote(
+  pullRequest: number,
+  record: StateRecord,
+  name: string,
+  closed?: ClosedBy,
+  listed?: readonly ReviewThread[],
+): OwnerNote | undefined {
   const { owner } = record;
   if (owner === undefined) return undefined;
   const at = owner.subagent === undefined ? name : `${name}, the work of subagent ${owner.subagent}`;
-  const text = textOf(pullRequest, record, at, closed);
+  const text = textOf(pullRequest, record, at, closed, listed);
   if (text === undefined) return undefined;
   const fields = {
     to: owner.sessionId,
@@ -40,7 +53,16 @@ export function ownerNote(pullRequest: number, record: StateRecord, name: string
 
 export type OwnerNote = { readonly sessionId: string; readonly fields: NoteFields };
 
-function textOf(pullRequest: number, record: StateRecord, at: string, closed: ClosedBy | undefined): string | undefined {
+// The wake carries the note whole, and no runtime has said how much text it takes.
+const PRINTED_THREADS = 10;
+
+function textOf(
+  pullRequest: number,
+  record: StateRecord,
+  at: string,
+  closed: ClosedBy | undefined,
+  listed: readonly ReviewThread[] | undefined,
+): string | undefined {
   const review = `\`squiz review ${pullRequest}\``;
   switch (record.status) {
     case "queued":
@@ -49,11 +71,21 @@ function textOf(pullRequest: number, record: StateRecord, at: string, closed: Cl
     case "reviewed": {
       if (record.result === "clean, episode open") return undefined;
       const reviewed = `Squiz reviewed PR #${pullRequest} at ${at}`;
-      const open = record.openThreads.length;
-      const them = open === 1 ? "it" : "them";
-      if (record.exitStatus === 2) return `${reviewed}: ${threads(open)} ${open === 1 ? "is" : "are"} open. Run ${review} to read ${them}.`;
-      if (open === 0) return `${reviewed}: nothing is open, and the episode has closed. Run ${review} to read the close.`;
-      return `${reviewed}: the episode has closed with ${threads(open)} open. Run ${review} to read ${them}.`;
+      if (record.openThreads.length === 0) return `${reviewed}: nothing is open, and the episode has closed. Run ${review} to read the close.`;
+      const open = threadsToPrint(record.openThreads, listed ?? []);
+      const counted = open.length > 0 ? open.length : record.openThreads.length;
+      const heading =
+        record.exitStatus === 2
+          ? `${reviewed}: ${threads(counted)} ${counted === 1 ? "is" : "are"} open`
+          : `${reviewed}: the episode has closed with ${threads(counted)} open`;
+      if (open.length === 0) return `${heading}. Run ${review} to read ${counted === 1 ? "it" : "them"}.`;
+      const rest = open.length - PRINTED_THREADS;
+      return [
+        `${heading}:`,
+        ...open.slice(0, PRINTED_THREADS).map(printedThread),
+        ...(record.exitStatus === 2 ? [workTheThreads(pullRequest)] : []),
+        ...(rest > 0 ? [`${rest} more ${rest === 1 ? "thread is" : "threads are"} open. ${review} prints them all.`] : []),
+      ].join("\n\n");
     }
     case "failed": {
       const next =
@@ -65,6 +97,11 @@ function textOf(pullRequest: number, record: StateRecord, at: string, closed: Cl
     case "not reviewed":
       return `Squiz did not review PR #${pullRequest} at ${at}: ${sentence(record.reason)}`;
   }
+}
+
+/** The threads of `listed` that are among `openThreads` and still open, in the listing's order. */
+export function threadsToPrint(openThreads: readonly string[], listed: readonly ReviewThread[]): readonly ReviewThread[] {
+  return listed.filter((thread) => !thread.isResolved && openThreads.includes(thread.id));
 }
 
 function threads(count: number): string {

@@ -15,7 +15,7 @@
  * because nothing waits on the host to be told.
  *
  * **A note for a state's owner is written only once its result is recorded**,
- * because the note sends the owner to read that result. Where the owner's hook
+ * because the note reports that result. Where the owner's hook
  * recorded a messaging socket, the host then wakes it there. A note that cannot
  * be written, or a wake that does not arrive, goes to `host.log` and changes
  * nothing else.
@@ -24,7 +24,9 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { findPullRequestNodeId } from "../github/pull-request.ts";
 import { unthreadedNotes } from "../github/summary-body.ts";
+import { listReviewThreads, type ReviewThread } from "../github/threads.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
@@ -56,7 +58,7 @@ import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
-import { ownerNote } from "./owner-note.ts";
+import { ownerNote, threadsToPrint } from "./owner-note.ts";
 import { wakeOwner } from "./wake.ts";
 
 // Each `ps` run that tells whether the lock's holder is still running.
@@ -65,6 +67,9 @@ const LOCK_BOUND_MS = 5_000;
 // Another writer holds the state lock for one read and one write, so a wait this
 // long is a holder that has stopped.
 const STATE_WAIT_MS = 5_000;
+
+// Listing the threads for the notes: a node id lookup and the pages of threads.
+const LISTING_WAIT_MS = 30_000;
 
 const ALREADY_CLOSED = "the episode had closed before a round took this state";
 
@@ -283,8 +288,18 @@ function inOrder(records: readonly StateRecord[], after: StateKey | null = null)
 /** Write a note for the owner of each of `recorded` that gets one, and wake each owner that has a socket. */
 async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log): Promise<void> {
   const notes = join(episode.directory, "notes");
+  // Listed once for all the notes, and only where one prints threads.
+  let listing: Listing | undefined;
   for (const { record, name, closed } of recorded) {
-    const note = ownerNote(Number(episode.id), record, name, closed);
+    const listed = printsThreads(record) ? (listing ??= threadsOf(episode)) : undefined;
+    if (listed !== undefined && "reason" in listed) {
+      log(`${named(record)}: the threads could not be listed for its note: ${listed.reason}`);
+    }
+    const threads = listed !== undefined && "threads" in listed ? listed.threads : undefined;
+    if (threads !== undefined && record.status === "reviewed" && record.result === "exited" && threadsToPrint(record.openThreads, threads).length === 0) {
+      log(`${named(record)}: none of the threads the round left open is open on PR #${episode.id}, so its note points to squiz review`);
+    }
+    const note = ownerNote(Number(episode.id), record, name, closed, threads);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);
     if (written.outcome === "failed") {
@@ -301,6 +316,22 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
     else if (woken.outcome === "already delivered") log(`${named(record)}: its note was delivered before the host could post it`);
     else log(`${named(record)}: did not wake its owner: ${woken.reason}`);
   }
+}
+
+type Listing = { readonly threads: readonly ReviewThread[] } | { readonly reason: string };
+
+/** Whether the note for `record` carries threads, and so needs them listed. */
+function printsThreads(record: StateRecord): boolean {
+  return record.owner !== undefined && record.status === "reviewed" && record.result === "exited" && record.openThreads.length > 0;
+}
+
+/** The review threads on the episode's pull request as they stand now. */
+function threadsOf(episode: Episode): Listing {
+  const call = { directory: episode.worktree, until: deadlineIn(LISTING_WAIT_MS) };
+  const found = findPullRequestNodeId(Number(episode.id), call);
+  if (found.outcome !== "found") return { reason: found.reason };
+  const listed = listReviewThreads(found.nodeId, call);
+  return listed.outcome === "listed" ? { threads: listed.threads } : { reason: listed.reason };
 }
 
 /** When a round started and ended, and its number. */
