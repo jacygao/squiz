@@ -103,12 +103,14 @@ test("a COPILOT_MODEL the host carries is the user's default, and is handed on o
   assert.equal(environment["COPILOT_MODEL"], "gpt-5-mini");
 });
 
-test("where the user has no default model, none is handed over", (t) => {
+// A pane runs with its server's environment, and the line puts a non-empty
+// COPILOT_MODEL on `--model`, so a stale one there would be made mandatory.
+test("where the user has no default model, COPILOT_MODEL is handed over empty, so a pane's own cannot reach --model", (t) => {
   const { invocation, home } = fixture(t);
   const environment = environmentOf(confine(invocation, { HOME: home }));
-  assert.deepEqual(Object.keys(environment).toSorted(), ["COPILOT_ALLOW_ALL", "COPILOT_HOME"]);
+  assert.equal(environment["COPILOT_MODEL"], "", "an absent variable leaves whatever a pane's server carries");
   settingsIn(join(home, ".copilot"), JSON.stringify({ effortLevel: "high" }));
-  assert.ok(!("COPILOT_MODEL" in environmentOf(confine(invocation, { HOME: home, COPILOT_MODEL: "" }))));
+  assert.equal(environmentOf(confine(invocation, { HOME: home, COPILOT_MODEL: "" }))["COPILOT_MODEL"], "");
 });
 
 test("settings carrying a comment line are still read", (t) => {

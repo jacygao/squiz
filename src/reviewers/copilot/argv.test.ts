@@ -76,19 +76,18 @@ test("the script carries the grant, the agent, and every flag that keeps the tre
   }
   // The charter reaches Copilot as the agent's instructions, and only there.
   assert.ok(!script.includes("--allow-all-mcp-server-instructions"), script);
-  assert.ok(!script.includes("--model"), "with no model configured, the model is the user's, set through the environment");
 });
 
 // `--model` refuses a model Copilot does not offer, before any request.
 // `COPILOT_MODEL` set to one runs the round on some other model, and exits 0.
-test("a configured model is passed with --model, as the script's $1, and changes nothing else", () => {
+test("a configured model is passed with --model, as the script's $1, in place of the user's default", () => {
   const unset = argv(invocation);
   const set = argv({ ...invocation, model: "gpt-5-mini" });
   assert.equal(set.args.length, 4, "the line is sh's -c, the script, the MCP configuration and the model");
   assert.equal(set.args[3], "gpt-5-mini");
   assert.equal(
     scriptOf(set),
-    scriptOf(unset).replace(" --reasoning-effort ", ' --model "$1" --reasoning-effort '),
+    scriptOf(unset).replace(' ${COPILOT_MODEL:+--model "$COPILOT_MODEL"} ', ' --model "$1" '),
   );
   assert.deepEqual(set.args.slice(2, 3), unset.args.slice(2, 3));
   assert.deepEqual(set.environment, unset.environment);
@@ -289,6 +288,35 @@ test("a configured model reaches Copilot as one argument after --model, unread b
   assert.equal(after(ran.args, "--model"), model);
   assert.equal(ran.args?.[1], AWKWARD_PROMPT);
   assert.equal(after(ran.args, "--additional-mcp-config"), line.args[2]);
+});
+
+test("with no model configured, the user's default in COPILOT_MODEL reaches Copilot on --model, unread by the shell (#599)", (t) => {
+  const { tree, bin } = standInTree(t);
+  const model = "gpt-6-astra $(id) `uname`; exit 3 'x\"";
+  const line = lineIn(tree);
+  writeFileSync(join(tree, ".squiz/7/rounds/1/prompt.md"), AWKWARD_PROMPT);
+  const runWith = (variable: string | undefined): Ran => {
+    const environment = environmentFor(bin, tree, "0");
+    delete environment["COPILOT_MODEL"];
+    const result = spawnSync(line.command, line.args, {
+      cwd: line.directory,
+      env: variable === undefined ? environment : { ...environment, COPILOT_MODEL: variable },
+      stdio: "ignore",
+      timeout: 10_000,
+    });
+    return ranIn(tree, result.status);
+  };
+
+  const set = runWith(model);
+  assert.equal(set.status, 0);
+  assert.equal(after(set.args, "--model"), model, "a default Copilot does not offer would run the round on another model");
+  assert.equal(set.args?.[1], AWKWARD_PROMPT);
+
+  for (const variable of [undefined, ""]) {
+    const unset = runWith(variable);
+    assert.equal(unset.status, 0);
+    assert.ok(!(unset.args ?? []).includes("--model"), `COPILOT_MODEL ${variable === undefined ? "unset" : "empty"} put --model on the line`);
+  }
 });
 
 test("Copilot is not started where the prompt file cannot be read", (t) => {
