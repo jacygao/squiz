@@ -45,6 +45,8 @@ before(async () => {
   git(["init", "--quiet", "--initial-branch", "main"]);
   git([...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "x"]);
   git(["checkout", "--quiet", "--detach"]);
+  // A file of its own, so that no run adds the line saying the defaults are in use.
+  await writeFile(join(elsewhere, ".squiz.json"), "{}");
 
   onABranch = await mkdtemp(join(tmpdir(), "squiz-branch-"));
   gitIn(onABranch, ["init", "--quiet", "--initial-branch", "main"]);

@@ -21,10 +21,11 @@ import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } 
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
-import { configFileName, defaultConfig, loadConfig, type Config } from "../config/config.ts";
+import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
 import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
+import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
 /**
@@ -500,13 +501,15 @@ function codeOf(error: unknown): unknown {
 const reviewer: Check = (context) => {
   const project = projectOf(context);
   if (project.outcome === "failed") return { level: "failed", line: project.line };
-  const { config } = project;
+  const { config, file, main } = project;
 
-  const label = `Reviewer ${config.reviewer}`;
+  // The file is named because it is the main worktree's, never the one in the
+  // worktree the check ran in, and the two may differ.
+  const from = file !== null ? ` (${file})` : main === undefined ? "" : ` (no ${join(main, configFileName)})`;
   const found = versionOf(config.reviewer, ["--version"], context);
-  if (found.outcome === "absent") return { level: "failed", line: `${label}: not found` };
-  if (found.outcome === "failed") return { level: "failed", line: `${label}: could not be run: ${found.reason}` };
-  const installed = `${label} ${found.version}`;
+  if (found.outcome === "absent") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: not found` };
+  if (found.outcome === "failed") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: could not be run: ${found.reason}` };
+  const installed = `Reviewer ${config.reviewer} ${found.version}${from}`;
   const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : { level: "present", line });
   const onModel = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : withThinking(line, config, context));
 
@@ -640,9 +643,13 @@ function inProse(items: readonly string[]): string {
   return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
 }
 
-/** The repository's root, `undefined` outside one, and the configuration read there. */
+/**
+ * The worktree's root and the main worktree's, each `undefined` outside a
+ * repository, the configuration read as a round reads it, and the file it came
+ * from: `null` for the defaults.
+ */
 type Project =
-  | { readonly outcome: "found"; readonly root: string | undefined; readonly config: Config }
+  | { readonly outcome: "found"; readonly root: string | undefined; readonly config: Config; readonly file: string | null; readonly main: string | undefined }
   | { readonly outcome: "failed"; readonly line: string };
 
 const projects = new WeakMap<DoctorContext, Project>();
@@ -659,16 +666,17 @@ function projectOf(context: DoctorContext): Project {
 function findProject(context: DoctorContext): Project {
   const root = repositoryRoot(context);
   if (root.outcome === "failed") return { outcome: "failed", line: `Reviewer: the repository could not be found: ${root.reason}` };
-  if (root.outcome === "outside") return { outcome: "found", root: undefined, config: { ...defaultConfig } };
+  if (root.outcome === "outside") return { outcome: "found", root: undefined, config: { ...defaultConfig }, file: null, main: undefined };
   try {
-    return { outcome: "found", root: root.path, config: loadConfig(root.path) };
+    const { config, file, main } = projectConfigIn(root.main);
+    return { outcome: "found", root: root.path, config, file, main };
   } catch (cause) {
     return { outcome: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
   }
 }
 
 type Root =
-  | { readonly outcome: "found"; readonly path: string }
+  | { readonly outcome: "found"; readonly path: string; readonly main: string | undefined }
   | { readonly outcome: "outside" }
   | { readonly outcome: "failed"; readonly reason: string };
 
@@ -676,9 +684,9 @@ type Root =
 const NOT_A_REPOSITORY = /fatal: not a git repository/u;
 
 /**
- * The root of the repository the check runs in. Only git saying this is no
- * repository is `outside`; any other refusal is `failed`, because a round run
- * here would stop on it too.
+ * The root of the worktree the check runs in, and of the repository's main
+ * worktree. Only git saying this is no repository is `outside`; any other
+ * refusal is `failed`, because a round run here would stop on it too.
  */
 function repositoryRoot(context: DoctorContext): Root {
   const untranslated = { ...context, environment: { ...context.environment, LC_ALL: "C" } };
@@ -688,7 +696,11 @@ function repositoryRoot(context: DoctorContext): Root {
     return NOT_A_REPOSITORY.test(asked.reason) ? { outcome: "outside" } : { outcome: "failed", reason: asked.reason };
   }
   const root = asked.stdout.trim();
-  return root === "" ? { outcome: "failed", reason: "git named no worktree for this directory" } : { outcome: "found", path: root };
+  if (root === "") return { outcome: "failed", reason: "git named no worktree for this directory" };
+  const listed = probe("git", ["worktree", "list", "--porcelain", "-z"], untranslated);
+  if (listed.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
+  if (listed.outcome === "failed") return { outcome: "failed", reason: listed.reason };
+  return { outcome: "found", path: root, main: mainWorktreeIn(listed.stdout) };
 }
 
 function reasonFor(cause: unknown): string {

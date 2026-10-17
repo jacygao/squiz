@@ -7,6 +7,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { Deadline } from "../reviewers/deadline.ts";
+import { mainWorktree } from "../worktree/toplevel.ts";
+
 export const configFileName = ".squiz.json";
 
 /** The reviewer CLIs a project can choose between. */
@@ -73,15 +76,60 @@ const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max
 const thinkingList = thinkingLevels.map((level) => `"${level}"`).join(", ");
 
 /**
- * Reads `.squiz.json` from the root of the repository. Its absence is not an
- * error: it yields the defaults. Every other way of failing throws a
- * `ConfigError` naming the setting, the value given and what was expected.
+ * Reads `.squiz.json` from `root`. Its absence is not an error: it yields the
+ * defaults. Every other way of failing throws a `ConfigError` naming the
+ * setting, the value given and what was expected.
  */
-export function loadConfig(repositoryRoot: string): Config {
-  const path = join(repositoryRoot, configFileName);
+export function loadConfig(root: string): Config {
+  return readConfigAt(root) ?? { ...defaultConfig };
+}
+
+/** The settings in `root`'s `.squiz.json`, or `null` where it has none. */
+function readConfigAt(root: string): Config | null {
+  const path = join(root, configFileName);
   const source = read(path);
-  if (source === null) return { ...defaultConfig };
-  return parse(source, path);
+  return source === null ? null : parse(source, path);
+}
+
+/** The settings a repository reviews with, and where they came from. */
+export type ProjectConfig = {
+  readonly config: Config;
+  /** The `.squiz.json` read, or `null` where none was found and the defaults are in use. */
+  readonly file: string | null;
+  /** The main worktree, `undefined` for a repository that has none. */
+  readonly main: string | undefined;
+};
+
+/**
+ * Reads `.squiz.json` from the root of the repository's main worktree, the one
+ * the common `.git` belongs to, whichever of its worktrees `worktree` is.
+ *
+ * The worktree under review is never read. Every worktree of a repository runs
+ * on the same settings, and a file git ignores, which `git worktree add` does
+ * not copy, is not missed in one that lacks it. A main worktree git cannot name
+ * throws a `ConfigError`, because the defaults read then would look exactly
+ * like a project that chose them.
+ */
+export function findProjectConfig(worktree: string, until?: Deadline): ProjectConfig {
+  const main = mainWorktree(worktree, until);
+  if (main.outcome === "failed") {
+    throw new ConfigError(`the main worktree, which holds ${configFileName}, could not be found: ${main.reason}`);
+  }
+  return projectConfigIn(main.path);
+}
+
+/** Reads `.squiz.json` from the main worktree `main`, or yields the defaults where there is none. */
+export function projectConfigIn(main: string | undefined): ProjectConfig {
+  const config = main === undefined ? null : readConfigAt(main);
+  if (main === undefined || config === null) return { config: { ...defaultConfig }, file: null, main };
+  return { config, file: join(main, configFileName), main };
+}
+
+/** The line saying the defaults are in use, or `undefined` where a file was read. */
+export function defaultsLine(project: ProjectConfig): string | undefined {
+  if (project.file !== null) return undefined;
+  if (project.main === undefined) return `the repository has no main worktree to hold a ${configFileName}, so the defaults are in use`;
+  return `no ${configFileName} was found in the main worktree, ${project.main}, so the defaults are in use`;
 }
 
 function read(path: string): string | null {

@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -221,6 +221,10 @@ async function withPullRequest(
   writeFileSync(join(worktree, FILE), "// line 1\n// line 2\n", "utf8");
   git("add", ".");
   git("commit", "--quiet", "--message", "the change under review");
+  // A file of its own, so that no run adds the line saying the defaults are in
+  // use. Kept out of git as this repository keeps its own.
+  writeFileSync(join(worktree, ".squiz.json"), "{}", "utf8");
+  appendFileSync(join(worktree, ".git", "info", "exclude"), ".squiz.json\n", "utf8");
 
   const ghFile = join(bin, "gh-state.json");
   const setGh = (state: GhState): void => writeFileSync(ghFile, JSON.stringify(state), "utf8");

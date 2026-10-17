@@ -85,6 +85,8 @@ export type HostSetup = {
   readonly round: Omit<RoundSetup, "worktree" | "held" | "endsOn">;
   /** What changes the state file. `updateState` where not given. */
   readonly update?: typeof updateState;
+  /** A line for `host.log` once the host holds the lock, such as one saying the defaults are in use. */
+  readonly note?: string;
 };
 
 /** Why the host exited. */
@@ -126,6 +128,7 @@ export async function runHost(setup: HostSetup): Promise<HostEnd> {
   }
 
   try {
+    if (setup.note !== undefined) log(setup.note);
     const end = await hostRounds(setup, episode, taking.lock, log);
     log(endLine(end));
     return end;

@@ -1792,7 +1792,9 @@ harness's own trap, is never read as a result.
 
 **stdout carries the outcome and stderr carries what failed.** A run that exits 0,
 2, 3 or 4 prints its outcome on stdout, and § 7 The command's stderr sets out what
-it adds on stderr. A run that exits 1 prints nothing on stdout.
+it adds on stderr. A run that exits 1 prints nothing on stdout. A run whose main
+worktree holds no `.squiz.json` adds one line before any other on stderr, saying
+the defaults are in use, whatever its exit (§ 9 Configuration).
 
 **The first line names a file holding the whole output**, because Claude Code can
 hand the agent less than the command printed. A run that exits 0, 2, 3 or 4
@@ -2182,7 +2184,7 @@ Node 24.6.0
 tmux: not found. Not required: without tmux or Herdr, reviews run detached
 Herdr 0.9.3
 squiz link: /Users/ana/.local/bin/squiz already links to this squiz
-Reviewer pi 0.85.1, model deepseek/deepseek-v4-pro, pi's default: warning: thinking medium runs at high on this model, which offers only off, high and max
+Reviewer pi 0.85.1 (/Users/ana/app/.squiz.json), model deepseek/deepseek-v4-pro, pi's default: warning: thinking medium runs at high on this model, which offers only off, high and max
 ```
 
 Each line is at one of three levels, and only `failed` changes the exit status:
@@ -2215,9 +2217,12 @@ The rows, in the order they print:
 | The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, for Copilot the sign-in prompt succeeds, and for `pi` the model runs at the configured thinking level. |
 | The project's `pi` settings | No, and printed only where the reviewer is `pi` and there are any | Never: the row names what a review does not use. |
 
-**The reviewer is the one `reviewer` names in `.squiz.json`** at the root
-`git rev-parse --show-toplevel` gives, or `pi` outside a repository or where the
-file does not exist. A git that refuses for any other reason fails the row.
+**The reviewer is the one `reviewer` names in `.squiz.json`**, read from the
+main worktree as § 9 Configuration sets out, or `pi` outside a repository or
+where the file does not exist. The row names the file's path after the version,
+as `(/work/squiz/.squiz.json)` where it was read and `(no /work/squiz/.squiz.json)`
+where it was not. A git that refuses for any other reason than this being no
+repository fails the row.
 
 **The row names the model a round would run on:** `model` from `.squiz.json`,
 or else the user's default from the reviewer CLI's own settings, as § 4 sets out
@@ -2427,7 +2432,9 @@ squiz: the reviewer ruled thread PRRT_kwDOAbc123 fixed, and it could not be reso
 squiz: the failure could not be posted on PR #142: GitHub answered 502
 ```
 
-A run with nothing that failed writes nothing on stderr.
+A run with nothing that failed writes nothing on stderr, except the line saying
+the defaults are in use where the main worktree holds no `.squiz.json`
+(§ 9 Configuration).
 
 A line is a pointer rather than a report. What a person needs to read about a
 failure is in the failure comment.
@@ -2662,7 +2669,7 @@ of git itself (§ 3 The state file).
    copilot --allow-tool='shell(squiz review:*)' --allow-tool='shell(squiz threads)' --allow-tool='shell(squiz reply:*)'
    ```
 
-2. **Optional.** `.squiz.json` in the host project, to change any of the
+2. **Optional.** `.squiz.json` in the host project's main worktree, to change any of the
    settings below. Every one has a working default, so a project that writes
    none still runs.
 
@@ -2731,7 +2738,26 @@ its own branch. Squiz does not create them, and does not remove them.
 
 ### Configuration
 
-`.squiz.json`, at the root of the repository.
+`.squiz.json`, at the root of the repository's main worktree: the worktree the
+common `.git` belongs to, which `git worktree list --porcelain` names first. It is read
+from there whichever worktree is under review, and never from the reviewed
+worktree itself. Every worktree of a repository therefore reviews with the same
+settings, which are per repository on the machine rather than per branch. A
+branch that changes `.squiz.json` has its change applied once the change reaches
+the main worktree.
+
+Where the main worktree holds no `.squiz.json`, every setting takes its default.
+`squiz review` then writes one line on stderr naming the main worktree, and its
+outcome and exit status are unchanged. A round host started without one writes
+the same line in `host.log`:
+
+```
+squiz: no .squiz.json was found in the main worktree, /work/squiz, so the defaults are in use
+```
+
+A bare repository has no main worktree, so a review in one of its linked
+worktrees has no `.squiz.json` to read, and its line says so. A git that cannot name the main
+worktree is a configuration that cannot be read.
 
 | Setting | Default | |
 |---|---|---|

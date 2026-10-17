@@ -25,10 +25,11 @@
 
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { loadConfig } from "../config/config.ts";
+import { defaultsLine, findProjectConfig, type ProjectConfig } from "../config/config.ts";
 import { readComment } from "../findings/comment.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "../github/threads.ts";
 import type { GhCall } from "../github/gh.ts";
+import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
 import { lastReviewed, namedStates } from "../loop/round-end.ts";
@@ -80,13 +81,25 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
 
   const toplevel = worktreeToplevel(directory, until);
   if (toplevel.outcome === "failed") return notRun(`the worktree could not be resolved: ${toplevel.reason}`);
-  let cap: number;
+  let project: ProjectConfig;
   try {
-    cap = loadConfig(toplevel.path).rounds;
+    project = findProjectConfig(toplevel.path, until);
   } catch (cause) {
     // The settings refuse a value they cannot use by throwing.
     return notRun(cause instanceof Error ? cause.message : String(cause));
   }
+
+  const printed = await reviewUnder(request, until, project.config.rounds);
+  // Running on the defaults changes neither the outcome nor the status, and is
+  // otherwise told from running on a file only by the summary's reviewer line.
+  const note = defaultsLine(project);
+  return note === undefined ? printed : { ...printed, stderr: failureLine(note) + printed.stderr };
+}
+
+/** The run once its settings are read, `cap` being the round cap they set. */
+async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number): Promise<Printed> {
+  const { directory, pullRequest } = request;
+  const notRun = (reason: string): Printed => printReview({ outcome: "not run", pullRequest, reason }, directory);
 
   const triggerNow = (): Triggered =>
     (request.trigger ?? triggerReview)({

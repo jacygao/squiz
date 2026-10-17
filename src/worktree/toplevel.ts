@@ -12,6 +12,7 @@
 import { spawnSync } from "node:child_process";
 
 import type { Deadline } from "../reviewers/deadline.ts";
+import { runGit } from "./git.ts";
 
 /** Where the worktree's root is, or why git could not say. */
 export type ToplevelLookup =
@@ -55,6 +56,30 @@ export function worktreeToplevel(directory: string, until?: Deadline): ToplevelL
   // there is nothing here to run a round against.
   if (path === "") return failed("git named no worktree for this directory");
   return { outcome: "resolved", path };
+}
+
+/** Where the repository's main worktree is, `undefined` where it has none, or why git could not say. */
+export type MainWorktreeLookup =
+  | { readonly outcome: "resolved"; readonly path: string | undefined }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/** Ask git for the main worktree of the repository holding `directory`. Never throws. */
+export function mainWorktree(directory: string, until?: Deadline): MainWorktreeLookup {
+  const asked = runGit(directory, ["worktree", "list", "--porcelain", "-z"], { until, ranOut: RAN_OUT });
+  if (!asked.ran) return { outcome: "failed", reason: asked.reason };
+  return { outcome: "resolved", path: mainWorktreeIn(asked.stdout) };
+}
+
+/**
+ * The main worktree in what `git worktree list --porcelain -z` printed: the first
+ * entry, which is the one the common `.git` belongs to. A bare repository's
+ * first entry is marked `bare`, and it has no worktree to read.
+ */
+export function mainWorktreeIn(porcelain: string): string | undefined {
+  const first = porcelain.split("\0\0", 1)[0]?.split("\0") ?? [];
+  if (first.includes("bare")) return undefined;
+  const path = first.find((field) => field.startsWith("worktree "))?.slice("worktree ".length);
+  return path === undefined || path === "" ? undefined : path;
 }
 
 /** What a call killed at its bound says, which is never that there is no worktree. */
