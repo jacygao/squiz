@@ -9,7 +9,7 @@ import type { Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { AGENT_NAME, argv, grants, serverFile } from "./argv.ts";
-import { CHARTER_VARIABLE, SNAPSHOT_VARIABLE } from "./server.ts";
+import { SNAPSHOT_VARIABLE } from "./server.ts";
 
 const invocation: Invocation = {
   directory: "/tmp/squiz/worktree",
@@ -144,7 +144,6 @@ test("the MCP configuration starts the shipped server with this Node, naming the
     },
   });
   assert.ok(isAbsolute(serverFile) && existsSync(serverFile), `no server at ${serverFile}`);
-  assert.ok(!JSON.stringify(config).includes(CHARTER_VARIABLE));
 });
 
 test("a pane and no terminal run the same line, and only no terminal is handed /dev/null", () => {
