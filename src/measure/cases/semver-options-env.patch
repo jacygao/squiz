@@ -1,0 +1,155 @@
+diff --git a/bin/semver.js b/bin/semver.js
+--- a/bin/semver.js
++++ b/bin/semver.js
+@@ -15,13 +15,32 @@
+ 
+ const version = require('../package.json').version
+ 
+-let loose = false
++const envOptions = (() => {
++  const raw = process.env.SEMVER_OPTIONS
++  if (!raw) {
++    return {}
++  }
++  let parsed
++  try {
++    parsed = JSON.parse(raw)
++  } catch (er) {
++    console.error(`Invalid SEMVER_OPTIONS: ${er.message}`)
++    process.exit(1)
++  }
++  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
++    console.error('Invalid SEMVER_OPTIONS: expected a JSON object')
++    process.exit(1)
++  }
++  return parsed
++})()
+ 
+-let includePrerelease = false
++let loose = envOptions.loose === true
+ 
++let includePrerelease = envOptions.includePrerelease === true
++
+ let coerce = false
+ 
+-let rtl = false
++let rtl = envOptions.rtl === true
+ 
+ let identifier
+ 
+@@ -179,6 +198,11 @@
+ --ltr
+         Coerce version strings left to right (default)
+ 
++Environment:
++SEMVER_OPTIONS
++        A JSON object of default options, such as {"loose":true}.
++        Only loose, includePrerelease and rtl are read.
++
+ -n <base>
+         Base number to be used for the prerelease identifier.
+         Can be either 0 or 1, or false to omit the number altogether.
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -128,6 +128,11 @@
+ --ltr
+         Coerce version strings left to right (default)
+ 
++Environment:
++SEMVER_OPTIONS
++        A JSON object of default options, such as {"loose":true}.
++        Only loose, includePrerelease and rtl are read.
++
+ Program exits successfully if any valid version satisfies
+ all supplied ranges, and prints all satisfying versions.
+ 
+diff --git a/tap-snapshots/test/bin/semver.js.test.cjs b/tap-snapshots/test/bin/semver.js.test.cjs
+--- a/tap-snapshots/test/bin/semver.js.test.cjs
++++ b/tap-snapshots/test/bin/semver.js.test.cjs
+@@ -93,6 +93,11 @@
+     --ltr
+             Coerce version strings left to right (default)
+     
++    Environment:
++    SEMVER_OPTIONS
++            A JSON object of default options, such as {"loose":true}.
++            Only loose, includePrerelease and rtl are read.
++    
+     -n <base>
+             Base number to be used for the prerelease identifier.
+             Can be either 0 or 1, or false to omit the number altogether.
+@@ -153,6 +158,11 @@
+     
+     --ltr
+             Coerce version strings left to right (default)
++    
++    Environment:
++    SEMVER_OPTIONS
++            A JSON object of default options, such as {"loose":true}.
++            Only loose, includePrerelease and rtl are read.
+     
+     -n <base>
+             Base number to be used for the prerelease identifier.
+@@ -214,6 +224,11 @@
+     
+     --ltr
+             Coerce version strings left to right (default)
++    
++    Environment:
++    SEMVER_OPTIONS
++            A JSON object of default options, such as {"loose":true}.
++            Only loose, includePrerelease and rtl are read.
+     
+     -n <base>
+             Base number to be used for the prerelease identifier.
+@@ -276,6 +291,11 @@
+     --ltr
+             Coerce version strings left to right (default)
+     
++    Environment:
++    SEMVER_OPTIONS
++            A JSON object of default options, such as {"loose":true}.
++            Only loose, includePrerelease and rtl are read.
++    
+     -n <base>
+             Base number to be used for the prerelease identifier.
+             Can be either 0 or 1, or false to omit the number altogether.
+diff --git a/test/bin/semver.js b/test/bin/semver.js
+--- a/test/bin/semver.js
++++ b/test/bin/semver.js
+@@ -7,8 +7,8 @@
+ 
+ const spawn = require('child_process').spawn
+ const bin = require.resolve('../../bin/semver')
+-const run = args => new Promise((resolve, reject) => {
+-  const c = spawn(process.execPath, [bin].concat(args))
++const run = (args, env = {}) => new Promise((resolve, reject) => {
++  const c = spawn(process.execPath, [bin].concat(args), { env: { ...process.env, ...env } })
+   c.on('error', reject)
+   const out = []
+   const err = []
+@@ -38,6 +38,23 @@
+   ['-i', 'invalid', '1.0.0'], // invalid -i value, should warn
+ ].map(args => t.resolveMatchSnapshot(run(args), args.join(' ')))))
+ 
++t.test('SEMVER_OPTIONS sets default options', async t => {
++  const loose = await run(['1.2.3beta'], { SEMVER_OPTIONS: '{"loose":true}' })
++  t.equal(loose.out, '1.2.3-beta\n')
++  t.equal(loose.code, 0)
++
++  const strict = await run(['1.2.3beta'], { SEMVER_OPTIONS: '{}' })
++  t.equal(strict.code, 1)
++
++  const invalid = await run(['1.2.3'], { SEMVER_OPTIONS: '{' })
++  t.equal(invalid.code, 1)
++  t.match(invalid.err, /^Invalid SEMVER_OPTIONS: /)
++
++  const notObject = await run(['1.2.3'], { SEMVER_OPTIONS: '[]' })
++  t.equal(notObject.code, 1)
++  t.match(notObject.err, /expected a JSON object/)
++})
++
+ t.test('help output', t => Promise.all([
+   ['-h'],
+   ['-?'],

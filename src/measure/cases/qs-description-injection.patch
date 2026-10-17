@@ -1,0 +1,63 @@
+diff --git a/lib/stringify.js b/lib/stringify.js
+--- a/lib/stringify.js
++++ b/lib/stringify.js
+@@ -49,6 +49,7 @@
+     serializeDate: function serializeDate(date) {
+         return toISO.call(date);
+     },
++    skipEmptyStrings: false,
+     skipNulls: false,
+     strictNullHandling: false
+ };
+@@ -283,6 +284,7 @@
+         format: format,
+         formatter: formatter,
+         serializeDate: typeof opts.serializeDate === 'function' ? opts.serializeDate : defaults.serializeDate,
++        skipEmptyStrings: typeof opts.skipEmptyStrings === 'boolean' ? opts.skipEmptyStrings : defaults.skipEmptyStrings,
+         skipNulls: typeof opts.skipNulls === 'boolean' ? opts.skipNulls : defaults.skipNulls,
+         sort: typeof opts.sort === 'function' ? opts.sort : null,
+         strictNullHandling: typeof opts.strictNullHandling === 'boolean' ? opts.strictNullHandling : defaults.strictNullHandling
+@@ -332,6 +334,10 @@
+         var value = obj[key];
+ 
+         if (options.skipNulls && value === null) {
++            continue;
++        }
++
++        if (options.skipEmptyStrings && !value) {
+             continue;
+         }
+ 
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -721,6 +721,13 @@
+ assert.equal(isoSentinel, 'utf8=%26%2310003%3B&a=%E6');
+ ```
+ 
++To skip a top-level key whose value is the empty string, use the `skipEmptyStrings` flag:
++
++```javascript
++var emptySkipped = qs.stringify({ a: 'b', c: '' }, { skipEmptyStrings: true });
++assert.equal(emptySkipped, 'a=b');
++```
++
+ ### Dealing with special character sets
+ 
+ By default the encoding and decoding of characters is done in `utf-8`, and `iso-8859-1` support is also built in via the `charset` parameter.
+diff --git a/test/stringify.js b/test/stringify.js
+--- a/test/stringify.js
++++ b/test/stringify.js
+@@ -391,6 +391,12 @@
+             'a%5B0%5D=b&a%5B1%5D=c&a%5B2%5D=d',
+             'default => indices'
+         );
++        st.end();
++    });
++
++    t.test('`skipEmptyStrings` option', function (st) {
++        st.equal(qs.stringify({ a: 'b', c: '' }, { skipEmptyStrings: true }), 'a=b', 'skips an empty string');
++        st.equal(qs.stringify({ a: 'b', c: '' }), 'a=b&c=', 'keeps it by default');
+         st.end();
+     });
+ 

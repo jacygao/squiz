@@ -1,0 +1,66 @@
+diff --git a/bin/main.js b/bin/main.js
+--- a/bin/main.js
++++ b/bin/main.js
+@@ -206,6 +206,13 @@
+       }
+ 
+       await runConfig(config);
++    } else if (nodeProcess.env.MARKED_CONFIG) {
++      const envConfig = nodeProcess.env.MARKED_CONFIG;
++      if (!await fileExists(envConfig)) {
++        throw Error(`Cannot load config file '${envConfig}' named by MARKED_CONFIG`);
++      }
++
++      await runConfig(envConfig);
+     } else {
+       const defaultConfig = [
+         '~/.marked.json',
+diff --git a/man/marked.1.md b/man/marked.1.md
+--- a/man/marked.1.md
++++ b/man/marked.1.md
+@@ -41,6 +41,7 @@
+ 
+ * -c, --config [config file]
+ Specify config file to use instead of the default `~/.marked.json` or `~/.marked.js` or `~/.marked/index.js`.
++Without this option, the file the `MARKED_CONFIG` environment variable names is used, where it is set.
+ 
+ * -t, --tokens
+ Output a token list instead of html.
+diff --git a/test/unit/bin.test.js b/test/unit/bin.test.js
+--- a/test/unit/bin.test.js
++++ b/test/unit/bin.test.js
+@@ -42,10 +42,13 @@
+   return mocks;
+ }
+ 
+-function testInput({ args = [], stdin = '', stdinError = '', stdout = '', stderr = '', code = 0 } = {}) {
++function testInput({ args = [], env, stdin = '', stdinError = '', stdout = '', stderr = '', code = 0 } = {}) {
+   return async() => {
+     const mocks = createMocks();
+     mocks.process.argv = ['node', 'marked', ...args];
++    if (env) {
++      mocks.process.env = env;
++    }
+     const mainPromise = main(mocks.process);
+     if (typeof mocks.stdin.end === 'function') {
+       if (stdin) {
+@@ -127,6 +130,19 @@
+       stdout: '<p>line1<br>line2</p>',
+     }));
+ 
++    it('MARKED_CONFIG', testInput({
++      args: ['-s', 'line1\nline2'],
++      env: { MARKED_CONFIG: fixturePath('bin-config.js') },
++      stdout: '<p>line1<br>line2</p>',
++    }));
++
++    it('MARKED_CONFIG not found', testInput({
++      args: ['-s', 'line1\nline2'],
++      env: { MARKED_CONFIG: fixturePath('does-not-exist.js') },
++      stderr: `Cannot load config file '${fixturePath('does-not-exist.js')}' named by MARKED_CONFIG`,
++      code: 1,
++    }));
++
+     it('config not found', testInput({
+       args: ['--config', fixturePath('does-not-exist.js'), '-s', 'line1\nline2'],
+       stderr: `Cannot load config file '${fixturePath('does-not-exist.js')}'`,

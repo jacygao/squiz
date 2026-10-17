@@ -1,0 +1,27 @@
+diff --git a/lib/parse.js b/lib/parse.js
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -29,6 +29,12 @@
+     strictNullHandling: false,
+     throwOnLimitExceeded: false
+ };
++
++// Built once rather than on every call. `replace` resets a global regular
++// expression's `lastIndex` before it starts, so sharing one is safe.
++var encodedOpenBracket = /%5B/gi;
++var encodedCloseBracket = /%5D/gi;
++var queryPrefix = /^\?/;
+ 
+ var interpretNumericEntities = function (str) {
+     return str.replace(/&#(\d+);/g, function ($0, numberStr) {
+@@ -72,8 +78,8 @@
+ var parseValues = function parseQueryStringValues(str, options) {
+     var obj = { __proto__: null };
+ 
+-    var cleanStr = options.ignoreQueryPrefix ? str.replace(/^\?/, '') : str;
+-    cleanStr = cleanStr.replace(/%5B/gi, '[').replace(/%5D/gi, ']');
++    var cleanStr = options.ignoreQueryPrefix ? str.replace(queryPrefix, '') : str;
++    cleanStr = cleanStr.replace(encodedOpenBracket, '[').replace(encodedCloseBracket, ']');
+ 
+     var limit = options.parameterLimit === Infinity ? void undefined : options.parameterLimit;
+     var parts = cleanStr.split(

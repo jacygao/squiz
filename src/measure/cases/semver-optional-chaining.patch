@@ -1,0 +1,44 @@
+diff --git a/functions/prerelease.js b/functions/prerelease.js
+--- a/functions/prerelease.js
++++ b/functions/prerelease.js
+@@ -3,6 +3,6 @@
+ const parse = require('./parse')
+ const prerelease = (version, options) => {
+   const parsed = parse(version, options)
+-  return (parsed && parsed.prerelease.length) ? parsed.prerelease : null
++  return parsed?.prerelease.length ? parsed.prerelease : null
+ }
+ module.exports = prerelease
+diff --git a/functions/coerce.js b/functions/coerce.js
+--- a/functions/coerce.js
++++ b/functions/coerce.js
+@@ -17,7 +17,7 @@
+     return null
+   }
+ 
+-  options = options || {}
++  options ??= {}
+ 
+   let match = null
+   if (!options.rtl) {
+diff --git a/ranges/subset.js b/ranges/subset.js
+--- a/ranges/subset.js
++++ b/ranges/subset.js
+@@ -162,7 +162,7 @@
+     hasDomLT = hasDomLT || c.operator === '<' || c.operator === '<='
+     if (gt) {
+       if (needDomGTPre) {
+-        if (c.semver.prerelease && c.semver.prerelease.length &&
++        if (c.semver.prerelease?.length &&
+             c.semver.major === needDomGTPre.major &&
+             c.semver.minor === needDomGTPre.minor &&
+             c.semver.patch === needDomGTPre.patch) {
+@@ -180,7 +180,7 @@
+     }
+     if (lt) {
+       if (needDomLTPre) {
+-        if (c.semver.prerelease && c.semver.prerelease.length &&
++        if (c.semver.prerelease?.length &&
+             c.semver.major === needDomLTPre.major &&
+             c.semver.minor === needDomLTPre.minor &&
+             c.semver.patch === needDomLTPre.patch) {

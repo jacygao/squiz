@@ -1,0 +1,32 @@
+diff --git a/internal/identifiers.js b/internal/identifiers.js
+--- a/internal/identifiers.js
++++ b/internal/identifiers.js
+@@ -9,16 +9,23 @@
+   const anum = numeric.test(a)
+   const bnum = numeric.test(b)
+ 
++  // A numeric identifier has lower precedence than an alphanumeric one.
++  if (anum && !bnum) {
++    return -1
++  }
++  if (bnum && !anum) {
++    return 1
++  }
++
+   if (anum && bnum) {
+     a = +a
+     b = +b
+   }
+ 
+-  return a === b ? 0
+-    : (anum && !bnum) ? -1
+-    : (bnum && !anum) ? 1
+-    : a < b ? -1
+-    : 1
++  if (a === b) {
++    return 0
++  }
++  return a < b ? -1 : 1
+ }
+ 
+ const rcompareIdentifiers = (a, b) => compareIdentifiers(b, a)
