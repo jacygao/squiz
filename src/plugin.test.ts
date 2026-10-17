@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -64,7 +67,7 @@ function commandsOn(event: string): readonly unknown[] {
 // The bare name does not resolve in either. A hook runs under a shell whose PATH
 // is the user's, without the plugin's bin/ in it, and the runtime supplies the
 // root instead.
-const command = "${CLAUDE_PLUGIN_ROOT}/bin/squiz hook";
+const command = '"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook';
 
 test("Stop runs the binary through the plugin root, in the background, for as long as a day", () => {
   assert.deepEqual(commandsOn("Stop"), [{ type: "command", command, asyncRewake: true, timeout: 86_400 }]);
@@ -72,4 +75,34 @@ test("Stop runs the binary through the plugin root, in the background, for as lo
 
 test("SubagentStop runs the binary through the plugin root, under the runtime's own timeout", () => {
   assert.deepEqual(commandsOn("SubagentStop"), [{ type: "command", command }]);
+});
+
+test("each registered command runs bin/squiz hook from a plugin root with a space in its path (#662)", () => {
+  const root = join(mkdtempSync(join(tmpdir(), "squiz-662-")), "plugin root");
+  try {
+    // A stand-in bin/squiz that writes down the arguments it was given.
+    mkdirSync(join(root, "bin"), { recursive: true });
+    const argvFile = join(root, "argv");
+    writeFileSync(join(root, "bin", "squiz"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${argvFile}"\n`);
+    chmodSync(join(root, "bin", "squiz"), 0o755);
+    let ran = 0;
+    // Claude Code runs a shell-form command under /bin/sh and Copilot under /bin/bash.
+    for (const shell of ["/bin/sh", "/bin/bash"]) {
+      for (const event of ["Stop", "SubagentStop"]) {
+        for (const hook of commandsOn(event) as { command?: string }[]) {
+          rmSync(argvFile, { force: true });
+          const run = spawnSync(shell, ["-c", hook.command ?? ""], {
+            env: { ...process.env, CLAUDE_PLUGIN_ROOT: root },
+            encoding: "utf8",
+          });
+          assert.equal(run.status, 0, `${event}'s command failed under ${shell}: ${run.stderr}`);
+          assert.equal(readFileSync(argvFile, "utf8"), "hook\n", `${event}'s command reached bin/squiz with other arguments`);
+          ran += 1;
+        }
+      }
+    }
+    assert.equal(ran, 4, "a registration this test never ran would pass it");
+  } finally {
+    rmSync(join(root, ".."), { recursive: true, force: true });
+  }
 });
