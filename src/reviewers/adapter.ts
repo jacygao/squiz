@@ -247,16 +247,6 @@ export type Confinement =
  */
 export type UserModel = string | undefined | { readonly problem: string; readonly failsTheRound: boolean };
 
-/** One file of the project's that a review does not use, with the keys it sets where the CLI reads it as settings. */
-export type UnusedSetting = { readonly path: string; readonly keys: readonly string[] };
-
-/**
- * The project's own settings for a CLI that a review leaves unused, and the
- * file of the project's conventions the CLI loads into the review regardless,
- * `undefined` where the project has none.
- */
-export type ProjectSettings = { readonly unused: readonly UnusedSetting[]; readonly contextFile: string | undefined };
-
 /** What a round would hand the CLI that bears on how hard it thinks, and where it would run. */
 export type ThinkingAsked = {
   readonly directory: string;
@@ -332,8 +322,6 @@ export type Adapter = {
   readonly costAtExit?: true;
   /** The user's default model, read from `environment`'s home and variables. It reads and never writes. */
   readonly userModel?: (environment: NodeJS.ProcessEnv) => UserModel;
-  /** What of the project at the repository root `root` a review leaves unused. It reads and never writes. */
-  readonly projectSettings?: (root: string) => ProjectSettings;
   /** The level a round asked for `asked.thinking` runs at. It makes no model request and never throws. */
   readonly runsAt?: (asked: ThinkingAsked) => RunsAt;
 };
