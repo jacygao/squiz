@@ -634,10 +634,18 @@ test("squiz init links squiz, prints the line that says so, and writes no AGENTS
 
     const result = await run(shim, ["init"], { cwd: root, path, home });
 
+    const settings = join(home, ".claude", "settings.json");
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout, `squiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n`);
+    assert.equal(
+      result.stdout,
+      `squiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n` +
+        `squiz: allowed Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *) in ${settings}\n`,
+    );
     assert.equal(result.stderr, "");
     await assert.rejects(stat(join(root, "AGENTS.md")));
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), {
+      permissions: { allow: ["Bash(squiz review *)", "Bash(squiz threads)", "Bash(squiz reply *)"] },
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
@@ -656,7 +664,8 @@ test("squiz init run by name through its own link finds the link already there",
     assert.equal(result.code, 0, result.stderr);
     assert.equal(
       result.stdout,
-      `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n`,
+      `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n` +
+        `squiz: ${join(home, ".claude", "settings.json")} already allows Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *); nothing changed\n`,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

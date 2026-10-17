@@ -2019,11 +2019,19 @@ taken for none.
 
 ### `squiz init`
 
-`squiz init` links `squiz` into a directory already on `PATH`, for a coding
-agent whose shell does not have the plugin's `bin/` on its `PATH`. It prints a
-line for what it did, and exits 0 where the link is in place afterwards and 1
-otherwise, with the line on stderr. It writes nothing in the repository it is
-run from, and runs outside one as well.
+`squiz init` does two things, and prints a line for each:
+
+1. It links `squiz` into a directory already on `PATH`, for a coding agent whose
+   shell does not have the plugin's `bin/` on its `PATH`.
+2. It allows the coding agent's three `squiz` commands in Claude Code's user
+   settings, `~/.claude/settings.json`, so that no project has to.
+
+It exits 0 where the link is in place afterwards and 1 otherwise, with the
+link's line on stderr. Settings it could not change put their line on stderr
+too, and leave the exit as the link set it. It writes nothing in the repository
+it is run from, and runs outside one as well.
+
+#### The link
 
 - **The link's target is this squiz:** the real path of the `bin/squiz` that is
   running, every symlink resolved, so the link holds an absolute path.
@@ -2056,6 +2064,40 @@ squiz: /Users/ana/.local/bin/squiz already links to this squiz; nothing changed
 squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz, in place of /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, an earlier version of this install
 squiz: made no link: /Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again
 squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a directory on PATH that you can write to. Add /Users/ana/.local/bin to PATH, creating it if it does not exist, then run squiz init again
+```
+
+#### The permission rules
+
+`squiz init` adds these three rules to `permissions.allow` in
+`~/.claude/settings.json`, creating the file, the `permissions` object or the
+`allow` list where it is missing:
+
+```
+Bash(squiz review *)
+Bash(squiz threads)
+Bash(squiz reply *)
+```
+
+- **Only a missing rule is added,** after the rules already there. Every other
+  key and rule keeps its value, and a file that already has all three is not
+  written.
+- **A file squiz cannot read as settings is left as it is:** one that cannot be
+  read, is not JSON, is not a JSON object, or whose `permissions` is not an
+  object or `permissions.allow` not a list. The line names the file and says
+  which.
+- **The file is replaced whole,** by a file written beside it and renamed over
+  it, holding the settings as JSON indented by two spaces. A symlinked
+  `settings.json` is written at its target, and stays a link.
+
+Copilot is left as it is. Its tool approvals come only from the `--allow-tool`
+flags a session starts with.
+
+```
+squiz: allowed Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *) in /Users/ana/.claude/settings.json
+squiz: allowed Bash(squiz reply *) in /Users/ana/.claude/settings.json
+squiz: /Users/ana/.claude/settings.json already allows Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *); nothing changed
+squiz: allowed nothing in /Users/ana/.claude/settings.json: it is not JSON (Expected property name or '}' in JSON at position 2 (line 1 column 3))
+squiz: allowed nothing in /Users/ana/.claude/settings.json: its permissions.allow is not a list
 ```
 
 ### The setup check
@@ -2530,14 +2572,22 @@ itself.
 
 ### Getting started
 
-Two things in the host project, the second one optional. Nothing goes in the
-project's `.gitignore`: squiz keeps `.squiz/`, where it writes each episode's
-state, out of git itself (§ 3 The state file).
+Two things, the second one optional. Nothing goes in the project's
+`.gitignore`: squiz keeps `.squiz/`, where it writes each episode's state, out
+of git itself (§ 3 The state file).
 
-1. Allow `squiz` in the project's Claude Code permissions, so the coding agent
-   is not prompted every time it starts a round or works a thread.
-2. **Optional.** `.squiz.json`, to change any of the settings below. Every one
-   has a working default, so a project that writes none still runs.
+1. Allow the coding agent's three `squiz` commands, so it is not prompted every
+   time it starts a round or works a thread. For Claude Code, `squiz init` has
+   already done this, once for every project, in the user's settings (§ 6
+   `squiz init`). A Copilot session is started with them allowed:
+
+   ```
+   copilot --allow-tool='shell(squiz review:*)' --allow-tool='shell(squiz threads)' --allow-tool='shell(squiz reply:*)'
+   ```
+
+2. **Optional.** `.squiz.json` in the host project, to change any of the
+   settings below. Every one has a working default, so a project that writes
+   none still runs.
 
 Then check the setup with `squiz doctor` (§ 6 The setup check), from the
 repository. In a Claude Code session, type it after `!`:

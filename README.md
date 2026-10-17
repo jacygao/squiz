@@ -40,8 +40,9 @@ Then, in a Claude Code session:
 ! squiz init
 ```
 
-This lets you run `squiz` from your own terminal too. Run it again in a new
-session after each update.
+This lets you run `squiz` from your own terminal too, and lets the coding agent
+run its three `squiz` commands without asking. Run it again in a new session
+after each update.
 
 ### Copilot
 
@@ -59,7 +60,9 @@ squiz too, type `! squiz init` there instead of the last line.
 
 Let the coding agent run its three `squiz` commands without asking.
 
-Claude Code, in the project's `.claude/settings.json`:
+Claude Code: `squiz init` has already done this, for every project. It adds
+these rules to your own `~/.claude/settings.json`, beside any rules already
+there:
 
 ```json
 {
