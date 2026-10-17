@@ -108,3 +108,11 @@ test("a note for a review closed with threads open says it closed, and carries t
     ].join("\n"),
   );
 });
+
+test("a note whose listing holds none of the threads the round left open counts them and points to squiz review", () => {
+  const listed = [thread("PRRT_person", 1, "Not the reviewer's"), thread("PRRT_a", 134, "Resolved since the round", true)];
+
+  const text = textOf(ownerNote(41, reviewed(2, ["PRRT_a", "PRRT_b"]), "3f9c2e0", undefined, listed));
+
+  assert.equal(text, "Squiz reviewed PR #41 at 3f9c2e0: 2 threads are open. Run `squiz review 41` to read them.");
+});
