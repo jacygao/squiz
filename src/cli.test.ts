@@ -96,7 +96,7 @@ type Run = {
 async function run(
   command: string,
   args: readonly string[],
-  options: { cwd: string; path?: string; home?: string; input?: string },
+  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string },
 ): Promise<Run> {
   return await new Promise<Run>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -105,6 +105,7 @@ async function run(
         ...process.env,
         ...(options.path === undefined ? {} : { PATH: options.path }),
         ...(options.home === undefined ? {} : { HOME: options.home }),
+        ...(options.claudeConfig === undefined ? {} : { CLAUDE_CONFIG_DIR: options.claudeConfig }),
       },
     });
     // A child that reads no stdin can exit before the write lands, and the
@@ -615,29 +616,51 @@ test("a throw inside squiz review exits 1, which never reads as a result", async
  * init` links into neither the developer's home nor a directory their PATH
  * already has. Beyond the system's own directories, the PATH reaches `node`,
  * which the shim needs, through a link to it alone.
+ *
+ * Every run gets `claudeConfig` as its CLAUDE_CONFIG_DIR, so that one inherited
+ * from the developer's session never sends the rules to their real settings.
+ * It is not `~/.claude`, which also exists, so a settings file written there
+ * shows the variable was ignored.
  */
-async function initSandbox(): Promise<{ readonly home: string; readonly localBin: string; readonly path: string }> {
+async function initSandbox(): Promise<{
+  readonly home: string;
+  readonly localBin: string;
+  readonly path: string;
+  readonly claudeConfig: string;
+}> {
   const home = realpathSync(await mkdtemp(join(tmpdir(), "squiz-553-home-")));
   const localBin = join(home, ".local", "bin");
   await mkdir(localBin, { recursive: true });
+  await mkdir(join(home, ".claude"));
+  const claudeConfig = join(home, "claude-config");
+  await mkdir(claudeConfig);
   const tools = join(home, "tools");
   await mkdir(tools);
   await symlink(process.execPath, join(tools, "node"));
-  return { home, localBin, path: `${localBin}:${tools}:/usr/bin:/bin` };
+  return { home, localBin, path: `${localBin}:${tools}:/usr/bin:/bin`, claudeConfig };
 }
 
 test("squiz init links squiz, prints the line that says so, and writes no AGENTS.md (#600)", async () => {
   const root = await mkdtemp(join(tmpdir(), "squiz-553-init-cli-"));
-  const { home, localBin, path } = await initSandbox();
+  const { home, localBin, path, claudeConfig } = await initSandbox();
   try {
     gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
 
-    const result = await run(shim, ["init"], { cwd: root, path, home });
+    const result = await run(shim, ["init"], { cwd: root, path, home, claudeConfig });
 
+    const settings = join(claudeConfig, "settings.json");
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout, `squiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n`);
+    assert.equal(
+      result.stdout,
+      `squiz: linked ${join(localBin, "squiz")} to ${realpathSync(shim)}\n` +
+        `squiz: allowed Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *) in ${settings}\n`,
+    );
     assert.equal(result.stderr, "");
     await assert.rejects(stat(join(root, "AGENTS.md")));
+    assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), {
+      permissions: { allow: ["Bash(squiz review *)", "Bash(squiz threads)", "Bash(squiz reply *)"] },
+    });
+    await assert.rejects(stat(join(home, ".claude", "settings.json")), "~/.claude was written though CLAUDE_CONFIG_DIR is set");
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
@@ -646,17 +669,18 @@ test("squiz init links squiz, prints the line that says so, and writes no AGENTS
 
 test("squiz init run by name through its own link finds the link already there", async () => {
   const root = await mkdtemp(join(tmpdir(), "squiz-553-init-cli-"));
-  const { home, localBin, path } = await initSandbox();
+  const { home, localBin, path, claudeConfig } = await initSandbox();
   try {
     gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
-    await run(shim, ["init"], { cwd: root, path, home });
+    await run(shim, ["init"], { cwd: root, path, home, claudeConfig });
 
-    const result = await run("squiz", ["init"], { cwd: root, path, home });
+    const result = await run("squiz", ["init"], { cwd: root, path, home, claudeConfig });
 
     assert.equal(result.code, 0, result.stderr);
     assert.equal(
       result.stdout,
-      `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n`,
+      `squiz: ${join(localBin, "squiz")} already links to this squiz; nothing changed\n` +
+        `squiz: ${join(claudeConfig, "settings.json")} already allows Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *); nothing changed\n`,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -666,10 +690,10 @@ test("squiz init run by name through its own link finds the link already there",
 
 test("a link squiz init cannot make exits 1, which is how the person running it learns it did nothing", async () => {
   const root = await mkdtemp(join(tmpdir(), "squiz-553-nolink-"));
-  const { home, path } = await initSandbox();
+  const { home, path, claudeConfig } = await initSandbox();
   try {
     // The PATH without ~/.local/bin, so neither directory squiz init links into is on it.
-    const result = await run(shim, ["init"], { cwd: root, path: path.split(":").slice(1).join(":"), home });
+    const result = await run(shim, ["init"], { cwd: root, path: path.split(":").slice(1).join(":"), home, claudeConfig });
 
     assert.equal(result.code, 1, result.stdout);
     assert.match(result.stderr, /^squiz: made no link: [^\n]+\n$/u);
