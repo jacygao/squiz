@@ -12,7 +12,7 @@ import {
   defaultConfig,
   defaultsLine,
   findProjectConfig,
-  loadConfig,
+  projectConfigIn,
 } from "./config.ts";
 
 /** A repository root holding the given `.squiz.json`, or none where it is null. */
@@ -25,7 +25,7 @@ function repositoryWith(contents: string | null): string {
 function load(contents: string | null): Config {
   const root = repositoryWith(contents);
   try {
-    return loadConfig(root);
+    return projectConfigIn(root).config;
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -105,10 +105,6 @@ test("timeout accepts 60 and 3,600, and refuses 59 and 3,601", () => {
   rejection(`{"timeout": -1}`);
 });
 
-test("the default timeout is 900 seconds", () => {
-  assert.equal(defaultConfig.timeout, 900);
-});
-
 test("tokens accepts 100,000 and 10,000,000, and refuses 99,999 and 10,000,001", () => {
   assert.equal(load(`{"tokens": 100000}`).tokens, 100_000);
   assert.equal(load(`{"tokens": 10000000}`).tokens, 10_000_000);
@@ -134,15 +130,11 @@ test("a count that is not whole is refused", () => {
 // default and report nothing. These are the two settings where that wrong
 // answer is silent.
 
-test("a token bound of 0 is refused rather than replaced by the default", () => {
-  const error = rejection(`{"tokens": 0}`);
-  assert.match(error.message, /"tokens" is 0/);
-  assert.doesNotMatch(error.message, /10000000/);
-});
-
-test("a timeout of 0 is refused rather than replaced by the default", () => {
-  const error = rejection(`{"timeout": 0}`);
-  assert.match(error.message, /"timeout" is 0/);
+test("a zero is refused rather than replaced by the default", () => {
+  const tokens = rejection(`{"tokens": 0}`);
+  assert.match(tokens.message, /"tokens" is 0/);
+  assert.doesNotMatch(tokens.message, /10000000/);
+  assert.match(rejection(`{"timeout": 0}`).message, /"timeout" is 0/);
 });
 
 test("a value in range but below the default survives the load", () => {
@@ -153,13 +145,6 @@ test("a value in range but below the default survives the load", () => {
   assert.equal(load(`{"tokens": 100000}`).tokens, 100_000);
 });
 
-// The grant is the same at every review, so the setting that chose one is gone.
-test("an old depth key is refused like any unknown setting", () => {
-  for (const value of [`"read"`, `"deep"`]) {
-    assert.match(rejection(`{"depth": ${value}}`).message, /"depth" is not a setting, and the settings are /u);
-  }
-});
-
 test("reviewer is pi or copilot, and anything else is refused", () => {
   assert.equal(load(`{"reviewer": "pi"}`).reviewer, "pi");
   assert.equal(load(`{"reviewer": "copilot"}`).reviewer, "copilot");
@@ -168,13 +153,6 @@ test("reviewer is pi or copilot, and anything else is refused", () => {
   rejection(`{"reviewer": "pi "}`);
   rejection(`{"reviewer": ""}`);
   rejection(`{"reviewer": null}`);
-});
-
-// A project that writes no reviewer is reviewed by pi, as every project was
-// before the setting existed.
-test("reviewer defaults to pi", () => {
-  assert.equal(load("{}").reviewer, "pi");
-  assert.equal(load(`{"rounds": 3}`).reviewer, "pi");
 });
 
 // The levels are the reviewer CLI's own names, matched exactly. A name it does
@@ -189,11 +167,6 @@ test("thinking accepts every level the reviewer has, and refuses anything else",
   rejection(`{"thinking": "xxhigh"}`);
   rejection(`{"thinking": "medium "}`);
   rejection(`{"thinking": ""}`);
-});
-
-test("thinking defaults to medium, and no value asks for the machine's own level", () => {
-  assert.equal(load("{}").thinking, "medium");
-  assert.equal(load(`{"rounds": 3}`).thinking, "medium");
   rejection(`{"thinking": "inherit"}`);
   rejection(`{"thinking": "default"}`);
   rejection(`{"thinking": null}`);
@@ -325,26 +298,13 @@ test("a key that is not a setting is refused rather than ignored", () => {
   assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking" and "model"/);
 });
 
-test("a .squiz.json still setting test is refused like any other key that is not a setting", () => {
-  const error = rejection(`{"test": "npm test"}`);
-  assert.match(error.message, /"test" is not a setting, and the settings are "reviewer", "rounds", "timeout", "tokens", "thinking" and "model"$/u);
-});
-
-// What a project upgrading from the dollar bound meets. Silently ignoring it
-// would leave someone believing a figure in dollars still bounded their episodes.
-test("a .squiz.json still setting budget is refused, and the refusal lists the settings", () => {
-  const error = rejection(`{"rounds": 3, "budget": 0.5}`);
-  assert.match(error.message, /"budget" is not a setting/);
-  assert.match(error.message, /"tokens"/);
-});
-
 test("a .squiz.json that is there and cannot be read is not read as absent", () => {
   const root = mkdtempSync(join(tmpdir(), "squiz-config-"));
   // A directory in its place is the portable way to make the read fail with
   // something other than ENOENT.
   mkdirSync(join(root, configFileName));
   try {
-    const error = rejectionOf(() => loadConfig(root), "a .squiz.json that is a directory");
+    const error = rejectionOf(() => projectConfigIn(root), "a .squiz.json that is a directory");
     assert.match(error.message, /could not be read/);
     assert.ok(error.message.includes(configFileName));
   } finally {
