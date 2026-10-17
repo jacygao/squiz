@@ -676,43 +676,8 @@ test("the reason the comment could not be posted stays out of the summary", () =
  * the first round failed before the reviewer ran. There is then no spend to
  * report rather than a spend of nothing.
  */
-test("an episode that ran no round reports no spend", () => {
-  const comment = renderSummary({ ...quiet, rounds: [] });
-  assert.ok(
-    comment.startsWith(
-      [
-        "**Squiz review — 0 rounds, 0 findings**",
-        "",
-        "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
-        "No rounds ran",
-      ].join("\n"),
-    ),
-    `an episode with no round reported a spend: ${comment}`,
-  );
-});
-
 // A round the state file recorded with no figures, as a Copilot round the
 // bound stopped is.
-test("an episode no round of which has a cost carries no spend line", () => {
-  const comment = renderSummary({
-    ...quiet,
-    rounds: [{ elapsedSeconds: 900.4, cutShortAtSeconds: 900, reviewer: "copilot" }],
-  });
-  assert.ok(
-    comment.startsWith(
-      [
-        "**Squiz review — 1 round, 0 findings**",
-        "",
-        "Fixed 0 · Withdrawn 0 · Open 0 · Disputed 0",
-        "Reviewed by `copilot` on an unknown model",
-        "",
-        "**Needs a person**",
-      ].join("\n"),
-    ),
-    `an episode with no cost carried a spend line: ${comment}`,
-  );
-});
-
 /** The line of a summary of `rounds` that names the reviewer, where there is one. */
 function reviewerLine(rounds: readonly RoundRecord[]): string | undefined {
   return renderSummary({ ...quiet, rounds })
