@@ -18,9 +18,9 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, normalize, relative } from "node:path";
 
-import type { Finding } from "../findings/finding.ts";
-import { historyTools } from "../reviewers/git-tools.ts";
-import type { Round } from "../reviewers/round.ts";
+import type { Finding } from "../src/findings/finding.ts";
+import { historyTools } from "../src/reviewers/git-tools.ts";
+import type { Round } from "../src/reviewers/round.ts";
 
 /** One run as `review-once.ts` records it. */
 export type Run = {

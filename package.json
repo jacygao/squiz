@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"src/**/*.test.ts\""
+    "test": "node --test \"src/**/*.test.ts\" \"eval/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

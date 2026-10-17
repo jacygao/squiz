@@ -1,7 +1,7 @@
 /**
  * Print the runs `review-once.ts` recorded as one Markdown table, a row each.
  *
- *   node src/measure/table.ts <out-directory>...
+ *   node eval/table.ts <out-directory>...
  *
  * Which known defect a finding reports is a reading of its headline against the
  * case, so the findings are listed for a person to judge rather than scored.

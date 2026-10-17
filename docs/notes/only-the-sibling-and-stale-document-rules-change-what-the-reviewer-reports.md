@@ -9,7 +9,7 @@ recheck-when: the reviewer's model changes, the diff stops being carried in the 
 # Only the sibling and stale-document rules change what the reviewer reports
 
 Seven of the charter changes proposed from other reviewers' instructions were
-measured with the rig in `src/measure/`. Each was measured alone, against the
+measured with the rig in `eval/`. Each was measured alone, against the
 charter without it, on cases written to tempt the reviewer into what the rule
 guards against.
 
@@ -73,8 +73,8 @@ guards against.
 
 ```sh
 export MEASURE_CACHE=/tmp/squiz-measure-cases
-node src/measure/review-once.ts prepare
-MEASURE_MODEL=gpt-6-astra node src/measure/review-once.ts squiz-closing-line copilot charter.md /tmp/runs/copilot-1
+node eval/review-once.ts prepare
+MEASURE_MODEL=gpt-6-astra node eval/review-once.ts squiz-closing-line copilot charter.md /tmp/runs/copilot-1
 ```
 
 The cases written for this are the four added with the sibling rule and
