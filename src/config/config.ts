@@ -1,5 +1,5 @@
 /**
- * The `.squiz.json` loader: the six settings, their defaults and their ranges.
+ * The `.squiz.json` loader: the settings, their defaults and their ranges.
  * A project that writes no file runs on the defaults, and a value outside its
  * range is refused rather than replaced.
  */
@@ -66,7 +66,7 @@ export class ConfigError extends Error {
 
 const settingNames = ["reviewer", "rounds", "timeout", "tokens", "thinking", "model"] as const;
 
-const settingList = `"reviewer", "rounds", "timeout", "tokens", "thinking" and "model"`;
+const settingList = `${settingNames.slice(0, -1).map((name) => `"${name}"`).join(", ")} and "${settingNames.at(-1)}"`;
 
 const reviewers = ["pi", "copilot"] as const;
 
@@ -76,15 +76,10 @@ const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max
 const thinkingList = thinkingLevels.map((level) => `"${level}"`).join(", ");
 
 /**
- * Reads `.squiz.json` from `root`. Its absence is not an error: it yields the
- * defaults. Every other way of failing throws a `ConfigError` naming the
- * setting, the value given and what was expected.
+ * The settings in `root`'s `.squiz.json`, or `null` where it has none. Every
+ * other way of failing throws a `ConfigError` naming the setting, the value
+ * given and what was expected.
  */
-export function loadConfig(root: string): Config {
-  return readConfigAt(root) ?? { ...defaultConfig };
-}
-
-/** The settings in `root`'s `.squiz.json`, or `null` where it has none. */
 function readConfigAt(root: string): Config | null {
   const path = join(root, configFileName);
   const source = read(path);
@@ -244,9 +239,7 @@ function reviewerOf(path: string, value: unknown): Reviewer {
 }
 
 function thinkingOf(path: string, value: unknown): Thinking {
-  for (const level of thinkingLevels) {
-    if (value === level) return level;
-  }
+  if (thinkingLevels.some((level) => value === level)) return value as Thinking;
   // Matched exactly, and refused here because the reviewer CLI will not refuse
   // it: a level it does not know costs it nothing and changes nothing.
   throw new ConfigError(reject(path, "thinking", value, `one of ${thinkingList}`));
