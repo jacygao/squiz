@@ -401,6 +401,17 @@ test("git_diff refuses a path of the wrong shape", async () => {
   }
 });
 
+test("git_diff refuses a from that is not a whole number from 1, and one past the list says so", async () => {
+  for (const params of [{ from: 0 }, { from: 1.5 }, { from: "2" }]) {
+    const result = await gitDiff.run(repo, params);
+    assert.equal(result.failed, true, result.text);
+    assert.match(result.text, /^from must /u);
+  }
+  const past = await gitDiff.run(repo, { from: 3 });
+  assert.equal(past.failed, false, past.text);
+  assert.equal(past.text, "The pull request changes 2 files, so there is no file 3.\n");
+});
+
 test("git_diff shows a renamed file as a rename, named by either of its paths", async () => {
   const moved = await mkdtemp(join(root, "moved-"));
   git(moved, "init", "--quiet", "--initial-branch", "main");
@@ -422,7 +433,7 @@ test("git_diff shows a renamed file as a rename, named by either of its paths", 
   }
 });
 
-test("a change whose list of files runs past the cap is listed whole to the harness, and cut for the reviewer", async () => {
+test("a change whose list of files runs past the cap is listed whole to the harness, and in pages to the reviewer", async () => {
   const many = await mkdtemp(join(root, "many-"));
   git(many, "init", "--quiet", "--initial-branch", "main");
   await writeFile(join(many, "keep.txt"), "kept\n");
@@ -437,11 +448,20 @@ test("a change whose list of files runs past the cap is listed whole to the harn
   const files = await changedFiles(many);
   assert.ok(Array.isArray(files), JSON.stringify(files));
   assert.equal((files as readonly string[]).length, 400);
-  const listed = await gitDiff.run(many, {});
-  assert.equal(listed.failed, false, listed.text.slice(0, 200));
-  assert.ok(listed.text.length < OUTPUT_CAP + 500, `the listing ran to ${listed.text.length} characters`);
-  assert.match(listed.text, /cut at 65,536 bytes/u);
-  const last = (files as readonly string[]).at(-1) ?? "";
+  // Every name, found the way the reviewer finds them: a page, then the page its last line points to.
+  const seen: string[] = [];
+  let from: number | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const listed = await gitDiff.run(many, from === undefined ? {} : { from });
+    assert.equal(listed.failed, false, listed.text.slice(0, 200));
+    assert.ok(Buffer.byteLength(listed.text) <= OUTPUT_CAP + 200, `a page ran to ${listed.text.length} characters`);
+    seen.push(...[...listed.text.matchAll(/^A {2}(\S+)/gmu)].map((match) => match[1] ?? ""));
+    const next = /call git_diff with from: (\d+)/u.exec(listed.text);
+    if (next === null) break;
+    from = Number(next[1]);
+  }
+  assert.deepEqual(seen, files, "the pages did not list every file once, in order");
+  const last = seen.at(-1) ?? "";
   const shown = await gitDiff.run(many, { path: last });
   assert.equal(shown.failed, false, shown.text);
   assert.equal(shown.read, last);

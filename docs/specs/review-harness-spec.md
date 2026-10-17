@@ -628,7 +628,16 @@ R  src/old.ts -> src/new.ts           +1 -1
 ```
 ```
 
-A binary file is listed with `binary` in place of its counts.
+A binary file is listed with `binary` in place of its counts. A list longer than
+the 65,536 bytes a tool answers with comes in pages of whole lines, and each page
+but the last ends with the call that lists the rest, so the prompt carries the
+first page:
+
+```
+[Files 1 to 287 of 400 are listed. To list the rest, call git_diff with from: 288.]
+```
+
+The round host reads the whole list, which no page bounds.
 
 **The prompt's size does not grow with the diff.** A pull request that changes
 3,899 lines of one file adds one line to the prompt.
@@ -896,7 +905,7 @@ arguments as separate words:
 | `git_log_search` | A term | `git log -S<term> HEAD`: the commits that added or removed the term, newest first, each with its message and the files it changed. The term is matched as literal text. |
 | `git_blame` | A file and a line | `git blame -L <line>,<line> HEAD -- <file>`: the commit that last changed that line, with its author and date. |
 | `git_show` | A commit | `git show` on the one commit the name resolves to: its author, date, message and change. A range, a tree or a file at a revision is refused. |
-| `git_diff` | A path, or nothing | `git diff refs/squiz/base...HEAD`, the pull request's own range, which the reviewer cannot change. With no path, the list of changed files the prompt carries. With the path of a changed file, under either of its names where it was renamed, that file's diff. A path the list does not hold is answered with a line saying so, and never reaches `git`. |
+| `git_diff` | A path, or a file to start the list at, or nothing | `git diff refs/squiz/base...HEAD`, the pull request's own range, which the reviewer cannot change. With no path, the list of changed files the prompt carries, from file 1 or from the `from` given. With the path of a changed file, under either of its names where it was renamed, that file's diff. A path the list does not hold is answered with a line saying so, and never reaches `git`. |
 
 **The history tools are hardened against the repository they read**, whose
 tracked files are the code under review's to set:

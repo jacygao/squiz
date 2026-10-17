@@ -395,45 +395,57 @@ async function changedIn(
   return changed;
 }
 
-/** `text` as git's output would arrive under the cap: whole lines up to it, and whether it was cut. */
-function capped(text: string): Ran {
-  if (Buffer.byteLength(text) <= OUTPUT_CAP) return { ran: true, stdout: text, cut: false };
-  const head = new TextDecoder("utf-8").decode(Buffer.from(text).subarray(0, OUTPUT_CAP));
-  return { ran: true, stdout: head.slice(0, head.lastIndexOf("\n") + 1), cut: true };
-}
-
 function lineCount(field: string | undefined): number | undefined {
   return field === undefined || field === "-" ? undefined : Number(field);
 }
 
 /**
- * The listing the reviewer reads, one file a line:
+ * One page of the listing the reviewer reads, one file a line, starting at the
+ * `from`th file:
  *
  *     M  src/a.ts         +12 -3
  *     R  old.ts -> new.ts +1
+ *
+ * A page holds as many whole lines as fit under the cap, and where files are
+ * left it ends with the `from` that lists them, so every name is reachable.
  */
-function listing(changed: readonly Changed[]): string {
+function listing(changed: readonly Changed[], from: number): string {
   if (changed.length === 0) return "The pull request changes no file.\n";
+  const files = changed.length === 1 ? "1 file" : `${changed.length} files`;
+  if (from > changed.length) return `The pull request changes ${files}, so there is no file ${from}.\n`;
   const named = changed.map((file) => (file.from === undefined ? file.path : `${file.from} -> ${file.path}`));
   const width = Math.max(...named.map((name) => name.length));
-  return changed
-    .map((file, at) => {
-      const counts =
-        file.added === undefined
-          ? "binary"
-          : [file.added > 0 ? `+${file.added}` : "", (file.removed ?? 0) > 0 ? `-${file.removed}` : ""]
-              .filter((count) => count !== "")
-              .join(" ");
-      return `${file.status}  ${(named[at] ?? "").padEnd(width)}  ${counts}`.trimEnd();
-    })
-    .map((line) => `${line}\n`)
-    .join("");
+  const lines = changed.map((file, at) => {
+    const counts =
+      file.added === undefined
+        ? "binary"
+        : [file.added > 0 ? `+${file.added}` : "", (file.removed ?? 0) > 0 ? `-${file.removed}` : ""]
+            .filter((count) => count !== "")
+            .join(" ");
+    return `${`${file.status}  ${(named[at] ?? "").padEnd(width)}  ${counts}`.trimEnd()}\n`;
+  });
+  // Room is kept for the line that points at the next page.
+  const room = OUTPUT_CAP - 200;
+  let text = "";
+  let size = 0;
+  let at = from - 1;
+  // The first line goes in whatever its length, so a page never lists nothing.
+  do {
+    const line = lines[at] ?? "";
+    text += line;
+    size += Buffer.byteLength(line);
+    at += 1;
+  } while (at < lines.length && size + Buffer.byteLength(lines[at] ?? "") <= room);
+  if (at < lines.length) {
+    text += `[Files ${from} to ${at} of ${lines.length} are listed. To list the rest, call git_diff with from: ${at + 1}.]\n`;
+  }
+  return text;
 }
 
 export const gitDiff: HistoryTool = {
   name: "git_diff",
   description:
-    "Read the pull request's change. With no path, list the files it changes, each with its status (A added, M modified, D deleted, R renamed) and its lines added and removed. With a path, show that file's diff. Runs `git diff <base>...HEAD`, the range GitHub shows for the pull request.",
+    "Read the pull request's change. With no path, list the files it changes, each with its status (A added, M modified, D deleted, R renamed) and its lines added and removed; a long list comes in pages, each ending with the `from` that lists the rest. With a path, show that file's diff. Runs `git diff <base>...HEAD`, the range GitHub shows for the pull request.",
   parameters: {
     type: "object",
     properties: {
@@ -441,18 +453,27 @@ export const gitDiff: HistoryTool = {
         type: "string",
         description: "A changed file's path, relative to the repository root. Leave it out to list the changed files.",
       },
+      from: {
+        type: "integer",
+        minimum: 1,
+        description: "Where there is no path, the file to start the list at, counting from 1. The first page starts at 1.",
+      },
     },
   },
   run: async (snapshot, params, signal) => {
     const given = typeof params === "object" && params !== null ? (params as Record<string, unknown>)["path"] : undefined;
     const path = given === undefined ? undefined : stringArgument(params, "path");
     if (typeof path === "object") return refused(path.reason);
+    const from = typeof params === "object" && params !== null ? (params as Record<string, unknown>)["from"] : undefined;
+    if (from !== undefined && (typeof from !== "number" || !Number.isInteger(from) || from < 1)) {
+      return refused("from must be a whole number from 1");
+    }
 
     const range = await rangeIn(snapshot, signal);
     if (typeof range !== "string") return range;
     const changed = await changedIn(snapshot, range, signal);
     if ("failed" in changed) return changed;
-    if (path === undefined) return answer(gitDiff.name, capped(listing(changed)));
+    if (path === undefined) return { text: listing(changed, from ?? 1), failed: false };
 
     const file = changed.find((each) => each.path === path || each.from === path);
     if (file === undefined) {
