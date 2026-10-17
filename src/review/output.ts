@@ -64,7 +64,7 @@ type Clean = RoundResult & {
 
 /**
  * A state the close left unreviewed. `state` is how it is printed: its short
- * head commit, with how its replies differ where it shares a head with a state
+ * head commit, and that its replies differ where it shares a head with a state
  * before it, as `namedStates` names it.
  */
 type NotReviewed = { readonly state: string; readonly closedAt: Bound };

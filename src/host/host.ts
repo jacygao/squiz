@@ -275,7 +275,7 @@ type Recorded = { readonly record: StateRecord; readonly name: string; readonly 
 
 /**
  * `records` with the name each is told apart by, in order: its short commit,
- * and where a state before it has that commit, how its replies differ.
+ * and where a state before it has that commit, that its replies differ.
  *
  * `after` is the state reviewed before them, where one was.
  */
