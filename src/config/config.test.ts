@@ -405,3 +405,27 @@ test("#745: a main worktree's .squiz.json that is refused fails, though the link
     rmSync(pair.base, { recursive: true, force: true });
   }
 });
+
+test("#745: a linked worktree of a bare repository named .git runs on the defaults, never reading the directory beside it", () => {
+  const pair = linkedPair(null, null);
+  const project = join(pair.base, "project");
+  const linked = join(pair.base, "bare-linked");
+  try {
+    const git = (cwd: string, ...args: string[]): void => {
+      const ran = spawnSync("git", args, { cwd, encoding: "utf8" });
+      assert.equal(ran.status, 0, ran.stderr);
+    };
+    mkdirSync(project);
+    git(pair.base, "clone", "--quiet", "--bare", pair.main, join(project, ".git"));
+    git(join(project, ".git"), "worktree", "add", "--quiet", "--detach", linked);
+    writeFileSync(join(project, configFileName), `{"reviewer": "copilot"}`);
+
+    const found = findProjectConfig(linked);
+
+    assert.equal(found.config.reviewer, "pi", "the bare repository's parent directory is not a worktree, and its file is not read");
+    assert.equal(found.file, null);
+    assert.equal(defaultsLine(found), "the repository has no main worktree to hold a .squiz.json, so the defaults are in use");
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
+  }
+});

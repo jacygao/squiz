@@ -101,8 +101,8 @@ export type ProjectConfig = {
 };
 
 /**
- * Reads `.squiz.json` from the root of the repository's main worktree, the
- * directory holding the common `.git`, whichever of its worktrees `worktree` is.
+ * Reads `.squiz.json` from the root of the repository's main worktree, the one
+ * the common `.git` belongs to, whichever of its worktrees `worktree` is.
  *
  * The worktree under review is never read. Every worktree of a repository runs
  * on the same settings, and a file git ignores, which `git worktree add` does

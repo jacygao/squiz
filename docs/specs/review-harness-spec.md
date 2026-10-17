@@ -2714,8 +2714,8 @@ its own branch. Squiz does not create them, and does not remove them.
 
 ### Configuration
 
-`.squiz.json`, at the root of the repository's main worktree: the directory
-holding the common `.git` that `git rev-parse --git-common-dir` names. It is read
+`.squiz.json`, at the root of the repository's main worktree: the worktree the
+common `.git` belongs to, which `git worktree list --porcelain` names first. It is read
 from there whichever worktree is under review, and never from the reviewed
 worktree itself. Every worktree of a repository therefore reviews with the same
 settings, which are per repository on the machine rather than per branch. A
@@ -2731,8 +2731,8 @@ the same line in `host.log`:
 squiz: no .squiz.json was found in the main worktree, /work/squiz, so the defaults are in use
 ```
 
-A repository with no main worktree, a bare one or a submodule, has no
-`.squiz.json` to read, and its line says so. A git that cannot name the main
+A bare repository has no main worktree, so a review in one of its linked
+worktrees has no `.squiz.json` to read, and its line says so. A git that cannot name the main
 worktree is a configuration that cannot be read.
 
 | Setting | Default | |

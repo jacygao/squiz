@@ -25,7 +25,7 @@ import { configFileName, defaultConfig, projectConfigIn, type Config } from "../
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
 import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
-import { mainWorktreeOf } from "../worktree/toplevel.ts";
+import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
 /**
@@ -685,21 +685,22 @@ const NOT_A_REPOSITORY = /fatal: not a git repository/u;
 
 /**
  * The root of the worktree the check runs in, and of the repository's main
- * worktree, from one call to git. Only git saying this is no
- * repository is `outside`; any other refusal is `failed`, because a round run
- * here would stop on it too.
+ * worktree. Only git saying this is no repository is `outside`; any other
+ * refusal is `failed`, because a round run here would stop on it too.
  */
 function repositoryRoot(context: DoctorContext): Root {
   const untranslated = { ...context, environment: { ...context.environment, LC_ALL: "C" } };
-  const asked = probe("git", ["rev-parse", "--show-toplevel", "--git-common-dir"], untranslated);
+  const asked = probe("git", ["rev-parse", "--show-toplevel"], untranslated);
   if (asked.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
   if (asked.outcome === "failed") {
     return NOT_A_REPOSITORY.test(asked.reason) ? { outcome: "outside" } : { outcome: "failed", reason: asked.reason };
   }
-  const [root = "", common = ""] = asked.stdout.split("\n").map((line) => line.trim());
+  const root = asked.stdout.trim();
   if (root === "") return { outcome: "failed", reason: "git named no worktree for this directory" };
-  // Git names the common directory relative to the directory it ran in wherever it can.
-  return { outcome: "found", path: root, main: common === "" ? undefined : mainWorktreeOf(resolve(context.directory, common)) };
+  const listed = probe("git", ["worktree", "list", "--porcelain"], untranslated);
+  if (listed.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
+  if (listed.outcome === "failed") return { outcome: "failed", reason: listed.reason };
+  return { outcome: "found", path: root, main: mainWorktreeIn(listed.stdout) };
 }
 
 function reasonFor(cause: unknown): string {

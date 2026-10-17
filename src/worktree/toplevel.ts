@@ -10,7 +10,6 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { basename, dirname, resolve } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
 import { runGit } from "./git.ts";
@@ -66,19 +65,21 @@ export type MainWorktreeLookup =
 
 /** Ask git for the main worktree of the repository holding `directory`. Never throws. */
 export function mainWorktree(directory: string, until?: Deadline): MainWorktreeLookup {
-  const asked = runGit(directory, ["rev-parse", "--git-common-dir"], { until, ranOut: RAN_OUT });
+  const asked = runGit(directory, ["worktree", "list", "--porcelain"], { until, ranOut: RAN_OUT });
   if (!asked.ran) return { outcome: "failed", reason: asked.reason };
-  // Git answers relative to the directory it ran in wherever it can.
-  return { outcome: "resolved", path: mainWorktreeOf(resolve(directory, asked.stdout.trim())) };
+  return { outcome: "resolved", path: mainWorktreeIn(asked.stdout) };
 }
 
 /**
- * The main worktree is the directory holding the common `.git`. A common
- * directory by any other name, a bare repository's or a submodule's, has no
- * worktree beside it.
+ * The main worktree in what `git worktree list --porcelain` printed: the first
+ * entry, which is the one the common `.git` belongs to. A bare repository's
+ * first entry is marked `bare`, and it has no worktree to read.
  */
-export function mainWorktreeOf(commonDirectory: string): string | undefined {
-  return basename(commonDirectory) === ".git" ? dirname(commonDirectory) : undefined;
+export function mainWorktreeIn(porcelain: string): string | undefined {
+  const first = porcelain.split("\n\n", 1)[0]?.split("\n") ?? [];
+  if (first.includes("bare")) return undefined;
+  const path = first.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
+  return path === undefined || path === "" ? undefined : path;
 }
 
 /** What a call killed at its bound says, which is never that there is no worktree. */
