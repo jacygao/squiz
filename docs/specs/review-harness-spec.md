@@ -2740,10 +2740,11 @@ of git itself (§ 3 The state file).
    time it starts a round or works a thread. For Claude Code, `squiz init` has
    already done this, once for every project, in the user's settings in
    `$CLAUDE_CONFIG_DIR` or `~/.claude` (§ 6 `squiz init`). A Copilot session is
-   started with them allowed:
+   started with `squiz` allowed. Copilot matches a `shell(...)` rule on the
+   command's name alone, so the one rule allows every `squiz` subcommand:
 
    ```
-   copilot --allow-tool='shell(squiz review:*)' --allow-tool='shell(squiz threads)' --allow-tool='shell(squiz reply:*)'
+   copilot --allow-tool='shell(squiz)'
    ```
 
 2. **Optional.** `.squiz.json` in the host project's main worktree, to change any of the
