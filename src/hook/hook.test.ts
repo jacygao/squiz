@@ -557,17 +557,3 @@ test("a place's clean-up leaves no host the firing started running, one that has
     assert.deepEqual(processesNaming(directory), [], `a process naming ${directory} outlived the clean-up that removed it`);
   }
 });
-
-test("probe old: a firing that starts a host", async () => {
-  await withPlace(async (place) => {
-    await fire(place, { payload: stopPayload(place.worktree) });
-    assert.deepEqual(hostsThatTook(place), [], "OLD assertion caught the host");
-  });
-});
-
-test("probe new: a firing that starts a host", async () => {
-  await withPlace(async (place) => {
-    await fire(place, { payload: stopPayload(place.worktree) });
-    assert.equal(hostsAsked(place), 0, "NEW assertion caught the host");
-  });
-});
