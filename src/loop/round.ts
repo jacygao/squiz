@@ -79,6 +79,7 @@ import { sameState, type ReviewerPlace, type ReviewerSession, type StateKey } fr
 import { postFindings, type PostedFindings, type Threaded } from "./post-findings.ts";
 import { closedBeforeAnyRound, postEpisodeSummary, type EpisodeSummary } from "./post-summary.ts";
 import { tokenBoundIsReached, type ClosingReason, type EpisodeBounds } from "./round-decision.ts";
+import { seenDuring } from "./seen-during.ts";
 import { applyVerdicts, rulingsOn, rulingsReplied, type AppliedVerdict, type AppliedVerdicts } from "./verdicts.ts";
 
 // Each `ps` run that tells whether a lock's holder is still running. Its own
@@ -1415,7 +1416,10 @@ function ruledOn(
 function reviewerFailed(review: FailedReview, kept: number): string {
   switch (review.outcome) {
     case "timed-out":
-      return `the reviewer was killed at its ${review.seconds}-second bound, and the round ${keptBy(kept)}`;
+      return [
+        `the reviewer was killed at its ${review.seconds}-second bound, and the round ${keptBy(kept)}`,
+        ...seenDuring(review),
+      ].join("; ");
     case "unavailable":
       return alsoKept(`the review did not run: ${review.reason}`, kept);
     case "setup":

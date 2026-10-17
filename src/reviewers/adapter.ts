@@ -174,8 +174,20 @@ export type Reported = RoundOutput & {
   readonly broken: string | undefined;
 };
 
-/** What a round has so far: what it has spent, and what the reviewer has reported. */
-export type RoundProgress = { readonly cost: Spend } & Reported;
+/**
+ * The requests the reviewer's provider failed, and the error the last one gave,
+ * `undefined` where it gave none. The CLI retried each itself, so they are what
+ * the provider did to the round rather than a failed run.
+ */
+export type FailedRequests = { readonly count: number; readonly last: string | undefined };
+
+/**
+ * What a round has so far: what it has spent, and what the reviewer has reported.
+ *
+ * `failedRequests` is absent where none failed, and on a CLI whose adapter
+ * cannot see a failed request, as Copilot's cannot.
+ */
+export type RoundProgress = { readonly cost: Spend; readonly failedRequests?: FailedRequests } & Reported;
 
 /**
  * Told what the round has so far, each time the run adds to it.

@@ -2131,6 +2131,36 @@ test("a review is bounded by the configured timeout, whatever the calls before i
   assert.equal(ran.state?.rounds[0]?.cutShortAtSeconds, 900);
 });
 
+test("a round killed at its bound says what squiz saw of the reviewer's messages and its provider (#494)", async () => {
+  const clock = stoppedClock();
+  const throttled: Reviewer = {
+    command: "/bin/sh",
+    args: ["-c", "sleep 30"],
+    parse: async (_stdout, progressSoFar): Promise<ParsedRun> => {
+      clock.at = 900_000;
+      progressSoFar?.({
+        cost: { dollars: 0.254, tokens: 891_728, messages: 21 },
+        failedRequests: { count: 7, last: "429 Too Many Requests" },
+        ...nothingReported,
+        refusals: 0,
+        finished: false,
+        broken: undefined,
+      });
+      await new Promise<never>(() => {});
+      throw new Error("the round read a parse that never finished");
+    },
+  };
+  const ran = await runInFixture({ clock, config: { timeout: 900 }, answers: FAILING, reviewer: throttled });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(
+    ran.conclusion.reason,
+    "the reviewer was killed at its 900-second bound, and the round recorded no findings; " +
+      "the reviewer's 21 messages took about 43 seconds each; " +
+      'its provider failed 7 requests, the last with "429 Too Many Requests"',
+  );
+});
+
 /**
  * The posting reserve is counted from the end of the review rather than from the
  * start of the round. Counted from the start, a review that ran its whole bound

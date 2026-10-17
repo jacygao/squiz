@@ -111,6 +111,21 @@ test("a reviewer that says nothing and does not stop is killed at the bound", as
   });
 });
 
+test("a round killed at the bound carries the requests its provider failed (#494)", async () => {
+  await inATree(async (tree) => {
+    const throttled = `${writing(
+      said("", "error", 0, "429 Too Many Requests") + reportingMessage + said("", "error", 0, "503 overloaded"),
+    )}\nsetInterval(() => {}, 1000);`;
+    const round = await runRound(reviewer(throttled).adapter, at(tree), BOUND);
+    assert.equal(round.outcome, "timed-out", accountOf(round));
+    assert.deepEqual(
+      round.outcome === "timed-out" ? round.failedRequests : undefined,
+      { count: 2, last: "503 overloaded" },
+      "the round's failure line can only name what the round hands it",
+    );
+  });
+});
+
 /**
  * The run closes its own output and the round reads to the end of it. `pi`
  * answers the calls of one message in whatever order they complete, so a report

@@ -26,6 +26,7 @@
 import type { Finding } from "../../findings/finding.ts";
 import { readFinding, readVerdict } from "../../findings/reported.ts";
 import type {
+  FailedRequests,
   ParsedRun,
   ProgressSoFar,
   Reported,
@@ -53,6 +54,10 @@ type Tally = {
   stopped: boolean;
   /** The last reason an errored message gave. */
   reason: string | undefined;
+  /** How many messages stopped with an error, each a request the provider failed. */
+  failed: number;
+  /** The error the last of them gave. */
+  lastFailure: string | undefined;
   findings: Finding[];
   verdicts: ThreadVerdict[];
   ruled: Set<string>;
@@ -82,6 +87,8 @@ export async function readReports(
     lost: false,
     stopped: false,
     reason: undefined,
+    failed: 0,
+    lastFailure: undefined,
     findings: [],
     verdicts: [],
     ruled: new Set(),
@@ -89,7 +96,7 @@ export async function readReports(
     finished: false,
     broken: undefined,
   };
-  const tell = (): void => soFar?.({ cost: costOf(tally), ...reportedIn(tally) });
+  const tell = (): void => soFar?.({ cost: costOf(tally), ...failedIn(tally), ...reportedIn(tally) });
 
   const decoder = new TextDecoder();
   let pending = "";
@@ -197,6 +204,10 @@ function take(tally: Tally, text: string, number: number): void {
         tally.messages += 1;
       }
       if (stopReason === "stop") tally.stopped = true;
+      if (stopReason === "error") {
+        tally.failed += 1;
+        tally.lastFailure = errorMessage;
+      }
       if (errorMessage !== undefined) tally.reason = errorMessage;
       tally.owed = false;
       return;
@@ -250,6 +261,10 @@ function costOf(tally: Tally): RoundCost {
     ...(tally.models.length === 0 ? {} : { models: [...tally.models] }),
   };
   return tally.owed || tally.lost ? { ...cost, floor: true } : cost;
+}
+
+function failedIn(tally: Tally): { readonly failedRequests?: FailedRequests } {
+  return tally.failed === 0 ? {} : { failedRequests: { count: tally.failed, last: tally.lastFailure } };
 }
 
 function reportedIn(tally: Tally): Reported {
