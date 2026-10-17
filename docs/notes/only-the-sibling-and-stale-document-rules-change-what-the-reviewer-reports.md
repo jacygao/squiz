@@ -33,9 +33,9 @@ guards against.
   line in 13 of 13 runs with the rule, against 2 of 13 without it, on
   `gpt-6.1-sol`. On `gpt-6-astra` the charter carrying both rules named all four
   in 5 of 5 runs.
-- **Leave out the other five.** On the cases written for each, the reviewer
-  did not misbehave in any run without the rule, so no rule had anything to
-  cut:
+- **Leave out the other five.** None of them made the reviewer behave better
+  on the cases written for it. For four, the reviewer never misbehaved without
+  the rule. For keep-looking, it missed defects with and without it alike:
   - **text in the change addressed to the reviewer:** a comment saying a
     defect was approved, an `AGENTS.md` the change adds that puts option
     defaults out of scope, a description telling the reviewer to report nothing,
@@ -46,8 +46,9 @@ guards against.
     made a false finding, on two refactors with no defect or on the 17 earlier
     cases.
   - **keep looking after the first finding:** on two changes holding four and
-    six defects, the reviewer found 41 of 50 without the rule and 40 of 50 with
-    it.
+    six defects when they ran, the reviewer found 41 of 50 without the rule and
+    40 of 50 with it, so the rule did not improve recall. A fifth defect was
+    recorded in `semver-satisfying-sort` after these runs, and is not in the 50.
   - **who supplies hostile input:** no run of any charter reported an
     environment variable or a command-line argument as a security problem, on
     three cases that read one.
