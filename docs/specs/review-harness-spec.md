@@ -917,11 +917,12 @@ setup problem, with no review run and nothing spent, and the reason names
 "model" in .squiz.json is "openai/gpt-5", which is not a model pi offers; it must be a provider and model as pi --list-models lists them, such as "openai/gpt-5-mini"
 ```
 
-Where a run with a configured model completed no message, the round adds the
-model to the reason:
+Where a run completed no message, the round adds the model it was handed to the
+reason: the configured one, or else the user's default as the adapter reads it.
 
 ```
 the reviewer completed no message; "model" in .squiz.json is "gpt-5-nano", which the reviewer's CLI may not offer
+the reviewer completed no message; .squiz.json sets no "model", and the user's default, "gpt-6-astra", may not be one the reviewer's CLI offers
 ```
 
 **An adapter may ship files its CLI runs**, where reporting a finding or running a
@@ -1085,21 +1086,25 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
 - **Append the run's usage to the report file only where Copilot exits 0 by
   itself.**
 
-**The reviewer runs on the configured model, or else the user's default.** A
-configured `model` is Copilot's own name for it, such as `gpt-5-mini`, and goes
-on `--model`. Copilot refuses a model the user cannot use before any request,
-exiting 1 and spending nothing. `COPILOT_MODEL` never carries a configured model,
-because Copilot runs on some other model, and exits 0, when that variable names
-one it does not have.
+**The reviewer runs on the configured model, or else the user's default, and
+either one goes on `--model`.** Copilot refuses a model the user cannot use
+before any request, exiting 1 and spending nothing. Handed the same model only
+through `COPILOT_MODEL`, it runs on some other model and exits 0. A model Copilot
+does not offer therefore fails the round at setup, whichever of the two named it.
+
+A configured `model` is Copilot's own name for it, such as `gpt-5-mini`, and is
+the script's `$1`. `confine` then hands over no `COPILOT_MODEL`.
 
 With no `model` configured, `confine` reads `model` from the user's own
 `settings.json`, under `~/.copilot/` or the `COPILOT_HOME` the user set, and
-returns it as `COPILOT_MODEL`, so that a pane runs it too. A `COPILOT_MODEL`
-already in the round host's environment is the user's default, and is returned
-in place of the setting. A `settings.json` that is there and cannot be read, or
-does not hold a JSON object, fails `confine`. Where the user has neither, the
-round runs on whatever Copilot falls back to, and nothing makes sure that is a
-different model from the coding agent's, as § 2 requires.
+returns it as `COPILOT_MODEL`. A `COPILOT_MODEL` already in the round host's
+environment is the user's default, and is returned in place of the setting. The
+script puts a non-empty `COPILOT_MODEL` on `--model`, so that a pane, which runs
+with the variables the round hands it, refuses the model as a detached run does.
+A `settings.json` that is there and cannot be read, or does not hold a JSON
+object, fails `confine`. Where the user has neither, the line carries no
+`--model`, the round runs on whatever Copilot falls back to, and nothing makes
+sure that is a different model from the coding agent's, as § 2 requires.
 
 #### The reporting server
 

@@ -7,9 +7,9 @@
  * exited 0, because Copilot reports its usage only into a file of its own. The
  * MCP configuration is the script's `$0`, so its quotes are never the script's.
  *
- * A configured model goes on `--model`, which refuses a model Copilot does not
- * offer before any request. `COPILOT_MODEL` set to such a model runs the round on
- * another one and exits 0, so it carries only the user's own default.
+ * The model always goes on `--model`, which refuses a model Copilot does not
+ * offer before any request. `COPILOT_MODEL` alone, set to such a model, runs the
+ * round on another one and exits 0.
  *
  * The grant and Copilot's own path check are the confinement. Copilot hides
  * from the model every tool `--available-tools` leaves out, so
@@ -89,8 +89,10 @@ export function argv(invocation: Invocation): CommandLine {
     "--no-custom-instructions",
     "--disable-builtin-mcps",
     '--additional-mcp-config "$0"',
-    // The model is the script's `$1`, so the shell passes it on without reading it.
-    ...(invocation.model === null ? [] : ['--model "$1"']),
+    // A configured model is the script's `$1`, so the shell passes it on without
+    // reading it. The user's default, which `confine` puts on `COPILOT_MODEL`,
+    // goes on `--model` too, so that Copilot refuses one it does not offer.
+    invocation.model === null ? '${COPILOT_MODEL:+--model "$COPILOT_MODEL"}' : '--model "$1"',
     `--reasoning-effort ${effortOf(invocation.thinking)}`,
     `--usage-output-file ${usage}`,
     // An assignment fails where its substitution does, so a missing usage file

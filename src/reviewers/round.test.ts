@@ -385,6 +385,22 @@ test("a run that completed no message on a configured model names the setting an
   });
 });
 
+test("a run that completed no message on the user's default model names that model (#599)", async () => {
+  await inATree(async (tree) => {
+    const defaulted = { ...reviewer(sayingNothing).adapter, userModel: () => "gpt-6-astra" };
+    const round = await runRound(defaulted, at(tree), 10);
+    assert.equal(round.outcome, "setup");
+    assert.match(
+      round.outcome === "setup" ? round.reason : "",
+      /\.squiz\.json sets no "model", and the user's default, "gpt-6-astra", may not be one the reviewer's CLI offers/u,
+    );
+
+    // A configured model is the one the run was on, so the default is not named.
+    const configured = await runRound(defaulted, { ...at(tree), model: "gpt-5-mini" }, 10);
+    assert.doesNotMatch(configured.outcome === "setup" ? configured.reason : "", /gpt-6-astra/u);
+  });
+});
+
 // The round has no terminal to give. A line built for a pane would get
 // `/dev/null` instead, and an interactive CLI there is a run nobody can see.
 test("a command line that needs a terminal is not started without one", async () => {

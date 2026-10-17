@@ -236,7 +236,13 @@ export async function runRound(
       return { outcome: "timed-out", cost: spent, seconds, refusals: refused, ...held };
     }
     if (ran.kind === "unstartable" || ran.kind === "incomplete") {
-      return { outcome: "setup", cost: spent, reason: withModel(ran.reason, invocation, spent), refusals: refused, ...held };
+      return {
+        outcome: "setup",
+        cost: spent,
+        reason: withModel(ran.reason, invocation, adapter, spent),
+        refusals: refused,
+        ...held,
+      };
     }
     if (attempts > 1) {
       return { outcome: "unavailable", cost: spent, reason: ran.reason, refusals: refused, ...held };
@@ -254,16 +260,21 @@ export async function runRound(
 }
 
 /**
- * The reason a setup failure gives, naming the configured model where the run
- * completed no message.
+ * The reason a setup failure gives, naming the model the run was handed where it
+ * completed no message: the configured one, or else the user's default.
  *
  * A CLI that refuses a model it does not offer exits before its first request,
  * and in a pane nothing it said reaches the round, so the model is named as one
  * cause the person can check.
  */
-function withModel(reason: string, invocation: Invocation, spent: Spend): string {
-  if (invocation.model === null || (spent?.messages ?? 0) > 0) return reason;
-  return `${reason}; "model" in .squiz.json is "${invocation.model}", which the reviewer's CLI may not offer`;
+function withModel(reason: string, invocation: Invocation, adapter: Adapter, spent: Spend): string {
+  if ((spent?.messages ?? 0) > 0) return reason;
+  if (invocation.model !== null) {
+    return `${reason}; "model" in .squiz.json is "${invocation.model}", which the reviewer's CLI may not offer`;
+  }
+  const user = adapter.userModel?.(process.env);
+  if (typeof user !== "string") return reason;
+  return `${reason}; .squiz.json sets no "model", and the user's default, "${user}", may not be one the reviewer's CLI offers`;
 }
 
 /** No findings and no verdicts: what an attempt the reviewer told nothing carries. */
