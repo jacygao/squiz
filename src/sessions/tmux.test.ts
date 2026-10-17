@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 
+import { processesNaming, stopEveryNaming } from "./leftovers.ts";
 import { identityOf, stillRunning } from "./process.ts";
 import { closeWindow, openWindow, type TmuxWindow, type WindowOpening } from "./tmux.ts";
 
@@ -53,7 +54,11 @@ function privateServer(t: TestContext, shell?: string): Server {
 
 function scratch(t: TestContext): string {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "squiz-sessions-tmux-")));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(async () => {
+    // A window's command can outlive its server, and writes here until it ends.
+    await stopEveryNaming(directory, BOUND_MS);
+    rmSync(directory, { recursive: true, force: true });
+  });
   return directory;
 }
 
@@ -384,4 +389,22 @@ test("a close where tmux is not installed could not tell", { skip }, async (t) =
   const result = closeWindow(window, { ...server.environment, PATH: directory }, BOUND_MS);
 
   assert.equal(result.outcome, "unknown", JSON.stringify(result));
+});
+
+// Killing the server signals a window's command and does not wait for it, so
+// the command can outlive the server. One that ignores the hangup always does.
+test("a test's clean-up stops a command that outlives its server before removing its directory (#443)", { skip }, async (t) => {
+  let directory = "";
+  await t.test("a window left open", async (inner) => {
+    const server = privateServer(inner);
+    directory = scratch(inner);
+    const file = join(directory, "started");
+    const script = "process.on('SIGHUP', () => {}); require('node:fs').writeFileSync(process.argv[1], ''); setInterval(() => {}, 60000);";
+    opened(
+      openWindow({ name: "squiz-left", directory, argv: [process.execPath, "-e", script, file] }, server.environment, BOUND_MS),
+    );
+    assert.ok(await eventually(() => existsSync(file), 10_000), "the command never ran");
+  });
+
+  assert.deepEqual(processesNaming(directory), [], `a process naming ${directory} outlived the clean-up that removed it`);
 });

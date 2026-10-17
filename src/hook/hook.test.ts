@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { readState } from "../loop/episode-state.ts";
 import { episodeAt } from "../loop/episode.ts";
+import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
 
 const hookModule = new URL("./hook.ts", import.meta.url).href;
@@ -105,13 +106,9 @@ async function withPlace(body: (place: Place) => Promise<void>): Promise<void> {
     standIn(bin, "gh", fakeGh(bin));
     await body(place);
   } finally {
-    for (const pid of hostsThatTook(place)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // Already gone.
-      }
-    }
+    // A host can still be starting, and writes into both once it has.
+    await stopEveryNaming(worktree, BOUND_MS);
+    await stopEveryNaming(bin, BOUND_MS);
     await rm(worktree, { recursive: true, force: true });
     await rm(bin, { recursive: true, force: true });
   }
@@ -539,4 +536,17 @@ test("a host that could not be started says so in one line, the state queued", a
     assert.match(fired.stderr, new RegExp(`^squiz: the round host for PR #${NUMBER} could not be started: [^\\n]*\\n$`, "u"));
     assert.equal(recordsIn(place).length, 1);
   });
+});
+
+test("a place's clean-up leaves no host the firing started running, one that has not yet taken the lock included (#443)", async () => {
+  let directories: readonly string[] = [];
+  await withPlace(async (place) => {
+    directories = [place.worktree, place.bin];
+    const fired = await fire(place, { payload: stopPayload(place.worktree) });
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+  });
+
+  for (const directory of directories) {
+    assert.deepEqual(processesNaming(directory), [], `a process naming ${directory} outlived the clean-up that removed it`);
+  }
 });

@@ -14,6 +14,7 @@ import { readState, writeState, type EpisodeState } from "../loop/episode-state.
 import type { StateRecord } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
+import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { takeHostLock } from "./lock.ts";
 import { trigger, type TriggerRequest, type Triggered } from "./trigger.ts";
@@ -127,7 +128,9 @@ function withFixture(body: (fixture: Fixture) => void | Promise<void>): Promise<
       await body(fixture);
     } finally {
       process.env["PATH"] = originalPath;
-      for (const pid of hostsThatTook(fixture)) stop(pid);
+      // A host can still be starting, and writes into both once it has.
+      await stopEveryNaming(worktree, BOUND_MS);
+      await stopEveryNaming(bin, BOUND_MS);
       rmSync(worktree, { recursive: true, force: true });
       rmSync(bin, { recursive: true, force: true });
     }
@@ -509,4 +512,16 @@ test("a trigger for the state the closing round is reviewing leaves it in hand, 
 
     assert.deepEqual(result.decision, { outcome: "in-hand" }, "a run on the running closing round's state would print the old close");
   });
+});
+
+test("the fixture's clean-up leaves no host it started running, one that has not yet taken the lock included (#443)", async () => {
+  let directories: readonly string[] = [];
+  await withFixture((fixture) => {
+    directories = [fixture.worktree, fixture.bin];
+    assert.equal(decided(trigger(request(fixture))).host.outcome, "started");
+  });
+
+  for (const directory of directories) {
+    assert.deepEqual(processesNaming(directory), [], `a process naming ${directory} outlived the clean-up that removed it`);
+  }
 });
