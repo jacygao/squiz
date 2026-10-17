@@ -97,7 +97,8 @@ export function awakeDeadlineIn(milliseconds: number, now: () => number = Date.n
  * A deadline at the moment `at` returns, which `gapped` may move on.
  *
  * `gapped` is told the time since the watch's previous look, before each look
- * after the first decides whether the moment has passed.
+ * after the first decides whether the moment has passed, and once more when the
+ * watch is cancelled.
  */
 function watched(at: () => number, now: () => number, gapped: (gap: number) => void): Deadline {
   const passed = (): boolean => now() >= at();
@@ -124,6 +125,9 @@ function watched(at: () => number, now: () => number, gapped: (gap: number) => v
     };
     look();
     return (): void => {
+      // The time since the last look was watched too, and a sleep in it is the
+      // watched work's, however it ended.
+      if (!done && lookedAt !== undefined) gapped(now() - lookedAt);
       done = true;
       if (timer !== undefined) clearTimeout(timer);
     };

@@ -226,6 +226,21 @@ test("no more than the bound itself is added back, however long the sleep (#665)
   }
 });
 
+/**
+ * A review that ends on waking, before the watch looks again. The round cancels
+ * the watch as the review ends, and the sleep is still the review's.
+ */
+test("a sleep that ends as the watch is cancelled is still added back (#665)", () => {
+  let clock = 0;
+  const bound = awakeDeadlineIn(10_000, () => clock);
+  const cancel = bound.whenPassed(() => {});
+  clock = 8_000;
+  cancel();
+  assert.equal(bound.slept(), 8_000, "the gap since the last look was dropped when the watch was cancelled");
+  clock = 14_000;
+  assert.ok(!bound.passed(), "the review ended inside its awake time, and the posting reserve counts from there");
+});
+
 /** Long enough for a watch to look again, whose looks are at most 250 ms apart. */
 const LOOKED_MS = 600;
 
