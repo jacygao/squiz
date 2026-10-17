@@ -1102,9 +1102,10 @@ environment is the user's default, and is returned in place of the setting. The
 script puts a non-empty `COPILOT_MODEL` on `--model`, so that a pane, which runs
 with the variables the round hands it, refuses the model as a detached run does.
 A `settings.json` that is there and cannot be read, or does not hold a JSON
-object, fails `confine`. Where the user has neither, the line carries no
-`--model`, the round runs on whatever Copilot falls back to, and nothing makes
-sure that is a different model from the coding agent's, as § 2 requires.
+object, fails `confine`. Where the user has neither, `confine` returns
+`COPILOT_MODEL` set empty, so that one a pane's server carries never reaches
+`--model`. The round then runs on whatever Copilot falls back to, and nothing
+makes sure that is a different model from the coding agent's, as § 2 requires.
 
 #### The reporting server
 

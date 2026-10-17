@@ -55,9 +55,10 @@ export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv =
       // holds. Copilot reads empty as off, where an unset variable would leave
       // whatever the round host inherited.
       COPILOT_ALLOW_ALL: "",
-      // Set even where the host carries it, because a pane runs with its
-      // server's environment rather than the host's.
-      ...(model === undefined ? {} : { COPILOT_MODEL: model }),
+      // Set even where the host carries it, and set empty where the user has no
+      // default, because a pane runs with its server's environment rather than
+      // the host's, and the line puts a non-empty value on `--model`.
+      ...(invocation.model === null ? { COPILOT_MODEL: model ?? "" } : {}),
     },
   };
 }
