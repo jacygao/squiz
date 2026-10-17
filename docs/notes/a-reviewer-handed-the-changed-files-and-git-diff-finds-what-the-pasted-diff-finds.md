@@ -33,11 +33,7 @@ recheck-when: the reviewer's model or the charter changes, or a case set of chan
 
 ## Needs your input
 
-- **The DeepSeek account ran out of balance during the runs.** 33 of the 102
-  `pi` runs ended on `402 Insufficient Balance`, and one on `429` for
-  concurrency, so `pi` is measured on 69 runs. Recommended: top it up before the
-  next measurement, and re-run the `pi` column if a decision ever rests on it
-  alone.
+Nothing.
 
 ## Reference
 
@@ -141,9 +137,10 @@ round granted then.
   pasted was never large. What reading on demand does to a
   review of a change of hundreds of files is not measured, beyond the one round
   on #714's head.
-- **`pi` is underpowered.** A third of its runs failed on the provider's
-  balance, unevenly across prompts, so its column supports the Copilot result
-  and settles nothing alone.
+- **`pi` is measured on 69 of 102 runs.** The DeepSeek account ran out of
+  balance during the runs: 33 ended on `402 Insufficient Balance` and one on
+  `429` for concurrency, unevenly across prompts. Its column supports the
+  Copilot result and settles nothing alone.
 - **Matching a finding to a defect is a judgement.** Patterns over each
   finding's file, line and headline made the match, and a sample of the
   matches was read to check it. The two that matched no known defect, both `pi`'s, were not
