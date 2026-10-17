@@ -76,12 +76,13 @@ there:
 Copilot, when you start a session:
 
 ```sh
-copilot --allow-tool='shell(squiz review:*)' --allow-tool='shell(squiz threads)' --allow-tool='shell(squiz reply:*)'
+copilot --allow-tool='shell(squiz)'
 ```
 
-Nothing else is allowed: other commands, and anything chained after these with
-`&&` or `;`, still ask. These three start reviews and post replies on GitHub as
-you.
+Copilot matches a rule on the command's name alone, so this allows every
+`squiz` subcommand, not just the three. Other commands, and anything chained
+after `squiz` with `&&` or `;`, still ask. The three start reviews and post
+replies on GitHub as you.
 
 That is all. A review starts each time the coding agent finishes its work on a
 branch with an open pull request.
