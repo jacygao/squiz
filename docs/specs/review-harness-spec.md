@@ -441,20 +441,62 @@ the session that dispatched it.
 
 When a round records its result, the round host writes a note for the owner
 recorded on the state, in `.squiz/<number>/notes/<session id>/`, one file per
-note:
+note. Each field is one `key=value` line, and a backslash, line feed or carriage
+return in a value is written as `\\`, `\n` or `\r`:
 
 ```
 to=60517e1f-e1dc-49b1-8e39-6fcbe686f3fb
 pr=41
 head=3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
 subagent=a402ef8f56c1b2ed1
-text=Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2 threads are open. Run `squiz review 41` to read them.
+text=Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2 threads are open:\n\nPRRT_kwDOL7tYbc5abcd1 packages/sync/src/queue.ts:134 high — Retry backoff resets on every enqueue\n  - `enqueue()` calls …
 ```
 
-The note points, and carries no finding. `subagent` is there only where a
-subagent did the work. A failed state gets one note, however many times it fails,
-and a state not reviewed gets one saying why. A state no hook recorded an owner
-for gets no note.
+`subagent` is there only where a subagent did the work. A failed state gets one
+note, however many times it fails, and a state not reviewed gets one saying why.
+A state no hook recorded an owner for gets no note.
+
+**A note for open threads carries them.** Just before it writes the note, the
+round host lists the review threads on the pull request. The note prints those
+the round left open that are still open, each as `squiz review` prints it (§ 6),
+in the order GitHub lists them. Where threads remain open with rounds left, the
+text, decoded, reads:
+
+```
+Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2 threads are open:
+
+PRRT_kwDOL7tYbc5abcd1 packages/sync/src/queue.ts:134 high — Retry backoff resets on every enqueue
+  - `enqueue()` calls `resetBackoff()` on every call, so a busy queue never backs off.
+
+  **Suggested fix:** reset the backoff only when the queue was empty.
+
+PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
+  - `isExpired()` compares the server's `exp` against the local clock with no margin.
+
+  **Suggested fix:** allow the skew the server documents before reading a token as expired.
+
+Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say
+what you changed or why you disagree. Commit and push what you changed, then run
+`squiz review 41` again.
+```
+
+Where the episode closed with threads open, the first line reads `the episode has
+closed with 2 threads open:`, and the threads end the text, with no paragraph
+after them.
+
+- **At most 10 threads.** Where more are open, the note prints the first 10 and
+  ends with a line counting the rest: ``3 more threads are open. `squiz review 41` prints them all.``
+- **A listing that fails leaves a pointer.** Where the threads cannot be listed,
+  or the listing holds none of those the round left open, the note counts them
+  and points to `squiz review` instead, and `host.log` says why the listing
+  failed:
+
+  ```
+  text=Squiz reviewed PR #41 at 3f9c2e0: 2 threads are open. Run `squiz review 41` to read them.
+  ```
+
+A round that closed the episode with nothing open says so and points to
+`squiz review` for the close.
 
 For a round that failed, the text gives the reason and names `squiz status`.
 Where a round remains under the round cap and the token bound, it says that a new

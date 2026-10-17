@@ -59,7 +59,7 @@ index d3d0cb2..6db135b 100644
  // line 91
 `.slice(1);
 
-type Kind = "prlist" | "diff" | "threads" | "create" | "lookup" | "summary" | "failure";
+type Kind = "prlist" | "diff" | "node" | "threads" | "create" | "lookup" | "summary" | "failure";
 
 /** One state of the pull request, queued, with the owner its trigger recorded where it had one. */
 function queued(head: string, activity: string | null = null, owner?: Owner): StateRecord {
@@ -355,6 +355,7 @@ function prList(listed: number, head: string): string {
 function answers(listed: number): Partial<Record<Kind, string>> {
   return {
     diff: DIFF,
+    node: included("200 OK", JSON.stringify({ number: listed, node_id: "PR_pull" })),
     threads: included(
       "200 OK",
       JSON.stringify({ data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } }),
@@ -406,6 +407,7 @@ const GH_SCRIPT = [
   "  *'/issues/'*'/comments'*) kind=summary ;;",
   "  *'--method POST'*) kind=create ;;",
   "  *'pr list'*) kind=prlist ;;",
+  "  *'api --include repos/'*'/pulls/'*) kind=node ;;",
   "  *'v3.diff'*) kind=diff ;;",
   "esac",
   'printf \'%s\\n\' "$kind" >> "$dir/kinds"',
@@ -742,41 +744,69 @@ test("the host runs no round for an episode whose close is recorded, and records
 });
 
 /** The threads listing with one open thread the reviewer opened. */
-const ONE_OPEN_THREAD = included(
-  "200 OK",
-  JSON.stringify({
-    data: {
-      node: {
-        reviewThreads: {
-          pageInfo: { hasNextPage: false, endCursor: null },
-          nodes: [
-            {
-              id: "PRRT_open",
-              isResolved: false,
-              isOutdated: false,
-              path: TRACKED,
-              line: 88,
-              originalLine: 88,
-              subjectType: "LINE",
-              comments: {
-                pageInfo: { hasNextPage: false, endCursor: null },
-                nodes: [
-                  {
-                    id: "PRRC_open",
-                    databaseId: 51,
-                    author: { login: "squiz" },
-                    body: renderComment(finding("The name says nothing.")),
-                    createdAt: "2026-10-05T07:13:05Z",
-                  },
-                ],
+const ONE_OPEN_THREAD = threadsAnswer("PRRT_open");
+
+/** A threads listing holding one open thread, `id`, which carries the finding `finding("The name says nothing.")`. */
+function threadsAnswer(id: string): string {
+  return included(
+    "200 OK",
+    JSON.stringify({
+      data: {
+        node: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id,
+                isResolved: false,
+                isOutdated: false,
+                path: TRACKED,
+                line: 88,
+                originalLine: 88,
+                subjectType: "LINE",
+                comments: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [
+                    {
+                      id: "PRRC_open",
+                      databaseId: 51,
+                      author: { login: "squiz" },
+                      body: renderComment(finding("The name says nothing.")),
+                      createdAt: "2026-10-05T07:13:05Z",
+                    },
+                  ],
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       },
-    },
-  }),
-);
+    }),
+  );
+}
+
+/**
+ * Have the threads listing hold the thread the round opens, from the moment it
+ * posts the comment, as GitHub's would.
+ */
+function listOpenedThread(fixture: Fixture): void {
+  writeFileSync(join(fixture.binaries, "threads-after-create"), threadsAnswer("PRRT_new"), "utf8");
+  writeFileSync(join(fixture.binaries, "on-create.sh"), `cp '${join(fixture.binaries, "threads-after-create")}' '${join(fixture.binaries, "answer-threads")}'\n`, "utf8");
+}
+
+/** The opened thread as the note prints it. */
+const OPENED_THREAD = [
+  `PRRT_new ${TRACKED}:88 high — The name says nothing.`,
+  "  - The caller reads the old value.",
+  "",
+  "  **Suggested fix:** Rename it.",
+].join("\n");
+
+const WORK_THE_THREADS = [
+  "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
+  "what you changed or why you disagree. Commit and push what you changed, then run",
+  `\`squiz review ${PULL_REQUEST}\` again.`,
+].join("\n");
 
 test("a host that finds the cap spent posts the summary, and records the close on the state it took and the rest not reviewed", async () => {
   let head = "";
@@ -1073,10 +1103,11 @@ function onlyNote(ran: Hosted, owner: Owner): NoteFields {
   return notes[0] ?? {};
 }
 
-test("a round that leaves threads open writes its owner a note naming the pull request, the head and the subagent, which points to squiz review", async () => {
+test("a round that leaves threads open writes its owner a note naming the pull request, the head and the subagent, which carries the threads as the pull request lists them", async () => {
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, PARENT)],
     findings: [[finding("The name says nothing.")]],
+    before: listOpenedThread,
   });
 
   const short = ran.firstHead.slice(0, 7);
@@ -1085,8 +1116,27 @@ test("a round that leaves threads open writes its owner a note naming the pull r
     pr: String(PULL_REQUEST),
     head: ran.firstHead,
     subagent: "a402ef8f56c1b2ed1",
-    text: `Squiz reviewed PR #${PULL_REQUEST} at ${short}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
+    text: [
+      `Squiz reviewed PR #${PULL_REQUEST} at ${short}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open:`,
+      OPENED_THREAD,
+      WORK_THE_THREADS,
+    ].join("\n\n"),
   });
+});
+
+test("a round whose threads cannot be listed for the note writes one that points to squiz review, and host.log says why", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    findings: [[finding("The name says nothing.")]],
+    before: (fixture) => rmSync(join(fixture.binaries, "answer-node")),
+  });
+
+  const short = ran.firstHead.slice(0, 7);
+  assert.equal(
+    onlyNote(ran, MAIN)["text"],
+    `Squiz reviewed PR #${PULL_REQUEST} at ${short}: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
+  );
+  assert.match(ran.log, /the threads could not be listed for its note: .*no answer fixtured for node/u);
 });
 
 test("a round that closes the episode with nothing open writes its owner a note with no subagent field, which points to squiz review", async () => {
@@ -1101,17 +1151,18 @@ test("a round that closes the episode with nothing open writes its owner a note 
   });
 });
 
-test("a round that closes the episode with threads open writes its owner a note counting them", async () => {
+test("a round that closes the episode with threads open writes its owner a note carrying them", async () => {
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, MAIN)],
     config: { rounds: 1 },
     findings: [[finding("The name says nothing.")]],
+    before: listOpenedThread,
   });
 
   const short = ran.firstHead.slice(0, 7);
   assert.equal(
     onlyNote(ran, MAIN)["text"],
-    `Squiz reviewed PR #${PULL_REQUEST} at ${short}: the episode has closed with 1 thread open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
+    [`Squiz reviewed PR #${PULL_REQUEST} at ${short}: the episode has closed with 1 thread open:`, OPENED_THREAD].join("\n\n"),
   );
 });
 
@@ -1386,9 +1437,14 @@ test("a subagent's note is posted to the socket its hook recorded, the parent's,
     const ran = await host({
       records: (fixture) => [queued(fixture.head(), null, owner)],
       findings: [[finding("The name says nothing.")]],
+      before: listOpenedThread,
     });
 
-    const text = `Squiz reviewed PR #${PULL_REQUEST} at ${ran.firstHead.slice(0, 7)}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`;
+    const text = [
+      `Squiz reviewed PR #${PULL_REQUEST} at ${ran.firstHead.slice(0, 7)}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open:`,
+      OPENED_THREAD,
+      WORK_THE_THREADS,
+    ].join("\n\n");
     assert.deepEqual(socket.received(), [`${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`]);
     assert.deepEqual(ran.notes[PARENT.sessionId], [], `notes/ holds ${JSON.stringify(ran.notes)}`);
     assert.equal(ran.delivered[PARENT.sessionId], 1);

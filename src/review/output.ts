@@ -235,11 +235,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         heading,
         `${counted(open.length, "thread")} ${open.length === 1 ? "is" : "are"} open:`,
         ...open.map(printedThread),
-        [
-          "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
-          "what you changed or why you disagree. Commit and push what you changed, then run",
-          `\`squiz review ${result.pullRequest}\` again.`,
-        ].join("\n"),
+        workTheThreads(result.pullRequest),
       ];
     case 0:
       return [withNotReviewed(heading, result, result.notReviewed), NOTHING_OPEN];
@@ -254,6 +250,15 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
       ];
     }
   }
+}
+
+/** What the coding agent does with threads that are open while rounds remain. */
+export function workTheThreads(pullRequest: number): string {
+  return [
+    "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
+    "what you changed or why you disagree. Commit and push what you changed, then run",
+    `\`squiz review ${pullRequest}\` again.`,
+  ].join("\n");
 }
 
 const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";
@@ -347,7 +352,7 @@ function unpostedLine(result: Unposted): string {
  * One open thread: its `squiz threads` line, then its comments indented two
  * spaces, the first without the first line the `squiz threads` line carries.
  */
-function printedThread(thread: ReviewThread): string {
+export function printedThread(thread: ReviewThread): string {
   const [opening, ...replies] = thread.comments.map((comment) => linesOf(comment.body));
   const bodies = [trimBlank((opening ?? []).slice(1)), ...replies.map(trimBlank)].filter(
     (lines) => lines.length > 0,

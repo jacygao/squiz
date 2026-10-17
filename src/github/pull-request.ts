@@ -8,7 +8,7 @@
  * exactly like the harness working normally, every round and forever.
  */
 
-import { runGh, saidBy, type GhCall } from "./gh.ts";
+import { callRest, runGh, saidBy, type GhCall } from "./gh.ts";
 
 /** The pull request a round reviews. */
 export type PullRequest = {
@@ -44,6 +44,9 @@ export type PullRequestLookup =
   | ({ readonly outcome: "found" } & PullRequest)
   | { readonly outcome: "none" }
   | Failure;
+
+/** The `PR_` node id GitHub gave for a pull request's number. */
+export type NodeIdLookup = { readonly outcome: "found"; readonly nodeId: string } | Failure;
 
 /** The diff GitHub served for a pull request. */
 export type DiffFetch = { readonly outcome: "fetched"; readonly diff: string } | Failure;
@@ -108,6 +111,18 @@ export function fetchDiff(number: number, call: GhCall): DiffFetch {
   if (run.outcome !== "ran") return failed(run.reason);
   if (run.stdout === "") return failed("gh answered with an empty diff");
   return { outcome: "fetched", diff: run.stdout };
+}
+
+/**
+ * Ask GitHub for the node id of pull request `number`, for a caller that holds
+ * only the number. Never throws.
+ */
+export function findPullRequestNodeId(number: number, call: GhCall): NodeIdLookup {
+  const answer = callRest({ path: `repos/{owner}/{repo}/pulls/${number}` }, call);
+  if (answer.outcome !== "answered") return failed(answer.reason);
+  const nodeId = textOf(rowOf(answer.body)?.["node_id"]);
+  if (nodeId === null) return failed(`GitHub answered for PR #${number} with no node id`);
+  return { outcome: "found", nodeId };
 }
 
 /**
