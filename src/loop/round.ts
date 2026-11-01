@@ -747,8 +747,8 @@ async function reviewOn(
  * exactly like the harness working normally, every round and forever. The time
  * for GitHub running out is one of those, and never an answer of none.
  */
-function gate(call: GhCall): Step<PullRequest> {
-  const branch = currentBranch(call.directory);
+function gate(call: PreReview): Step<PullRequest> {
+  const branch = currentBranch(call.directory, call.until);
   if (branch.outcome === "failed") {
     return {
       ended: failed(
