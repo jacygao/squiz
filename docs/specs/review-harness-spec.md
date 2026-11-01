@@ -1846,6 +1846,7 @@ through the link `squiz init` makes in a directory already on its `PATH`.
 | `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
 | `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
 | `squiz doctor` | A person | Prints a line per dependency, saying it is present or naming what is missing or unauthenticated, and exits 1 where a required one is not usable (The setup check). |
+| `squiz version` | A person | Prints the version and the `bin/squiz` path of the squiz that answers, as `squiz 0.1.0 /Users/ana/squiz/bin/squiz`. `squiz --version` is the same command. |
 | `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for the payload's `cwd` and returns, as § 3 sets out. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
@@ -2264,6 +2265,27 @@ squiz: allowed nothing in /Users/ana/.claude/settings.json: its permissions.allo
 squiz: allowed nothing: Claude Code's configuration was not found at /Users/ana/.claude
 ```
 
+### `squiz version`
+
+`squiz version` prints one line, and exits 0:
+
+```
+squiz 0.1.0 /Users/ana/squiz/bin/squiz
+```
+
+The version is the one in `.claude-plugin/plugin.json` of the squiz that runs,
+and the path is the real path of that squiz's `bin/squiz`, with every symlink
+followed. Both are found from the running squiz, never from the working
+directory or from `PATH`, so a `squiz` on `PATH` that runs another install
+prints that install's version.
+
+Where `plugin.json` cannot be read, is not JSON, names another plugin or names
+no version, it prints nothing on stdout, says why on stderr, and exits 1:
+
+```
+squiz: the version of this squiz could not be read: /Users/ana/squiz/.claude-plugin/plugin.json could not be read: ENOENT: no such file or directory, open '/Users/ana/squiz/.claude-plugin/plugin.json'
+```
+
 ### The setup check
 
 `squiz doctor` is run by a person, from a shell, inside a repository or outside
@@ -2672,7 +2694,7 @@ charter.md                   the standing review instructions, shipped as one fi
 src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
-  review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, and squiz doctor
+  review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
   hook/                      the Stop and SubagentStop trigger, which resolves the pull request and queues the review
   host/                      the round host, which takes queued states and runs their rounds
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
