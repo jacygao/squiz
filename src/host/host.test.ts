@@ -706,6 +706,37 @@ test("a state superseded by a later reply on the same commit is recorded not rev
   assert.equal(second?.status, "reviewed");
 });
 
+test("#416: a reply-state queued behind a clean round and superseded by it, once its reply is deleted, closes the episode on the clean round", async () => {
+  let head = "";
+  const ran = await host({
+    records: (fixture) => {
+      head = fixture.head();
+      return [queued(head, null, MAIN)];
+    },
+    // The fake lists no replies, so by the time the host takes the reply-state
+    // the pull request is back at the state the first round reviewed.
+    onStart: (index, fixture) => {
+      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted", MAIN));
+    },
+  });
+
+  assert.equal(ran.started, 1, `no second reviewer should run; the log says:\n${ran.log}`);
+  const [clean, superseded] = recordsOf(ran.state);
+  assert.ok(clean?.status === "reviewed" && clean.result === "exited", `the clean round is left as ${JSON.stringify(clean)}`);
+  assert.equal(clean.exitStatus, 0);
+  assert.deepEqual(clean.openThreads, []);
+  assert.deepEqual(superseded, {
+    head,
+    activity: "PRRC_deleted",
+    owner: MAIN,
+    status: "not reviewed",
+    reason: `superseded by ${head.slice(0, 7)} with different replies`,
+    supersededBy: { head, activity: null },
+  });
+  assert.equal(ran.state?.closeReported, true, "the episode was left open with nothing queued to close it");
+  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 1, `gh was asked for ${ran.kinds.join(", ")}`);
+});
+
 test("a state queued while the summary is being posted is reviewed or refused, and never stopped by a close it arrived before (#405)", async () => {
   const ran = await host({
     records: atHead,
@@ -977,6 +1008,24 @@ test("#414: a last round whose summary GitHub refuses keeps the reason on its re
   assert.deepEqual(record.problems, [line]);
   assert.match(ran.log, new RegExp(`round 1: ${escaped(line)}\n`, "u"));
   assert.match(ran.status.stdout, new RegExp(`\n  ${escaped(line)}\n`, "u"));
+});
+
+test("#416: a clean round that closes the episode once the state behind it is superseded keeps the summary's refusal on its record", async () => {
+  const ran = await host({
+    records: atHead,
+    before: refuseSummary,
+    onStart: (index, fixture) => {
+      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted"));
+    },
+  });
+
+  const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;
+  assert.ok(ran.kinds.includes("summary"), `gh was asked for ${ran.kinds.join(", ")}`);
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.exitStatus, 0, "a close without its summary is a close still");
+  assert.deepEqual(record.problems, [line]);
+  assert.match(ran.log, new RegExp(`round 2: ${escaped(line)}\n`, "u"));
 });
 
 test("#414: a close before any review whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
@@ -1476,6 +1525,28 @@ test("a superseded state's owner gets a note naming the state that superseded it
   assert.equal(
     onlyNote(ran, MAIN)["text"],
     `Squiz did not review PR #${PULL_REQUEST} at ${older.slice(0, 7)}: superseded by ${newer.slice(0, 7)}.`,
+  );
+});
+
+test("#416: the owner of a clean round that closes the episode once the state queued behind it is superseded is told the episode closed", async () => {
+  let head = "";
+  const ran = await host({
+    records: (fixture) => {
+      head = fixture.head();
+      return [queued(head, null, MAIN)];
+    },
+    onStart: (index, fixture) => {
+      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted", PARENT));
+    },
+  });
+
+  assert.equal(
+    onlyNote(ran, MAIN).text,
+    `Squiz reviewed PR #${PULL_REQUEST} at ${head.slice(0, 7)}: nothing is open, and the episode has closed. Run \`squiz review ${PULL_REQUEST}\` to read the close.`,
+  );
+  assert.equal(
+    onlyNote(ran, PARENT).text,
+    `Squiz did not review PR #${PULL_REQUEST} at ${head.slice(0, 7)}, the work of subagent ${PARENT.subagent}: superseded by ${head.slice(0, 7)} with different replies.`,
   );
 });
 

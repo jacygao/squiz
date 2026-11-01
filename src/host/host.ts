@@ -42,6 +42,7 @@ import {
   type QueuedRecord,
   type RoundEnd,
 } from "../loop/round-end.ts";
+import type { EpisodeSummary } from "../loop/post-summary.ts";
 import { runRoundThen, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
 import {
   putRecord,
@@ -418,7 +419,23 @@ function resultOf(
       const reason = `superseded by ${supersededBy(taken, conclusion.by)}`;
       const by = { head: conclusion.by.head, activity: conclusion.by.activity };
       const record = { ...notReviewed(key, reason), supersededBy: by };
-      return { records: () => inOrder([record]), line: `${named(taken)} not reviewed: ${reason}`, problems: [] };
+      const line = `${named(taken)} not reviewed: ${reason}`;
+      if (conclusion.closing === undefined) return { records: () => inOrder([record]), line, problems: [] };
+      const problems = summaryProblems(conclusion.pullRequest, conclusion.closing.summary);
+      return {
+        // The round already rewrote the clean record as the close. It is written
+        // again here only to carry the summary's problem, and listed so that its
+        // owner is told the episode closed.
+        records: (state) => {
+          const closing = (state.records ?? []).find((held) => sameState(held, by));
+          if (closing?.status !== "reviewed") return inOrder([record]);
+          const kept = [...(closing.problems ?? []), ...problems];
+          const closed = kept.length === 0 ? closing : { ...closing, problems: kept };
+          return [...inOrder([record]), { record: closed, name: closing.head.slice(0, 7) }];
+        },
+        line: `${line}, and the episode closed on it`,
+        problems,
+      };
     }
     case "episode-over":
       return {
@@ -454,7 +471,7 @@ function closedUnreviewed(
 ): Result {
   const bound = conclusion.because === "token-bound" ? "token-bound" : "round-cap";
   const reason = closedBeforeReview(bound);
-  const problems = summaryProblems(conclusion);
+  const problems = summaryProblems(conclusion.pullRequest, conclusion.summary);
   const closed: ClosedBeforeReview = {
     exitStatus: openThreads.length === 0 ? 0 : 3,
     openThreads,
@@ -472,10 +489,9 @@ function closedUnreviewed(
 }
 
 /** The line `squiz review` prints on stderr for a close with no summary on the pull request, or none. */
-function summaryProblems(conclusion: Extract<RoundConclusion, { readonly outcome: "close" }>): readonly string[] {
-  const { summary } = conclusion;
+function summaryProblems(pullRequest: number, summary: EpisodeSummary): readonly string[] {
   if (summary.outcome === "posted") return [];
-  return [`the review of PR #${conclusion.pullRequest} closed without its summary: ${summary.reason}`];
+  return [`the review of PR #${pullRequest} closed without its summary: ${summary.reason}`];
 }
 
 /** What a round that reviewed did beside its result, as `squiz review` prints it. */
@@ -486,7 +502,7 @@ function reportOf(
   const problems = [
     ...unpostedReasons(conclusion.verdicts),
     ...unappliedRulings(conclusion.verdicts),
-    ...(conclusion.outcome === "close" ? summaryProblems(conclusion) : []),
+    ...(conclusion.outcome === "close" ? summaryProblems(conclusion.pullRequest, conclusion.summary) : []),
   ];
   // Only a close that left threads open is printed with its bound.
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
