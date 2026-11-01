@@ -569,6 +569,41 @@ test("a superseded state whose wait runs out before the newer state's round ends
   });
 });
 
+test("#427: a clean state followed by one it superseded waits out its deadline and exits 4, rather than following the two round each other", async () => {
+  await withWorktree(async (fixture) => {
+    // A completed clean while B was queued, then B's reply was deleted before its round started, so A superseded B.
+    const replied: StateKey = { head: OWN.head, activity: "PRRC_deleted" };
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) },
+      { ...replied, status: "not reviewed", reason: "superseded by 3f9c2e0", supersededBy: OWN },
+    ], { rounds: [ROUND] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }), until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz is still reviewing PR #41 at 3f9c2e0. Run `squiz review 41` again to wait for it.");
+  });
+});
+
+test("#427: a superseded state whose successor was reviewed clean ahead of it waits out its deadline and exits 4", async () => {
+  await withWorktree(async (fixture) => {
+    const replied: StateKey = { head: OWN.head, activity: "PRRC_deleted" };
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) },
+      { ...replied, status: "not reviewed", reason: "superseded by 3f9c2e0", supersededBy: OWN },
+    ], { rounds: [ROUND] });
+    const triggered = { ...decided(fixture, { outcome: "result" }), state: replied };
+
+    const printed = await runReview(request(fixture, { triggered, until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz is reviewing PR #41 at 3f9c2e0 instead of 3f9c2e0. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
 test("a round some of whose findings failed to post keeps its status, and says how many on stderr", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

@@ -279,8 +279,14 @@ function settle(waiting: Waiting, state: EpisodeState): Settled | undefined {
   return settleRecord(waiting, state, record);
 }
 
-/** `hops` counts the superseded states followed so far, which ends a loop of them. */
+/**
+ * `hops` counts the states followed so far, from a clean state to the last
+ * record and from a superseded state to its successor. A walk that visits each
+ * record once takes fewer hops than there are records, so one that reaches that
+ * many has come round to a state it already read, and waits.
+ */
 function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord, hops = 0): Settled | undefined {
+  if (hops >= (state.records ?? []).length) return undefined;
   switch (record.status) {
     case "queued":
     case "reviewing":
@@ -292,7 +298,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
       };
     case "reviewed":
       if (record.result === "exited") return compose((threads) => roundResult(waiting, state, record, threads));
-      return afterClean(waiting, state, record);
+      return afterClean(waiting, state, record, hops);
     case "not reviewed":
       return notReviewed(waiting, state, record, hops);
   }
@@ -302,7 +308,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
  * The result the queue ends on, for a state reviewed clean with a later state
  * queued behind it, or `undefined` while a state is still queued or under review.
  */
-function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord): Settled | undefined {
+function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord, hops: number): Settled | undefined {
   const records = state.records ?? [];
   const following = { ...waiting, recorded: false };
   if (state.closeReported === true) {
@@ -315,7 +321,7 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord): 
   const last = after.at(-1);
   // A last state reviewed clean has a later one queued behind it, still to be written.
   if (last === undefined || (last.status === "reviewed" && last.result === "clean, episode open")) return undefined;
-  return settleRecord(following, state, last);
+  return settleRecord(following, state, last, hops + 1);
 }
 
 /**
@@ -334,7 +340,7 @@ function notReviewed(
     // Followed by its full key alone, because the reason names only a commit
     // other states can share.
     const newer = record.supersededBy === undefined ? undefined : recordFor(records, record.supersededBy);
-    if (newer === undefined || hops >= records.length) return undefined;
+    if (newer === undefined) return undefined;
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
   }
   const before = records.find((held): held is ClosedFirst => held.status === "not reviewed" && held.closed !== undefined);
