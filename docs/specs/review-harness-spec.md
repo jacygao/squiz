@@ -234,10 +234,16 @@ exits 4 where its wait runs out first, as § 6 shows.
 **A state reviewed clean can close the episode when the state behind it is
 superseded by it.** Say A was reviewed clean with B, a reply, queued behind it,
 and the reply is deleted before B's round starts. The pull request is at A again,
-so B is superseded by A. Where A is still the episode's last review and nothing
-else is queued, A is now the last round with nothing queued behind it, and the
-episode closes on A. No reviewer runs, and nothing is spent against the round
-cap. The close is recorded first, as for any round. The summary is then posted
+so B is superseded by A. A closes the episode where all of these hold:
+
+- no round has run since A's, whether it reviewed or failed;
+- none of the reviewer's threads is open on the pull request;
+- nothing else is queued.
+
+A is then the last round with nothing queued behind it. Otherwise B is recorded
+superseded, and the episode stays open for the next commit or reply. No reviewer
+runs for a close on A, and nothing is spent against the round cap. The close is
+recorded first, as for any round. The summary is then posted
 as § 5 sets out for a close that runs no reviewer. A's record then becomes a
 reviewed result with exit status 0 and no threads open, carrying the summary's
 problem where it was not posted, and A's owner gets the note of any close. A

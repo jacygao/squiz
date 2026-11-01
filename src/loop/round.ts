@@ -1382,9 +1382,9 @@ function closeBeforeReview(
 /**
  * The conclusion for a state the pull request has moved past, to `now`.
  *
- * Where `now` is the episode's last review, reviewed clean with the episode open,
- * and nothing else is queued, that round is the last with nothing queued behind
- * it, and it closes the episode. The close is written under the state lock, and
+ * Where `now` is the episode's last round, reviewed clean with the episode open,
+ * nothing else is queued and none of the reviewer's threads is open, that round
+ * is the last with nothing queued behind it, and it closes the episode. The close is written under the state lock, and
  * the summary is then posted from the threads and the episode's state, as any
  * close that runs no reviewer posts it. The caller turns the clean record into
  * the close once it knows what became of the summary, as it records any close.
@@ -1406,6 +1406,9 @@ function supersededBy(
       const record = lastReviewedRecord(records);
       if (record === undefined || !sameState(record, now) || record.result !== "clean, episode open") return current;
       if (current.closeReported === true || records.some((held) => held.status === "queued")) return current;
+      // A round after it, even one that failed, may have posted findings.
+      if (current.rounds.length > record.round.number) return current;
+      if (threads.some((thread) => !thread.isResolved)) return current;
       clean = record;
       return { ...current, closeReported: true };
     },

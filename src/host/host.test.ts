@@ -110,6 +110,8 @@ type Arrangement = {
   readonly findings?: readonly (readonly Finding[])[];
   /** Where given, every reviewer start completes no message, for this reason. */
   readonly incomplete?: string;
+  /** Where given, every reviewer start from this index from 0 on prints nothing the adapter can read. */
+  readonly unparsedFrom?: number;
   readonly config?: Partial<Config>;
   /** The pull request `gh pr list` answers with, where it is not the host's. */
   readonly listedNumber?: number;
@@ -214,6 +216,9 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         for await (const chunk of stdout) void chunk;
         if (arranged.incomplete !== undefined) {
           return { cost: COST, result: { kind: "incomplete", reason: arranged.incomplete } };
+        }
+        if (arranged.unparsedFrom !== undefined && started - 1 >= arranged.unparsedFrom) {
+          return { cost: COST, result: { kind: "unparsed", reason: "the output was not JSON" } };
         }
         return {
           cost: COST,
@@ -1060,6 +1065,50 @@ test("#416: a clean round that closes the episode once the state behind it is su
   assert.equal(record.exitStatus, 0, "a close without its summary is a close still");
   assert.deepEqual(record.problems, [line]);
   assert.match(ran.log, new RegExp(`round 2: ${escaped(line)}\n`, "u"));
+});
+
+test("#416: a clean round closes nothing when a state is superseded by it while a thread of the reviewer's is open", async () => {
+  const ran = await host({
+    records: atHead,
+    // The thread is listed only after the clean round's own listing, as one a
+    // failed round salvaged would be.
+    onStart: (index, fixture) => {
+      if (index !== 0) return;
+      queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted"));
+      writeFileSync(join(fixture.binaries, "answer-threads"), ONE_OPEN_THREAD, "utf8");
+    },
+  });
+
+  const [clean, superseded] = recordsOf(ran.state);
+  assert.ok(clean?.status === "reviewed" && clean.result === "clean, episode open", `the clean round is ${JSON.stringify(clean)}`);
+  assert.equal(superseded?.status, "not reviewed");
+  assert.notEqual(ran.state?.closeReported, true, "the episode closed with nothing open over a thread that is open");
+  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 0, `gh was asked for ${ran.kinds.join(", ")}`);
+});
+
+test("#416: a clean round closes nothing when a state is superseded by it after a later round failed", async () => {
+  let atFirst = "";
+  const ran = await host({
+    records: atHead,
+    // The second state's round fails, and the third state is superseded by the first.
+    unparsedFrom: 1,
+    onStart: (index, fixture) => {
+      if (index === 0) {
+        atFirst = readFileSync(join(fixture.binaries, "answer-prlist"), "utf8");
+        queueNow(fixture.episode, queued(fixture.push()));
+      }
+      if (index === 1) {
+        queueNow(fixture.episode, queued(fixture.push()));
+        writeFileSync(join(fixture.binaries, "answer-prlist"), atFirst, "utf8");
+      }
+    },
+  });
+
+  const [clean, failed, superseded] = recordsOf(ran.state);
+  assert.ok(clean?.status === "reviewed" && clean.result === "clean, episode open", `the clean round is ${JSON.stringify(clean)}`);
+  assert.equal(failed?.status, "failed", `the second state is ${JSON.stringify(failed)}; the log says:\n${ran.log}`);
+  assert.equal(superseded?.status, "not reviewed");
+  assert.notEqual(ran.state?.closeReported, true, "the episode closed on a clean round a later round followed");
 });
 
 test("#414: a close before any review whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
