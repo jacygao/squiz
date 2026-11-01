@@ -234,13 +234,14 @@ exits 4 where its wait runs out first, as § 6 shows.
 **A state reviewed clean can close the episode when the state behind it is
 superseded by it.** Say A was reviewed clean with B, a reply, queued behind it,
 and the reply is deleted before B's round starts. The pull request is at A again,
-so B is superseded by A. Where nothing else is queued, A is now the last round
-with nothing queued behind it, and the episode closes on A. No reviewer runs, and
-nothing is spent against the round cap. In the update that records the
-close, A's record becomes a reviewed result with exit status 0 and no threads
-open. The summary is then posted as § 5 sets out for a close that runs no
-reviewer, and A's owner gets the note of any close. A run of `squiz review`
-waiting on A or on B returns A's close.
+so B is superseded by A. Where A is still the episode's last review and nothing
+else is queued, A is now the last round with nothing queued behind it, and the
+episode closes on A. No reviewer runs, and nothing is spent against the round
+cap. The close is recorded first, as for any round. The summary is then posted
+as § 5 sets out for a close that runs no reviewer. A's record then becomes a
+reviewed result with exit status 0 and no threads open, carrying the summary's
+problem where it was not posted, and A's owner gets the note of any close. A
+run of `squiz review` waiting on A or on B returns A's close.
 
 **A round decides its close and records it in one step.** It reads the queue
 under `state.lock`, decides from it as the table above sets out, and writes the

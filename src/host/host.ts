@@ -423,15 +423,22 @@ function resultOf(
       if (conclusion.closing === undefined) return { records: () => inOrder([record]), line, problems: [] };
       const problems = summaryProblems(conclusion.pullRequest, conclusion.closing.summary);
       return {
-        // The round already rewrote the clean record as the close. It is written
-        // again here only to carry the summary's problem, and listed so that its
-        // owner is told the episode closed.
+        // The clean round the pull request returned to closed the episode, so its
+        // record becomes the close, and its owner is told.
         records: (state) => {
-          const closing = (state.records ?? []).find((held) => sameState(held, by));
-          if (closing?.status !== "reviewed") return inOrder([record]);
-          const kept = [...(closing.problems ?? []), ...problems];
-          const closed = kept.length === 0 ? closing : { ...closing, problems: kept };
-          return [...inOrder([record]), { record: closed, name: closing.head.slice(0, 7) }];
+          const clean = (state.records ?? []).find((held) => sameState(held, by));
+          if (clean?.status !== "reviewed" || clean.result !== "clean, episode open") return inOrder([record]);
+          // A close names the findings no thread holds in its summary, so its record keeps none.
+          const { result: _clean, unthreaded: _named, problems: earlier = [], ...kept } = clean;
+          const all = [...earlier, ...problems];
+          const closed: StateRecord = {
+            ...kept,
+            result: "exited",
+            exitStatus: 0,
+            openThreads: [],
+            ...(all.length === 0 ? {} : { problems: all }),
+          };
+          return [...inOrder([record]), { record: closed, name: clean.head.slice(0, 7) }];
         },
         line: `${line}, and the episode closed on it`,
         problems,

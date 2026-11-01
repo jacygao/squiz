@@ -77,8 +77,6 @@ import {
   type StoppingBound,
 } from "./round-end.ts";
 import {
-  putRecord,
-  recordFor,
   sameState,
   type ReviewerPlace,
   type ReviewerSession,
@@ -1384,11 +1382,12 @@ function closeBeforeReview(
 /**
  * The conclusion for a state the pull request has moved past, to `now`.
  *
- * Where `now` was reviewed clean with the episode open and nothing else is
- * queued, that round is the last with nothing queued behind it, and it closes the
- * episode. Its record becomes the close, exit 0, in the update that writes the
- * close. The summary is then posted from the threads and the episode's state, as
- * any close that runs no reviewer posts it.
+ * Where `now` is the episode's last review, reviewed clean with the episode open,
+ * and nothing else is queued, that round is the last with nothing queued behind
+ * it, and it closes the episode. The close is written under the state lock, and
+ * the summary is then posted from the threads and the episode's state, as any
+ * close that runs no reviewer posts it. The caller turns the clean record into
+ * the close once it knows what became of the summary, as it records any close.
  */
 function supersededBy(
   now: StateKey,
@@ -1404,14 +1403,11 @@ function supersededBy(
     (current) => {
       clean = undefined;
       const records = current.records ?? [];
-      const record = recordFor(records, now);
-      if (record?.status !== "reviewed" || record.result !== "clean, episode open") return current;
+      const record = lastReviewedRecord(records);
+      if (record === undefined || !sameState(record, now) || record.result !== "clean, episode open") return current;
       if (current.closeReported === true || records.some((held) => held.status === "queued")) return current;
       clean = record;
-      // A close names the findings no thread holds in its summary, so its record keeps none.
-      const { result: _clean, unthreaded: _named, ...kept } = record;
-      const closing: StateRecord = { ...kept, result: "exited", exitStatus: 0, openThreads: [] };
-      return { ...current, closeReported: true, records: putRecord(records, closing) };
+      return { ...current, closeReported: true };
     },
     { until: lockWait(reserve) },
   );

@@ -737,6 +737,40 @@ test("#416: a reply-state queued behind a clean round and superseded by it, once
   assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 1, `gh was asked for ${ran.kinds.join(", ")}`);
 });
 
+test("#416: a clean round that a later review followed closes nothing when a state is superseded by it", async () => {
+  let first = "";
+  let atFirst = "";
+  let third = "";
+  const ran = await host({
+    records: (fixture) => {
+      first = fixture.head();
+      return [queued(first)];
+    },
+    // The second state's review opens a thread, and the third state is superseded
+    // by the first, as a force-push back to it would leave the pull request.
+    findings: [[], [finding("The name says nothing.")]],
+    onStart: (index, fixture) => {
+      if (index === 0) {
+        atFirst = readFileSync(join(fixture.binaries, "answer-prlist"), "utf8");
+        queueNow(fixture.episode, queued(fixture.push()));
+      }
+      if (index === 1) {
+        third = fixture.push();
+        queueNow(fixture.episode, queued(third));
+        writeFileSync(join(fixture.binaries, "answer-prlist"), atFirst, "utf8");
+      }
+    },
+  });
+
+  assert.equal(ran.started, 2, `the log says:\n${ran.log}`);
+  const [clean, reviewed, superseded] = recordsOf(ran.state);
+  assert.ok(clean?.status === "reviewed" && clean.result === "clean, episode open", `the first state is ${JSON.stringify(clean)}`);
+  assert.ok(reviewed?.status === "reviewed" && reviewed.result === "exited" && reviewed.exitStatus === 2, `the second state is ${JSON.stringify(reviewed)}`);
+  assert.equal(superseded?.status, "not reviewed");
+  assert.notEqual(ran.state?.closeReported, true, "the episode closed over the thread the later review left open");
+  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 0, `gh was asked for ${ran.kinds.join(", ")}`);
+});
+
 test("a state queued while the summary is being posted is reviewed or refused, and never stopped by a close it arrived before (#405)", async () => {
   const ran = await host({
     records: atHead,
