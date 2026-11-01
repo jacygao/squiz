@@ -824,6 +824,26 @@ test("#412: a host that finds a state queued as it exits, and another host holdi
   }
 });
 
+test("#412: a host whose state file stops reading as it exits says so, rather than that nothing is left queued", async () => {
+  let fixture: Fixture | undefined;
+  const ran = await host({
+    records: atHead,
+    findings: [[finding("The name says nothing.")]],
+    before: (arranged) => {
+      fixture = arranged;
+    },
+    host: {
+      lock: exitingAt(
+        () => {},
+        () => writeFileSync((fixture ?? assert.fail("the fixture was not handed over")).episode.stateFile, "{ not json", "utf8"),
+      ),
+    },
+  });
+
+  assert.equal(ran.end.outcome, "state unreadable", `the log says:\n${ran.log}`);
+  assert.match(ran.log.trimEnd().split("\n").at(-1) ?? "", / exiting: .* is not valid JSON: /u);
+});
+
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {
   const ran = await host({ records: atHead, rounds: [EARLIER_ROUND], closeReported: true });
 
