@@ -510,13 +510,14 @@ const reviewer: Check = (context) => {
   if (found.outcome === "absent") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: not found` };
   if (found.outcome === "failed") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: could not be run: ${found.reason}` };
   const installed = `Reviewer ${config.reviewer} ${found.version}${from}`;
-  const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : { level: "present", line });
-  const onModel = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, context) : withThinking(line, config, context));
+  const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, undefined, context) : { level: "present", line });
+  const onModel = (line: string, model: string): Row =>
+    config.reviewer === "copilot" ? copilotSignIn(line, model, context) : withThinking(line, config, context);
 
-  if (config.model !== null) return onModel(`${installed}, model ${config.model}, from ${configFileName}`);
+  if (config.model !== null) return onModel(`${installed}, model ${config.model}, from ${configFileName}`, config.model);
   const cli = config.reviewer === "pi" ? "pi" : "Copilot";
   const user = adapterFor(config.reviewer).userModel?.(context.environment);
-  if (typeof user === "string") return onModel(`${installed}, model ${user}, ${cli}'s default`);
+  if (typeof user === "string") return onModel(`${installed}, model ${user}, ${cli}'s default`, user);
   // The levels on offer are a model's, so with no model named there is no level to report.
   if (user === undefined) return usable(`${installed}, model unknown: neither ${configFileName} nor ${cli}'s settings name one`);
   if (user.failsTheRound) return { level: "failed", line: `${installed}: model unknown: ${user.problem}` };
@@ -539,20 +540,18 @@ function withThinking(line: string, config: Config, context: DoctorContext): Row
   return { level: "warning", line: `${line}: warning: thinking ${asked} runs at ${runs.level} on this model, which offers only ${offered}` };
 }
 
-// The cheapest model the prompt was measured on, whatever model a round runs.
-const SIGN_IN_MODEL = "gpt-5-mini";
-
 /**
  * `line`, ending with whether Copilot is signed in. Only a request that reaches
  * the model shows it, because no Copilot command reports its login without one.
  *
- * The prompt runs as a round runs the reviewer: under a `COPILOT_HOME` and a
- * `gh` configuration of its own, with the token variables empty, so it signs in
- * as a round would. It runs in that temporary directory rather than the
- * repository, so no project file reaches Copilot, and the directory is removed
- * afterwards.
+ * The prompt runs as a round runs the reviewer: on the round's `model`, under a
+ * `COPILOT_HOME` and a `gh` configuration of its own, with the token variables
+ * empty, so it passes wherever a round could start. With no `model` it names
+ * none, and runs on whatever Copilot falls back to, as the round would. It runs
+ * in that temporary directory rather than the repository, so no project file
+ * reaches Copilot, and the directory is removed afterwards.
  */
-function copilotSignIn(line: string, context: DoctorContext): Row {
+function copilotSignIn(line: string, model: string | undefined, context: DoctorContext): Row {
   let scratch: string;
   try {
     scratch = mkdtempSync(join(tmpdir(), "squiz-doctor-"));
@@ -567,16 +566,17 @@ function copilotSignIn(line: string, context: DoctorContext): Row {
     const environment = {
       ...context.environment,
       ...absolutePath(context),
-      ...variablesOf(github, { COPILOT_HOME: home, COPILOT_ALLOW_ALL: "" }),
+      // The model goes on --model or nowhere. A whitespace COPILOT_MODEL names no model to squiz, and must name none to Copilot.
+      ...variablesOf(github, { COPILOT_HOME: home, COPILOT_ALLOW_ALL: "", COPILOT_MODEL: "" }),
     };
     const asked = probe(
       "copilot",
-      ["-p", "Reply with the single word OK.", "--model", SIGN_IN_MODEL, "--no-ask-user"],
+      ["-p", "Reply with the single word OK.", ...(model === undefined ? [] : ["--model", model]), "--no-ask-user"],
       { ...context, environment, directory: scratch, boundMs: context.signInBoundMs },
       withIndentedDetail,
     );
     if (asked.outcome === "answered") {
-      return { level: "present", line: `${line}. Signed in; the check spent one request on ${SIGN_IN_MODEL}` };
+      return { level: "present", line: `${line}. Signed in; the check spent one request on ${model ?? "the model Copilot falls back to"}` };
     }
     const reason = asked.outcome === "absent" ? "copilot vanished from PATH" : asked.reason;
     return { level: "failed", line: `${line}. Its sign-in check failed: ${reason}` };

@@ -2333,16 +2333,26 @@ level that matches ends the line, as `; thinking medium`. A level that differs
 is a warning naming the configured level, the level it runs at and the levels
 the model offers. A level `pi` does not report is a warning with the reason.
 
-**Copilot's sign-in is checked with one prompt, which spends one request**, since
-no `copilot` command reports a sign-in without reaching the model:
+**Copilot's sign-in is checked with one prompt, which spends one request on the
+model the row names**, since no `copilot` command reports a sign-in without
+reaching the model:
 
 ```
-copilot -p "Reply with the single word OK." --model gpt-5-mini --no-ask-user
+copilot -p "Reply with the single word OK." --model gpt-6-astra --no-ask-user
 ```
 
-It runs with the variables a round gives a Copilot reviewer, so it signs in as a
-round does, and is bounded at 60 seconds. No prompt is sent where the reviewer
-is `pi`, or for Copilot as a coding agent.
+Where the model is unknown, the prompt carries no `--model` and runs on whatever
+Copilot falls back to, as the round does. It runs with the variables a round
+gives a Copilot reviewer, and `COPILOT_MODEL` set empty, so it passes wherever a
+round could start, and is bounded at 60 seconds. A model the account cannot use
+fails it, with the reason Copilot prints:
+
+```
+Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-6-astra
+Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-7, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: Model "gpt-7" from --model flag is not available.
+```
+
+No prompt is sent where the reviewer is `pi`, or for Copilot as a coding agent.
 
 **Copilot's experimental features are on** where `"experimental"` is `true` in
 the user's own `<COPILOT_HOME>/settings.json`, since a session without them is
