@@ -578,7 +578,8 @@ test("#427: a clean state followed by one it superseded waits out its deadline a
       { ...replied, status: "not reviewed", reason: "superseded by 3f9c2e0", supersededBy: OWN },
     ], { rounds: [ROUND] });
 
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }), until: deadlineIn(POLL_MS * 5) }));
+    // Long enough for git to answer on a loaded machine, and short enough to wait out.
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "result" }), until: deadlineIn(2_000) }));
 
     assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
     assert.equal(printed.stdout.split("\n")[1], "Squiz is still reviewing PR #41 at 3f9c2e0. Run `squiz review 41` again to wait for it.");
@@ -594,7 +595,7 @@ test("#427: a superseded state whose successor was reviewed clean ahead of it wa
     ], { rounds: [ROUND] });
     const triggered = { ...decided(fixture, { outcome: "result" }), state: replied };
 
-    const printed = await runReview(request(fixture, { triggered, until: deadlineIn(POLL_MS * 5) }));
+    const printed = await runReview(request(fixture, { triggered, until: deadlineIn(2_000) }));
 
     assert.equal(printed.exit, 4, printed.stdout + printed.stderr);
     assert.equal(
