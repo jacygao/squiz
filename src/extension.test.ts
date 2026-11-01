@@ -162,6 +162,42 @@ test("the socket is removed when Copilot stops the extension", async () => {
   });
 });
 
+/**
+ * Start the extension, send it SIGTERM as soon as its socket file exists, and
+ * say how it ended and whether the file is left.
+ */
+async function stopAtTheSocket(): Promise<{ readonly signal: NodeJS.Signals | null; readonly left: boolean }> {
+  const home = mkdtempSync("/tmp/squiz-ex-");
+  const workspace = join(home, "session-state", SESSION_ID);
+  mkdirSync(workspace, { recursive: true });
+  const socket = join(workspace, "squiz.sock");
+  const child = spawn(process.execPath, ["--import", sdkHooks, extension], {
+    env: { ...process.env, SQUIZ_STAND_IN_WORKSPACE: workspace },
+    stdio: ["pipe", "ignore", "inherit"],
+  });
+  try {
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => child.once("exit", (_code, signal) => resolve(signal)));
+    // A wait that yields would let the extension finish starting before the signal is sent.
+    const deadline = Date.now() + BOUND_MS;
+    while (!existsSync(socket)) if (Date.now() > deadline) assert.fail("the extension made no socket");
+    child.kill("SIGTERM");
+    return { signal: await exited, left: existsSync(socket) };
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test("the socket is removed when Copilot stops the extension the moment the socket appears (#784)", async () => {
+  // One stop can miss the moment while this process is still cold, so the test takes several.
+  for (let stop = 1; stop <= 5; stop++) {
+    const { signal, left } = await stopAtTheSocket();
+
+    assert.equal(signal, null, `stop ${stop}: the extension ended on SIGTERM's default action, before it could remove its socket`);
+    assert.equal(left, false, `stop ${stop}: the socket is still there after SIGTERM`);
+  }
+});
+
 test("a session directory too long for a socket path gets a warning in the session, and no socket", async () => {
   const home = mkdtempSync("/tmp/squiz-ex-");
   // Past the 104 bytes macOS allows a socket path, and the 108 Linux allows.
