@@ -135,7 +135,7 @@ Each record has one of five statuses:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it. |
 | Reviewing | A round host is running the round. The record names the host, and once the reviewer starts, the reviewer's session and snapshot, so that a recovery can find and stop them. |
-| Reviewed | The round's result: its exit status and the threads it left open. A round that left nothing open while a later state was queued behind it records *reviewed clean, episode open* instead, with no exit status. A round that left the episode open also records each finding no thread holds, as § 5's Notes would give it. |
+| Reviewed | The round's result: its exit status and the threads it left open. A round that left nothing open while a later state was queued behind it records *reviewed clean, episode open* instead, with no exit status. That record gets exit status 0 where it later closes the episode, when the state behind it is superseded by it. A round that left the episode open also records each finding no thread holds, as § 5's Notes would give it. |
 | Failed | Why the round failed, and whether its owner has had a note about it. |
 | Not reviewed | Why no round reviewed it: the episode closed first, or a later state superseded it. |
 
@@ -197,7 +197,7 @@ commit, is queued behind it:
 | A's round ends with | What happens to B |
 |---|---|
 | Threads open, rounds remaining | B is reviewed next, as usual. |
-| Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
+| Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. Where B is superseded by A, A is that round, as below. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
 | The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. Its Notes name the cap or the bound and each state left not reviewed, whether A left threads open or nothing. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
 
 The line comes right after the heading of the close the run is handed:
@@ -230,6 +230,24 @@ superseded after a hook queued it is queued by the next trigger. A run of
 it and returns that state's result. Where that state has no record, the run
 reads the pull request afresh and acts on its record as any trigger does. It
 exits 4 where its wait runs out first, as § 6 shows.
+
+**A state reviewed clean can close the episode when the state behind it is
+superseded by it.** Say A was reviewed clean with B, a reply, queued behind it,
+and the reply is deleted before B's round starts. The pull request is at A again,
+so B is superseded by A. A closes the episode where all of these hold:
+
+- no round has run since A's, whether it reviewed or failed;
+- none of the reviewer's threads is open on the pull request;
+- nothing else is queued.
+
+A is then the last round with nothing queued behind it. Otherwise B is recorded
+superseded, and the episode stays open for the next commit or reply. No reviewer
+runs for a close on A, and nothing is spent against the round cap. The close is
+recorded first, as for any round. The summary is then posted
+as § 5 sets out for a close that runs no reviewer. A's record then becomes a
+reviewed result with exit status 0 and no threads open, carrying the summary's
+problem where it was not posted, and A's owner gets the note of any close. A
+run of `squiz review` waiting on A or on B returns A's close.
 
 **A round decides its close and records it in one step.** It reads the queue
 under `state.lock`, decides from it as the table above sets out, and writes the
@@ -1567,6 +1585,12 @@ open and 0 where none are. Where the episode ran no round, because its failed
 attempts spent the token bound, and none of the reviewer's threads is on the
 pull request, it posts no summary, exits 0, and says on stderr that the episode
 closed before any round ran.
+
+**A state reviewed clean that closes the episode once the state behind it is
+superseded closes it without running a reviewer** (§ 3 The state file). The
+round host lists the episode's threads and posts the summary from them and from
+what the episode recorded, with the findings no thread holds that the clean
+round recorded.
 
 **A close that runs no reviewer counts each thread by its resolved state and the
 last ruling the state file holds for it** (§ 3 The state file):
