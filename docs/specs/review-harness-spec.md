@@ -686,7 +686,8 @@ line typed runs that file, which removes itself and then execs the gated line:
 tmux types nothing: the command line is `new-window`'s own argument.
 
 The gate writes its pid into the gate directory, waits for a `go` file there,
-and then becomes the reviewer with the same pid, group and start time. The
+removes the directory, and then becomes the reviewer with the same pid, group
+and start time. The round host removes the directory of a start that failed. The
 round host reads the pid and the reviewer's group while the gate is shut, and
 only then writes `go`, so a start that fails never lets the reviewer run. A
 gate left waiting gives up on its own after four times the bound on each

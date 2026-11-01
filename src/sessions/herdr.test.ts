@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -273,6 +273,18 @@ test("a line run from a file hands the command every argument byte for byte (#51
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("a gate that lets its command run leaves no directory behind (#453)", () => {
+  typedFor("/bin/sh", ["-c", "exit 0"], (line) => {
+    const gate = wordsOf(line)[3] ?? "";
+    assert.match(gate, /squiz-gate-/u, line);
+    // The start opened the gate, so the line runs the command at once, as the pane's shell would.
+    const ran = spawnSync("/bin/sh", ["-c", line], { encoding: "utf8", timeout: BOUND_MS });
+    assert.equal(ran.status, 0, ran.stderr);
+    const left = existsSync(gate) ? readdirSync(gate) : [];
+    assert.equal(existsSync(gate), false, `the gate still holds ${JSON.stringify(left)}`);
+  });
 });
 
 test("a pane Herdr refuses to open is refused, and nothing more is asked of it", () => {
@@ -954,6 +966,34 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     if (started.outcome !== "started") return;
     try {
       assert.equal(started.leader.pid, Number(await written(pidFile)));
+    } finally {
+      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
+    }
+  });
+
+  test("a command that started leaves no gate directory behind once it runs (#453)", async () => {
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    // The gate is made in the temporary directory, so one of the test's own holds nothing else.
+    const temporary = mkdtempSync(join(home, "tmp-"));
+    const pidFile = join(home, "gate-gone.pid");
+    const saved = process.env["TMPDIR"];
+    process.env["TMPDIR"] = temporary;
+    let started: ReturnType<typeof startInHerdrPane>;
+    try {
+      started = startInHerdrPane(fakeCommand("squiz-gate-gone", pidFile, 60), options);
+    } finally {
+      if (saved === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = saved;
+    }
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    if (started.outcome !== "started") return;
+    try {
+      // The command writes its pid only once the gate has become it.
+      assert.equal(started.leader.pid, Number(await written(pidFile)));
+      const [gate] = readdirSync(temporary);
+      const left = gate === undefined ? [] : readdirSync(join(temporary, gate));
+      assert.deepEqual(readdirSync(temporary), [], `the gate still holds ${JSON.stringify(left)}`);
     } finally {
       assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
     }

@@ -122,7 +122,7 @@ export function closeHerdrPane(pane: string, options: HerdrOptions): PaneClose {
  * What the pane's shell runs: `/bin/sh -c GATE <gate> <polls> <program> <arguments…>`.
  *
  * It writes its pid to `<gate>/pid`, or `<gate>/absent` where the program is not
- * on its path. It then waits for `<gate>/go`, and becomes the program. It gives
+ * on its path. It then waits for `<gate>/go`, removes the gate, and becomes the program. It gives
  * up after `<polls>` waits without ever running the program, so a start that
  * failed and could not close its pane still runs nothing.
  */
@@ -131,7 +131,7 @@ const GATE = [
   'command -v "$1" >/dev/null 2>&1 || { : > "$d/absent"; exit 127; }',
   'echo $$ > "$d/pid.part" && mv "$d/pid.part" "$d/pid" || exit 125',
   'while [ ! -e "$d/go" ]; do n=$((n - 1)); [ "$n" -gt 0 ] || exit 125; sleep 0.05; done',
-  'rm -f "$d/go"; rmdir "$d" 2>/dev/null',
+  'rm -f "$d/go" "$d/pid"; rmdir "$d" 2>/dev/null',
   'exec "$@"',
 ].join("; ");
 
