@@ -132,12 +132,12 @@ Node 24.15.0
 tmux 3.7b
 Herdr 0.9.3
 squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init
-Reviewer copilot 1.0.93 (/Users/jacy/squiz/.squiz.json), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-5-mini
+Reviewer copilot 1.0.93 (/Users/jacy/squiz/.squiz.json), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-6-astra
 ```
 
 The last line names the reviewer and the model it will run on, read from the
 `.squiz.json` it names. For a Copilot reviewer, it checks the sign-in by sending one
-prompt to `gpt-5-mini`, which costs about 0.35 AI credits. Where the Copilot
+prompt to that model, which spends one request at that model's rate. Where the Copilot
 CLI is installed, a line after Claude Code's says whether its experimental
 features are on, and warns where they are off.
 
