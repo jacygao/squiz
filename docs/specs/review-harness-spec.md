@@ -351,6 +351,12 @@ It takes the oldest queued state, writes the reviewing record naming itself, and
 runs the round as the steps above set out. It exits when nothing is left queued,
 and when the worktree it serves is gone.
 
+**A host that finds nothing queued reads the queue again once its lock is
+released.** A trigger that queued a state before the release saw the host
+running and started none. A state found on that second read is taken by taking
+the lock again, and where another host holds the lock by then, the state is left
+to that host.
+
 **One round host runs per episode.** It holds `.squiz/<number>/host.lock`, which
 names its pid and start time. A host that finds the lock held by a live process
 exits at once, so two triggers that each start one leave one running.

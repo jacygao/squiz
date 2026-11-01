@@ -27,7 +27,8 @@ import type { Finding } from "../findings/finding.ts";
 import { type Adapter, type ParsedRun, type RoundCost } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { startChild } from "../sessions/child.ts";
-import { identityOf, type ProcessIdentity } from "../sessions/process.ts";
+import { lockHolder } from "../sessions/lock-file.ts";
+import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { putRecord, type Owner, type StateRecord } from "../loop/state-record.ts";
@@ -36,6 +37,7 @@ import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { squizStatus } from "../review/status.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
+import { takeEpisodeHostLock } from "./lock.ts";
 
 const BRANCH = "review-me";
 const PULL_REQUEST = 142;
@@ -115,7 +117,7 @@ type Arrangement = {
   readonly onStart?: (index: number, fixture: Fixture) => void;
   /** Run before the host starts. */
   readonly before?: (fixture: Fixture) => void;
-  readonly host?: Partial<Pick<HostSetup, "update">>;
+  readonly host?: Partial<Pick<HostSetup, "update" | "lock">>;
   /** What the reviewer runs, as a script for `/bin/sh -c`, with the state file as `$1`. It exits at once where none is given. */
   readonly reviewer?: string;
   /** What every round runs with, over what the fixture gives it. */
@@ -725,6 +727,101 @@ test("a state queued while the summary is being posted is reviewed or refused, a
   assert.match(ran.summaryHook, /^(queued|closed)$/mu, `the trigger during the summary did not run: ${ran.summaryHook}`);
   const stopped = recordsOf(ran.state).filter((record) => record.status === "not reviewed");
   assert.deepEqual(stopped, [], "a state queued before the close was recorded was stopped by it");
+});
+
+/**
+ * A host lock whose first release runs `exiting` just before the lock goes, which
+ * is where a host that found nothing queued is committed to exit, and `released`
+ * just after.
+ */
+function exitingAt(exiting: () => void, released: () => void = () => {}): NonNullable<HostSetup["lock"]> {
+  let ran = false;
+  return (episode, options) => {
+    const taking = takeEpisodeHostLock(episode, options);
+    if (taking.outcome !== "taken" || ran) return taking;
+    const { lock } = taking;
+    const release = (): ReturnType<typeof lock.release> => {
+      if (ran) return lock.release();
+      ran = true;
+      exiting();
+      const outcome = lock.release();
+      released();
+      return outcome;
+    };
+    return { outcome: "taken", lock: { ...lock, release } };
+  };
+}
+
+/** Whether a trigger reading the host lock now would find a live host, and so start none. */
+function hostSeenRunning(episode: Episode): boolean {
+  const holder = lockHolder(episode.directory, "host.lock");
+  return holder.outcome === "named" && stillRunning(holder.holder, 5_000).outcome === "running";
+}
+
+test("#412: a state queued as the host exits, by a trigger that saw the host running and started none, is reviewed", async () => {
+  let fixture: Fixture | undefined;
+  let pushed = "";
+  let seenRunning: boolean | undefined;
+  const ran = await host({
+    records: atHead,
+    // The first round leaves a thread open, so the episode stays open for the state queued after it.
+    findings: [[finding("The name says nothing.")], []],
+    before: (arranged) => {
+      fixture = arranged;
+    },
+    host: {
+      lock: exitingAt(() => {
+        const at = fixture ?? assert.fail("the fixture was not handed over");
+        pushed = at.push();
+        queueNow(at.episode, queued(pushed));
+        seenRunning = hostSeenRunning(at.episode);
+      }),
+    },
+  });
+
+  assert.equal(seenRunning, true, "the trigger must find the host running, or it starts a host of its own and the window is not the one under test");
+  const left = recordsOf(ran.state).find((record) => record.head === pushed);
+  assert.equal(left?.status, "reviewed", `a state queued as the host exited was left ${left?.status} with no host to take it; the log says:\n${ran.log}`);
+  assert.equal(ran.started, 2);
+  assert.deepEqual(ran.end, { outcome: "nothing queued" });
+});
+
+test("#412: a host that finds a state queued as it exits, and another host holding the lock by then, leaves the state to that host", async () => {
+  const other = spawn("/bin/sh", ["-c", "sleep 30"], { stdio: "ignore" });
+  try {
+    const pid = other.pid ?? assert.fail("the other host did not start");
+    const read = identityOf(pid, 5_000);
+    assert.ok(read.outcome === "read");
+    let fixture: Fixture | undefined;
+    let pushed = "";
+    const ran = await host({
+      records: atHead,
+      findings: [[finding("The name says nothing.")], []],
+      before: (arranged) => {
+        fixture = arranged;
+      },
+      host: {
+        lock: exitingAt(
+          () => {
+            const at = fixture ?? assert.fail("the fixture was not handed over");
+            pushed = at.push();
+            queueNow(at.episode, queued(pushed));
+          },
+          // The host a later trigger started, taking the lock the moment it was free.
+          () => {
+            const at = fixture ?? assert.fail("the fixture was not handed over");
+            writeFileSync(join(at.episode.directory, "host.lock"), `${JSON.stringify(read.identity)}\n`, "utf8");
+          },
+        ),
+      },
+    });
+
+    assert.deepEqual(ran.end, { outcome: "lock held", holder: read.identity }, `the log says:\n${ran.log}`);
+    assert.equal(ran.started, 1, "the state was reviewed beside the host that holds the lock");
+    assert.equal(recordsOf(ran.state).find((record) => record.head === pushed)?.status, "queued");
+  } finally {
+    other.kill("SIGKILL");
+  }
 });
 
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {

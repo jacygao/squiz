@@ -85,6 +85,8 @@ export type HostSetup = {
   readonly round: Omit<RoundSetup, "worktree" | "held" | "endsOn">;
   /** What changes the state file. `updateState` where not given. */
   readonly update?: typeof updateState;
+  /** What takes the host lock. `takeEpisodeHostLock` where not given. */
+  readonly lock?: typeof takeEpisodeHostLock;
   /** A line for `host.log` once the host holds the lock, such as one saying the defaults are in use. */
   readonly note?: string;
 };
@@ -116,24 +118,35 @@ export async function runHost(setup: HostSetup): Promise<HostEnd> {
   const episode = episodeAt(setup.worktree, setup.pullRequest);
   const log = logIn(episode);
 
-  const taking = takeEpisodeHostLock(episode, { boundMs: LOCK_BOUND_MS });
-  if (taking.outcome === "held") {
-    const { pid, startedAt } = taking.holder;
-    log(`exiting: process ${pid}, started at ${startedAt}, holds the host lock`);
-    return { outcome: "lock held", holder: taking.holder };
-  }
-  if (taking.outcome === "unknown") {
-    log(`exiting: whether another host is running could not be told: ${taking.reason}`);
-    return { outcome: "lock unknown", reason: taking.reason };
-  }
+  for (let first = true; ; first = false) {
+    const taking = (setup.lock ?? takeEpisodeHostLock)(episode, { boundMs: LOCK_BOUND_MS });
+    if (taking.outcome === "held") {
+      const { pid, startedAt } = taking.holder;
+      log(`exiting: process ${pid}, started at ${startedAt}, holds the host lock`);
+      return { outcome: "lock held", holder: taking.holder };
+    }
+    if (taking.outcome === "unknown") {
+      log(`exiting: whether another host is running could not be told: ${taking.reason}`);
+      return { outcome: "lock unknown", reason: taking.reason };
+    }
 
-  try {
-    if (setup.note !== undefined) log(setup.note);
-    const end = await hostRounds(setup, episode, taking.lock, log);
-    log(endLine(end));
-    return end;
-  } finally {
-    taking.lock.release();
+    let end: HostEnd;
+    try {
+      if (first && setup.note !== undefined) log(setup.note);
+      end = await hostRounds(setup, episode, taking.lock, log);
+    } finally {
+      taking.lock.release();
+    }
+    // A trigger that queued a state while this host still held the lock saw it
+    // running and started none, so the queue is read again once the lock is free.
+    const after = end.outcome === "nothing queued" ? readState(episode) : undefined;
+    if (after?.outcome === "read" && queuedIn(after.state).length > 0) {
+      log("a state was queued as this host exited: taking the host lock again");
+      continue;
+    }
+    const final: HostEnd = after?.outcome === "unreadable" ? { outcome: "state unreadable", reason: after.reason } : end;
+    log(endLine(final));
+    return final;
   }
 }
 
