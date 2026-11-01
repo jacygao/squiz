@@ -44,14 +44,15 @@ function warn(message) {
   session.log(message, { level: "warning" }).catch(() => undefined);
 }
 
-// A file at the path is a socket a killed run of this session left, which nothing listens on.
-rmSync(path, { force: true });
-server.listen(path);
-
 session.on("session.shutdown", () => server.close());
 process.on("exit", () => rmSync(path, { force: true }));
 // Copilot stops an extension with SIGTERM, which would otherwise end it without the exit above.
+// Installed before the socket exists, since a SIGTERM that comes first ends the process and leaves the socket.
 process.on("SIGTERM", () => process.exit(0));
+
+// A file at the path is a socket a killed run of this session left, which nothing listens on.
+rmSync(path, { force: true });
+server.listen(path);
 
 /** The text of each user message in `text`, one JSON line each, skipping any line that is not one. */
 function messages(text) {
