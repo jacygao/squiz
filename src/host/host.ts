@@ -42,7 +42,7 @@ import {
   type QueuedRecord,
   type RoundEnd,
 } from "../loop/round-end.ts";
-import { runRound, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
+import { runRoundThen, type RoundConclusion, type RoundSetup } from "../loop/round.ts";
 import {
   putRecord,
   sameState,
@@ -218,7 +218,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     const endsOn = endsOnFor(keyOf(round.record), setup.round.config);
     let ended: RoundEnd | undefined;
     let reviewer: ReviewerPlace | undefined;
-    const conclusion = await runRound({
+    const roundSetup: RoundSetup = {
       ...setup.round,
       worktree: episode.worktree,
       held: { pullRequest: Number(episode.id), lock },
@@ -243,30 +243,36 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         ended = endsOn(tally, queued);
         return ended;
       },
-    });
-
-    // Recording the result would make the worktree's directory again.
-    if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
-    const result = resultOf(
-      conclusion,
-      ended,
-      round.record,
-      { number: round.number, startedAt, endedAt: nowSeconds() },
-      reviewer,
+    };
+    const end = await runRoundThen(
+      roundSetup,
+      async (conclusion): Promise<HostEnd | undefined> => {
+        // Recording the result would make the worktree's directory again.
+        if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
+        const result = resultOf(
+          conclusion,
+          ended,
+          round.record,
+          { number: round.number, startedAt, endedAt: nowSeconds() },
+          reviewer,
+        );
+        let written: readonly Recorded[] = [];
+        const recorded = write((state) => {
+          written = result.records(state);
+          return withRecords(state, written.map(({ record }) => record));
+        });
+        if (recorded.outcome === "failed") {
+          log(`round ${round.number}: ${result.line}, and could not be recorded: ${recorded.reason}`);
+          for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
+          return { outcome: "state unwritable", reason: recorded.reason };
+        }
+        log(`round ${round.number}: ${result.line}`);
+        for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
+        await noteOwners(episode, written, log);
+        return undefined;
+      },
     );
-    let written: readonly Recorded[] = [];
-    const recorded = write((state) => {
-      written = result.records(state);
-      return withRecords(state, written.map(({ record }) => record));
-    });
-    if (recorded.outcome === "failed") {
-      log(`round ${round.number}: ${result.line}, and could not be recorded: ${recorded.reason}`);
-      for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
-      return { outcome: "state unwritable", reason: recorded.reason };
-    }
-    log(`round ${round.number}: ${result.line}`);
-    for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
-    await noteOwners(episode, written, log);
+    if (end !== undefined) return end;
   }
 }
 

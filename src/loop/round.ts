@@ -323,16 +323,34 @@ export type RoundConclusion =
  * Never throws, whatever git, `gh`, the filesystem or the reviewer does.
  */
 export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
+  return runRoundThen(setup, (conclusion) => conclusion);
+}
+
+/**
+ * Run one round, hand what it concluded to `record`, and return what `record`
+ * returns.
+ *
+ * The round's snapshot is removed only once `record` has settled, whether it
+ * returned or threw. A throw from `record` reaches the caller.
+ */
+export async function runRoundThen<T>(
+  setup: RoundSetup,
+  record: (conclusion: RoundConclusion) => T | Promise<T>,
+): Promise<T> {
   const opened: Opened = {};
   try {
-    return await round(setup, opened);
-  } catch (cause) {
-    // A throw here is this harness's own defect. The round is still a value.
-    return failed("harness", `the round could not be run: ${reasonFor(cause)}`);
+    let conclusion: RoundConclusion;
+    try {
+      conclusion = await round(setup, opened);
+    } catch (cause) {
+      // A throw here is this harness's own defect. The round is still a value.
+      conclusion = failed("harness", `the round could not be run: ${reasonFor(cause)}`);
+    }
+    return await record(conclusion);
   } finally {
-    // Removal grows with what the reviewer left in the snapshot, so it waits for
-    // the round's result. It runs under the lock, before the next round can add
-    // a snapshot of its own.
+    // Removal grows with what the reviewer left in the snapshot, so anything
+    // waiting on the recorded result would wait it out too. It runs under the
+    // lock, before the next round can add a snapshot of its own.
     if (opened.snapshot !== undefined) {
       const removal = removeSnapshot(opened.snapshot);
       if (removal.outcome === "failed") setup.snapshotLeft?.(removal.reason);
