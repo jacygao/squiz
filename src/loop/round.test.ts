@@ -131,6 +131,8 @@ type Setup = {
    * a snapshot left behind by an add that failed.
    */
   readonly snapshotAddFails?: boolean;
+  /** Seconds git's `symbolic-ref` sleeps before answering, for a branch lookup that hangs. */
+  readonly branchLookupSleeps?: string;
   /** How many files the change adds beside the one under review. */
   readonly moreFiles?: number;
   /** Whether the pull request's base shares no history with its head, so no diff of the two can be read. */
@@ -546,6 +548,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
         : { [setup.lockStateAfter]: episode.directory }),
     });
     if (setup.snapshotAddFails === true) failCheckout(binaries);
+    if (setup.branchLookupSleeps !== undefined) slowBranchLookup(binaries, setup.branchLookupSleeps);
     process.env["PATH"] = `${binaries}:${previous ?? ""}`;
 
     if (setup.rounds !== undefined) {
@@ -708,6 +711,21 @@ function failCheckout(binaries: string): void {
     [
       "#!/bin/sh",
       `case " $* " in *" checkout "*) '${real}' "$@"; exit 1 ;; esac`,
+      `exec '${real}' "$@"`,
+      "",
+    ].join("\n"),
+  );
+}
+
+/** A `git` ahead of the real one, whose `symbolic-ref` sleeps first and every other command does not. */
+function slowBranchLookup(binaries: string, seconds: string): void {
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  standIn(
+    binaries,
+    "git",
+    [
+      "#!/bin/sh",
+      `if [ "$1" = symbolic-ref ]; then sleep ${seconds}; fi`,
       `exec '${real}' "$@"`,
       "",
     ].join("\n"),
@@ -2206,15 +2224,40 @@ test("the calls before the review share one deadline, and the part ends inside i
  */
 test("a pull request lookup that ran out of time fails the round rather than reading as no pull request", async () => {
   const ran = await runInFixture({
-    preReviewMs: 1,
+    // Long enough for the branch lookup before it, which the deadline bounds too,
+    // and far short of the pull request lookup's delay.
+    preReviewMs: 1_500,
+    delays: { prlist: "5" },
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
-  assert.match(ran.conclusion.reason, /the pull request for "review-me" could not be looked up/u);
+  assert.match(ran.conclusion.reason, /the pull request for "review-me" could not be looked up/u, ran.conclusion.reason);
   assert.equal(ran.invocations.length, 0);
+});
+
+/**
+ * The branch lookup is the gate's first call. A deadline checked only after git
+ * returns reads the same in the conclusion as one that stopped git on time, so
+ * only the elapsed time tells the two apart.
+ */
+test("a branch lookup that hangs is stopped at the deadline before the review (#432)", async () => {
+  const ran = await runInFixture({
+    preReviewMs: 500,
+    branchLookupSleeps: "6",
+    answers: POSTING,
+    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed", JSON.stringify(ran.conclusion));
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /the current branch could not be resolved: git ran out of the time it was given/u);
+  assert.equal(ran.kinds.length, 0, "a round whose branch lookup ran out of time made a call to GitHub");
+  // Far above the 500ms deadline and far below the 6 seconds git sleeps, so load
+  // on the machine cannot pass a round that waited for git or fail one that did not.
+  assert.ok(ran.elapsedMs < 4_000, `the round took ${ran.elapsedMs}ms, which is git's sleep and not the deadline`);
 });
 
 test("a review is bounded by the configured timeout, whatever the calls before it took", async () => {
