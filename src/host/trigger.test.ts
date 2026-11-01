@@ -407,6 +407,27 @@ test("a hook leaves a failed state failed, and squiz review queues it again", as
   });
 });
 
+test("#424: a failed state squiz review queues again goes behind every state recorded after it, so the records keep the order rounds ran in", async () => {
+  await withFixture(async (fixture) => {
+    const failed: StateRecord = { ...state, status: "failed", reason: "the round host died", ownerNoted: true };
+    const clean: StateRecord = {
+      head: "8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258",
+      activity: null,
+      status: "reviewed",
+      result: "clean, episode open",
+      newFindings: 0,
+      round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+    };
+    seed(fixture.episode, { records: [failed, clean] });
+
+    const byReview = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+
+    assert.equal(byReview.queued, true);
+    assert.deepEqual(records(fixture.episode), [clean, { ...state, status: "queued" }]);
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+  });
+});
+
 test("a round whose host has gone is handed back for recovery, and nothing is changed", async () => {
   await withFixture((fixture) => {
     const gone = { pid: process.pid, startedAt: ownIdentity().startedAt - 1_000 };

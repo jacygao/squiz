@@ -26,7 +26,7 @@ import { currentBranch } from "../hook/branch.ts";
 import { episodeOver, readState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
-import { putRecord, recordFor, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
+import { recordFor, sameState, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 import { decideTrigger, type TriggerDecision, type TriggerKind } from "../loop/trigger-decision.ts";
 import type { Deadline } from "../reviewers/deadline.ts";
@@ -137,7 +137,10 @@ export function trigger(request: TriggerRequest): Triggered {
         // a host, and the decision no longer applies.
         if (episodeOver(current, state) || now?.status !== record?.status) return current;
         queued = true;
-        return { ...current, records: putRecord(current.records ?? [], fresh) };
+        // A failed state queued again goes on the end, as any state queued now
+        // does, because the records' order is the order the rounds take them in.
+        const others = (current.records ?? []).filter((held) => !sameState(held, state));
+        return { ...current, records: [...others, fresh] };
       },
       { until },
     );

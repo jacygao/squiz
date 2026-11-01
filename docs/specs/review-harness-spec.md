@@ -179,7 +179,9 @@ because the state is read from them.
 
 **A failed state is retried only when someone runs `squiz review`.** A hook
 firing on it queues nothing, so a turn spent reading a failure note does not
-bring the failure back. A retry that fails again posts its failure comment,
+bring the failure back. The retry queues the state behind every state already
+queued or recorded, as a state queued for the first time is, so the records
+stay in the order their rounds ran. A retry that fails again posts its failure comment,
 exits 1 and writes no second note, and its stderr tells the coding agent not to
 run the command again (§ 6 `squiz review`). A new commit or reply is a new state, and is queued like any other.
 
