@@ -117,6 +117,8 @@ type Arrangement = {
   readonly onStart?: (index: number, fixture: Fixture) => void;
   /** Run before the host starts. */
   readonly before?: (fixture: Fixture) => void;
+  /** Run once the host has returned or thrown, while the temporary directory is still the fixture's. */
+  readonly after?: () => void;
   readonly host?: Partial<Pick<HostSetup, "update" | "lock">>;
   /** What the reviewer runs, as a script for `/bin/sh -c`, with the state file as `$1`. It exits at once where none is given. */
   readonly reviewer?: string;
@@ -249,6 +251,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       status,
     };
   } finally {
+    arranged.after?.();
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
     if (previousTemporary === undefined) delete process.env["TMPDIR"];
@@ -1631,5 +1634,61 @@ test("#406: a snapshot the round cannot remove is named in host.log, and the rou
     ran.log,
     /round 1: the snapshot at \/\S+\/rounds\/1\/tree could not be removed: .+; it stays on disk until it is deleted\n/u,
   );
+});
+
+/** What stands in the snapshots directory: one entry per episode a snapshot is left for. */
+function snapshotsStanding(): readonly string[] {
+  const directory = join(tmpdir(), `squiz-${process.getuid?.() ?? 0}`);
+  return existsSync(directory) ? readdirSync(directory) : [];
+}
+
+test("#640: a round's result is recorded while its snapshot still stands, and the snapshot is gone once the host exits", async () => {
+  const standingAtRecord: boolean[] = [];
+  let standingAfter: readonly string[] | undefined;
+  const ran = await host({
+    records: atHead,
+    host: {
+      update: (episode, change, options) => {
+        const written = updateState(episode, change, options);
+        const read = readState(episode);
+        if (read.outcome === "read" && recordsOf(read.state).some((record) => record.status === "reviewed")) {
+          standingAtRecord.push(snapshotsStanding().length > 0);
+        }
+        return written;
+      },
+    },
+    after: () => {
+      standingAfter = snapshotsStanding();
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed", `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(standingAtRecord, [true], "the snapshot was removed before the round's result was recorded");
+  assert.deepEqual(standingAfter, [], "the host exited and left the snapshot on disk");
+});
+
+test("#640: a host that throws recording a round's result still removes the round's snapshot", async () => {
+  let standingAfter: readonly string[] | undefined;
+  await assert.rejects(
+    host({
+      records: atHead,
+      host: {
+        // Throws at the write that records the round reviewed, and makes every other.
+        update: (episode, change, options) => {
+          const read = readState(episode);
+          const next = read.outcome === "read" ? change(read.state) : null;
+          if (recordsOf(next).some((record) => record.status === "reviewed")) throw new Error("the state file threw");
+          return updateState(episode, change, options);
+        },
+      },
+      after: () => {
+        standingAfter = snapshotsStanding();
+      },
+    }),
+    /the state file threw/u,
+  );
+
+  assert.deepEqual(standingAfter, [], "the host threw and left the snapshot on disk");
 });
 
