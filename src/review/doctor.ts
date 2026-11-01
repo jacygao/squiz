@@ -426,7 +426,7 @@ type Manifest =
   | { readonly outcome: "other" }
   | { readonly outcome: "unreadable"; readonly reason: string };
 
-function manifestOf(root: string): Manifest {
+export function manifestOf(root: string): Manifest {
   const file = join(root, ".claude-plugin", "plugin.json");
   let parsed: unknown;
   try {

@@ -1,11 +1,12 @@
 /**
  * The entry point `bin/squiz` execs. Every command dispatches from here, and
  * the dispatch itself runs under the top-level trap. Every command but
- * `squiz review`, `squiz init` and `squiz doctor` exits 0 whatever it is
- * handed, and says on stderr what failed. `squiz review` exits with the status
- * its result gives, and 1 where it could not run. `squiz init` and
- * `squiz doctor` are run by a person: `init` exits 1 where it could not link
- * squiz onto PATH, and `doctor` where a required dependency is not usable.
+ * `squiz review`, `squiz init`, `squiz doctor` and `squiz version` exits 0
+ * whatever it is handed, and says on stderr what failed. `squiz review` exits
+ * with the status its result gives, and 1 where it could not run. The other
+ * three are run by a person: `init` exits 1 where it could not link squiz onto
+ * PATH, `doctor` where a required dependency is not usable, and `version` where
+ * this squiz's version cannot be read.
  *
  * stdout carries the answer to a command and nothing else. Everything that is
  * not an answer — a failure, a usage line, a branch with no pull request — goes
@@ -28,10 +29,11 @@ import { squizInit } from "./review/init.ts";
 import { thisSquiz } from "./review/path-link.ts";
 import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
+import { squizVersion } from "./review/version.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
-const commands = ["hook", "threads", "reply", "status", "host", "review", "init", "doctor"];
+const commands = ["hook", "threads", "reply", "status", "host", "review", "init", "doctor", "version"];
 
 // `gh auth status` asks GitHub about each login, so it is given a network's time.
 const PROBE_BOUND_MS = 15_000;
@@ -72,6 +74,12 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
   }
   if (command === "init") {
     const printed = squizInit(process.cwd(), process.env, thisSquiz());
+    process.stdout.write(printed.stdout);
+    process.stderr.write(printed.stderr);
+    return printed.exit;
+  }
+  if (isVersion(command)) {
+    const printed = squizVersion();
     process.stdout.write(printed.stdout);
     process.stderr.write(printed.stderr);
     return printed.exit;
@@ -203,7 +211,12 @@ function trappedFor(command: string | undefined): Trapped | undefined {
   if (command === "review") return { exit: 1, failed: "the review failed" };
   if (command === "init") return { exit: 1, failed: "squiz init failed" };
   if (command === "doctor") return { exit: 1, failed: "squiz doctor failed" };
+  if (isVersion(command)) return { exit: 1, failed: "squiz version failed" };
   return undefined;
+}
+
+function isVersion(command: string | undefined): boolean {
+  return command === "version" || command === "--version";
 }
 
 // The dispatch runs only where this file is the process's entry point, so that

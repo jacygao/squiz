@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -175,13 +175,55 @@ test("the binary runs by name off PATH, through a symlink to the shim", async ()
   }
 });
 
+test("squiz version and --version print this checkout's version and bin/squiz, from anywhere (#768)", async () => {
+  // A decoy squiz first on PATH, and a decoy manifest in the working directory.
+  // Either would print a plausible version for a copy that is not answering.
+  const decoy = await mkdtemp(join(tmpdir(), "squiz-768-decoy-"));
+  try {
+    await mkdir(join(decoy, "bin"));
+    await mkdir(join(decoy, ".claude-plugin"));
+    await writeFile(join(decoy, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "squiz", version: "0.0.1-decoy" }));
+    await writeFile(join(decoy, "bin", "squiz"), "#!/bin/sh\necho squiz 0.0.1-decoy\n", { mode: 0o755 });
+    await mkdir(join(elsewhere, ".claude-plugin"), { recursive: true });
+    await writeFile(join(elsewhere, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "squiz", version: "0.0.2-cwd" }));
+    const manifest = JSON.parse(await readFile(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8")) as { version: string };
+
+    for (const spelling of ["version", "--version"]) {
+      const result = await run(shim, [spelling], { cwd: elsewhere, path: `${join(decoy, "bin")}:${process.env["PATH"] ?? ""}` });
+
+      assert.equal(result.code, 0, `squiz ${spelling} failed: ${result.stderr}`);
+      assert.equal(result.stderr, "");
+      assert.equal(result.stdout, `squiz ${manifest.version} ${realpathSync(shim)}\n`, `squiz ${spelling} named another copy`);
+    }
+  } finally {
+    await rm(decoy, { recursive: true, force: true });
+    await rm(join(elsewhere, ".claude-plugin"), { recursive: true, force: true });
+  }
+});
+
+test("squiz version from a copy with no plugin.json says so on stderr and exits 1 (#768)", async () => {
+  const copy = await mkdtemp(join(tmpdir(), "squiz-768-copy-"));
+  try {
+    await cp(dirname(shim), join(copy, "bin"), { recursive: true });
+    await cp(dirname(cliEntry), join(copy, "src"), { recursive: true });
+
+    const result = await run(join(copy, "bin", "squiz"), ["version"], { cwd: elsewhere });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^squiz: the version of this squiz could not be read: .*plugin\.json could not be read: ENOENT/u);
+  } finally {
+    await rm(copy, { recursive: true, force: true });
+  }
+});
+
 test("a command the binary does not have is named on stderr, and still exits 0", async () => {
   const result = await run(shim, ["frobnicate"], { cwd: elsewhere });
 
   assert.equal(result.code, 0, "the binary is the hook entry point, and only exit 2 may block a turn");
   assert.equal(
     result.stderr,
-    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review, init, doctor\n',
+    'squiz: no command "frobnicate". The commands are: hook, threads, reply, status, host, review, init, doctor, version\n',
     "the list backs the message, so a command the binary has must be on it",
   );
   assert.equal(result.stdout, "");
@@ -191,7 +233,7 @@ test("no command at all is reported the same way", async () => {
   const result = await run(shim, [], { cwd: elsewhere });
 
   assert.equal(result.code, 0);
-  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init, doctor\n");
+  assert.equal(result.stderr, "squiz: no command. The commands are: hook, threads, reply, status, host, review, init, doctor, version\n");
   assert.equal(result.stdout, "");
 });
 
