@@ -677,7 +677,12 @@ type ChangeLookup =
   | Failed;
 
 interface Venue {
-  readChange(worktree: string, until: Deadline): ChangeLookup;
+  /**
+   * The change to review in `worktree`. `asked` is the key a command was given,
+   * such as the 41 of `squiz review 41` or `squiz host 41`, or null for a hook,
+   * which finds the change from the worktree alone.
+   */
+  readChange(worktree: string, asked: string | null, until: Deadline): ChangeLookup;
   episodeDirectory(change: Change): string;
   /** Extra object directories the snapshot borrows from, once base and head are readable. */
   provideCommits(change: Change, until: Deadline):
@@ -739,7 +744,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | Member | In the GitHub venue |
 |---|---|
 | `key`, `name`, `rerun` | The pull request's number, `PR #41`, `squiz review 41` |
-| `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request, or one whose head is not checked out here, is `none`. |
+| `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
 | `episodeDirectory` | `.squiz/<number>/` in the worktree, which keeps itself out of git (§ 3 The state file) |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
 | Threads, replies, resolve and re-open | Review threads on the pull request, through `gh api` and GraphQL. Ids are `PRRT_` node ids, and `isOutdated` and `author` are what GitHub reports. |
@@ -762,7 +767,7 @@ worktree, so nothing it writes becomes part of the change.
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md` |
 | A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written |
-| `squiz review <number>` | `squiz review`, which takes no number |
+| `squiz review <number>` | `squiz review`, which takes no number. `readChange` is `none` for any `asked` key but the venue's directory. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |
 | The owner's note and its wake | None. The stop rule below hands the result to the coding agent instead. |
 
