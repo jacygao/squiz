@@ -1,5 +1,5 @@
 ---
-settles: "§ 9 — whether the README's Claude Code install and project setup work in a fresh project, and what it left out; M9 — the Claude Code half of the end-to-end criterion"
+settles: "§ 10 — whether the README's Claude Code install and project setup work in a fresh project, and what it left out; M9 — the Claude Code half of the end-to-end criterion"
 issue: 658
 recorded: 2026-10-08
 versions: { claude-code: "2.1.292 (doctor), 2.1.293 (the reviewed sessions)", squiz: 87ebfc4, plugin-version: 0.1.0, copilot: 1.0.93, models: "haiku (session), gpt-6-astra (reviewer, Copilot's default)", node: 24.15.0, gh: 2.97.0, git: 2.54.0, tmux: 3.7b, herdr: 0.9.3 }

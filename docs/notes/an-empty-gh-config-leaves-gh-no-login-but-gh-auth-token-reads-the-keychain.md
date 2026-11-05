@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — the GitHub variables the round sets for the reviewer, what they leave reachable, and how a pane's variables survive the shell's startup files"
+settles: "§ 5 — the GitHub variables the round sets for the reviewer, what they leave reachable, and how a pane's variables survive the shell's startup files"
 issue: 548
 recorded: 2026-10-06
 versions: { gh: 2.97.0, copilot: 1.0.92, herdr: "private server, as installed", tmux: 3.7b, macos: 26.6.2 }

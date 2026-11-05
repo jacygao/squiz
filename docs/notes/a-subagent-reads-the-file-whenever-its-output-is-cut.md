@@ -1,5 +1,5 @@
 ---
-settles: "§ 6 — whether a subagent handed a long exit-2 output works every thread, and what makes it read the whole of it; § 2 — when Claude Code cuts a command's output"
+settles: "§ 7 — whether a subagent handed a long exit-2 output works every thread, and what makes it read the whole of it; § 2 — when Claude Code cuts a command's output"
 issue: 303
 recorded: 2026-10-04
 versions: { claude-code: 2.1.289, coding-agent: claude-opus-5-5 }
@@ -49,7 +49,7 @@ recheck-when: Claude Code changes how it cuts or persists a Bash call's output, 
     well as its middle, because it is first cut to 30,000 and only then
     excerpted.
 
-  Recommended: correct § 2 to these three, and leave § 6's first line and
+  Recommended: correct § 2 to these three, and leave § 7's first line and
   `review.txt` as they are, since every case above is covered by them.
 
   2026-10-05: settled as recommended. § 2 Behaviour the design rests on now states all three.
@@ -116,7 +116,7 @@ cut; its call was wrapped too.
   ```
   Run the review as a plain `squiz review 41` Bash call, with nothing before or after it on the command line.
   ```
-- A stand-in `squiz` first on `PATH` printed the § 6 exit-2 output for 12
+- A stand-in `squiz` first on `PATH` printed the § 7 exit-2 output for 12
   threads on four seeded TypeScript files, each with a multi-line body, a code
   excerpt and a suggested fix, wrote the same text to `.squiz/41/review.txt`, and
   exited 2. Its second run printed the exit-0 output. It logged every call with

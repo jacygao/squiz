@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what other code reviewers give their model to see and to run, what the charter could take from their instructions, and what evidence exists for a review that runs tests and for reviewing a stranger's pull request"
+settles: "§ 5 — what other code reviewers give their model to see and to run, what the charter could take from their instructions, and what evidence exists for a review that runs tests and for reviewing a stranger's pull request"
 issue: [579]
 recorded: 2026-10-06
 versions: { pr-agent: 8175540f, claude-code: 8e60c4ca, claude-code-security-review: 0c6a49f1, claude-code-action: 86d88e61, codex: 822e58cc, no-mistakes: main, kodus-ai: main, run-gemini-cli: main }
@@ -57,7 +57,7 @@ recheck-when: a vendor publishes a measurement that separates running code from 
   starts. Codex's local review, Ellipsis, Kodus and Bito do not say. no-mistakes
   reviews only its user's own pushes, unconfined. Squiz does none of the
   documented things. It reviews whatever pull request is checked out
-  where it runs, and nothing in § 4 or § 6 asks who wrote it. Its reviewer runs
+  where it runs, and nothing in § 5 or § 7 asks who wrote it. Its reviewer runs
   none of the change's code, holds no GitHub token, and reads only the
   snapshot. The `AGENTS.md` it treats as authoritative is read from the head
   commit, so whoever wrote the pull request also wrote those rules.
@@ -74,7 +74,7 @@ recheck-when: a vendor publishes a measurement that separates running code from 
   stranger's `AGENTS.md`. Recommended: read `AGENTS.md` and what it names from
   the base, as claude-code-action does with its own configuration, and refuse a
   head in another repository if a level that runs code returns. This would be a
-  spec change to § 4 and § 6, and is not filed.
+  spec change to § 5 and § 7, and is not filed.
 
 ## Reference
 
@@ -84,7 +84,7 @@ recheck-when: a vendor publishes a measurement that separates running code from 
 
 | Tool | Sees | Shell | Runs tests or builds | Git history | Where it runs | Sources |
 |---|---|---|---|---|---|---|
-| **squiz** | The whole snapshot, through read tools | No | No | Through three typed tools | The user's machine | § 4 Tools |
+| **squiz** | The whole snapshot, through read tools | No | No | Through three typed tools | The user's machine | § 5 Tools |
 | Qodo PR-Agent | The diff, with up to 10 extra lines reaching to the enclosing function, plus `AGENTS.md` from the default branch | No | No | No | GitHub Action, self-hosted app, or Qodo's cloud | [prompt L11][qodo-prompt], [configuration.toml][qodo-config] |
 | Claude Code `code-review` plugin | The diff and what `gh` returns. No file read tools | No | No; told "do not run the linter to verify" | Through `gh` | The user's machine | [code-review.md][cc-plugin] |
 | Claude Code `/security-review` | The diff, plus read-only `Read`, `Glob`, `Grep` and `git log/show` | No | No | Yes | The user's machine, or CI | [security-review.md][cc-sec] |

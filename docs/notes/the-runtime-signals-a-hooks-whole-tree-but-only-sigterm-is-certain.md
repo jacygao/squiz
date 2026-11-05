@@ -1,5 +1,5 @@
 ---
-settles: "§ 2 — what the runtime sends the processes under a hook it kills, and what fails a subagent at 600 seconds; § 3 — why a hook only queues and the round runs outside it; § 4 — that a reviewer CLI must exit on SIGTERM"
+settles: "§ 2 — what the runtime sends the processes under a hook it kills, and what fails a subagent at 600 seconds; § 3 — why a hook only queues and the round runs outside it; § 5 — that a reviewer CLI must exit on SIGTERM"
 issue: 142
 recorded: 2026-09-25
 versions: { claude-code: 2.1.270, node: 24.15.0, pi: 0.85.1 }

@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what confines the reviewer's reading tools to the snapshot, for each adapter"
+settles: "§ 5 — what confines the reviewer's reading tools to the snapshot, for each adapter"
 issue: [576, 620]
 recorded: 2026-10-07
 versions: { pi: 0.85.1, copilot: 1.0.92, models: "deepseek-v4-pro, gpt-6-astra", macos: 26.6.2 }

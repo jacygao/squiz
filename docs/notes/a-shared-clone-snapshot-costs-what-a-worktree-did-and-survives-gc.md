@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — how the snapshot is made and removed, what it costs in time and disk, what it shares with the coding agent's repository, and what a gc there does to it; § 7 — whether making it fits the 30 seconds before the review"
+settles: "§ 5 — how the snapshot is made and removed, what it costs in time and disk, what it shares with the coding agent's repository, and what a gc there does to it; § 8 — whether making it fits the 30 seconds before the review"
 issue: [302, 570]
 recorded: 2026-10-06
 versions: { git: 2.54.0 (Apple Git-157), macos: 26.6.2 }
@@ -65,7 +65,7 @@ recheck-when: git changes what clone --shared writes, how gc expires unreachable
   so `origin/main` there is the repository's local `main`, where in a worktree
   it was the repository's own `origin/main`. Hashes and revisions from `HEAD`
   resolve alike, and those are what the tool's description offers. Recommend
-  leaving it; § 4 states it.
+  leaving it; § 5 states it.
 
 ## Reference
 

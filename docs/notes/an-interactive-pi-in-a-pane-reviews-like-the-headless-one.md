@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether interactive pi in a pane can be the reviewer, how its reports reach the round, and how it ends"
+settles: "§ 5 — whether interactive pi in a pane can be the reviewer, how its reports reach the round, and how it ends"
 issue: 277
 recorded: 2026-10-03
 versions: { pi: "0.85.1 and 1.0.0", model: deepseek-v4-pro, tmux: 3.7b, node: 24.15.0 }

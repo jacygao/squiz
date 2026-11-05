@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether Copilot meets Adapters' requirement to exit on SIGTERM, and what of its processes the round's signal reaches; § 7 — what a Copilot round stopped by the time bound leaves running"
+settles: "§ 5 — whether Copilot meets Adapters' requirement to exit on SIGTERM, and what of its processes the round's signal reaches; § 8 — what a Copilot round stopped by the time bound leaves running"
 issue: 458
 recorded: 2026-10-06
 versions: { copilot: 1.0.91, model: gpt-5-mini, tmux: 3.7b, macos: 26.6.2 }
@@ -16,7 +16,7 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes how it starts shell t
 ## Decisions
 
 - **Hold Copilot to the round's bound by signalling its process group, as for
-  `pi`.** It meets § 4 Adapters' requirement for itself: on `SIGTERM`, to its pid
+  `pi`.** It meets § 5 Adapters' requirement for itself: on `SIGTERM`, to its pid
   or to its group, mid-command or idle, it exited at once. It took its MCP server
   down with it, and the bash running a shell call, and that bash's children.
 - **Tell a stopped run from a finished one by the stream, not by the exit

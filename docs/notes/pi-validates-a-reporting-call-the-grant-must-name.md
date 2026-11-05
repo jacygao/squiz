@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether a finding can arrive as a call the reviewer's CLI validates, what `--tools` withholds and how a grant short of a name fails, why `pi` needs `/dev/null` on stdin, and where the harness reads the report back from"
+settles: "§ 5 — whether a finding can arrive as a call the reviewer's CLI validates, what `--tools` withholds and how a grant short of a name fails, why `pi` needs `/dev/null` on stdin, and where the harness reads the report back from"
 issue: [11, 165]
 recorded: 2026-09-25
 versions: { pi: "0.84.2, 0.85.1", model: deepseek-v4-pro, node: 24.15.0 }
@@ -63,7 +63,7 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   serialises `details`, so the report goes back to the harness whole without
   being paid for a second time in the reviewer's context. 2026-10-05: since M7
   the extension appends each accepted report to the round's report file, and
-  the round reads that file rather than `pi`'s stream (§ 4 The `pi` adapter).
+  the round reads that file rather than `pi`'s stream (§ 5 The `pi` adapter).
 - **End the run from the round, once the reviewer has reported the review
   complete, and ask `pi` for nothing.** `terminate: true` on a tool's result ends
   the run only where every call of the same assistant message carries it, so a
@@ -78,7 +78,7 @@ recheck-when: pi upgrades, pi changes how --tools filters extension tools, or pi
   recover it: those bytes never left the process. Bound the wait, because a call
   that never answers would otherwise hold a review that is already complete.
   2026-10-05: since M7 the extension ends the reviewer with `ctx.shutdown()`
-  after `finish_review`, and the round waits for the process to exit (§ 4 The
+  after `finish_review`, and the round waits for the process to exit (§ 5 The
   `pi` adapter).
 - **Write the extension against structural types and a plain JSON Schema
   object.** `pi` validates a schema that is not a TypeBox value through its own

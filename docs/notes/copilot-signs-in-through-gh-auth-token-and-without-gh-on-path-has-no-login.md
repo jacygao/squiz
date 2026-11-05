@@ -1,5 +1,5 @@
 ---
-settles: "§ 6 — what Copilot's sign-in prompt prints signed in and signed out, and how a signed-out run is reached without touching the user's login; § 4 — where a Copilot reviewer's login comes from"
+settles: "§ 7 — what Copilot's sign-in prompt prints signed in and signed out, and how a signed-out run is reached without touching the user's login; § 5 — where a Copilot reviewer's login comes from"
 issue: 673
 recorded: 2026-10-08
 versions: { copilot: 1.0.93, gh: 2.97.0, macos: 26.6.2 }
@@ -70,7 +70,7 @@ none for Copilot. Copilot's runtime library names `gh auth token` and an
 `AuthInfo::GhCli` login source. `~/.copilot/config.json` holds no
 `logged_in_users`.
 
-**This contradicts § 4 Tools**, which says the round leaves alone "Copilot's own
+**This contradicts § 5 Tools**, which says the round leaves alone "Copilot's own
 login in the system's credential store". On this machine Copilot has no login
 of its own. It signs in with `gh`'s, which it reads by running `gh auth token`,
 so a round whose `PATH` has no `gh` would have no model credential.

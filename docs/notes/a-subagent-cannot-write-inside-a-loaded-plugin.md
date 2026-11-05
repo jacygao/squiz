@@ -1,5 +1,5 @@
 ---
-settles: "executing-milestones § 8 — where squiz is loaded from when it is used on this repository's own work"
+settles: "executing-milestones § 9 — where squiz is loaded from when it is used on this repository's own work"
 issue: 272
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288 }

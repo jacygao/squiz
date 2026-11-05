@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — why every reviewer gets one level, with no level that runs the project's code, and why the history tools are in that level"
+settles: "§ 5 — why every reviewer gets one level, with no level that runs the project's code, and why the history tools are in that level"
 issue: 590
 recorded: 2026-10-07
 versions: { pi: 0.85.1, pi-model: deepseek/deepseek-v4-pro, copilot: 1.0.92, copilot-model: gpt-6-astra, thinking: medium, node: 24.15.0, qs: 07b1d4d8, node-semver: 6e05b763, marked: 7e8754d6 }

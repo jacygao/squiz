@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — the Copilot adapter's environment (COPILOT_MODEL, COPILOT_ALLOW_ALL), the process group a round signals, and the usage a run leaves"
+settles: "§ 5 — the Copilot adapter's environment (COPILOT_MODEL, COPILOT_ALLOW_ALL), the process group a round signals, and the usage a run leaves"
 issue: 462
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-5-mini, tmux: 3.7b, macos: 26.6.2 }
@@ -23,7 +23,7 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads COPILOT_
   `session.start` event carried `"selectedModel":"gpt-5-mini"`, and its usage
   file `"currentModel": "gpt-5-mini"`. A model the project configures goes on
   `--model` instead, because a `COPILOT_MODEL` naming a model the user does not
-  have runs the round on another one and exits 0 (§ 4 The Copilot adapter).
+  have runs the round on another one and exits 0 (§ 5 The Copilot adapter).
 - **Set `COPILOT_ALLOW_ALL` to the empty string.** Empty, it trusted nothing: a
   tree's `.mcp.json` server was not listed and not started. Set to `true` under
   the same empty `COPILOT_HOME`, the same server was listed. The empty value

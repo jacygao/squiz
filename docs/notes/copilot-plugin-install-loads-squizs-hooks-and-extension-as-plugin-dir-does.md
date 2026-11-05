@@ -1,5 +1,5 @@
 ---
-settles: "§ 8 — whether an installed plugin gives Copilot the hooks and the extension; § 9 — how a Copilot user installs squiz, and how `squiz init` is run without Claude Code"
+settles: "§ 9 — whether an installed plugin gives Copilot the hooks and the extension; § 10 — how a Copilot user installs squiz, and how `squiz init` is run without Claude Code"
 issue: 602
 recorded: 2026-10-07
 versions: { copilot: 1.0.92, models: "gpt-5-mini (session), claude-sonnet-5 and gpt-6-astra (reviewer)", node: 24.15.0, macos: 26.6.2 }
@@ -54,16 +54,16 @@ itself for a local marketplace, and `squiz init` run by path from there links
   Copilot's copy.** `${CLAUDE_PLUGIN_ROOT}` is that copy, so the hook already
   runs it. `squiz init` linked `~/.local/bin/squiz` to it, and the session's
   `squiz review` ran the same squiz the hook did. A second install's
-  `squiz init` made no link and named the first, as § 6 `squiz init` says.
+  `squiz init` made no link and named the first, as § 7 `squiz init` says.
 
 ## Needs your input
 
 - **Whether `/squiz doctor` should catch two installs at different versions.**
   Copilot keeps its own copy of the plugin, and its hook runs that copy. `squiz`
-  on `PATH` links to whichever install ran `squiz init`, which § 9 says is
+  on `PATH` links to whichever install ran `squiz init`, which § 10 says is
   Claude Code's where both have squiz. After an update to one and not the
   other, a Copilot session's hook and its `squiz review` run different versions
-  on one state file. § 9 now tells such a person to update both.
+  on one state file. § 10 now tells such a person to update both.
   Recommendation: have `/squiz doctor` report a Copilot copy whose
   `plugin.json` version differs from the one the link names, as an M9 issue.
 

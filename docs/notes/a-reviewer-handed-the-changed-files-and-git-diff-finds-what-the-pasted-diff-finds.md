@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — the prompt lists the changed files and carries no diff, the reviewer reads each file's diff through git_diff, and the diff is read from the snapshot rather than downloaded"
+settles: "§ 5 — the prompt lists the changed files and carries no diff, the reviewer reads each file's diff through git_diff, and the diff is read from the snapshot rather than downloaded"
 issue: 715
 recorded: 2026-10-17
 versions: { copilot: 1.0.98, copilot-model: gpt-6.1-sol, pi: 0.85.1, pi-model: deepseek/deepseek-v4-pro, thinking: medium, node: 24.15.0, qs: 07b1d4d8, node-semver: 6e05b763, marked: 7e8754d6 }

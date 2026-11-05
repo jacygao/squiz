@@ -9,7 +9,7 @@ method; this file holds what is specific to squiz, and they read it from here.
 **Load the `skills:writing-specs` skill before writing or editing anything under
 `docs/specs/`.** Every time, without being asked.
 
-`docs/specs/review-harness-spec.md` is the specification. Its § 8, The project,
+`docs/specs/review-harness-spec.md` is the specification. Its § 9, The project,
 fixes the language rules and the `src/` layout: erasable syntax only, and no
 directory the layout does not have.
 

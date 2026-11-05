@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — where the snapshot is made, and why no component of its path begins with a dot"
+settles: "§ 5 — where the snapshot is made, and why no component of its path begins with a dot"
 issue: 541
 recorded: 2026-10-06
 versions: { mocha: a9fc5296, minimatch: 10.2.5, glob: 13.0.6, node: 24.15.0, git: 2.54.0 (Apple Git-157), macos: 26.6.2 }

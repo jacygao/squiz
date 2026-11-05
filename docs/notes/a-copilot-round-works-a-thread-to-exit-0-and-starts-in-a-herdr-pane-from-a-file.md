@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether the Copilot adapter reviews a real pull request as it specifies when detached, whether a Copilot round starts and closes in a Herdr pane, and whether the charter governs the user's default model; § 5 — the summary's cost line for a Copilot review"
+settles: "§ 5 — whether the Copilot adapter reviews a real pull request as it specifies when detached, whether a Copilot round starts and closes in a Herdr pane, and whether the charter governs the user's default model; § 6 — the summary's cost line for a Copilot review"
 issue: [465, 516]
 recorded: 2026-10-06
 versions: { claude-code: 2.1.290, coding-agent: claude-opus-5-5, copilot: 1.0.92, reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, squiz: "9dccf87, and the #516 fix" }
@@ -8,7 +8,7 @@ recheck-when: Copilot changes `--agent`, `--usage-output-file` or its usage file
 
 # A Copilot round works a thread to exit 0, and starts in a Herdr pane once its line runs from a file
 
-Copilot reviewed a real pull request as § 4 sets out, once it ran detached. Test
+Copilot reviewed a real pull request as § 5 sets out, once it ran detached. Test
 pull request #515 carried a planted off-by-one, a `pageCount` using
 `Math.floor`, and a test that only divided evenly. Round 1 posted one `high`
 thread on it, and the command exited 2. The fix was pushed with tests, a reply
@@ -25,7 +25,7 @@ pane closed when the review ended.
   request, with a finding posted as a thread.
 - Whether the coding agent works that finding through `squiz review` to exit 0
   or 3.
-- Whether the summary carries the round's cost as § 4 and § 5 set out for
+- Whether the summary carries the round's cost as § 5 and § 6 set out for
   Copilot.
 - Whether the reviewer keeps to the charter's reporting contract when the charter
   arrives as a custom agent's instructions, on the user's own default model.
@@ -34,7 +34,7 @@ pane closed when the review ended.
 ## Decisions
 
 - **Keep the Copilot adapter's command line, grant, reporting server and read as
-  § 4 sets them out.** Both detached rounds ran the line as specified, appended
+  § 5 sets them out.** Both detached rounds ran the line as specified, appended
   the usage line once Copilot exited 0, and were read back as reviewed. The
   resume line was written in the specified form.
 
@@ -48,7 +48,7 @@ pane closed when the review ended.
   coding agent's worktree is about 935 bytes, under the cut but not by much, so
   it runs from the file too.
 
-- **Read a Copilot round's cost as § 4 does.** Round 1's 38,236 tokens are
+- **Read a Copilot round's cost as § 5 does.** Round 1's 38,236 tokens are
   `inputTokens` 37,717 and `outputTokens` 519 from `modelMetrics`, and its 15.69
   AI credits are `totalNanoAiu` 15,687,150,000 over 10⁹. The summary carried
   both, with no dollar figure.
@@ -105,7 +105,7 @@ Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0
 ```
 
 The failure comment from the first attempt stays on the pull request beside the
-summary, as § 7 says it does.
+summary, as § 8 says it does.
 
 Each round wrote `resume.txt`, for round 1 as
 `COPILOT_HOME=.squiz/515/rounds/1/session copilot --resume=1ee7acf1-7a58-4ea4-a8f7-6df164adeb76`.

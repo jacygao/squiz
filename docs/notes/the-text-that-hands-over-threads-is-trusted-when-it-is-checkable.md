@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 and § 6 — what the note to the owner and `squiz review`'s output must say for the coding agent to work the threads; § 7 — what that text may assert; § 9 — whether the host project declares Squiz's feedback authorised"
+settles: "§ 3 and § 7 — what the note to the owner and `squiz review`'s output must say for the coding agent to work the threads; § 8 — what that text may assert; § 10 — whether the host project declares Squiz's feedback authorised"
 recorded: 2026-09-06
 versions: { claude-code: 2.1.263, node: 24.15.0 }
 recheck-when: the coding agent's model changes, or the note's text or `squiz review`'s exit-2 output changes
@@ -22,7 +22,7 @@ wakes the owner, which points at `squiz review`, and the exit-2 output of
 
 ## Decisions
 
-- **§ 9's getting-started list gains no authorisation line, and the host project
+- **§ 10's getting-started list gains no authorisation line, and the host project
   declares nothing about Squiz's feedback.** The text was acted on with no
   authorisation present anywhere, so the line buys nothing. Where the line was
   present in `CLAUDE.md` and `AGENTS.md` and the text described a pull request

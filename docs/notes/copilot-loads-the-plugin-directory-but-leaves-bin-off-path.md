@@ -1,5 +1,5 @@
 ---
-settles: "§ 6 — how the `squiz` binary reaches a Copilot session's shell; § 9 — whether Copilot loads squiz's plugin directory and its hooks as they are"
+settles: "§ 7 — how the `squiz` binary reaches a Copilot session's shell; § 10 — whether Copilot loads squiz's plugin directory and its hooks as they are"
 issue: [534, 553]
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-5-mini, node: 24.15.0, macos: 26.6.2 }
@@ -31,7 +31,7 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or changes how it reads a plugin
   (decided 2026-10-06).** The owner chose the link over naming the binary by
   path, on the condition that it never makes two coding agents on one machine
   run different squizzes, so `squiz review` and `squiz reply` keep the same names
-  under both runtimes. § 6 `squiz init` says which directory and which
+  under both runtimes. § 7 `squiz init` says which directory and which
   conflicts.
 
 ## Needs your input

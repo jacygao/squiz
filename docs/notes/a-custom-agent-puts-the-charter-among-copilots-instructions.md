@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — how the charter reaches a Copilot reviewer's system prompt"
+settles: "§ 5 — how the charter reaches a Copilot reviewer's system prompt"
 issue: [461, 462]
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-5-mini, macos: 26.6.2 }

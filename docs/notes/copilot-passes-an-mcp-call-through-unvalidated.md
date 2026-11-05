@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether Copilot validates a reporting call, and so what the reporting MCP server must check itself"
+settles: "§ 5 — whether Copilot validates a reporting call, and so what the reporting MCP server must check itself"
 issue: 458
 recorded: 2026-10-06
 versions: { copilot: 1.0.91, model: gpt-5-mini, node: 24.15.0, macos: 26.6.2 }
@@ -28,7 +28,7 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or starts validating MCP tool ar
   | `"line": "12"` | `"line": "12"`, a string |
 
   Under Copilot the server's own checks are the only validation a call gets, as
-  § 4 Adapters now says, and a string of digits is not converted to a number for
+  § 5 Adapters now says, and a string of digits is not converted to a number for
   it, as `pi` converts one.
 - **Treat the schema the model sees as advice to the model, not a guard.** Given
   the same schema, the same model sent `"critical"` in one run and, in the next,

@@ -42,10 +42,10 @@ to pid 1 and leading a process group of its own.
   measurement ran on macOS only. The mechanism, leaving both the command's
   group and its process tree, is the same on Linux, and `startDetached`'s own
   tests, which kill the caller's group, run there in CI. Recommendation: do not block #326 on it. Record Linux as not
-  measured in § 8, and run the same stand-in on Linux the first time a Linux
+  measured in § 9, and run the same stand-in on Linux the first time a Linux
   machine with Claude Code is to hand.
 
-  2026-10-05: § 8 Prerequisites now lists Linux as open, because the detach and
+  2026-10-05: § 9 Prerequisites now lists Linux as open, because the detach and
   pane probes ran on macOS alone.
 
 ## Reference

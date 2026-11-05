@@ -1,9 +1,9 @@
 ---
-settles: "§ 3 — whether the round cap hands threads back R−1 times against a real runtime, by blocking when this was recorded; § 7 — which failure rows a configuration or an environment can force, what each writes on stderr, and which rows a live run cannot reach at all; § 4 — whether a verdict of `open` re-opens a thread the loop had closed"
+settles: "§ 3 — whether the round cap hands threads back R−1 times against a real runtime, by blocking when this was recorded; § 8 — which failure rows a configuration or an environment can force, what each writes on stderr, and which rows a live run cannot reach at all; § 5 — whether a verdict of `open` re-opens a thread the loop had closed"
 issue: 201
 recorded: 2026-09-27
 versions: { claude-code: 2.1.270, pi: 0.85.1, provider: deepseek, model: deepseek-v4-pro, coding-agent: claude-sonnet-5, gh: 2.97.0, node: 24.15.0 }
-recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows change
+recheck-when: the hook's exit-code decisions change, pi upgrades, or § 8's rows change
 ---
 
 # The cap holds, and every failure a configuration can force exits 0
@@ -16,7 +16,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
 - **No round had ever failed.** The failure pointer on stderr was written by
   unit tests alone, and nothing said whether a real firing writes it on the
   right channel.
-- **Nothing said which of § 7's rows a live run can reach at all**, or what
+- **Nothing said which of § 8's rows a live run can reach at all**, or what
   forcing one costs. Every row was covered by tests and none had been seen
   happen.
 - **Nothing had seen a verdict of `open`.** The earlier episode closed three
@@ -45,7 +45,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   2026-10-05: since M7 no hook blocks or runs a round, and the hook still exits
   0 on every path. The round host runs the round, `squiz review` exits 2 where
   threads are open and 1 where the round failed, and a failed round posts a
-  failure comment (§ 6, § 7).
+  failure comment (§ 7, § 8).
 
 - **A verdict of `open` re-opens a thread the loop had closed.** A thread the
   previous episode's round 2 had resolved was handed to a later round with the
@@ -63,7 +63,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   retrying three times, completing four errored messages, and exiting 0 with an
   empty stderr, so no message ever stops for an answer. The harness reads that
   as a reviewer that completed no message, and its pointer says the reviewer
-  could not run. The wording § 7 gives the unavailable-API row is reachable only
+  could not run. The wording § 8 gives the unavailable-API row is reachable only
   through the retry path, which needs output no fresh process could read either.
 
 - **Do not expect a killed round to salvage findings from a round this small.**
@@ -71,7 +71,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   reports every finding in the last seconds of it. A bound of 50 seconds and a
   bound of 65 seconds each killed a review that had reported nothing, and a
   bound of 75 seconds left a round of the same shape to finish and post. The
-  salvage that § 7 describes needs a round long enough for the reports to spread
+  salvage that § 8 describes needs a round long enough for the reports to spread
   out.
 
 - **Force a row from `.squiz.json` where one can be forced there, and prove the
@@ -80,7 +80,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   proof that the file the round read is the file that was written. `timeout` is
   the setting to do it with: it is refused above 480 and its value is quoted
   back in the pointer of a round it kills. 2026-10-05: M7 made the range 60 to
-  3,600 seconds, with 900 the default (§ 9 Configuration).
+  3,600 seconds, with 900 the default (§ 10 Configuration).
 
 - **Tell a driving session why a destructive step is wanted.** A parent given a
   numbered script that deleted the harness's own state directory investigated
@@ -101,7 +101,7 @@ recheck-when: the hook's exit-code decisions change, pi upgrades, or § 7's rows
   dispatches one subagent and fails its round in a second still costs tens of
   cents.
 
-- **Keep § 7's two rows, and name the second for what reaches it rather than for
+- **Keep § 8's two rows, and name the second for what reaches it rather than for
   a cause.** Every unreachable provider lands on the row for a reviewer that runs,
   exits cleanly and completes no message, so naming the other one after the model
   API described a case `pi` cannot produce. It is now named for output that cannot
@@ -159,7 +159,7 @@ can change.
 Each row's evidence is the exit code in the `hook_response` event, the threads on
 pull request #204 read back through GraphQL, and the `stderr` that event carried.
 
-| § 7 row | How it was forced | Exit | stderr | Posted |
+| § 8 row | How it was forced | Exit | stderr | Posted |
 |---|---|---|---|---|
 | The reviewer is not installed | `PATH` without the directory holding `pi` | 0 | `squiz: the reviewer could not run: the reviewer pi could not be started: spawn pi ENOENT` | nothing |
 | The reviewer runs, exits cleanly, and completes no message | `HTTPS_PROXY` at a refused port, `NO_PROXY` keeping GitHub reachable | 0 | `squiz: the reviewer could not run: Connection error.` | nothing |
@@ -168,12 +168,12 @@ pull request #204 read back through GraphQL, and the `stderr` that event carried
 | The local state file cannot be read | `.squiz` replaced by an empty regular file, so the episode's directory cannot exist | 0 | `squiz: no review ran: <worktree>/.squiz/<episode>/state.json could not be read: ENOTDIR: not a directory, open '<worktree>/.squiz/<episode>/state.json'` | nothing |
 | The round cap is reached | `"rounds": 1`, and `"rounds": 2` | 0 | empty | 2 threads under the cap of 1, none new by the cap of 2's round 2 |
 | The token bound is reached | `"tokens": 100000` with `"rounds": 3` and `"thinking": "max"` | 0 | empty | 3 threads |
-| A `.squiz.json` that cannot be read or parsed (§ 9) | `"timeout": 700`, then a key named `reviewEverything` | 0 | `squiz: no review ran: <worktree>/.squiz.json: "timeout" is 700, but it must be a whole number of seconds from 1 to 480` | nothing |
+| A `.squiz.json` that cannot be read or parsed (§ 10) | `"timeout": 700`, then a key named `reviewEverything` | 0 | `squiz: no review ran: <worktree>/.squiz.json: "timeout" is 700, but it must be a whole number of seconds from 1 to 480` | nothing |
 
 The subagent finished normally after every one of those firings: each one's
 `task_updated` carried `"status": "completed"`.
 
-§ 7 names the state file only at the write. The forcing above stops the episode
+§ 8 names the state file only at the write. The forcing above stops the episode
 at the read, before a reviewer starts, so the write is in the table of rows a run
 did not reach.
 
@@ -297,7 +297,7 @@ environment, and each is covered by the harness's own tests.
 ### Where a run contradicted the specification
 
 **Round 1 of an episode hands the reviewer no threads, even where the pull
-request carries some.** § 4's Invocation says the reviewer is handed "every
+request carries some.** § 5's Invocation says the reviewer is handed "every
 review thread already on it with the replies and resolved state of each", with
 no exception, and § 3's step 4 blocks where threads are still open. Five
 episodes posted a round 1's findings against #204 one after another, and the four
