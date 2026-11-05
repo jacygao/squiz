@@ -769,18 +769,23 @@ worktree, so nothing it writes becomes part of the change.
 #### The change
 
 **The head is a commit squiz builds from the working tree, and two builds of the
-same tree are the same commit.** Each trigger builds it before it reads the
-state:
+same worktree are the same commit.** Each trigger builds it before it reads the
+state, in an index of its own that starts as a copy of the worktree's:
 
 ```
-GIT_INDEX_FILE=$SQUIZ_LOCAL/index git add --all
-GIT_INDEX_FILE=$SQUIZ_LOCAL/index git write-tree
+cp "$(git rev-parse --git-path index)" $SQUIZ_LOCAL/index.<pid>
+GIT_INDEX_FILE=$SQUIZ_LOCAL/index.<pid> git add --all
+GIT_INDEX_FILE=$SQUIZ_LOCAL/index.<pid> git write-tree
 git commit-tree <tree> -p $SQUIZ_BASE -m "squiz: the working tree"
+rm $SQUIZ_LOCAL/index.<pid>
 ```
 
-- **The index is the venue's own**, so the worktree's index is never read or
-  changed. `git add --all` takes every tracked and untracked file that
-  `.gitignore` does not exclude.
+- **Each build copies the worktree's index afresh, and never changes the
+  worktree's own.** `git add --all` then takes what `git add --all` in the
+  worktree would: every tracked file, a tracked file that `.gitignore` names
+  included, and every untracked file that `.gitignore` does not exclude. The
+  copy is named for the building process and removed after, so two triggers
+  never share one, and nothing an earlier build left changes a later one.
 - **The objects go into the venue's directory.** Each command runs with
   `GIT_OBJECT_DIRECTORY` set to `$SQUIZ_LOCAL/objects` and the repository's own
   object directory as an alternate, so no object is written into the
@@ -814,7 +819,7 @@ $SQUIZ_LOCAL/
   state.json  state.lock  host.lock  host.log  rounds/  review.txt   as under § 3
   threads.json   threads.lock
   summary.md     failure-1.md …
-  index          objects/                                         the change's index and objects
+  objects/                                                        the change's objects
   description.md                                                  written by whoever starts the run
 ```
 
@@ -877,11 +882,18 @@ by running the command again.
 
 | What the state's record says | The hook |
 |---|---|
-| Queued or reviewing | Blocks |
-| Reviewed with threads open, and the hook has not yet blocked for that result | Blocks, and records in the state's record that it did |
-| Reviewed with threads open, and the hook already blocked for that result | Returns. The coding agent was handed the threads and stopped without changing the tree or replying, so the run ends with them open. |
+| Queued or reviewing | Blocks, with the reason above |
+| Reviewed with threads open, and the hook has not yet blocked for that result | Blocks, with the reason above, and records in the state's record that it did |
+| Failed, and the hook has not yet blocked for that failure | Blocks with the failure, and records in the state's record that it did |
+| Reviewed with threads open, or failed, and the hook already blocked for that result | Returns. The coding agent was handed the result and stopped without changing the tree or replying, so the run ends there. |
 | The episode closed | Returns |
-| Failed | Returns. `squiz review` already said so, and running it once more is the retry (§ 3 The state file). |
+
+The reason for a failure carries it, and tells the agent not to retry, because
+`squiz review` on a failed state is the retry (§ 3 The state file):
+
+```json
+{"decision":"block","reason":"Squiz could not review the working tree at 3f9c2e0: the reviewer could not run: the provider refused the credential. Do not run `squiz review` again. Say so in your final message, and finish."}
+```
 
 The round cap closes every episode in at most R rounds, and a round needs a new
 state, so a run that keeps the hook blocking ends.

@@ -29,10 +29,11 @@ recheck-when: Copilot CLI upgrades past 1.0.105, or changes how a Stop hook's de
 - **Start the round host from the hook as now.** A process the hook started
   with Node's `spawn(…, {detached: true})` and `unref()` went on after the run
   that started it had exited.
-- **Keep `squiz review`'s 540-second wait.** No foreground command was stopped:
-  one ran 7 minutes, and one ran 1 hour 5 minutes. On the long one, Copilot gave
-  the turn back while the command still ran. The agent then waited on it with
-  `Read shell output` calls of up to 120 seconds each until it ended.
+- **Keep `squiz review`'s 540-second wait.** No foreground command was stopped.
+  One ran 7 minutes, start to end, in one call. The other ran about 10 minutes
+  of awake time before Copilot gave the turn back with the command still
+  running. The agent then waited on it with `Read shell output` calls of up to
+  120 seconds each, about 6 minutes more, until it ended.
 
 ## Needs your input
 
@@ -65,10 +66,12 @@ The hook's answer, on standard output, exit 0:
 - **The model followed the instruction to wait.** Nothing here shows what a
   model does that ends its turn instead. Under the stop rule, ending the turn
   is another `Stop`, which blocks again.
-- **The long run's 1 hour 5 minutes includes about 57 minutes the machine
-  slept.** It shows that the command was not stopped across that span, not that
-  Copilot sets no bound shorter than an hour of awake time. Awake, the command
-  ran about 17 minutes.
+- **The machine slept for about 56 minutes of the long run.** The wait script
+  ran 73 minutes of wall time and about 17 awake. Copilot reported the call as
+  1 hour 5 minutes 48 seconds, about 10 minutes of it awake, before it handed
+  the turn back. That shows the command was not stopped across the sleep. It
+  does not show what Copilot does with a command that runs longer than about
+  10 awake minutes in one call.
 - **The reviewer's hosts were not observed.** No network was captured, so
   whether a Copilot reviewer with `--no-auto-update` and
   `--disable-client-telemetry` reaches only `api.github.com` and the model host
