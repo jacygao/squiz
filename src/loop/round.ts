@@ -642,7 +642,11 @@ async function reviewOn(
     {
       directory: tree,
       charterFile: setup.charterFile,
-      prompt: composePrompt({ pullRequest, changes: change.listing, threads: handedOver }),
+      prompt: composePrompt({
+        change: { name: named(pullRequest), base: pullRequest.baseSha, description: pullRequest.description },
+        changes: change.listing,
+        threads: handedOver,
+      }),
       sessionDirectory,
       promptFile: join(ownDirectory, "prompt.md"),
       reportsFile: join(ownDirectory, "reports.jsonl"),
