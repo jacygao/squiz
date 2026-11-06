@@ -16,11 +16,10 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { threadLine } from "../findings/listing.ts";
-import type { ReviewThread } from "../venues/github/threads.ts";
-import { draftLine, followUpFor } from "../venues/github/venue.ts";
 import { failureLine } from "../hook/report.ts";
 import { episodeAt } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
+import type { Change, ReviewThread } from "../venues/venue.ts";
 
 /** What closed an episode short of a clean review. */
 export type Bound = "round cap" | "token bound";
@@ -50,7 +49,7 @@ type RoundResult = About & {
   readonly recorded: boolean;
 };
 
-type Open = RoundResult & { readonly exit: 2 };
+type Open = RoundResult & { readonly exit: 2; readonly followUp: Change["followUp"] };
 
 type Clean = RoundResult & {
   readonly exit: 0;
@@ -126,8 +125,8 @@ type Failed = About & {
 /** A run that failed before any round, exit 1. */
 type NotRun = About & { readonly outcome: "not run"; readonly reason: string };
 
-/** A draft, which no trigger queues, exit 0. */
-type Draft = About & { readonly outcome: "draft" };
+/** A change the venue holds back, which no trigger queues, exit 0, printing the venue's line. */
+type Held = About & { readonly outcome: "held"; readonly line: string };
 
 /** A round whose findings could not be posted, exit 1. */
 type Unposted = About & {
@@ -146,7 +145,7 @@ export type ReviewResult =
   | Failed
   | NotRun
   | Unposted
-  | Draft;
+  | Held;
 
 /** What the run ends with. `stderr` is whole lines, newlines included, or empty. */
 export type Printed = {
@@ -165,14 +164,14 @@ export function reviewOutputPath(worktree: string, pullRequest: number): string 
  * file in `worktree`, replacing what was there.
  *
  * A run that exits 1 prints nothing on stdout and writes no file, and neither
- * does a draft, whose one line is all there is to read. A write that
+ * does a held change, whose one line is all there is to read. A write that
  * fails adds a line on stderr and changes nothing else: the outcome stands, and
  * it is printed whole on stdout either way.
  */
 export function printReview(result: ReviewResult, worktree: string): Printed {
   const path = reviewOutputPath(worktree, result.pullRequest);
   const printed = composeReview(result, path);
-  if (printed.exit === 1 || result.outcome === "draft") return printed;
+  if (printed.exit === 1 || result.outcome === "held") return printed;
 
   try {
     makeEpisodeDirectory(episodeAt(resolve(worktree), result.pullRequest));
@@ -205,12 +204,8 @@ export function composeReview(result: ReviewResult, path: string): Printed {
       return { exit: 1, stdout: "", stderr: failureLine(`no review ran: ${result.reason}`) + problems + NOT_AGAIN };
     case "unposted":
       return { exit: 1, stdout: "", stderr: failureLine(unpostedLine(result)) + problems + NOT_AGAIN };
-    case "draft":
-      return {
-        exit: 0,
-        stdout: `${draftLine(result.pullRequest)}\n`,
-        stderr: problems,
-      };
+    case "held":
+      return { exit: 0, stdout: `${result.line}\n`, stderr: problems };
   }
 }
 
@@ -247,7 +242,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         heading,
         `${counted(open.length, "thread")} ${open.length === 1 ? "is" : "are"} open:`,
         ...open.map(printedThread),
-        workTheThreads(result.pullRequest),
+        result.followUp,
       ];
     case 0:
       return [withNotReviewed(heading, result, result.notReviewed), NOTHING_OPEN];
@@ -262,11 +257,6 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
       ];
     }
   }
-}
-
-/** What the coding agent does with threads that are open while rounds remain. */
-export function workTheThreads(pullRequest: number): string {
-  return followUpFor(pullRequest);
 }
 
 const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";

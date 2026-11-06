@@ -315,6 +315,8 @@ test("a detached HEAD queues nothing and makes no .squiz", async () => {
   });
 });
 
+const DRAFT_LINE = `PR #${NUMBER} is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.`;
+
 function draftRow(): string {
   return JSON.stringify([{ ...(JSON.parse(pullRequestRow()) as Record<string, unknown>[])[0], isDraft: true }]);
 }
@@ -326,7 +328,7 @@ test("a draft queues nothing, lists no threads, starts no host and makes no .squ
     for (const asked of [request(fixture), request(fixture, { trigger: "review", pullRequest: NUMBER })]) {
       const result = trigger(asked);
 
-      assert.deepEqual(result, { outcome: "draft", pullRequest: NUMBER });
+      assert.deepEqual(result, { outcome: "held", line: DRAFT_LINE });
     }
     assert.equal(existsSync(join(fixture.bin, "count")), false, "the trigger listed the threads of a draft");
     assert.equal(existsSync(join(fixture.worktree, ".squiz")), false);
@@ -339,14 +341,14 @@ test("a draft whose episode closed is still a draft, rather than the close (#720
     seed(fixture.episode, { closeReported: true });
     writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
 
-    assert.deepEqual(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })), { outcome: "draft", pullRequest: NUMBER });
+    assert.deepEqual(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })), { outcome: "held", line: DRAFT_LINE });
   });
 });
 
 test("a pull request marked ready after a trigger found it a draft is queued by the next trigger (#720)", async () => {
   await withFixture(async (fixture) => {
     writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
-    assert.equal(trigger(request(fixture)).outcome, "draft");
+    assert.equal(trigger(request(fixture)).outcome, "held");
 
     writeFileSync(join(fixture.bin, "list.out"), pullRequestRow(), "utf8");
     const result = decided(trigger(request(fixture)));

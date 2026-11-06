@@ -9,15 +9,17 @@
  */
 
 import { closedLines, type ClosedBy } from "../venues/github/failure-body.ts";
-import type { ReviewThread } from "../venues/github/threads.ts";
-import { printedThread, workTheThreads } from "../review/output.ts";
+import { printedThread } from "../review/output.ts";
 import type { NoteFields } from "../sessions/notes.ts";
 import type { StateRecord } from "../loop/state-record.ts";
+import type { Change, ReviewThread } from "../venues/venue.ts";
 
 /**
  * The note for the owner of `record`, or none.
  *
- * `name` is how the state is told apart from the others in the text. A state
+ * `name` is how the state is told apart from the others in the text, and
+ * `followUp` is the change's, which ends a note for threads open while rounds
+ * remain. A state
  * with no owner gets no note, and nor does one reviewed clean with the episode
  * open, because the episode is still under way and nothing waits on that state.
  *
@@ -33,13 +35,14 @@ export function ownerNote(
   pullRequest: number,
   record: StateRecord,
   name: string,
+  followUp: Change["followUp"],
   closed?: ClosedBy,
   listed?: readonly ReviewThread[],
 ): OwnerNote | undefined {
   const { owner } = record;
   if (owner === undefined) return undefined;
   const at = owner.subagent === undefined ? name : `${name}, the work of subagent ${owner.subagent}`;
-  const text = textOf(pullRequest, record, at, closed, listed);
+  const text = textOf(pullRequest, record, at, followUp, closed, listed);
   if (text === undefined) return undefined;
   const fields = {
     to: owner.sessionId,
@@ -60,6 +63,7 @@ function textOf(
   pullRequest: number,
   record: StateRecord,
   at: string,
+  followUp: string,
   closed: ClosedBy | undefined,
   listed: readonly ReviewThread[] | undefined,
 ): string | undefined {
@@ -83,7 +87,7 @@ function textOf(
       return [
         `${heading}:`,
         ...open.slice(0, PRINTED_THREADS).map(printedThread),
-        ...(record.exitStatus === 2 ? [workTheThreads(pullRequest)] : []),
+        ...(record.exitStatus === 2 ? [followUp] : []),
         ...(rest > 0 ? [`${rest} more ${rest === 1 ? "thread is" : "threads are"} open. ${review} prints them all.`] : []),
       ].join("\n\n");
     }

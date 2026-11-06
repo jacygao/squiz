@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { findPullRequestNodeId } from "../venues/github/pull-request.ts";
 import { unthreadedNotes } from "../venues/github/summary-body.ts";
 import { listReviewThreads, type ReviewThread } from "../venues/github/threads.ts";
+import { followUpFor } from "../venues/github/venue.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
@@ -322,7 +323,7 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
     if (threads !== undefined && record.status === "reviewed" && record.result === "exited" && threadsToPrint(record.openThreads, threads).length === 0) {
       log(`${named(record)}: none of the threads the round left open is open on PR #${episode.id}, so its note points to squiz review`);
     }
-    const note = ownerNote(Number(episode.id), record, name, closed, threads);
+    const note = ownerNote(Number(episode.id), record, name, followUpFor(Number(episode.id)), closed, threads);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);
     if (written.outcome === "failed") {
