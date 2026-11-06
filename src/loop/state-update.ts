@@ -62,9 +62,7 @@ export type StateUpdate =
  * A state file that is absent is handed to `change` as the empty state. One that
  * is unreadable is left as it is, and the update fails with the reason.
  *
- * A lock held by a live process, or by one `ps` cannot tell running or gone, is
- * waited on until `until` passes, and the update then fails naming the holder. A
- * lock naming a process that has gone is taken over.
+ * The lock is waited on and taken over as `holdingLock` sets out.
  *
  * Never throws, unless `change` does, and the lock is released either way.
  */
@@ -73,11 +71,37 @@ export function updateState(
   change: (state: EpisodeState) => EpisodeState,
   options: UpdateOptions,
 ): StateUpdate {
-  const { until } = options;
   const notWritten = (why: string): StateUpdate => ({
     outcome: "failed",
     reason: `${episode.stateFile} could not be written: ${why}`,
   });
+  try {
+    makeEpisodeDirectory(episode);
+  } catch (error) {
+    return notWritten(`${episode.directory} could not be made: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const held = holdingLock(episode.directory, LOCK_NAME, () => underLock(episode, change), options);
+  return held.outcome === "held" ? held.value : notWritten(held.reason);
+}
+
+/** What `act` returned, or why the lock it needed was never taken. */
+export type Locked<T> =
+  | { readonly outcome: "held"; readonly value: T }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * Run `act` holding the lock `name` in `directory`, and release the lock after,
+ * whatever `act` does.
+ *
+ * A lock held by a live process, or by one `ps` cannot tell running or gone, is
+ * waited on until `options.until` passes, and the call then fails naming the
+ * holder. A lock naming a process that has gone is taken over.
+ *
+ * Never throws, unless `act` does.
+ */
+export function holdingLock<T>(directory: string, name: string, act: () => T, options: UpdateOptions): Locked<T> {
+  const { until } = options;
+  const notHeld = (reason: string): Locked<T> => ({ outcome: "failed", reason });
 
   // A deadline spent before the update began still gets its one attempt, and the
   // floor lets that attempt's `ps` finish: a round records its cost after its
@@ -90,7 +114,7 @@ export function updateState(
   const expired = (): boolean => !lastAttemptOnly && until.passed();
 
   const self = options.self ?? ownIdentity(boundMs(), options.identify);
-  if ("reason" in self) return notWritten(self.reason);
+  if ("reason" in self) return notHeld(self.reason);
   const ask = options.presence ?? stillRunning;
   let cutShort = false;
   const presence = (identity: ProcessIdentity): Presence => {
@@ -102,23 +126,28 @@ export function updateState(
   // The last answer a holder gave. An attempt the deadline cut short says only that
   // time ran out, so the failure names what the attempt before it found.
   let found: Exclude<Taking, { readonly outcome: "taken" }> | undefined;
-  try {
-    makeEpisodeDirectory(episode);
-  } catch (error) {
-    return notWritten(`${episode.directory} could not be made: ${error instanceof Error ? error.message : String(error)}`);
-  }
   for (;;) {
     cutShort = false;
-    const taking = takeLock(episode.directory, LOCK_NAME, { boundMs: boundMs(), self, presence });
+    const taking = takeLock(directory, name, { boundMs: boundMs(), self, presence });
     if (taking.outcome === "taken") {
-      if (!expired()) return underLock(episode, change, taking.lock);
+      if (!expired()) return { outcome: "held", value: runHolding(act, taking.lock) };
       // The caller's time for this write has gone, so the lock goes back unused.
       taking.lock.release();
-      return notWritten("its lock was taken only after the deadline had passed");
+      return notHeld("its lock was taken only after the deadline had passed");
     }
     if (!cutShort || found === undefined) found = taking;
-    if (until.passed()) return notWritten(whyNotTaken(found));
+    if (until.passed()) return notHeld(whyNotTaken(found));
     pause(Math.min(until.remaining(), PAUSE_MS + Math.random() * JITTER_MS));
+  }
+}
+
+function runHolding<T>(act: () => T, lock: HeldLock): T {
+  try {
+    return act();
+  } finally {
+    // A lock this fails to remove names this process, so the next writer waits
+    // until it exits, when the exit handler removes it.
+    lock.release();
   }
 }
 
@@ -128,18 +157,12 @@ function whyNotTaken(taking: Exclude<Taking, { readonly outcome: "taken" }>): st
     : `its lock could not be taken: ${taking.reason}`;
 }
 
-function underLock(episode: Episode, change: (state: EpisodeState) => EpisodeState, lock: HeldLock): StateUpdate {
-  try {
-    const found = readState(episode);
-    if (found.outcome === "unreadable") return { outcome: "failed", reason: found.reason };
-    const state = change(found.outcome === "read" ? found.state : { rounds: [], spentOutsideRounds: unspent });
-    const written = writeState(episode, state);
-    return written.outcome === "written" ? { outcome: "written", state } : written;
-  } finally {
-    // A lock this fails to remove names this process, so the next writer waits
-    // until it exits, when the exit handler removes it.
-    lock.release();
-  }
+function underLock(episode: Episode, change: (state: EpisodeState) => EpisodeState): StateUpdate {
+  const found = readState(episode);
+  if (found.outcome === "unreadable") return { outcome: "failed", reason: found.reason };
+  const state = change(found.outcome === "read" ? found.state : { rounds: [], spentOutsideRounds: unspent });
+  const written = writeState(episode, state);
+  return written.outcome === "written" ? { outcome: "written", state } : written;
 }
 
 let own: ProcessIdentity | undefined;
