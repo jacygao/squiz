@@ -9,7 +9,7 @@
 
 import type { Deadline } from "../reviewers/deadline.ts";
 import { githubVenue } from "./github/venue.ts";
-import type { Anchor, ThreadPosting } from "./github/post-thread.ts";
+import type { Anchor } from "./github/post-thread.ts";
 import type { CommentPosting } from "./github/summary.ts";
 import type { ThreadAction } from "./github/thread-actions.ts";
 import type { ReviewThread } from "./github/threads.ts";
@@ -43,7 +43,28 @@ export type ChangeLookup =
   | { readonly outcome: "none"; readonly reason: string }
   | Failed;
 
-export type { Anchor, ReviewThread, ThreadAction, ThreadPosting };
+export type { Anchor, ReviewThread, ThreadAction };
+
+/**
+ * What became of a new thread. `anchor-refused` is a line the venue cannot
+ * hold, and `posted-without-thread-id` a comment that landed whose thread's id
+ * could not be read back. Ids are the issuing venue's own opaque strings.
+ */
+export type ThreadPosting =
+  | {
+      readonly outcome: "posted";
+      readonly threadId: string;
+      readonly commentId: string;
+      readonly url: string;
+    }
+  | {
+      readonly outcome: "posted-without-thread-id";
+      readonly reason: string;
+      readonly commentId: string;
+      readonly url: string;
+    }
+  | { readonly outcome: "anchor-refused"; readonly reason: string }
+  | Failed;
 
 /** What became of a summary or a failure comment. */
 export type Posting = CommentPosting;

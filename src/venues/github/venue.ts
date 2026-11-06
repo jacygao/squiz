@@ -13,8 +13,8 @@ import { join } from "node:path";
 import { currentBranch } from "../../hook/branch.ts";
 import type { Deadline } from "../../reviewers/deadline.ts";
 import { runGit } from "../../worktree/git.ts";
-import type { Change, ChangeLookup, Failed, Venue } from "../venue.ts";
-import { postFileThread, postThread } from "./post-thread.ts";
+import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venue.ts";
+import { postFileThread, postThread, type ThreadPosting as GitHubThreadPosting } from "./post-thread.ts";
 import { findPullRequestForBranch, findPullRequestNodeId, type PullRequest } from "./pull-request.ts";
 import { postIssueComment, postSummary } from "./summary.ts";
 import { reopenThread, replyInThread, resolveThread } from "./thread-actions.ts";
@@ -76,17 +76,15 @@ export const githubVenue: Venue = {
   openThread(change, anchor, body, until) {
     const number = numberOf(change);
     if (typeof number !== "number") return number;
-    return postThread(
-      { pullRequest: number, headSha: change.head, body, anchor },
-      { directory: worktreeOf(change), until },
+    return posting(
+      postThread({ pullRequest: number, headSha: change.head, body, anchor }, { directory: worktreeOf(change), until }),
     );
   },
   openFileThread(change, path, body, until) {
     const number = numberOf(change);
     if (typeof number !== "number") return number;
-    return postFileThread(
-      { pullRequest: number, headSha: change.head, body, path },
-      { directory: worktreeOf(change), until },
+    return posting(
+      postFileThread({ pullRequest: number, headSha: change.head, body, path }, { directory: worktreeOf(change), until }),
     );
   },
   // A thread's node id names its repository, so these run wherever squiz does.
@@ -196,6 +194,14 @@ function hasCommit(worktree: string, commit: string, until: Deadline): Presence 
   });
   if (!checked.ran) return { known: false, reason: checked.reason };
   return { known: true, has: checked.status === 0 };
+}
+
+/** GitHub's posting outcome, with its REST comment id spelled as the venue's opaque string. */
+function posting(posted: GitHubThreadPosting): ThreadPosting {
+  if (posted.outcome === "posted" || posted.outcome === "posted-without-thread-id") {
+    return { ...posted, commentId: String(posted.commentId) };
+  }
+  return posted;
 }
 
 function worktreeOf(change: Change): string {

@@ -382,11 +382,25 @@ test("openThread posts on the pull request's head, on the line asked for", async
     assert.deepEqual(posted, {
       outcome: "posted",
       threadId: "PRRT_kwDOUEd2qM6hqHeq",
-      commentId: 3993908108,
+      commentId: "3993908108",
       url: created.html_url,
     });
     assert.ok(gh.argumentsAt(1).includes("repos/{owner}/{repo}/pulls/142/comments"));
     assert.deepEqual(JSON.parse(gh.stdinAt(1)), { body: "the finding", commit_id: HEAD, path: "a.ts", line: 7, side: "RIGHT" });
+  });
+});
+
+test("openThread returns a comment whose thread could not be read back as posted-without-thread-id, with a string comment id", async () => {
+  const noThread = api(200, {
+    data: { node: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: "x" }, nodes: [] } } } },
+  });
+  await withFakeGh([api(201, created), noThread], () => {
+    assert.deepEqual(githubVenue.openThread(foreign, { path: "a.ts", line: 7, side: "RIGHT" }, "the finding", deadlineIn(10_000)), {
+      outcome: "posted-without-thread-id",
+      reason: "GitHub listed no thread that this comment opened",
+      commentId: "3993908108",
+      url: created.html_url,
+    });
   });
 });
 
