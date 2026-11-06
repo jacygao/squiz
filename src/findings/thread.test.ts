@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ReviewThread } from "../github/threads.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import { renderComment } from "./comment.ts";
 import type { LineFinding } from "./finding.ts";
 import { namedFindingOn, readThread } from "./thread.ts";

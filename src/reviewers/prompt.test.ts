@@ -8,8 +8,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { PullRequest } from "../github/pull-request.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { PullRequest } from "../venues/github/pull-request.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import { composePrompt, type UnderReview } from "./prompt.ts";
 
 // The expected prompts are lines joined rather than template literals: they are

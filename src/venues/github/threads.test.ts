@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { deadlineIn } from "../reviewers/deadline.ts";
-import { standIn } from "../testing/stand-in.ts";
+import { deadlineIn } from "../../reviewers/deadline.ts";
+import { standIn } from "../../testing/stand-in.ts";
 import { listReviewThreads, type ReviewThread, type ThreadListing } from "./threads.ts";
 
 const pullRequestId = "PR_kwDOUEd2qM8AAAABDNPXSA";
@@ -29,7 +29,7 @@ type Fake = {
  * Run `body` with a `gh` on `PATH` that answers `answers` in order, one per
  * call, and records what each call was given.
  *
- * A fake binary rather than an injected runner, as the rest of `src/github/`
+ * A fake binary rather than an injected runner, as the rest of this directory's
  * tests do. A call the fixture has no answer for fails loudly: reading one page
  * too many is the thing being tested, so it must not quietly repeat the last.
  */

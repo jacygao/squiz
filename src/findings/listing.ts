@@ -4,7 +4,7 @@
  * under the same line, so the two commands name a thread alike.
  */
 
-import { threadLocation, type ReviewThread } from "../github/threads.ts";
+import { threadLocation, type ReviewThread } from "../venues/github/threads.ts";
 import { namedFindingOn } from "./thread.ts";
 
 /**

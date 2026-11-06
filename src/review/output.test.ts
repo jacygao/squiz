@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { renderComment, renderReply } from "../findings/comment.ts";
 import type { LineFinding } from "../findings/finding.ts";
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 import { composeReview, printReview, reviewOutputPath, type ReviewResult } from "./output.ts";
 
 // Every expected output below is written out whole, so any change of wording

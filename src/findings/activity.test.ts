@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 import { latestActivity } from "./activity.ts";
 import { renderComment, renderOpenReason, renderReply } from "./comment.ts";
 

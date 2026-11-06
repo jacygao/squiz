@@ -11,10 +11,10 @@
  * about what the round concluded.
  */
 
-import { renderFailure, type ClosedBy, type FailureReport } from "../github/failure-body.ts";
-import type { GhCall } from "../github/gh.ts";
-import { postIssueComment, type CommentPosting } from "../github/summary.ts";
-import { unthreadedNotes } from "../github/summary-body.ts";
+import { renderFailure, type ClosedBy, type FailureReport } from "../venues/github/failure-body.ts";
+import type { GhCall } from "../venues/github/gh.ts";
+import { postIssueComment, type CommentPosting } from "../venues/github/summary.ts";
+import { unthreadedNotes } from "../venues/github/summary-body.ts";
 import type { PostedFindings } from "./post-findings.ts";
 
 /** What a failed round holds that its report is composed from. */

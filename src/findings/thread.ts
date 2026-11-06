@@ -8,7 +8,7 @@
  * summary knows what to call a thread that still needs a person.
  */
 
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 import { namedFinding, readComment } from "./comment.ts";
 import type { Severity } from "./finding.ts";
 

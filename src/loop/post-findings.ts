@@ -21,8 +21,8 @@ import {
   type InlineRouting,
   type Routing,
 } from "../findings/route.ts";
-import type { GhCall } from "../github/gh.ts";
-import { postFileThread, postThread, type ThreadPosting } from "../github/post-thread.ts";
+import type { GhCall } from "../venues/github/gh.ts";
+import { postFileThread, postThread, type ThreadPosting } from "../venues/github/post-thread.ts";
 
 /** A round's new findings, and the pull request their threads go on. */
 export type NewFindings = {

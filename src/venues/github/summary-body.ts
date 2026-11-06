@@ -14,15 +14,15 @@
  * does not write.
  */
 
-import type { Finding } from "../findings/finding.ts";
-import type { ThreadStatus } from "../findings/status.ts";
-import { readThread } from "../findings/thread.ts";
-import { locationOf, type ClassifiedThread, type CountedStatus } from "../loop/classify.ts";
-import { costOf, type RoundRecord, type RulingCounts } from "../loop/episode-state.ts";
-import type { Failed, Noted, PostedFindings } from "../loop/post-findings.ts";
-import type { ClosingReason } from "../loop/round-decision.ts";
-import { namedStates, type LeftNotReviewed, type StoppingBound } from "../loop/round-end.ts";
-import { mutated, type AppliedVerdicts } from "../loop/verdicts.ts";
+import type { Finding } from "../../findings/finding.ts";
+import type { ThreadStatus } from "../../findings/status.ts";
+import { readThread } from "../../findings/thread.ts";
+import { locationOf, type ClassifiedThread, type CountedStatus } from "../../loop/classify.ts";
+import { costOf, type RoundRecord, type RulingCounts } from "../../loop/episode-state.ts";
+import type { Failed, Noted, PostedFindings } from "../../loop/post-findings.ts";
+import type { ClosingReason } from "../../loop/round-decision.ts";
+import { namedStates, type LeftNotReviewed, type StoppingBound } from "../../loop/round-end.ts";
+import { mutated, type AppliedVerdicts } from "../../loop/verdicts.ts";
 import { renderReviewerLine } from "./reviewer-line.ts";
 import { renderSpendLine } from "./spend-line.ts";
 import type { ReviewThread } from "./threads.ts";

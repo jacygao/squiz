@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 import { renderComment } from "./comment.ts";
 import type { LineFinding } from "./finding.ts";
 import { threadListing } from "./listing.ts";

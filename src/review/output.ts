@@ -16,7 +16,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { threadLine } from "../findings/listing.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import { failureLine } from "../hook/report.ts";
 import { episodeAt } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";

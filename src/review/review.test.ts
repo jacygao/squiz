@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { renderComment } from "../findings/comment.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";

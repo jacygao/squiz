@@ -7,13 +7,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { renderComment } from "../findings/comment.ts";
-import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
-import type { ThreadStatus } from "../findings/status.ts";
-import type { ClassifiedThread } from "../loop/classify.ts";
-import type { RoundRecord, RoundWork, Timings } from "../loop/episode-state.ts";
-import type { FindingOutcome, PostedFindings } from "../loop/post-findings.ts";
-import type { RoundCost } from "../reviewers/adapter.ts";
+import { renderComment } from "../../findings/comment.ts";
+import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../../findings/finding.ts";
+import type { ThreadStatus } from "../../findings/status.ts";
+import type { ClassifiedThread } from "../../loop/classify.ts";
+import type { RoundRecord, RoundWork, Timings } from "../../loop/episode-state.ts";
+import type { FindingOutcome, PostedFindings } from "../../loop/post-findings.ts";
+import type { RoundCost } from "../../reviewers/adapter.ts";
 import { renderSummary, unappliedNotes, unpostedReplyNotes, type ClosedEpisode } from "./summary-body.ts";
 import type { ReviewThread } from "./threads.ts";
 

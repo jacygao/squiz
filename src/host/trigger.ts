@@ -20,8 +20,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { latestActivity } from "../findings/activity.ts";
-import { findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
-import { listReviewThreads, type ReviewThread } from "../github/threads.ts";
+import { findPullRequestForBranch, type PullRequest } from "../venues/github/pull-request.ts";
+import { listReviewThreads, type ReviewThread } from "../venues/github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
 import { episodeOver, readState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";

@@ -23,7 +23,7 @@
 
 import { statusOf, type ThreadStatus, type Verdict } from "../findings/status.ts";
 import { readThread } from "../findings/thread.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import type { PostedFindings, Threaded } from "./post-findings.ts";
 import type { AppliedVerdicts } from "./verdicts.ts";
 
