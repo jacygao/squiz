@@ -134,9 +134,3 @@ Squiz's round cap is that bound, and a headless fixer stays under it.
   pid.
 - **The rig behind the review-level measurement scores findings, not fixes.**
   Comparing fixers needs a rig that grades the change left behind.
-- **This contradicts § 4 as it stands.** The local venue's table says the
-  owner's note and wake are "None", its stop rule blocks every `Stop` until the
-  result is handed over, and its `SubagentStop` does nothing. The note on
-  `copilot -p` going on after a blocking `Stop` records that a block holds a
-  run. The fact stands, and holding a run that way is what this note decides
-  against.

@@ -10,8 +10,9 @@ different model from the coding agent, and a different harness. The
 two agents work through the findings over as many rounds as it takes to settle
 them. Everything they say to each other is kept as review comments on the pull
 request, where a person, or an agent trusted to merge, can see how each finding
-was settled. A run with no pull request, such as a headless agent in a sandbox,
-keeps the same record in a directory instead (§ 4 The local venue).
+was settled. A change with no pull request, such as a working tree in a
+repository with no remote, keeps the same record in a directory instead (§ 4
+The local venue).
 
 ## 2. Dependencies
 
@@ -609,18 +610,18 @@ them apart.** They spend one round cap between them. Nothing detects this.
 ## 4. The venue
 
 **The venue is where a review happens.** It supplies the change under review,
-holds the threads the reviewer opens and the coding agent replies on, takes the
-summary and the failure comment, and decides what a stop does once a review is
-queued. Squiz has two:
+holds the threads the reviewer opens and the coding agent replies on, and takes
+the summary and the failure comment. Squiz has two:
 
 | Venue | The change | The record | Used for |
 |---|---|---|---|
 | **GitHub** | A pull request, at its head commit | Review threads and comments on the pull request | Every review, unless `SQUIZ_LOCAL` is set |
-| **Local** | The working tree, against a base commit it is given | Files in a directory outside the repository | A headless run with no remote and no pull request, such as `copilot -p` in a sandbox |
+| **Local** | The working tree, against a base commit it is given | Files in a directory outside the repository | A change with no remote and no pull request |
 
 § 3 describes the loop in the GitHub venue's terms. The loop is the same in
-both venues: the state file, the queue, the round host, the round cap and the
-budget. The local venue, below, says what each of § 3's terms means there.
+both venues: the state file, the hooks, the queue, the round host, the owner's
+note and its wake, the round cap and the budget. The local venue, below, says
+what each of § 3's terms means there.
 
 ### Choosing the venue
 
@@ -633,7 +634,7 @@ round host inherits it from the trigger that started it, so all of them agree.
 
 | Variable | Holds |
 |---|---|
-| `SQUIZ_LOCAL` | The local venue's directory: an absolute path outside the worktree. Squiz makes it where it is missing. |
+| `SQUIZ_LOCAL` | The local venue's directory: an absolute path outside every worktree it reviews. It holds a directory for each worktree, under The record below. Squiz makes it where it is missing. |
 | `SQUIZ_BASE` | The base commit, as a full sha the repository has. Read only where `SQUIZ_LOCAL` is set. |
 
 A local venue whose variables cannot be used reviews nothing. `squiz review`
@@ -648,8 +649,8 @@ squiz: no review ran: SQUIZ_LOCAL is "/work/squiz/.review", which is inside the 
 
 **Every venue meets one interface, and nothing outside a venue asks which venue
 it has.** The loop, the round host, the hook and the commands call the venue
-they were handed. One factory, `modeFor`, reads the environment and builds the
-venue and its stop rule together, so the two always match.
+they were handed. One factory, `venueFor`, reads the environment and builds the
+venue.
 
 ```ts
 /** The change under review. */
@@ -700,17 +701,8 @@ interface Venue {
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }
 
-/** What a Stop or SubagentStop firing does in this venue. */
-interface StopRule {
-  actsOn(event: "Stop" | "SubagentStop"): boolean;
-  readonly recordsOwner: boolean;
-  afterQueue(episode: EpisodeState, state: StateKey):
-    | { readonly outcome: "return" }
-    | { readonly outcome: "block"; readonly reason: string };
-}
-
-function modeFor(worktree: string, environment: NodeJS.ProcessEnv):
-  | { readonly outcome: "chosen"; readonly venue: Venue; readonly stop: StopRule }
+function venueFor(environment: NodeJS.ProcessEnv):
+  | { readonly outcome: "chosen"; readonly venue: Venue }
   | Failed;
 ```
 
@@ -749,7 +741,6 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
 | Threads, replies, resolve and re-open | Review threads on the pull request, through `gh api` and GraphQL. Ids are `PRRT_` node ids, and `isOutdated` and `author` are what GitHub reports. |
 | `postSummary`, `postFailure` | An issue-level comment on the pull request |
-| `StopRule` | Acts on `Stop` and `SubagentStop`, records the owner of the work, and always returns, so the result reaches the owner through The report under § 3 |
 
 ### The local venue
 
@@ -762,14 +753,14 @@ worktree, so nothing it writes becomes part of the change.
 |---|---|
 | The pull request | The working tree's change against `SQUIZ_BASE` |
 | Its head commit | The commit built from the working tree, under The change below |
-| Its description | `description.md` in the venue's directory, or none where there is no such file |
-| `.squiz/<number>/` | The venue's directory, `SQUIZ_LOCAL` |
+| Its description | `description.md` in the worktree's directory, else `description.md` in `SQUIZ_LOCAL`, else none |
+| `.squiz/<number>/` | The worktree's directory in `SQUIZ_LOCAL`, under The record below. `Change.key` is its path. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md` |
 | A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written |
-| `squiz review <number>` | `squiz review`, which takes no number. `readChange` is `none` for any `asked` key but the venue's directory. |
+| `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but that worktree's directory. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |
-| The owner's note and its wake | None. The stop rule below hands the result to the coding agent instead. |
+| The owner's note and its wake | As § 3 sets out. The note is written in the worktree's directory. |
 
 #### The change
 
@@ -816,17 +807,33 @@ like any other, with nothing in the list of files it changes.
 
 #### The record
 
-**Everything the local venue keeps is in its directory**, beside the state file
-and the rounds that § 3 The state file puts in an episode's directory:
+**Each worktree the local venue reviews has a directory of its own in
+`SQUIZ_LOCAL`, and that directory is its episode's.** It is named for the
+worktree's absolute path, with the leading `/` dropped and every other `/` made
+`-`, so `/work/squiz` is `work-squiz`. Its `worktree` file holds the path it was
+made for, and a directory whose file names another worktree is that worktree's:
+
+```
+squiz: no review ran: /work/squiz-review/work-squiz-a holds the review of /work/squiz-a, not /work-squiz/a
+```
+
+The worktree's directory holds the state file and the rounds that § 3 The state
+file puts in an episode's directory, beside the venue's own files:
 
 ```
 $SQUIZ_LOCAL/
-  state.json  state.lock  host.lock  host.log  rounds/  review.txt   as under § 3
-  threads.json   threads.lock
-  summary.md     failure-1.md …
-  objects/                                                        the change's objects
-  description.md                                                  written by whoever starts the run
+  objects/                                                         the objects of every head built here
+  description.md                                                   for a worktree with none of its own
+  work-squiz/                                                      the directory of the worktree /work/squiz
+    worktree
+    state.json  state.lock  host.lock  host.log  notes/  rounds/  review.txt   as under § 3
+    threads.json   threads.lock
+    summary.md     failure-1.md …
+    description.md
 ```
+
+`description.md` is written by whoever starts the run. Squiz reads it and never
+writes it.
 
 **`threads.json` holds every thread, each with its comments and where it stands.**
 It is written whole under `threads.lock`, which follows `state.lock`'s rules: a
@@ -858,66 +865,36 @@ broken while it lives. The round host and `squiz reply` both take it.
   refuses a line, and never answers `posted-without-thread-id`.
 - **`isOutdated` is always false, and every comment's author is `local`.**
 
-**A run's outcome is read from the directory once the run has ended.**
+**A worktree's outcome is read from its directory once the run has ended.**
 `threads.json` gives each finding, its replies and whether it is resolved. The
 state file gives the reviewer's last ruling on each thread, and `summary.md`
 counts them as § 6 sets out, `disputed` where the coding agent replied to a
 thread still open. A run that ended before the episode closed has no
 `summary.md`, and `squiz status` shows where it stopped.
 
-#### The stop rule
+#### The hooks
 
-**A `Stop` firing queues the state and then holds the coding agent until it has
-the review's result.** A local run is often headless, and a headless run ends
-when the agent's turn does, with nothing left to wake. So instead of returning,
-the hook answers Claude Code and Copilot alike with a block, whose reason
-arrives as the agent's next message, and the agent waits for the review in its
-own shell:
+**`Stop` and `SubagentStop` queue a state and record its owner as § 3 The hooks
+sets out, after building the worktree's head.** A subagent dispatched into a
+worktree of its own is reviewed in that worktree's directory, and its result
+wakes the session that dispatched it, as in the GitHub venue.
 
-```json
-{"decision":"block","reason":"Squiz is reviewing the working tree. Run `squiz review` in the foreground and work what it prints, until it exits 0 or 3. While it exits 4 the review is still running: run it again."}
-```
-
-The hook answers within the time it always takes, because the reviewer runs in
-the round host, as in the GitHub venue. `squiz review` waits within its deadline
-of 540 seconds (§ 8 The review budget). Copilot's shell does not stop a command
-that runs that long. Where it hands the turn back first, the agent reads the
-command's output once it ends. A review longer than the deadline is waited out
-by running the command again.
-
-| What the state's record says | The hook |
-|---|---|
-| Queued or reviewing | Blocks, with the reason above |
-| Reviewed with threads open, and the hook has not yet blocked for that result | Blocks, with the reason above, and records in the state's record that it did |
-| Failed, and the hook has not yet blocked for that failure | Blocks with the failure, and records in the state's record that it did |
-| Reviewed with threads open, or failed, and the hook already blocked for that result | Returns. The coding agent was handed the result and stopped without changing the tree or replying, so the run ends there. |
-| The episode closed | Returns |
-
-The reason for a failure carries it, and tells the agent not to retry, because
-`squiz review` on a failed state is the retry (§ 3 The state file):
-
-```json
-{"decision":"block","reason":"Squiz could not review the working tree at 3f9c2e0: the reviewer could not run: the provider refused the credential. Do not run `squiz review` again. Say so in your final message, and finish."}
-```
-
-The round cap closes every episode in at most R rounds, and a round needs a new
-state, so a run that keeps the hook blocking ends.
-
-**A `SubagentStop` firing does nothing in the local venue.** A subagent's work is
-part of the one working tree, which the parent's `Stop` reviews whole. The hook
-records no owner, and the round host writes no note and wakes no one.
+**A headless run has ended by the time its review does.** Under `claude -p` or
+`copilot -p` the review still runs, its threads and summary are written, and its
+note waits in the worktree's directory, as § 3 says of a note no wake reached.
+Nothing hands those findings to a coding agent once the run has exited.
 
 #### The commands
 
-`squiz review`, `squiz threads`, `squiz reply` and `squiz status` work on the
-venue's directory as § 7 sets out for a pull request:
+`squiz review`, `squiz threads` and `squiz reply` work on the directory of the
+worktree they are run in, as § 7 sets out for a pull request:
 
 - `squiz review` takes no number, and refuses one: `squiz: the local venue
   reviews the working tree, and takes no pull request number`.
 - `squiz threads` heads its list `2 open threads on the working tree`.
 - `squiz reply <id> <text>` adds the coding agent's reply to thread `<id>` in
-  `threads.json`, and refuses an id the file does not hold.
-- `squiz status` lists the one episode in `SQUIZ_LOCAL`.
+  that directory's `threads.json`, and refuses an id the file does not hold.
+- `squiz status` lists one row for each worktree's directory in `SQUIZ_LOCAL`.
 - `squiz doctor` does not require `gh`, and says the local venue is in use.
 
 ## 5. The reviewer
@@ -3044,7 +3021,7 @@ src/
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution and the reviewer's snapshot
   reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
-  venues/                    the venue contract, modeFor, and one directory per venue
+  venues/                    the venue contract, venueFor, and one directory per venue
     github/                  the pull request, threads, replies, resolve and re-open, summary, through gh
     local/                   the working tree's commit, threads.json, summary.md and failure files
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
