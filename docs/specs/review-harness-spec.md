@@ -659,8 +659,13 @@ type Change = {
   readonly key: string;
   /** What every message calls it: "PR #41", or "the working tree". */
   readonly name: string;
-  /** The command that reviews it again: "squiz review 41", or "squiz review". */
+  /** The command that reviews it again, from anywhere: "squiz review 41", or "cd '/work/squiz-a' && squiz review". */
   readonly rerun: string;
+  /**
+   * The paragraph after the open threads, in a note and in `squiz review`'s
+   * output: what to fix, how to reply, and what to run next.
+   */
+  readonly followUp: string;
   /** Full shas. */
   readonly base: string;
   readonly head: string;
@@ -736,6 +741,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | Member | In the GitHub venue |
 |---|---|
 | `key`, `name`, `rerun` | The pull request's number, `PR #41`, `squiz review 41` |
+| `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
 | `episodeDirectory` | `.squiz/<number>/` in the worktree, which keeps itself out of git (§ 3 The state file) |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
@@ -761,6 +767,19 @@ worktree, so nothing it writes becomes part of the change.
 | `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but that worktree's directory. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |
 | The owner's note and its wake | As § 3 sets out. The note is written in the worktree's directory. |
+| The paragraph after the open threads | `followUp`, below |
+
+**`followUp` names the worktree, and asks for no commit or push.** The local
+venue builds its head from the working tree, so an edit is the whole of a fix.
+Its thread ids count up from `T1` in every worktree, so a reply run from any
+other worktree lands on a different thread. Every command it gives runs in the
+reviewed worktree:
+
+```
+Fix what applies in /work/squiz-a, and reply on each thread with
+`cd '/work/squiz-a' && squiz reply <id> <text>` to say what you changed or why
+you disagree. Then run `cd '/work/squiz-a' && squiz review` again.
+```
 
 #### The change
 
