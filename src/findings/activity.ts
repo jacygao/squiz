@@ -7,7 +7,7 @@
  * was posted, and never by where it is listed or by how its identifier sorts.
  */
 
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 import { readComment } from "./comment.ts";
 import { readThread } from "./thread.ts";
 

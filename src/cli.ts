@@ -16,9 +16,9 @@
 
 import { renderReply } from "./findings/comment.ts";
 import { threadListing } from "./findings/listing.ts";
-import { findPullRequestForBranch } from "./github/pull-request.ts";
-import { replyInThread } from "./github/thread-actions.ts";
-import { listReviewThreads } from "./github/threads.ts";
+import { findPullRequestForBranch } from "./venues/github/pull-request.ts";
+import { replyInThread } from "./venues/github/thread-actions.ts";
+import { listReviewThreads } from "./venues/github/threads.ts";
 import { currentBranch } from "./hook/branch.ts";
 import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";

@@ -24,14 +24,14 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { findPullRequestNodeId } from "../github/pull-request.ts";
-import { unthreadedNotes } from "../github/summary-body.ts";
-import { listReviewThreads, type ReviewThread } from "../github/threads.ts";
+import { findPullRequestNodeId } from "../venues/github/pull-request.ts";
+import { unthreadedNotes } from "../venues/github/summary-body.ts";
+import { listReviewThreads, type ReviewThread } from "../venues/github/threads.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
-import type { ClosedBy } from "../github/failure-body.ts";
+import type { ClosedBy } from "../venues/github/failure-body.ts";
 import {
   closedBeforeReview,
   decideRoundEnd,

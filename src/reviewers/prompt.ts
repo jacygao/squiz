@@ -14,8 +14,8 @@
  * and the threads are the whole of what it knows about the rounds before it.
  */
 
-import type { PullRequest } from "../github/pull-request.ts";
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { PullRequest } from "../venues/github/pull-request.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 
 /** What the reviewer is told about the change it is reading. */
 export type UnderReview = {

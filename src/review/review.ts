@@ -27,8 +27,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { defaultsLine, findProjectConfig, type ProjectConfig } from "../config/config.ts";
 import { readComment } from "../findings/comment.ts";
-import { listReviewThreads, type ReviewThread, type ThreadListing } from "../github/threads.ts";
-import type { GhCall } from "../github/gh.ts";
+import { listReviewThreads, type ReviewThread, type ThreadListing } from "../venues/github/threads.ts";
+import type { GhCall } from "../venues/github/gh.ts";
 import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";

@@ -29,12 +29,12 @@ import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
 import type { RuledAt } from "../findings/comment.ts";
 import { readThread } from "../findings/thread.ts";
-import type { GhCall } from "../github/gh.ts";
-import type { ClosedBy } from "../github/failure-body.ts";
-import type { CommentPosting } from "../github/summary.ts";
-import { unappliedNotes, unpostedReplyNotes } from "../github/summary-body.ts";
-import { findPullRequestForBranch, type PullRequest } from "../github/pull-request.ts";
-import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../github/threads.ts";
+import type { GhCall } from "../venues/github/gh.ts";
+import type { ClosedBy } from "../venues/github/failure-body.ts";
+import type { CommentPosting } from "../venues/github/summary.ts";
+import { unappliedNotes, unpostedReplyNotes } from "../venues/github/summary-body.ts";
+import { findPullRequestForBranch, type PullRequest } from "../venues/github/pull-request.ts";
+import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../venues/github/threads.ts";
 import { currentBranch } from "../hook/branch.ts";
 import {
   unspent,

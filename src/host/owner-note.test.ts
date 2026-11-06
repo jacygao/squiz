@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ReviewThread } from "../github/threads.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import type { Owner, StateRecord } from "../loop/state-record.ts";
 import { ownerNote } from "./owner-note.ts";
 

@@ -8,7 +8,7 @@
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 
-import type { Deadline } from "../reviewers/deadline.ts";
+import type { Deadline } from "../../reviewers/deadline.ts";
 
 /**
  * The ceiling on one call to GitHub, in milliseconds.

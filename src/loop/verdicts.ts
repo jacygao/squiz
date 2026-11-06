@@ -14,8 +14,8 @@
 
 import { renderClosingReply, renderOpenReason, type RuledAt } from "../findings/comment.ts";
 import { defaultVerdict, type Verdict } from "../findings/status.ts";
-import type { GhCall } from "../github/gh.ts";
-import { reopenThread, replyInThread, resolveThread, type ThreadAction } from "../github/thread-actions.ts";
+import type { GhCall } from "../venues/github/gh.ts";
+import { reopenThread, replyInThread, resolveThread, type ThreadAction } from "../venues/github/thread-actions.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 
 /**

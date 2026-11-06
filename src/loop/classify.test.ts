@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { renderComment, renderReply } from "../findings/comment.ts";
 import type { ChangeFinding, FileFinding, LineFinding } from "../findings/finding.ts";
 import type { Verdict } from "../findings/status.ts";
-import type { ReviewThread, ThreadComment } from "../github/threads.ts";
+import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
 import { classifyAtClose, type ClassifiedThread, type EpisodeAtClose } from "./classify.ts";
 import type { PostedFindings, ThreadPlacement, Threaded } from "./post-findings.ts";
 import type { AppliedVerdicts } from "./verdicts.ts";

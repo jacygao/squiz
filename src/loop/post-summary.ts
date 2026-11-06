@@ -16,10 +16,10 @@
  * the episode is over either way, and the coding agent still finishes.
  */
 
-import type { GhCall } from "../github/gh.ts";
-import { renderSummary, unappliedNotes } from "../github/summary-body.ts";
-import { postSummary, type CommentPosting } from "../github/summary.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { GhCall } from "../venues/github/gh.ts";
+import { renderSummary, unappliedNotes } from "../venues/github/summary-body.ts";
+import { postSummary, type CommentPosting } from "../venues/github/summary.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import { classifyAtClose } from "./classify.ts";
 import type { RoundRecord } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";

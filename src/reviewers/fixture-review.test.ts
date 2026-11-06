@@ -40,8 +40,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type { LineFinding } from "../findings/finding.ts";
-import type { PullRequest } from "../github/pull-request.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { PullRequest } from "../venues/github/pull-request.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Invocation, RoundCost, ThreadVerdict } from "./adapter.ts";
 import { pi } from "./pi/adapter.ts";

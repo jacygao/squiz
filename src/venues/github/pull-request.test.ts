@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { deadlineIn } from "../reviewers/deadline.ts";
-import { standIn } from "../testing/stand-in.ts";
+import { deadlineIn } from "../../reviewers/deadline.ts";
+import { standIn } from "../../testing/stand-in.ts";
 import { findPullRequestForBranch } from "./pull-request.ts";
 
 type FakeGh = {

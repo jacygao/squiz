@@ -8,8 +8,8 @@
  * Nothing here touches the filesystem or GitHub.
  */
 
-import { closedLines, type ClosedBy } from "../github/failure-body.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import { closedLines, type ClosedBy } from "../venues/github/failure-body.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import { printedThread, workTheThreads } from "../review/output.ts";
 import type { NoteFields } from "../sessions/notes.ts";
 import type { StateRecord } from "../loop/state-record.ts";

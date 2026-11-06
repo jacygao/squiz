@@ -19,9 +19,9 @@ import { test } from "node:test";
 
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
-import type { GhCall } from "../github/gh.ts";
-import { renderSummary } from "../github/summary-body.ts";
-import type { ReviewThread } from "../github/threads.ts";
+import type { GhCall } from "../venues/github/gh.ts";
+import { renderSummary } from "../venues/github/summary-body.ts";
+import type { ReviewThread } from "../venues/github/threads.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import type { RoundRecord } from "./episode-state.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";

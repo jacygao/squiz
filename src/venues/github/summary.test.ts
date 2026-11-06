@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { standIn } from "../testing/stand-in.ts";
+import { standIn } from "../../testing/stand-in.ts";
 import { postSummary } from "./summary.ts";
 
 type FakeGh = {
