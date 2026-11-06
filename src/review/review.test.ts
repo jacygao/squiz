@@ -303,6 +303,22 @@ test("#745: a run whose main worktree has no .squiz.json says on stderr that the
   });
 });
 
+test("a run where no venue can be chosen still leads with the line saying the defaults are in use", async () => {
+  await withLinkedWorktree(null, "{}", async (fixture) => {
+    const { venue: _, ...chosenFromEnvironment } = request(fixture, { triggered: decided(fixture, { outcome: "result" }) });
+
+    const printed = await runReview({ ...chosenFromEnvironment, environment: { SQUIZ_LOCAL: "/work/squiz-review" } });
+
+    assert.equal(printed.exit, 1);
+    assert.equal(
+      printed.stderr,
+      `squiz: no .squiz.json was found in the main worktree, ${fixture.main}, so the defaults are in use\n` +
+        `squiz: no review ran: SQUIZ_LOCAL is "/work/squiz-review", and this squiz has no local venue\n` +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
 test("a newer state reviewed while the run waits is not the run's result, and the run exits 4 at its deadline", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

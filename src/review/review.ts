@@ -88,14 +88,7 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     return notRun(cause instanceof Error ? cause.message : String(cause));
   }
 
-  let venue = request.venue;
-  if (venue === undefined) {
-    const chosen = venueFor(request.environment);
-    if (chosen.outcome === "failed") return notRun(chosen.reason);
-    venue = chosen.venue;
-  }
-
-  const printed = await reviewUnder(request, venue, until, project.config.rounds);
+  const printed = await reviewUnder(request, until, project.config.rounds);
   // Running on the defaults changes neither the outcome nor the status, and is
   // otherwise told from running on a file only by the summary's reviewer line.
   const note = defaultsLine(project);
@@ -103,9 +96,16 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
 }
 
 /** The run once its settings are read, `cap` being the round cap they set. */
-async function reviewUnder(request: ReviewRequest, venue: Venue, until: Deadline, cap: number): Promise<Printed> {
+async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number): Promise<Printed> {
   const { directory, pullRequest } = request;
   const notRun = (reason: string): Printed => printReview({ outcome: "not run", pullRequest, reason }, directory);
+
+  let venue = request.venue;
+  if (venue === undefined) {
+    const chosen = venueFor(request.environment);
+    if (chosen.outcome === "failed") return notRun(chosen.reason);
+    venue = chosen.venue;
+  }
 
   const triggerNow = (): Triggered =>
     (request.trigger ?? triggerReview)({
