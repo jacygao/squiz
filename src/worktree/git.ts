@@ -21,6 +21,8 @@ export type GitOptions = {
   readonly answers?: readonly number[];
   /** The reason a call cut short by `until` gives. */
   readonly ranOut?: string;
+  /** The environment git runs with, in place of this process's own. */
+  readonly env?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -31,7 +33,7 @@ export type GitOptions = {
  * the reason as a single line.
  */
 export function runGit(directory: string, args: readonly string[], options: GitOptions = {}): GitOutput {
-  const { until, answers = [0], ranOut = RAN_OUT } = options;
+  const { until, answers = [0], ranOut = RAN_OUT, env = process.env } = options;
   if (until?.passed() === true) return { ran: false, reason: ranOut };
 
   const result = spawnSync("git", args, {
@@ -42,7 +44,7 @@ export function runGit(directory: string, args: readonly string[], options: GitO
     maxBuffer: Infinity,
     // A credential prompt would wait on a terminal nobody is watching until the
     // deadline killed it, and then read as a call that ran out of time.
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    env: { ...env, GIT_TERMINAL_PROMPT: "0" },
     // A timeout of zero is no timeout at all, so a deadline with nothing left
     // still bounds the call.
     ...(until === undefined ? {} : { timeout: Math.max(1, until.remaining()) }),
