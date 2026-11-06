@@ -79,6 +79,15 @@ test("the script carries the grant, the agent, and every flag that keeps the tre
   assert.ok(!script.includes("--allow-all-mcp-server-instructions"), script);
 });
 
+test("a run in a pane and a run with no terminal each reach no host for an update or Copilot's own telemetry (#797)", () => {
+  for (const terminal of ["pane", "none"] as const) {
+    const script = scriptOf(argv({ ...invocation, terminal }));
+    for (const flag of ["--no-auto-update", "--disable-client-telemetry"]) {
+      assert.ok(script.includes(` ${flag} `), `a run with terminal ${terminal} does not pass ${flag}: ${script}`);
+    }
+  }
+});
+
 // `--model` refuses a model Copilot does not offer, before any request.
 // `COPILOT_MODEL` set to one runs the round on some other model, and exits 0.
 test("a configured model is passed with --model, as the script's $1, in place of the user's default", () => {
@@ -268,6 +277,9 @@ test("the prompt reaches Copilot byte for byte as one argument, and the MCP conf
   assert.equal(ran.args?.[1], AWKWARD_PROMPT, "the prompt Copilot was handed is not the file's bytes");
   assert.equal(after(ran.args, "--additional-mcp-config"), line.args[2]);
   assert.equal(after(ran.args, "--usage-output-file"), join(tree, ".squiz/7/rounds/1/session/usage.json"));
+  for (const flag of ["--no-auto-update", "--disable-client-telemetry"]) {
+    assert.ok(ran.args?.includes(flag), `Copilot was not handed ${flag} (#797)`);
+  }
 });
 
 // The script never reads the name, so a character the shell would act on reaches

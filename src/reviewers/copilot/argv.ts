@@ -88,6 +88,8 @@ export function argv(invocation: Invocation): CommandLine {
     "--disallow-temp-dir",
     "--no-custom-instructions",
     "--disable-builtin-mcps",
+    // Leaves the reviewer reaching GitHub's API and its model host, and no other.
+    "--no-auto-update --disable-client-telemetry",
     '--additional-mcp-config "$0"',
     // A configured model is the script's `$1`, so the shell passes it on without
     // reading it. The user's default, which `confine` puts on `COPILOT_MODEL`,
