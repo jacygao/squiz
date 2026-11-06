@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { renderSummary } from "../venues/github/summary-body.ts";
+import { renderSummary } from "./summary-body.ts";
 import type { RoundRecord } from "./episode-state.ts";
 import { decideAfterRound, type EpisodeBounds } from "./round-decision.ts";
 import { decideRoundEnd, lastReviewed, namedStates, type EndedRound, type QueuedRecord } from "./round-end.ts";

@@ -8,7 +8,7 @@
  * setting, and a line naming the wrong model reads exactly like a right one.
  */
 
-import type { Reviewer } from "../../config/config.ts";
+import type { Reviewer } from "../config/config.ts";
 
 /** What a round recorded about who reviewed it. */
 export type ReviewedBy = {

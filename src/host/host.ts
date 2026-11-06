@@ -24,15 +24,13 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { findPullRequestNodeId } from "../venues/github/pull-request.ts";
-import { unthreadedNotes } from "../venues/github/summary-body.ts";
-import { listReviewThreads, type ReviewThread } from "../venues/github/threads.ts";
-import { followUpFor } from "../venues/github/venue.ts";
+import { unthreadedNotes } from "../loop/summary-body.ts";
+import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
-import type { ClosedBy } from "../venues/github/failure-body.ts";
+import type { ClosedBy } from "../loop/failure-body.ts";
 import {
   closedBeforeReview,
   decideRoundEnd,
@@ -70,7 +68,7 @@ const LOCK_BOUND_MS = 5_000;
 // long is a holder that has stopped.
 const STATE_WAIT_MS = 5_000;
 
-// Listing the threads for the notes: a node id lookup and the pages of threads.
+// Listing the threads for the notes, every page of them.
 const LISTING_WAIT_MS = 30_000;
 
 const ALREADY_CLOSED = "the episode had closed before a round took this state";
@@ -248,7 +246,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     };
     const end = await runRoundThen(
       roundSetup,
-      async (conclusion): Promise<HostEnd | undefined> => {
+      async (conclusion, change): Promise<HostEnd | undefined> => {
         // Recording the result would make the worktree's directory again.
         if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
         const result = resultOf(
@@ -270,7 +268,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         }
         log(`round ${round.number}: ${result.line}`);
         for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
-        await noteOwners(episode, written, log);
+        await noteOwners(episode, written, log, change === undefined ? undefined : { venue: setup.round.venue, change });
         return undefined;
       },
     );
@@ -309,13 +307,25 @@ function inOrder(records: readonly StateRecord[], after: StateKey | null = null)
   return records.map((record, index) => ({ record, name: names[index] ?? record.head.slice(0, 7) }));
 }
 
-/** Write a note for the owner of each of `recorded` that gets one, and wake each owner that has a socket. */
-async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log): Promise<void> {
+/**
+ * Write a note for the owner of each of `recorded` that gets one, and wake each
+ * owner that has a socket. `read` is the change a round read and its venue,
+ * which list the threads a note prints and give its follow-up.
+ *
+ * Without one, no note prints threads or a follow-up: only a round that read
+ * its change records threads open.
+ */
+async function noteOwners(
+  episode: Episode,
+  recorded: readonly Recorded[],
+  log: Log,
+  read?: { readonly venue: Venue; readonly change: Change },
+): Promise<void> {
   const notes = join(episode.directory, "notes");
   // Listed once for all the notes, and only where one prints threads.
   let listing: Listing | undefined;
   for (const { record, name, closed } of recorded) {
-    const listed = printsThreads(record) ? (listing ??= threadsOf(episode)) : undefined;
+    const listed = printsThreads(record) && read !== undefined ? (listing ??= threadsOf(read.venue, read.change)) : undefined;
     if (listed !== undefined && "reason" in listed) {
       log(`${named(record)}: the threads could not be listed for its note: ${listed.reason}`);
     }
@@ -323,7 +333,7 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
     if (threads !== undefined && record.status === "reviewed" && record.result === "exited" && threadsToPrint(record.openThreads, threads).length === 0) {
       log(`${named(record)}: none of the threads the round left open is open on PR #${episode.id}, so its note points to squiz review`);
     }
-    const note = ownerNote(Number(episode.id), record, name, followUpFor(Number(episode.id)), closed, threads);
+    const note = ownerNote(Number(episode.id), record, name, read?.change.followUp ?? "", closed, threads);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);
     if (written.outcome === "failed") {
@@ -349,12 +359,9 @@ function printsThreads(record: StateRecord): boolean {
   return record.owner !== undefined && record.status === "reviewed" && record.result === "exited" && record.openThreads.length > 0;
 }
 
-/** The review threads on the episode's pull request as they stand now. */
-function threadsOf(episode: Episode): Listing {
-  const call = { directory: episode.worktree, until: deadlineIn(LISTING_WAIT_MS) };
-  const found = findPullRequestNodeId(Number(episode.id), call);
-  if (found.outcome !== "found") return { reason: found.reason };
-  const listed = listReviewThreads(found.nodeId, call);
+/** The threads on `change` as they stand now. */
+function threadsOf(venue: Venue, change: Change): Listing {
+  const listed = venue.listThreads(change, deadlineIn(LISTING_WAIT_MS));
   return listed.outcome === "listed" ? { threads: listed.threads } : { reason: listed.reason };
 }
 
@@ -549,9 +556,7 @@ function failureOf(conclusion: Extract<RoundConclusion, { readonly outcome: "fai
     case "failed":
       return conclusion.reason;
     case "no-pull-request":
-      return conclusion.branch === null
-        ? `no review ran: HEAD is detached in ${JSON.stringify(conclusion.directory)}`
-        : `no review ran: no open pull request has ${JSON.stringify(conclusion.branch)} as its head, in ${JSON.stringify(conclusion.directory)}`;
+      return `no review ran: ${conclusion.reason}`;
     case "round-running":
       // The round runs under the host's own lock, so only a defect reaches this.
       return `no review ran: a round is already running on PR #${conclusion.pullRequest}`;

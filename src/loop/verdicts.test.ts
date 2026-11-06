@@ -7,8 +7,10 @@ import { test } from "node:test";
 
 import { renderOpenReason } from "../findings/comment.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { applyVerdicts, unappliedRulings, type HandedOverThread } from "./verdicts.ts";
+import { githubVenue } from "../venues/github/venue.ts";
+import { applyVerdicts, unappliedRulings, type HandedOverThread, type Sending } from "./verdicts.ts";
 
 /** One answer of the fake `gh`, given to any request whose body holds `when`. */
 type Rule = { readonly when: string; readonly answer: string };
@@ -142,7 +144,8 @@ function refusing(thread: string): readonly Rule[] {
   return [{ when: thread, answer: notFound(thread) }, ...healthy];
 }
 
-const anywhere = { directory: tmpdir() };
+// Long enough that no test here reaches it.
+const anywhere: Sending = { venue: githubVenue, until: deadlineIn(600_000) };
 
 // The round and commit every verdict here is ruled at, which a closing reply names.
 const ruledAt = { round: 2, commit: "1b86987c4f0e2d6a9b3c5e7f8a1d2c3b4e5f6a7b" };

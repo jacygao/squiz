@@ -60,6 +60,15 @@ export function deadlineAt(at: number, now: () => number = Date.now): Deadline {
 }
 
 /**
+ * One call's part of `until`: `milliseconds` from now, or `until`, whichever
+ * comes first. It keeps one slow call among several from spending what the
+ * rest need.
+ */
+export function shareOf(until: Deadline, milliseconds: number): Deadline {
+  return deadlineIn(Math.min(until.remaining(), milliseconds));
+}
+
+/**
  * The longest gap between two looks that is still time the process was running.
  *
  * Looks are at most `LOOK_INTERVAL_MS` apart, so a longer gap is a machine that

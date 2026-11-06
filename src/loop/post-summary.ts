@@ -16,10 +16,9 @@
  * the episode is over either way, and the coding agent still finishes.
  */
 
-import type { GhCall } from "../venues/github/gh.ts";
-import { renderSummary, unappliedNotes } from "../venues/github/summary-body.ts";
-import { postSummary, type CommentPosting } from "../venues/github/summary.ts";
-import type { ReviewThread } from "../venues/github/threads.ts";
+import type { Deadline } from "../reviewers/deadline.ts";
+import type { Change, Posting, ReviewThread, Venue } from "../venues/venue.ts";
+import { renderSummary, unappliedNotes } from "./summary-body.ts";
 import { classifyAtClose } from "./classify.ts";
 import type { RoundRecord } from "./episode-state.ts";
 import type { PostedFindings } from "./post-findings.ts";
@@ -35,7 +34,7 @@ import type { AppliedVerdicts } from "./verdicts.ts";
  * then reads as a review that ended clean.
  */
 export type EpisodeSummary =
-  | CommentPosting
+  | Posting
   /**
    * Nothing was composed and nothing ever will be, so the episode ends with no
    * summary on the pull request at all. `reason` is the one line that says so.
@@ -44,7 +43,7 @@ export type EpisodeSummary =
 
 /** What the round that closed the episode holds of it, which is the whole of it. */
 export type EpisodeClose = {
-  readonly pullRequest: number;
+  readonly change: Change;
   /**
    * Each round of the episode, in the order the rounds ran, this round included.
    * Read from the episode's state file, which is the only thing that carries a
@@ -89,12 +88,12 @@ export type EpisodeClose = {
 /**
  * Compose the summary for `closing` and post it on the pull request, once.
  *
- * `call.until` is the round's posting margin, and the call is not made at all
- * where nothing is left of it: a call made past the end of the reserve would run
- * the round past its bound. The summary is lost in that case, which is what the
+ * `until` is the round's posting margin, and the call is not made at all where
+ * nothing is left of it: a call made past the end of the reserve would run the
+ * round past its bound. The summary is lost in that case, which is what the
  * caller reports.
  */
-export function postEpisodeSummary(closing: EpisodeClose, call: GhCall): CommentPosting {
+export function postEpisodeSummary(closing: EpisodeClose, venue: Venue, until: Deadline): Posting {
   const body = renderSummary({
     rounds: closing.rounds,
     threads: classifyAtClose(closing),
@@ -104,7 +103,7 @@ export function postEpisodeSummary(closing: EpisodeClose, call: GhCall): Comment
     because: closing.because,
     leftNotReviewed: closing.leftNotReviewed,
   });
-  return postSummary(closing.pullRequest, body, call);
+  return venue.postSummary(closing.change, body, until);
 }
 
 /**

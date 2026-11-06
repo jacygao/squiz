@@ -19,12 +19,12 @@ import { test } from "node:test";
 
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
-import type { GhCall } from "../venues/github/gh.ts";
-import { renderSummary } from "../venues/github/summary-body.ts";
-import type { ReviewThread } from "../venues/github/threads.ts";
+import { renderSummary } from "./summary-body.ts";
+import { githubVenue } from "../venues/github/venue.ts";
+import type { ReviewThread } from "../venues/venue.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
 import type { RoundRecord } from "./episode-state.ts";
-import { deadlineIn } from "../reviewers/deadline.ts";
+import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { PostedFindings } from "./post-findings.ts";
 import { postEpisodeSummary, type EpisodeClose } from "./post-summary.ts";
@@ -180,7 +180,15 @@ const findings: PostedFindings = {
  * later state queued behind it.
  */
 const closing: EpisodeClose = {
-  pullRequest: PULL_REQUEST,
+  change: {
+    key: String(PULL_REQUEST),
+    name: `PR #${PULL_REQUEST}`,
+    rerun: `squiz review ${PULL_REQUEST}`,
+    followUp: "",
+    base: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+    head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6",
+    description: "",
+  },
   rounds: [ROUND, ROUND],
   handedOver: [handedOver("PRRT_one", "The name says nothing")],
   verdicts: {
@@ -205,8 +213,8 @@ const closing: EpisodeClose = {
 };
 
 /** A margin with time left on it, which is what a round hands over. */
-function margin(): GhCall {
-  return { directory: tmpdir(), until: deadlineIn(30_000) };
+function margin(): Deadline {
+  return deadlineIn(30_000);
 }
 
 test("the body posted is the body the composer wrote for the episode", async () => {
@@ -217,7 +225,7 @@ test("the body posted is the body the composer wrote for the episode", async () 
     earlier: ["`src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)"],
   };
   await withFakeGh({ stdout: CREATED }, (gh) => {
-    const posting = postEpisodeSummary(carried, margin());
+    const posting = postEpisodeSummary(carried, githubVenue, margin());
 
     assert.deepEqual(posting, { outcome: "posted" });
     assert.equal(
@@ -246,7 +254,7 @@ test("the composed body carries the counts, the spend, what needs a person and t
   // The whole comment, so that a block dropped on the way to `gh` is a failure
   // here rather than a summary that reads as a review with nothing to report.
   await withFakeGh({ stdout: CREATED }, (gh) => {
-    postEpisodeSummary(closing, margin());
+    postEpisodeSummary(closing, githubVenue, margin());
 
     assert.equal(
       sent(gh.stdin()),
@@ -277,7 +285,7 @@ test("the composed body carries the counts, the spend, what needs a person and t
 
 test("the comment is created on the pull request, once", async () => {
   await withFakeGh({ stdout: CREATED }, (gh) => {
-    postEpisodeSummary(closing, margin());
+    postEpisodeSummary(closing, githubVenue, margin());
 
     assert.equal(gh.runs(), 1, "a second call would post a second comment for one episode");
     assert.deepEqual(gh.arguments(), [
@@ -296,7 +304,7 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
   await withFakeGh(
     { status: 1, stdout: included("403 Forbidden", '{"message":"Forbidden"}'), stderr: "gh: Forbidden (HTTP 403)\n" },
     () => {
-      const posting = postEpisodeSummary(closing, margin());
+      const posting = postEpisodeSummary(closing, githubVenue, margin());
 
       assert.equal(posting.outcome, "failed");
       assert.match(
@@ -315,7 +323,7 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
  */
 test("a margin with nothing left on it posts nothing and says so", async () => {
   await withFakeGh({ stdout: CREATED }, (gh) => {
-    const posting = postEpisodeSummary(closing, { directory: tmpdir(), until: deadlineIn(0) });
+    const posting = postEpisodeSummary(closing, githubVenue, deadlineIn(0));
 
     assert.equal(gh.runs(), 0, "gh was run with no time to answer in");
     assert.equal(posting.outcome, "failed");

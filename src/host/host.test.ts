@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { defaultConfig, type Config } from "../config/config.ts";
 import { renderComment } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
-import { type Adapter, type ParsedRun, type RoundCost } from "../reviewers/adapter.ts";
+import { type Adapter, type ParsedRun, type RoundCost, type ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { startChild } from "../sessions/child.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
@@ -36,6 +36,8 @@ import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { squizStatus } from "../review/status.ts";
 import { standIn } from "../testing/stand-in.ts";
+import { githubVenue } from "../venues/github/venue.ts";
+import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 import { takeEpisodeHostLock } from "./lock.ts";
 
@@ -108,6 +110,8 @@ type Arrangement = {
   readonly closeReported?: boolean;
   /** What each reviewer start reports, in order. An empty review where there is none. */
   readonly findings?: readonly (readonly Finding[])[];
+  /** What each reviewer start rules on the threads it was handed, in order. None where there is none. */
+  readonly verdicts?: readonly (readonly ThreadVerdict[])[];
   /** Where given, every reviewer start completes no message, for this reason. */
   readonly incomplete?: string;
   /** Where given, every reviewer start from this index from 0 on prints nothing the adapter can read. */
@@ -222,7 +226,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         }
         return {
           cost: COST,
-          result: { kind: "reviewed", findings: arranged.findings?.[started - 1] ?? [], verdicts: [] },
+          result: { kind: "reviewed", findings: arranged.findings?.[started - 1] ?? [], verdicts: arranged.verdicts?.[started - 1] ?? [] },
         };
       },
       grants: ["read"],
@@ -232,7 +236,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     const end = await runHost({
       worktree,
       pullRequest: PULL_REQUEST,
-      round: { config: { ...defaultConfig, timeout: 5, ...arranged.config }, adapter, charterFile, ...arranged.round },
+      round: { config: { ...defaultConfig, timeout: 5, ...arranged.config }, adapter, charterFile, ...arranged.round, venue: arranged.round?.venue ?? githubVenue },
       ...arranged.host,
     });
 
@@ -1379,7 +1383,8 @@ test("a round whose threads cannot be listed for the note writes one that points
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, MAIN)],
     findings: [[finding("The name says nothing.")]],
-    before: (fixture) => rmSync(join(fixture.binaries, "answer-node")),
+    // Removed once the round has listed its threads, so only the note's listing fails.
+    onStart: (_, fixture) => rmSync(join(fixture.binaries, "answer-threads")),
   });
 
   const short = ran.firstHead.slice(0, 7);
@@ -1387,7 +1392,7 @@ test("a round whose threads cannot be listed for the note writes one that points
     onlyNote(ran, MAIN)["text"],
     `Squiz reviewed PR #${PULL_REQUEST} at ${short}: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`,
   );
-  assert.match(ran.log, /the threads could not be listed for its note: .*no answer fixtured for node/u);
+  assert.match(ran.log, /the threads could not be listed for its note: .*no answer fixtured for threads/u);
 });
 
 test("a round whose listing holds none of the threads it left open writes a note that points to squiz review, and host.log says why", async () => {
@@ -1844,5 +1849,155 @@ test("#640: a host that throws recording a round's result still removes the roun
   );
 
   assert.deepEqual(standingAfter, [], "the host threw and left the snapshot on disk");
+});
+
+/** One call the round made of a fake venue: the member, and what it was handed. */
+type VenueCall = { readonly member: keyof Venue; readonly args: readonly unknown[] };
+
+/** A thread the reviewer opened in an earlier round, as a venue lists it. */
+const EARLIER_THREAD: ReviewThread = {
+  id: "thread-earlier",
+  isResolved: false,
+  isOutdated: false,
+  path: TRACKED,
+  anchor: { at: "line", line: 88 },
+  comments: [
+    { id: "comment-earlier", databaseId: null, author: "squiz", body: renderComment(finding("The old name is still read")), createdAt: "2026-11-01T00:00:00Z" },
+  ],
+};
+
+/**
+ * A venue that records every call and answers each as a healthy venue would,
+ * except where `failing` gives a member's answer. The change it finds is the
+ * worktree's head, against its parent, keyed as the host's pull request.
+ */
+function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; readonly calls: VenueCall[] } {
+  const calls: VenueCall[] = [];
+  let opened = 0;
+  const posted = (): { outcome: "posted"; threadId: string; commentId: string; url: string } => {
+    opened += 1;
+    return { outcome: "posted", threadId: `thread-${opened}`, commentId: `comment-${opened}`, url: `fake://thread-${opened}` };
+  };
+  const healthy: Venue = {
+    readChange: (worktree) => {
+      const commit = (name: string): string => execFileSync("git", ["rev-parse", name], { cwd: worktree, encoding: "utf8" }).trim();
+      const change: Change = {
+        key: String(PULL_REQUEST),
+        name: `PR #${PULL_REQUEST}`,
+        rerun: `squiz review ${PULL_REQUEST}`,
+        followUp: "Fix it.",
+        base: commit("HEAD^"),
+        head: commit("HEAD"),
+        description: "What this changes.",
+      };
+      return { outcome: "found", change };
+    },
+    episodeDirectory: (change) => join(".squiz", change.key),
+    provideCommits: () => ({ outcome: "ready", alternates: [] }),
+    listThreads: () => ({ outcome: "listed", threads: [EARLIER_THREAD] }),
+    openThread: posted,
+    openFileThread: posted,
+    reply: () => ({ outcome: "acted" }),
+    resolve: () => ({ outcome: "acted" }),
+    reopen: () => ({ outcome: "acted" }),
+    postSummary: () => ({ outcome: "posted" }),
+    postFailure: () => ({ outcome: "posted" }),
+  };
+  const answering = { ...healthy, ...failing };
+  const venue = Object.fromEntries(
+    (Object.keys(healthy) as (keyof Venue)[]).map((member) => [
+      member,
+      (...args: unknown[]) => {
+        calls.push({ member, args });
+        return (answering[member] as (...given: unknown[]) => unknown)(...args);
+      },
+    ]),
+  ) as unknown as Venue;
+  return { venue, calls };
+}
+
+function callsTo(calls: readonly VenueCall[], member: keyof Venue): readonly (readonly unknown[])[] {
+  return calls.filter((call) => call.member === member).map((call) => call.args);
+}
+
+test("a round the host runs on a fake venue reads the change and lists, opens, rules on and summarises its threads there, and runs no gh", async () => {
+  const fake = fakeVenue();
+  const ran = await host({
+    records: atHead,
+    config: { rounds: 1 },
+    findings: [[finding("The flag is never read")]],
+    verdicts: [[{ thread: EARLIER_THREAD.id, verdict: "fixed" }]],
+    round: { venue: fake.venue },
+  });
+
+  assert.deepEqual(ran.kinds, [], "the round reached GitHub around the venue it was handed");
+  const read = callsTo(fake.calls, "readChange");
+  assert.equal(read.length, 1, "the change was not read from the venue");
+  assert.equal(callsTo(fake.calls, "listThreads").length, 1, "the threads were not listed through the venue");
+
+  const opened = callsTo(fake.calls, "openThread");
+  assert.equal(opened.length, 1, "the finding's thread was not opened on the venue");
+  assert.deepEqual(opened[0]?.[1], { path: TRACKED, line: 88, side: "RIGHT" });
+  assert.match(String(opened[0]?.[2]), /The flag is never read/u);
+
+  assert.deepEqual(callsTo(fake.calls, "resolve").map((args) => args[0]), [EARLIER_THREAD.id], "the fixed ruling did not resolve its thread on the venue");
+  const replies = callsTo(fake.calls, "reply");
+  assert.deepEqual(replies.map((args) => args[0]), [EARLIER_THREAD.id], "the fixed ruling did not reply on its thread on the venue");
+
+  const summaries = callsTo(fake.calls, "postSummary");
+  assert.equal(summaries.length, 1, "the closing round's summary did not reach the venue");
+  assert.equal((summaries[0]?.[0] as Change).key, String(PULL_REQUEST), "the summary went to a change the venue did not read");
+  assert.match(String(summaries[0]?.[1]), /Squiz review/u);
+  assert.equal(callsTo(fake.calls, "postFailure").length, 0);
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(record.problems ?? [], []);
+});
+
+test("a round whose thread and failure comment the fake venue refuses records both refusals, rather than a clean round", async () => {
+  const fake = fakeVenue({
+    openThread: () => ({ outcome: "failed", reason: "the venue would not take the thread" }),
+    postFailure: () => ({ outcome: "failed", reason: "the venue would not take the comment" }),
+  });
+  const ran = await host({
+    records: atHead,
+    findings: [[finding("The flag is never read")]],
+    round: { venue: fake.venue },
+  });
+
+  assert.deepEqual(ran.kinds, [], "the round reached GitHub around the venue it was handed");
+  assert.equal(callsTo(fake.calls, "openThread").length, 1, "the finding never reached the venue");
+  const failures = callsTo(fake.calls, "postFailure");
+  assert.equal(failures.length, 1, "the failure comment never reached the venue");
+  assert.match(String(failures[0]?.[1]), /found 1 finding and could not post it/u);
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.match(record.reason, /found 1 finding and could not post it to PR #142/u);
+  assert.equal(record.lines?.at(-1), `the failure could not be posted on PR #${PULL_REQUEST}: the venue would not take the comment`);
+});
+
+test("a closing round whose summary the fake venue refuses keeps the refusal on its record", async () => {
+  const fake = fakeVenue({ postSummary: () => ({ outcome: "failed", reason: "the venue would not take the summary" }) });
+  const ran = await host({ records: atHead, config: { rounds: 1 }, round: { venue: fake.venue } });
+
+  assert.deepEqual(ran.kinds, [], "the round reached GitHub around the venue it was handed");
+  assert.equal(callsTo(fake.calls, "postSummary").length, 1, "the summary never reached the venue");
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed", `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(record.problems, [`the review of PR #${PULL_REQUEST} closed without its summary: the venue would not take the summary`]);
+});
+
+test("a venue that finds no change here runs no reviewer, posts nothing, and records its reason", async () => {
+  const fake = fakeVenue({ readChange: () => ({ outcome: "none", reason: "the fake venue has nothing here" }) });
+  const ran = await host({ records: atHead, round: { venue: fake.venue } });
+
+  assert.equal(ran.started, 0);
+  assert.deepEqual(ran.kinds, []);
+  assert.deepEqual(fake.calls.map((call) => call.member), ["readChange"], "the round went on past a venue with no change");
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.reason, "no review ran: the fake venue has nothing here");
 });
 

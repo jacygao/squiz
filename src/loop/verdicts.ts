@@ -3,20 +3,27 @@
  * the ones it ruled settled, re-opening the ones it ruled still wrong, replying
  * on each it closed or kept open, and leaving the rest as they are.
  *
- * A verdict reaches its thread by the GraphQL `PRRT_` node id and by nothing
- * else. It is the only identifier the resolve mutations take, and a verdict read
+ * A verdict reaches its thread by the thread's id and by nothing else. One read
  * off its position in a list closes whichever thread happens to sit there.
  *
  * Nothing here throws, and nothing is sent on the strength of an identifier the
  * round did not hand over. Every failure arrives as a value, because the round
- * around this has to exit 0 whatever GitHub did.
+ * around this has to exit 0 whatever the venue did.
  */
 
 import { renderClosingReply, renderOpenReason, type RuledAt } from "../findings/comment.ts";
 import { defaultVerdict, type Verdict } from "../findings/status.ts";
-import type { GhCall } from "../venues/github/gh.ts";
-import { reopenThread, replyInThread, resolveThread, type ThreadAction } from "../venues/github/thread-actions.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
+import { shareOf, type Deadline } from "../reviewers/deadline.ts";
+import type { ThreadAction, Venue } from "../venues/venue.ts";
+
+/** Where a round's calls go, the deadline they share, and each call's part of it where a caller sets one. */
+export type Sending = { readonly venue: Venue; readonly until: Deadline; readonly callMs?: number };
+
+/** The deadline one call runs under. */
+export function deadlineOf(call: Sending): Deadline {
+  return call.callMs === undefined ? call.until : shareOf(call.until, call.callMs);
+}
 
 /**
  * A thread as the round handed it to the reviewer.
@@ -97,15 +104,14 @@ export type AppliedVerdicts = {
  * A verdict naming a thread that was not handed over is reported and never
  * sent.
  *
- * Never throws. A mutation that failed, including one GitHub refused inside an
- * HTTP 200, comes back as `failed` on its own thread and leaves the others
- * alone.
+ * Never throws. A mutation that failed comes back as `failed` on its own thread
+ * and leaves the others alone.
  */
 export function applyVerdicts(
   handedOver: readonly HandedOverThread[],
   verdicts: readonly ThreadVerdict[],
   at: RuledAt,
-  call: GhCall,
+  call: Sending,
 ): AppliedVerdicts {
   const rulings = rulingsFor(handedOver, verdicts);
   const threads = handedOver.map((thread) =>
@@ -173,23 +179,23 @@ function rulingsFor(
  * reviewer kept it open or closed it.
  *
  * Whatever became of the reply, the state is still set, and whatever became of
- * the state, the reply is still sent. A thread GitHub would not re-open still
+ * the state, the reply is still sent. A thread the venue would not re-open still
  * holds a dispute, and the reason is what the coding agent acts on.
  */
 function apply(
   thread: HandedOverThread,
   ruling: ThreadVerdict | null,
   at: RuledAt,
-  call: GhCall,
+  call: Sending,
 ): AppliedVerdict {
   const named = { thread: thread.id, ruled: ruling?.verdict ?? null };
   if (ruling === null) return { ...named, ...setState(thread, defaultVerdict, call) };
   if (!owesReply(thread, ruling)) return { ...named, ...setState(thread, ruling.verdict, call) };
   if (ruling.verdict === "open") {
     const state = setState(thread, ruling.verdict, call);
-    return { ...named, ...state, reply: replyInThread(thread.id, renderOpenReason(ruling.reason), call) };
+    return { ...named, ...state, reply: call.venue.reply(thread.id, renderOpenReason(ruling.reason), deadlineOf(call)) };
   }
-  const reply = replyInThread(thread.id, renderClosingReply(ruling, at), call);
+  const reply = call.venue.reply(thread.id, renderClosingReply(ruling, at), deadlineOf(call));
   return { ...named, ...setState(thread, ruling.verdict, call), reply };
 }
 
@@ -209,7 +215,7 @@ function owesReply(thread: HandedOverThread, ruling: ThreadVerdict): boolean {
  * the reviewer gave it, where that ruling is owed a reply.
  *
  * Read before anything is posted, so it counts the replies a round set out to
- * post whatever GitHub then did with them.
+ * post whatever the venue then did with them.
  */
 export function rulingsReplied(
   handedOver: readonly HandedOverThread[],
@@ -230,15 +236,15 @@ export function rulingsReplied(
  * the resolved state it was handed over with was read before the coding agent
  * took its turn. Resolving a resolved thread succeeds.
  */
-function setState(thread: HandedOverThread, verdict: Verdict, call: GhCall): VerdictOutcome {
+function setState(thread: HandedOverThread, verdict: Verdict, call: Sending): VerdictOutcome {
   switch (verdict) {
     case "fixed":
     case "withdrawn":
-      return outcomeOf(resolveThread(thread.id, call), "closed");
+      return outcomeOf(call.venue.resolve(thread.id, deadlineOf(call)), "closed");
     case "open":
       // A thread that is open is already in the state the verdict asks for.
       if (!thread.isResolved) return { outcome: "left-open" };
-      return outcomeOf(reopenThread(thread.id, call), "reopened");
+      return outcomeOf(call.venue.reopen(thread.id, deadlineOf(call)), "reopened");
   }
 }
 
@@ -261,7 +267,7 @@ export function unpostedReasons(verdicts: AppliedVerdicts): readonly string[] {
  * Each ruling the round could not apply, as one line naming the thread, what the
  * reviewer ruled and why it was not applied.
  *
- * The thread stays as GitHub has it, so the line carries the ruling in full: it
+ * The thread stays as the venue has it, so the line carries the ruling in full: it
  * is what a person reads to apply the ruling by hand.
  */
 export function unappliedRulings(verdicts: AppliedVerdicts): readonly string[] {

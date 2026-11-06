@@ -21,10 +21,10 @@ import {
   type InlineRouting,
   type Routing,
 } from "../findings/route.ts";
-import type { GhCall } from "../venues/github/gh.ts";
-import { postFileThread, postThread, type ThreadPosting } from "../venues/github/post-thread.ts";
+import type { Change, ThreadPosting } from "../venues/venue.ts";
+import { deadlineOf, type Sending } from "./verdicts.ts";
 
-/** A round's new findings, and the pull request their threads go on. */
+/** A round's new findings, and the change their threads go on. */
 export type NewFindings = {
   /**
    * The findings as the reviewer returned them. Ordering them by severity is
@@ -32,10 +32,9 @@ export type NewFindings = {
    * caller hands them over in.
    */
   readonly findings: readonly Finding[];
-  /** The pull request's diff, which decides where each finding's comment can hang. */
+  /** The change's diff, which decides where each finding's comment can hang. */
   readonly diff: string;
-  readonly pullRequest: number;
-  readonly headSha: string;
+  readonly change: Change;
 };
 
 /** Whether a thread hangs on one line of a file or on the file as a whole. */
@@ -46,7 +45,7 @@ export type ThreadPlacement = "inline" | "file";
  * on.
  */
 type Ruleable = {
-  /** The `PRRT_` id, which is what a reply, a resolve and a re-open are addressed to. */
+  /** The thread's id, which is what a reply, a resolve and a re-open are addressed to. */
   readonly threadId: string;
   readonly unknownThread?: never;
 };
@@ -101,7 +100,7 @@ export type Noted = {
 export type Failed = {
   readonly outcome: "failed";
   readonly finding: Finding;
-  /** The one line the round reports: what GitHub did instead of opening the thread. */
+  /** The one line the round reports: what the venue did instead of opening the thread. */
   readonly reason: string;
 };
 
@@ -128,10 +127,10 @@ export type PostedFindings = {
  * create that failed says nothing about the next one, and the comments that
  * landed stay: nothing here deletes or rewrites a comment it posted.
  *
- * A refused anchor is not a failure. GitHub would not place a comment there, and
- * the finding comes back `noted` for the summary to carry.
+ * A refused anchor is not a failure. The venue would not place a comment there,
+ * and the finding comes back `noted` for the summary to carry.
  */
-export function postFindings(round: NewFindings, call: GhCall): PostedFindings {
+export function postFindings(round: NewFindings, call: Sending): PostedFindings {
   const routed = routeFindings(orderBySeverity(round.findings), round.diff);
   const outcomes = routed.routings.map((routing) => post(routing, round, call));
   if (routed.unreadableDiff === undefined) return { outcomes };
@@ -139,7 +138,7 @@ export function postFindings(round: NewFindings, call: GhCall): PostedFindings {
 }
 
 /** One finding's whole account, which for a general routing is posted nowhere. */
-function post(routing: Routing, round: NewFindings, call: GhCall): FindingOutcome {
+function post(routing: Routing, round: NewFindings, call: Sending): FindingOutcome {
   switch (routing.placement) {
     case "inline":
       return onLine(routing, round, call);
@@ -150,40 +149,34 @@ function post(routing: Routing, round: NewFindings, call: GhCall): FindingOutcom
   }
 }
 
-function onLine(routing: InlineRouting, round: NewFindings, call: GhCall): FindingOutcome {
+function onLine(routing: InlineRouting, round: NewFindings, call: Sending): FindingOutcome {
   const { finding } = routing;
-  const posting = postThread(
-    {
-      pullRequest: round.pullRequest,
-      headSha: round.headSha,
-      // `RIGHT` because a finding is anchored only to a line the change added,
-      // and an added line is counted in the head file.
-      anchor: { path: finding.file, line: finding.line, side: "RIGHT" },
-      body: renderComment(finding),
-    },
-    call,
+  const posting = call.venue.openThread(
+    round.change,
+    // `RIGHT` because a finding is anchored only to a line the change added,
+    // and an added line is counted in the head file.
+    { path: finding.file, line: finding.line, side: "RIGHT" },
+    renderComment(finding),
+    deadlineOf(call),
   );
   // Written here rather than taken from the routing, which carries no location
-  // for an anchor it placed. GitHub refusing the line is what the router could
-  // not know, and the summary still has to say where the defect is.
+  // for an anchor it placed. The venue refusing the line is what the router
+  // could not know, and the summary still has to say where the defect is.
   return outcomeOf(posting, finding, "inline", `${finding.file}:${finding.line}`);
 }
 
 function onFile(
   routing: FileRouting | DegradedRouting,
   round: NewFindings,
-  call: GhCall,
+  call: Sending,
 ): FindingOutcome {
   const { finding, unplacedAnchor } = routing;
   const comment = renderComment(finding);
-  const posting = postFileThread(
-    {
-      pullRequest: round.pullRequest,
-      headSha: round.headSha,
-      path: finding.file,
-      body: unplacedAnchor === undefined ? comment : namingTheLine(comment, unplacedAnchor),
-    },
-    call,
+  const posting = call.venue.openFileThread(
+    round.change,
+    finding.file,
+    unplacedAnchor === undefined ? comment : namingTheLine(comment, unplacedAnchor),
+    deadlineOf(call),
   );
   return outcomeOf(posting, finding, "file", unplacedAnchor ?? finding.file);
 }
@@ -203,7 +196,7 @@ function namingTheLine(comment: string, anchor: string): string {
  * What one create came to, as the finding's one outcome.
  *
  * `location` is where the summary's Notes would say the defect is, and is used
- * only where GitHub refuses the anchor. That refusal is a routing signal rather
+ * only where the venue refuses the anchor. That refusal is a routing signal rather
  * than a failure: nothing on the pull request holds the finding, so the summary
  * does.
  */

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { unspent, type RoundCost } from "../../reviewers/adapter.ts";
+import { unspent, type RoundCost } from "../reviewers/adapter.ts";
 import { renderSpendLine } from "./spend-line.ts";
 
 function round(dollars: number, tokens: number, messages = 4): RoundCost {

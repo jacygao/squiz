@@ -41,6 +41,7 @@ import { snapshotPath } from "../worktree/snapshot.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "./episode-state.ts";
 import { episodeAt } from "./episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
+import { githubVenue } from "../venues/github/venue.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
 
 const BRANCH = "review-me";
@@ -610,6 +611,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const started = Date.now();
     const config = { ...defaultConfig, timeout: 5, ...setup.config };
     const roundSetup = {
+      venue: githubVenue,
       worktree,
       config,
       adapter,
@@ -1925,8 +1927,7 @@ test("a branch with no pull request runs nothing, and names the branch and where
   });
 
   assert.ok(ran.conclusion.outcome === "no-pull-request");
-  assert.equal(ran.conclusion.branch, BRANCH);
-  assert.match(ran.conclusion.directory, /\/tree$/u, "the worktree the gate asked git in");
+  assert.match(ran.conclusion.reason, new RegExp(`^no open pull request has "${BRANCH}" as its head, in ".*/tree"$`, "u"), "the branch, and the worktree the gate asked git in");
   assert.deepEqual(ran.kinds, ["prlist"]);
   assert.equal(ran.invocations.length, 0);
   assert.equal(ran.stateSource, null);
@@ -1941,8 +1942,7 @@ test("a detached HEAD is no branch, so the round ends before gh is asked", async
   });
 
   assert.ok(ran.conclusion.outcome === "no-pull-request");
-  assert.equal(ran.conclusion.branch, null, "a detached HEAD names no branch");
-  assert.match(ran.conclusion.directory, /\/tree$/u, "the worktree the gate asked git in");
+  assert.match(ran.conclusion.reason, /^HEAD is detached in ".*\/tree", so no pull request has it as its head$/u, "a detached HEAD names no branch");
   assert.deepEqual(ran.kinds, []);
   assert.deepEqual(ran.episodesLeft, [], "an episode was opened with no pull request to key it");
 });

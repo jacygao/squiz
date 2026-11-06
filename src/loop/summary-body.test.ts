@@ -7,15 +7,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { renderComment } from "../../findings/comment.ts";
-import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../../findings/finding.ts";
-import type { ThreadStatus } from "../../findings/status.ts";
-import type { ClassifiedThread } from "../../loop/classify.ts";
-import type { RoundRecord, RoundWork, Timings } from "../../loop/episode-state.ts";
-import type { FindingOutcome, PostedFindings } from "../../loop/post-findings.ts";
-import type { RoundCost } from "../../reviewers/adapter.ts";
+import { renderComment } from "../findings/comment.ts";
+import type { ChangeFinding, FileFinding, Finding, LineFinding } from "../findings/finding.ts";
+import type { ThreadStatus } from "../findings/status.ts";
+import type { ClassifiedThread } from "./classify.ts";
+import type { RoundRecord, RoundWork, Timings } from "./episode-state.ts";
+import type { FindingOutcome, PostedFindings } from "./post-findings.ts";
+import type { RoundCost } from "../reviewers/adapter.ts";
 import { renderSummary, unappliedNotes, unpostedReplyNotes, type ClosedEpisode } from "./summary-body.ts";
-import type { ReviewThread } from "./threads.ts";
+import type { ReviewThread } from "../venues/venue.ts";
 
 /** A round of `pi` on one model, which is what most tests here need and none is about. */
 function round(dollars: number, tokens: number): RoundCost & Timings & RoundWork {
