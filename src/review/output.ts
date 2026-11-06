@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 
 import { threadLine } from "../findings/listing.ts";
 import type { ReviewThread } from "../venues/github/threads.ts";
+import { draftLine, followUpFor } from "../venues/github/venue.ts";
 import { failureLine } from "../hook/report.ts";
 import { episodeAt } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
@@ -207,7 +208,7 @@ export function composeReview(result: ReviewResult, path: string): Printed {
     case "draft":
       return {
         exit: 0,
-        stdout: `PR #${result.pullRequest} is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.\n`,
+        stdout: `${draftLine(result.pullRequest)}\n`,
         stderr: problems,
       };
   }
@@ -265,11 +266,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
 
 /** What the coding agent does with threads that are open while rounds remain. */
 export function workTheThreads(pullRequest: number): string {
-  return [
-    "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
-    "what you changed or why you disagree. Commit and push what you changed, then run",
-    `\`squiz review ${pullRequest}\` again.`,
-  ].join("\n");
+  return followUpFor(pullRequest);
 }
 
 const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";
