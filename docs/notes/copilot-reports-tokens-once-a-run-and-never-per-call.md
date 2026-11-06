@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what a Copilot adapter's read can return as a round's cost; § 7 — what a Copilot round that is killed records; M8 — whether the token bound can read Copilot's tokens"
+settles: "§ 5 — what a Copilot adapter's read can return as a round's cost; § 8 — what a Copilot round that is killed records; M8 — whether the token bound can read Copilot's tokens"
 issue: 458
 recorded: 2026-10-06
 versions: { copilot: 1.0.91, models: "gpt-5-mini, claude-haiku-4.5, gpt-6-astra", macos: 26.6.2 }
@@ -40,7 +40,7 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-c
   count `inputTokens + outputTokens`, as `pi`'s `totalTokens` does, so one bound
   means the same thing whichever CLI reviews.
 
-  2026-10-07: settled as recommended (§ 7 The review budget).
+  2026-10-07: settled as recommended (§ 8 The review budget).
 - **Whether AI credits should be recorded beside tokens.** Copilot reports no
   dollars. It reports AI credits, as `totalNanoAiu` (10⁹ to a credit), and
   premium requests. Recommended: record `totalNanoAiu` as the round's cost, and
@@ -49,7 +49,7 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-c
   `gpt-5-mini`.
 
   2026-10-07: settled as recommended. A Copilot round records tokens and AI
-  credits, and the summary shows both (§ 4 The Copilot adapter).
+  credits, and the summary shows both (§ 5 The Copilot adapter).
 
 ## Reference
 

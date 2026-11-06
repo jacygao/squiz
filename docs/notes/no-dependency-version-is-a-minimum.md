@@ -22,7 +22,7 @@ recheck-when: any dependency below is upgraded past the version listed, or the s
 - **Treat no version below as a minimum.** § 2 requires each dependency to be
   installed, and `gh` to be authenticated, and states no version for any of
   them. The setup check reports what is missing or unauthenticated, not what is
-  old. Node is the exception, and § 8 owns its requirement: Node 24 or later.
+  old. Node is the exception, and § 9 owns its requirement: Node 24 or later.
 
 - **Re-check a behaviour against the command beside it before relying on it
   after an upgrade.** Each version is the one the behaviour was seen on, and

@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — how a round a hook queued wakes an idle Copilot session, what the hook records under Copilot, and what Not in the first version keeps for Copilot; § 8 — the extension the plugin ships; § 9 — how a Copilot user turns the wake on"
+settles: "§ 3 — how a round a hook queued wakes an idle Copilot session, what the hook records under Copilot, and what Not in the first version keeps for Copilot; § 9 — the extension the plugin ships; § 10 — how a Copilot user turns the wake on"
 issue: 594
 recorded: 2026-10-07
 versions: { copilot: 1.0.92, models: "gpt-6-astra, gpt-5-mini, claude-haiku-4.5", reviewer: gpt-6-astra, herdr: 0.9.3, node: "24.15.0, and Copilot's own 24.20.0 for the extension", macos: 26.6.2 }
@@ -78,11 +78,11 @@ and its note waited.
   after round 2, and stopped at exit 2. Recommendation: accept it. The wake
   is what this issue tests, and the three runs show it. Working threads on
   `gpt-6-astra` was settled by #573.
-- **Whether § 9 should ask users to turn on every experimental feature for
+- **Whether § 10 should ask users to turn on every experimental feature for
   this.** The switch is all or nothing, per user, and stays on once flipped.
-  Recommendation: keep it optional, as § 9 now says.
+  Recommendation: keep it optional, as § 10 now says.
 
-  2026-10-07: settled another way. § 9 has a Copilot user turn experimental
+  2026-10-07: settled another way. § 10 has a Copilot user turn experimental
   features on as part of setup, and a Copilot session without them is
   unsupported.
 - **Whether to file the upstream request to take extensions out of
@@ -94,7 +94,7 @@ and its note waited.
 ### What each session did
 
 The coding model, the scratch pull request, how long the session had been idle
-when the note arrived, and how it ended. `squiz review` exit codes are as § 6
+when the note arrived, and how it ended. `squiz review` exit codes are as § 7
 gives them. The plugin still shipped the `squiz-review` skill, since removed.
 
 | Run | Model | PR | Idle | After the note |

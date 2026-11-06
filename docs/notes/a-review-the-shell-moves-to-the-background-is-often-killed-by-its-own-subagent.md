@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — the deadline `squiz review` waits within; § 2 — the Bash timeout, the move to the background, and the stall watchdog; § 6 — whether a coding agent follows the exit statuses as `squiz review` explains them"
+settles: "§ 8 — the deadline `squiz review` waits within; § 2 — the Bash timeout, the move to the background, and the stall watchdog; § 7 — whether a coding agent follows the exit statuses as `squiz review` explains them"
 issue: 278
 recorded: 2026-10-03
 versions: { claude-code: 2.1.288, coding-agent: claude-opus-5-5 }
@@ -65,7 +65,7 @@ recheck-when: Claude Code changes the Bash tool's timeout or background move, th
   minute for both.
 
   2026-10-05: settled. 540 seconds is now the deadline `squiz review` waits
-  within (§ 7), and no round runs inside a shell call.
+  within (§ 8), and no round runs inside a shell call.
 - **Whether the text says more about waiting.** The runtime's own message
   already says "do not end your turn to wait for it", and three subagents ended
   it anyway. Recommendation: rely on the margin, and measure any added sentence

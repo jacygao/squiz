@@ -1,5 +1,5 @@
 ---
-settles: "§ 9 — whether the README's Copilot install and project setup work in a fresh project, and what a Copilot user needs that it left out; M9 — the Copilot half of the end-to-end criterion"
+settles: "§ 10 — whether the README's Copilot install and project setup work in a fresh project, and what a Copilot user needs that it left out; M9 — the Copilot half of the end-to-end criterion"
 issue: 659
 recorded: 2026-10-07
 versions: { copilot: 1.0.92, squiz: f5ce5ca, plugin-version: 0.1.0, models: "gpt-5-mini (session), claude-sonnet-5 (reviewer, Copilot's default)", node: 24.15.0, gh: 2.97.0, tmux: 3.7b, macos: 26.6.2 }
@@ -46,7 +46,7 @@ model set runs on the coding session's model.
 - **Tell a user with Copilot on both sides to set `model` in `.squiz.json`.**
   With no model in Copilot's settings, both the reviewer and a session started
   without `--model` ran `claude-sonnet-5`, and doctor passed with `model
-  unknown`. § 4 The Copilot adapter already says nothing makes sure the two
+  unknown`. § 5 The Copilot adapter already says nothing makes sure the two
   differ. The README now says so, and #687 holds whether doctor should warn.
 - **Count the wake and the exit as working.** Each round's host log ended
   `woke its owner through <socket>`, the session's next event was the note as a

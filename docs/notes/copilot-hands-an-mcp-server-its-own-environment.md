@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — how the round's values and the reviewer's environment reach the history tools Copilot's reporting server runs, and whether the grant leaves Copilot a shell"
+settles: "§ 5 — how the round's values and the reviewer's environment reach the history tools Copilot's reporting server runs, and whether the grant leaves Copilot a shell"
 issue: 551
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-6-astra, node: 24.15.0, macos: 26.6.2 }

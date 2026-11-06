@@ -1,5 +1,5 @@
 ---
-settles: "§ 6 — which `PATH` a command a person types after `!` in a Claude Code session gets; § 9 — how a Claude Code user runs `squiz doctor` and `squiz init`"
+settles: "§ 7 — which `PATH` a command a person types after `!` in a Claude Code session gets; § 10 — how a Claude Code user runs `squiz doctor` and `squiz init`"
 issue: [657, 678]
 recorded: 2026-10-07
 versions: { claude-code: 2.1.292, plugin-version: 0.1.0, platform: macOS }

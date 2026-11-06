@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what of a tree under review reaches a Copilot reviewer, and the command line and environment that keep it out"
+settles: "§ 5 — what of a tree under review reaches a Copilot reviewer, and the command line and environment that keep it out"
 issue: 458
 recorded: 2026-10-06
 versions: { copilot: 1.0.91, models: "gpt-5-mini, gpt-6-astra", macos: 26.6.2 }
@@ -59,7 +59,7 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or changes how folder trust is d
 
   2026-10-07: settled as recommended, except the model. The adapter reads the
   user's default model from the user's own `settings.json` and passes it as
-  `COPILOT_MODEL` where the project configures none (§ 4 The Copilot adapter).
+  `COPILOT_MODEL` where the project configures none (§ 5 The Copilot adapter).
 
 ## Reference
 

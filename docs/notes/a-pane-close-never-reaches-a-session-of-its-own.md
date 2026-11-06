@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what a tmux window close and a Herdr pane close reach, and which pid the round host signals for a reviewer in a pane"
+settles: "§ 5 — what a tmux window close and a Herdr pane close reach, and which pid the round host signals for a reviewer in a pane"
 issue: 300
 recorded: 2026-10-04
 versions: { tmux: 3.7b, herdr: 0.9.3, pi: 0.85.1, macos: 26.6.2, zsh: 5.9 }
@@ -40,7 +40,7 @@ the close as tidying the screen.
   the call, `SIGTERM` about 260 ms after that, and was gone within 6 seconds
   with nothing logged, which is `SIGKILL`. That included the members of a job
   whose leader had exited and which was no longer in the foreground. The order
-  § 4 gives, the reviewer's group and then the pane, is right for both
+  § 5 gives, the reviewer's group and then the pane, is right for both
   backends.
 
 - **Never grant a reviewer a tool that leaves the reviewer's group.** A process
@@ -68,7 +68,7 @@ the close as tidying the screen.
   `herdr agent start` returns.
 
   2026-10-05: squiz now starts the reviewer with `herdr pane run` behind a
-  gate, and reads the group before `pi` runs. § 4 The reviewer session says
+  gate, and reads the group before `pi` runs. § 5 The reviewer session says
   how.
 
 - **Have the round host close a Herdr pane itself once `pi` exits.** Herdr

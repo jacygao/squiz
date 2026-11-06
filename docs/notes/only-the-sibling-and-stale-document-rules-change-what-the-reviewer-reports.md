@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — which of the review rules other reviewers publish the charter takes, and why the rest stay out"
+settles: "§ 5 — which of the review rules other reviewers publish the charter takes, and why the rest stay out"
 issue: [579]
 recorded: 2026-10-17
 versions: { copilot: 1.0.98, copilot-model: "gpt-6-astra, gpt-6.1-sol for the sibling rule", thinking: medium, node: 24.15.0, squiz: "7e78369b, with the diff carried in the prompt" }

@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether a Copilot reviewer stalls on its provider while the machine is awake; § 7 — what a round killed at its time bound after a silence was"
+settles: "§ 5 — whether a Copilot reviewer stalls on its provider while the machine is awake; § 8 — what a round killed at its time bound after a silence was"
 issue: [545, 665]
 recorded: 2026-10-17
 versions: { copilot: "1.0.92 to 1.0.98", macos: 26.6.2 }

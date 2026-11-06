@@ -1,5 +1,5 @@
 ---
-settles: "§ 9 — the rule a Copilot session is started with, so its coding agent runs squiz without asking"
+settles: "§ 10 — the rule a Copilot session is started with, so its coding agent runs squiz without asking"
 issue: 702
 recorded: 2026-10-17
 versions: { copilot: 1.0.98 }

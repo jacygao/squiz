@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what level a `pi` round runs at when the model does not offer the configured one; § 6 — how the setup check learns that level"
+settles: "§ 5 — what level a `pi` round runs at when the model does not offer the configured one; § 7 — how the setup check learns that level"
 issue: 709
 recorded: 2026-10-17
 versions: { pi: 0.85.1, node: 24.15.0, macos: 26.6.2 }

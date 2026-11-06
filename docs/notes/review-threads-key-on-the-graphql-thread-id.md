@@ -34,7 +34,7 @@ review nobody can see.
   the line whose change caused it, the anchor is inside the diff by construction,
   and how wide GitHub draws a hunk never affects whether a finding gets a thread.
   A finding whose effect lands elsewhere names that location in the comment body
-  rather than being anchored there. Issue #26 carries this into § 4.
+  rather than being anchored there. Issue #26 carries this into § 5.
 
 ## Needs your input
 
@@ -320,7 +320,7 @@ Every anchoring failure is a loud HTTP 422. None is silent.
 | `body` empty, anchor valid | `pull_request_review_thread.body` — `required when requesting changes`. The prefix, and not an anchor failure. |
 
 The `could not be resolved` messages are what the harness sees when a finding
-lands outside the diff. § 4 decides where that finding goes instead, so this is
+lands outside the diff. § 5 decides where that finding goes instead, so this is
 a condition to detect and route on, not an error to report. The prefix alone
 does not identify it: a 422 under `pull_request_review_thread.` is a refused
 anchor only where the field is `path`, `line` or `side`. The same prefix carries

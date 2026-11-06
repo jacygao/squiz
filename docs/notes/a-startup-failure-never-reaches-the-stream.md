@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — where the reason lives when the reviewer never got as far as the model"
+settles: "§ 8 — where the reason lives when the reviewer never got as far as the model"
 issue: 103
 recorded: 2026-09-24
 versions: { pi: 0.85.1, node: 24.15.0 }

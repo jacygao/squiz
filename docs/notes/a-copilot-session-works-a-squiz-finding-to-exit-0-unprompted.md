@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether a Copilot coding agent, never told about squiz, runs `squiz review` and works its threads to exit 0, and what the plugin's hooks queue meanwhile; § 9 — whether the Copilot setup § 9 gives is enough on its own; M13 — the live-run criterion"
+settles: "§ 3 — whether a Copilot coding agent, never told about squiz, runs `squiz review` and works its threads to exit 0, and what the plugin's hooks queue meanwhile; § 10 — whether the Copilot setup § 10 gives is enough on its own; M13 — the live-run criterion"
 issue: 573
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, models: "gpt-6-astra (medium and low effort), gpt-5-mini, claude-haiku-4.5", reviewer: gpt-6-astra, herdr: 0.9.3, node: 24.15.0, macos: 26.6.2, squiz-plugin: 21ed14b }
@@ -19,7 +19,7 @@ showed something the successful one did not.
 
 - Whether a Copilot session, given a task and no mention of squiz, opens a pull
   request, runs `squiz review`, and works a finding to exit 0 or 3, on a
-  repository set up as § 9 says.
+  repository set up as § 10 says.
 - Whether it runs the command in the foreground or the background, and if the
   background, whether the command's end wakes it.
 - Whether the plugin's hooks fire, and queue for the right pull request and
@@ -72,13 +72,13 @@ showed something the successful one did not.
   by a second model. Recommended: accept it for M13, whose criterion is about
   what the coding agent does, and record that nothing makes a Copilot reviewer
   differ from a Copilot coding agent on the same default model.
-- **Whether § 9 should say that the skill reaches only some Copilot models.**
+- **Whether § 10 should say that the skill reaches only some Copilot models.**
   Under the same setup, `gpt-5-mini` in run 5 and `claude-haiku-4.5` in run 6
   opened their pull requests and stopped. They never loaded the skill and never
   ran `squiz`. The hook's round then ran with nobody to read its result. Run 3,
   also `gpt-5-mini`, opened no pull request, so it did not reach the point where
   the skill applies. Recommended: run the `AGENTS.md` route once each with
-  `gpt-5-mini` and `claude-haiku-4.5` before changing § 9, since that route puts
+  `gpt-5-mini` and `claude-haiku-4.5` before changing § 10, since that route puts
   the text in the system prompt rather than leaving it to the model to load.
 
   2026-10-07: the `squiz-review` skill and the `AGENTS.md` section `squiz init`
@@ -200,7 +200,7 @@ ends only when it is signalled. `SIGTERM` while it was idle made it write
 - **The background wake was not exercised.** No session ran `squiz review` in
   `async` mode, and none of its calls outlived `initial_wait`.
 - **The session could see squiz's name before the skill loaded.** `.gitignore`
-  lists `.squiz/`, as § 9 step 1 asks, and `.squiz.json` sat in the working
+  lists `.squiz/`, as § 10 step 1 asks, and `.squiz.json` sat in the working
   tree. Run 7's first shell call listed both.
 - **`--allow-all` was set in every run.** A session that asks for tool
   permissions was not tried, because nothing could be typed into the pane.

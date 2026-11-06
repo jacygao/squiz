@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether a finding on a binary file can be anchored to it"
+settles: "§ 5 — whether a finding on a binary file can be anchored to it"
 issue: 139
 recorded: 2026-09-26
 versions: { github-api: 2022-11-28 }
@@ -46,7 +46,7 @@ Nothing.
 
 ## Reference
 
-The call, which is the one § 4 and `post-thread.ts` make:
+The call, which is the one § 5 and `post-thread.ts` make:
 
 ```
 gh api repos/{owner}/{repo}/pulls/{n}/comments \

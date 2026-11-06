@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — what can bound a round's time, given that `sleep` cannot and `timeout` is not installed"
+settles: "§ 8 — what can bound a round's time, given that `sleep` cannot and `timeout` is not installed"
 issue: 103
 recorded: 2026-09-24
 versions: { node: 24.15.0 }

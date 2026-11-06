@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — how long a round's posting reserve is"
+settles: "§ 8 — how long a round's posting reserve is"
 issue: 278
 recorded: 2026-10-03
 versions: {}

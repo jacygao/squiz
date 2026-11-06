@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — what keeps a tree under review from configuring `pi`, and what decides whether `pi` trusts a tree"
+settles: "§ 5 — what keeps a tree under review from configuring `pi`, and what decides whether `pi` trusts a tree"
 issue: 242
 recorded: 2026-10-03
 versions: { pi: 0.85.1, node: 24.15.0, macos: 26.6.2 }
@@ -44,7 +44,7 @@ recheck-when: pi upgrades, or pi's project trust resolution changes
   already withholds project extensions, and a tree that could name the model
   reviewing it could name a blind one.
 
-  2026-10-05: settled as recommended. § 4 The `pi` adapter passes
+  2026-10-05: settled as recommended. § 5 The `pi` adapter passes
   `--no-approve`, and none of the project's `pi` settings applies.
 
 ## Reference

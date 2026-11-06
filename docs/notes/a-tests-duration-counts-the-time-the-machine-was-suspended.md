@@ -1,5 +1,5 @@
 ---
-settles: "§ 7 — what a round does when the machine is suspended during its review; § 8 — how to read a local test that ran for minutes"
+settles: "§ 8 — what a round does when the machine is suspended during its review; § 9 — how to read a local test that ran for minutes"
 issue: 680
 recorded: 2026-10-17
 versions: { node: 24.15.0, macos: 26.6.2 }
@@ -22,10 +22,10 @@ recheck-when: Node's major version changes, or a long test duration turns up whi
   time in a test's duration on macOS, so the duration alone cannot tell the two
   apart.
 - **Leave the posting reserve alone for a suspend.** A round that resumes past
-  its posting reserve posts nothing and says so, as § 7 asks of a reserve that
+  its posting reserve posts nothing and says so, as § 8 asks of a reserve that
   is spent. A suspend spends the reserve the way a slow reviewer does. The
   review's own time bound is the exception: a sleep during the review is added
-  back to it, as § 7 The review budget sets out.
+  back to it, as § 8 The review budget sets out.
 - **Leave the test as it is.** It failed because its clock moved 900 seconds
   while its reviewer ran, not because anything in the round waited.
 

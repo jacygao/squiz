@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether a real reviewer reports through the three calls, whether the charter produces a review worth posting, and how far the reviewer honours the declared scope; § 7 — what tells a run that reached the model from one that did not, and what bounds a round"
+settles: "§ 5 — whether a real reviewer reports through the three calls, whether the charter produces a review worth posting, and how far the reviewer honours the declared scope; § 8 — what tells a run that reached the model from one that did not, and what bounds a round"
 issue: [105, 165]
 recorded: 2026-09-26
 versions: { pi: 0.85.1, provider: deepseek, model: deepseek-v4-pro, node: 24.15.0 }

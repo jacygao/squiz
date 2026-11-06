@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — how a round a hook queued could wake an idle Copilot session, and what Not in the first version leaves open for Copilot; § 8 — what the plugin would ship for Copilot; § 9 — what a Copilot session must be started with"
+settles: "§ 3 — how a round a hook queued could wake an idle Copilot session, and what Not in the first version leaves open for Copilot; § 9 — what the plugin would ship for Copilot; § 10 — what a Copilot session must be started with"
 issue: 591
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-5-mini, node: 24.15.0, macos: 26.6.2 }
@@ -73,14 +73,14 @@ hook, MCP notification or ACP call reaches a session another process owns.
 
 - **Whether to build the Copilot wake on an extension, given that the coding
   agent's session must run with `--experimental`.** The flag turns on every
-  experimental feature, not just extensions. § 9 would have to tell a project to
+  experimental feature, not just extensions. § 10 would have to tell a project to
   start Copilot with it, or to turn it on once with `/experimental on`.
   Recommendation: build it, as a later milestone's work and not M13's. The
   socket sits in a directory only the user can open, unlike the `--ui-server`
   port, and the extension is a few dozen lines. Until it lands, keep the wake
   that M13 settled: the session runs `squiz review` in the background.
 
-  2026-10-07: built in M13. § 9 has a Copilot user turn experimental features
+  2026-10-07: built in M13. § 10 has a Copilot user turn experimental features
   on, and squiz's Copilot support is experimental as a whole.
 - **Whether to file a request upstream to take extensions out of experimental.**
   Recommendation: file it only once squiz depends on the route. Link #1705,

@@ -1,5 +1,5 @@
 ---
-settles: "§ 4 — whether `pi`'s extension can refuse a call before it runs, what the reviewer reads when it does, and how the round counts what it refused"
+settles: "§ 5 — whether `pi`'s extension can refuse a call before it runs, what the reviewer reads when it does, and how the round counts what it refused"
 issue: 243
 recorded: 2026-09-29
 versions: { pi: 0.85.1, node: 24.15.0 }

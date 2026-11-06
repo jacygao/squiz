@@ -1,5 +1,5 @@
 ---
-settles: "§ 9 — what `claude plugin update` does to the old version's directory, how long that directory lasts, and when to run `squiz init` again; § 6 — what `squiz doctor` and `squiz init` print for a link left on the old version"
+settles: "§ 10 — what `claude plugin update` does to the old version's directory, how long that directory lasts, and when to run `squiz init` again; § 7 — what `squiz doctor` and `squiz init` print for a link left on the old version"
 issue: 677
 recorded: 2026-10-07
 versions: { claude-code: 2.1.292, plugin-version: "0.1.0 to 0.1.1", platform: macOS }

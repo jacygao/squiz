@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether a dispatched subagent works a real pull request's threads to its end, and what the hooks queue while it runs `squiz review` itself; § 4 — starting the reviewer in a Herdr pane"
+settles: "§ 3 — whether a dispatched subagent works a real pull request's threads to its end, and what the hooks queue while it runs `squiz review` itself; § 5 — starting the reviewer in a Herdr pane"
 issue: 338
 recorded: 2026-10-05
 versions: { claude-code: 2.1.289, coding-agent: claude-opus-5-5, reviewer: deepseek-v4-pro, pi: 0.85.1, herdr: 0.9.3, node: 24.15.0, squiz: "b30978d (runs 1 and 2), 6a5dabf (runs 3 and 4), 68bea94 (run 5)" }

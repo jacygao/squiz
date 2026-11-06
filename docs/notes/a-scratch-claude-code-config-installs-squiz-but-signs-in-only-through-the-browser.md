@@ -1,5 +1,5 @@
 ---
-settles: "§ 9 — whether the README's Claude Code install, run from a shell, works into a config of its own, and what `squiz doctor` prints for the install it makes; M9 — what a live run of Claude Code needs before it can start"
+settles: "§ 10 — whether the README's Claude Code install, run from a shell, works into a config of its own, and what `squiz doctor` prints for the install it makes; M9 — what a live run of Claude Code needs before it can start"
 issue: 658
 recorded: 2026-10-07
 versions: { claude-code: 2.1.292, squiz: b93d487, plugin-version: 0.1.0, copilot: 1.0.92, node: 24.15.0, gh: 2.97.0, tmux: 3.7b, herdr: 0.9.3 }
