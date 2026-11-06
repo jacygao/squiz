@@ -40,14 +40,13 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type { LineFinding } from "../findings/finding.ts";
-import type { PullRequest } from "../venues/github/pull-request.ts";
 import type { ReviewThread } from "../venues/github/threads.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Invocation, RoundCost, ThreadVerdict } from "./adapter.ts";
 import { pi } from "./pi/adapter.ts";
 import { extensionFile } from "./pi/argv.ts";
 import { FINISH_REVIEW, REPORT_FINDING, REPORT_VERDICT } from "./reporting.ts";
-import { composePrompt } from "./prompt.ts";
+import { composePrompt, type UnderReview } from "./prompt.ts";
 import { runRound } from "./round.ts";
 
 /** The file under review, as the host project spells it. */
@@ -143,13 +142,9 @@ const reportsFile = ".squiz/104/rounds/1/reports.jsonl";
 /** The charter that ships, handed over as the file the reviewer's CLI appends. */
 const charterFile = fileURLToPath(new URL("../../charter.md", import.meta.url));
 
-const pullRequest: PullRequest = {
-  number: 142,
-  nodeId: "PR_kwDOFixture",
-  baseRef: "main",
-  headRef: "threads/last-said",
-  headSha: "9a3f1c4e5b6d7a8f9012345678abcdef01234567",
-  baseSha: "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c",
+const change: UnderReview["change"] = {
+  name: "PR #142",
+  base: "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c",
   description: "Add `lastSaid`, so the summary can quote the end of a thread.",
 };
 
@@ -245,7 +240,7 @@ test("the prompt, the grant, the charter and the tree all reach the reviewer", a
     assert.equal(handed["charterFile"], charterFile);
     assert.equal(handed["charterOpens"], readFileSync(charterFile, "utf8").split("\n")[0]);
     assert.equal(handed["sessionDirectory"], sessionDirectory);
-    assert.equal(handed["heading"], `# Review pull request #${pullRequest.number}`);
+    assert.equal(handed["heading"], `# Review ${change.name}`);
     assert.equal(handed["thread"], thread.id);
   });
 });
@@ -289,7 +284,7 @@ function invocationIn(tree: string): Invocation {
   return {
     directory: tree,
     charterFile,
-    prompt: composePrompt({ pullRequest, changes: changedFilesOf(tree), threads: [thread] }),
+    prompt: composePrompt({ change, changes: changedFilesOf(tree), threads: [thread] }),
     sessionDirectory,
     promptFile: ".squiz/104/rounds/1/prompt.md",
     reportsFile,
@@ -513,7 +508,7 @@ function review() {
   if (promptArg === undefined || !promptArg.startsWith("@")) refuse("the command line names no prompt file");
   const prompt = fs.readFileSync(promptArg.slice(1), "utf8");
   const heading = prompt.split("\\n")[0];
-  if (!/^# Review pull request #\\d+$/.test(heading)) refuse("the prompt names no pull request");
+  if (!/^# Review PR #\\d+$/.test(heading)) refuse("the prompt names no pull request");
   const ruled = /^### (PRRT_\\S+)$/m.exec(prompt);
   if (ruled === null) refuse("the prompt carries no thread to rule on");
   if (!prompt.includes(reviewedFile)) refuse("the prompt names no changed file");

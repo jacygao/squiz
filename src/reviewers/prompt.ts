@@ -1,6 +1,6 @@
 /**
- * The task prompt the reviewer is handed each round: the pull request under
- * review, what the history tools are for, and the threads already on it.
+ * The task prompt the reviewer is handed each round: the change under review,
+ * what the history tools are for, and the threads already on it.
  *
  * It sits above the adapters rather than inside one. Every adapter hands its
  * CLI the same prompt, so a second reviewer is a second command line and not a
@@ -14,12 +14,16 @@
  * and the threads are the whole of what it knows about the rounds before it.
  */
 
-import type { PullRequest } from "../venues/github/pull-request.ts";
 import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
+import type { Change } from "../venues/venue.ts";
 
 /** What the reviewer is told about the change it is reading. */
 export type UnderReview = {
-  readonly pullRequest: PullRequest;
+  /**
+   * No branch name is carried. `git_diff` reads the base from the snapshot, and
+   * a branch named here is a second base the reviewer could diff against.
+   */
+  readonly change: Pick<Change, "name" | "base" | "description">;
   /**
    * The files the pull request changes, as `git_diff` lists them. The diff
    * itself is not carried: a large change would make a prompt the reviewer's
@@ -49,12 +53,12 @@ export type UnderReview = {
  * it is, because a round with a thin description is still a round to review.
  */
 export function composePrompt(underReview: UnderReview): string {
-  const { pullRequest, changes, threads } = underReview;
+  const { change, changes, threads } = underReview;
   return [
-    `# Review pull request #${pullRequest.number}`,
-    `Head \`${pullRequest.headRef}\`, base \`${pullRequest.baseRef}\`.`,
+    `# Review ${change.name}`,
+    `It is diffed against the base commit \`${change.base.slice(0, 7)}\`.`,
     "## Description",
-    described(pullRequest.description),
+    described(change.description),
     "## History",
     "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
     "## Changes",

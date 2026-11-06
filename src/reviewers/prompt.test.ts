@@ -8,7 +8,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { PullRequest } from "../venues/github/pull-request.ts";
 import type { ReviewThread } from "../venues/github/threads.ts";
 import { composePrompt, type UnderReview } from "./prompt.ts";
 
@@ -18,13 +17,9 @@ function prompt(...lines: readonly string[]): string {
   return lines.join("\n");
 }
 
-const pullRequest: PullRequest = {
-  number: 42,
-  nodeId: "PR_kwDOUEd2qM6fnpx6",
-  baseRef: "main",
-  headRef: "cards/placement",
-  headSha: "655997442d7a69aec2903665478883e71dac5da0",
-  baseSha: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
+const change: UnderReview["change"] = {
+  name: "PR #42",
+  base: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
   description: "Adds the placement pass.",
 };
 
@@ -71,15 +66,15 @@ const settled: ReviewThread = {
   ],
 };
 
-function round(threads: readonly ReviewThread[], change: Partial<UnderReview> = {}): string {
-  return composePrompt({ pullRequest, changes, threads, ...change });
+function round(threads: readonly ReviewThread[], replaced: Partial<UnderReview> = {}): string {
+  return composePrompt({ change, changes, threads, ...replaced });
 }
 
 /** The prompt down to the end of the changed files, which every round carries. */
 const preamble = [
-  "# Review pull request #42",
+  "# Review PR #42",
   "",
-  "Head `cards/placement`, base `main`.",
+  "It is diffed against the base commit `7c1e0d3`.",
   "",
   "## Description",
   "",
@@ -103,6 +98,22 @@ const preamble = [
 
 test("a prompt carrying no thread carries the pull request, the files it changes and the history tools, and asks for no verdict", () => {
   assert.equal(round([]), prompt(...preamble));
+});
+
+// The heading is the change's name, so the working tree is named as a pull
+// request is, and everything after the base line is the same for both.
+test("a change that is no pull request is named by its own name, against its base", () => {
+  const working = { ...change, name: "the working tree", base: "0d9a6f4e2b7c1a3d5e8f0b2c4d6e8a0b1c3d5e7f" };
+
+  assert.equal(
+    round([], { change: working }),
+    prompt(
+      "# Review the working tree",
+      "",
+      "It is diffed against the base commit `0d9a6f4`.",
+      ...preamble.slice(preamble.indexOf("## Description") - 1),
+    ),
+  );
 });
 
 test("every thread handed over is carried with its comments and its resolved state", () => {
@@ -248,7 +259,7 @@ test("a thread on a line GitHub named no line for is not called the file", () =>
 });
 
 test("a pull request nobody described is said to have no description", () => {
-  const bare = { pullRequest: { ...pullRequest, description: "  \n" }, changes, threads: [] };
+  const bare = { change: { ...change, description: "  \n" }, changes, threads: [] };
 
   assert.match(composePrompt(bare), /^The pull request has no description\.$/mu);
 });

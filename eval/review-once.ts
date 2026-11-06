@@ -120,13 +120,9 @@ if (snapshot.outcome === "failed") {
 }
 const tree = snapshot.path;
 
-const pullRequest = {
-  number: measured.number,
-  nodeId: "PR_measure",
-  baseRef: "main",
-  headRef: measured.headRef,
-  headSha: prepared.head,
-  baseSha: prepared.base,
+const change = {
+  name: `PR #${measured.number}`,
+  base: prepared.base,
   description: readFileSync(join(patches, measured.description), "utf8"),
 };
 
@@ -135,7 +131,7 @@ if (listed.failed) {
   console.error(listed.text);
   process.exit(1);
 }
-const prompt = composePrompt({ pullRequest, changes: listed.text, threads: [] });
+const prompt = composePrompt({ change, changes: listed.text, threads: [] });
 
 const started = Date.now();
 const round = await runRound(
