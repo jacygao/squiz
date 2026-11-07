@@ -742,7 +742,7 @@ test("a throw inside squiz review exits 1, which never reads as a result", async
         "      return {",
         '        format: "module",',
         "        shortCircuit: true,",
-        '        source: \'export async function runReview() { throw new Error("the wait exploded"); }\',',
+        '        source: \'export const REVIEW_BUDGET_MS = 540000; export async function runReview() { throw new Error("the wait exploded"); }\',',
         "      };",
         "    }",
         "    return nextLoad(url, context);",
