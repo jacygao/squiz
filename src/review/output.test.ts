@@ -666,7 +666,7 @@ test("#820: every result that names the change calls it by its name, so the work
   const named = {
     key: "local",
     name: "the working tree",
-    rerun: "cd '/work/squiz-a' && squiz review",
+    rerun: "(cd '/work/squiz-a' && squiz review)",
     summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
   } as const;
   const results: readonly ReviewResult[] = [
@@ -694,7 +694,7 @@ test("#823: every result that says to run squiz review again gives the change's 
   const named = {
     key: "local",
     name: "the working tree",
-    rerun: "cd '/work/squiz-a' && squiz review",
+    rerun: "(cd '/work/squiz-a' && squiz review)",
     summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
   } as const;
   const results: readonly ReviewResult[] = [
@@ -707,7 +707,7 @@ test("#823: every result that says to run squiz review again gives the change's 
   for (const result of results) {
     const { stdout } = composeReview(result, PATH);
     assert.doesNotMatch(stdout, /squiz review local/u, `the ${result.outcome} result names the key as an argument:\n${stdout}`);
-    assert.ok(stdout.includes("`cd '/work/squiz-a' && squiz review`"), `the ${result.outcome} result does not give the change's rerun:\n${stdout}`);
+    assert.ok(stdout.includes("`(cd '/work/squiz-a' && squiz review)`"), `the ${result.outcome} result does not give the change's rerun:\n${stdout}`);
   }
 });
 
@@ -715,7 +715,7 @@ test("#820: every result that says where the summary is gives the venue's place 
   const named = {
     key: "local",
     name: "the working tree",
-    rerun: "cd '/work/squiz-a' && squiz review",
+    rerun: "(cd '/work/squiz-a' && squiz review)",
     summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
   } as const;
   const results: readonly ReviewResult[] = [

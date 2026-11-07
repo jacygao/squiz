@@ -91,16 +91,16 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
   const description = descriptionIn(root);
   if (typeof description !== "string") return description;
 
-  const quoted = shellQuoted(root);
+  const rerun = inWorktree(root, "squiz review");
   const change: WorkingTreeChange = {
     key: LOCAL_KEY,
     name: "the working tree",
-    rerun: `cd ${quoted} && squiz review`,
+    rerun,
     summaryAt: `in ${summaryPath(localDirectory(root))}`,
     followUp: [
       `Fix what applies in ${root}, and reply on each thread with`,
-      `\`cd ${quoted} && squiz reply <id> <text>\` to say what you changed or why`,
-      `you disagree. Then run \`cd ${quoted} && squiz review\` again.`,
+      `\`${inWorktree(root, "squiz reply <id> <text>")}\` to say what you changed or why`,
+      `you disagree. Then run \`${rerun}\` again.`,
     ].join("\n"),
     base: base.base,
     head: built.head,
@@ -142,6 +142,14 @@ function worktreeOf(change: Change): string {
 function posting(opened: Opened): ThreadPosting {
   if (opened.outcome === "failed") return opened;
   return { outcome: "posted", threadId: opened.threadId, commentId: opened.commentId, url: opened.url };
+}
+
+/**
+ * `command`, run in `worktree` inside a subshell. A shell that keeps its
+ * directory between calls stays where it was, so its own stops review its own tree.
+ */
+function inWorktree(worktree: string, command: string): string {
+  return `(cd ${shellQuoted(worktree)} && ${command})`;
 }
 
 /** `text` as one word in `sh`, inside single quotes. */

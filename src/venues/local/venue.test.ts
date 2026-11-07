@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
+import { ownerNote } from "../../host/owner-note.ts";
+import type { Owner, StateRecord } from "../../loop/state-record.ts";
+import { composeReview, type ReviewResult } from "../../review/output.ts";
 import { deadlineIn } from "../../reviewers/deadline.ts";
 import type { Change } from "../venue.ts";
 import { localVenue } from "./venue.ts";
@@ -17,11 +20,11 @@ function git(directory: string, args: readonly string[]): string {
   return result.stdout.trim();
 }
 
-/** A repository with one commit and no remote, whose path holds a quote, removed when the test ends. */
-function worktreeIn(t: TestContext): string {
+/** A repository with one commit and no remote, at `name`, removed when the test ends. */
+function worktreeIn(t: TestContext, name = "squiz's work"): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "squiz-local-venue-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const worktree = join(root, "squiz's work");
+  const worktree = join(root, name);
   mkdirSync(worktree);
   git(worktree, ["init", "--quiet", "--initial-branch", "main"]);
   writeFileSync(join(worktree, "kept.txt"), "kept\n");
@@ -94,20 +97,98 @@ test("the change is the working tree against its base, named for the worktree, a
   const quoted = `'${worktree.replaceAll("'", `'\\''`)}'`;
   assert.equal(change.key, "local");
   assert.equal(change.name, "the working tree");
-  assert.equal(change.rerun, `cd ${quoted} && squiz review`);
+  assert.equal(change.rerun, `(cd ${quoted} && squiz review)`);
   assert.equal(change.summaryAt, `in ${join(worktree, ".squiz", "local", "summary.md")}`);
   assert.equal(
     change.followUp,
     [
       `Fix what applies in ${worktree}, and reply on each thread with`,
-      `\`cd ${quoted} && squiz reply <id> <text>\` to say what you changed or why`,
-      `you disagree. Then run \`cd ${quoted} && squiz review\` again.`,
+      `\`(cd ${quoted} && squiz reply <id> <text>)\` to say what you changed or why`,
+      `you disagree. Then run \`(cd ${quoted} && squiz review)\` again.`,
     ].join("\n"),
   );
   assert.doesNotMatch(change.followUp, /commit|push/iu);
   assert.equal(change.base, start);
   assert.notEqual(change.head, start);
   assert.equal(change.description, "Make the queue retry.\n");
+});
+
+/** Every command in `text`, as the backquoted spans it gives them in. */
+function commandsIn(text: string): readonly string[] {
+  return [...text.matchAll(/`([^`]+)`/gu)].map((match) => match[1] ?? "");
+}
+
+test("#826: every command the change gives runs squiz in the worktree, and leaves the caller's shell where it was, under sh and bash", (t) => {
+  const worktree = worktreeIn(t, "squiz's $HOME work");
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+  const change = changeIn(worktree);
+  const caller = realpathSync(mkdtempSync(join(tmpdir(), "squiz-local-caller-")));
+  t.after(() => rmSync(caller, { recursive: true, force: true }));
+  const bin = join(caller, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "squiz"), `#!/bin/sh\necho "squiz ran in $(pwd -P)"\n`, { mode: 0o755 });
+
+  const commands = [change.rerun, ...commandsIn(change.followUp)];
+  assert.equal(commands.length, 3, `the follow-up does not give its two commands:\n${change.followUp}`);
+  for (const shell of ["/bin/sh", "bash"]) {
+    for (const command of commands) {
+      const runnable = command.replace("<id> <text>", "T1 fixed");
+      const ran = spawnSync(shell, ["-c", `${runnable}\necho "caller is in $(pwd -P)"`], {
+        cwd: caller,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` },
+      });
+      assert.equal(ran.status, 0, `${shell} could not run ${command}: ${ran.stderr}`);
+      assert.equal(
+        ran.stdout,
+        `squiz ran in ${worktree}\ncaller is in ${caller}\n`,
+        `under ${shell}, ${command} did not run squiz in the worktree and leave the caller where it was`,
+      );
+    }
+  }
+});
+
+test("#826: no note or review output for a local change gives a cd outside a subshell", (t) => {
+  const worktree = worktreeIn(t);
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+  const change = changeIn(worktree);
+  const until = deadlineIn(30_000);
+  localVenue.openThread(change, { path: "kept.txt", line: 1, side: "RIGHT" }, "**Squiz reviewer · high — A**", until);
+  const listed = localVenue.listThreads(change, until);
+  const threads = listed.outcome === "listed" ? listed.threads : [];
+  assert.equal(threads.length, 1);
+
+  const owner: Owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
+  const round = { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } } as const;
+  const reviewed = (exitStatus: 2 | 3, openThreads: readonly string[]): StateRecord => ({
+    head: change.head, activity: null, owner, status: "reviewed", result: "exited", exitStatus, openThreads, round, newFindings: openThreads.length,
+  });
+  const records: readonly StateRecord[] = [
+    reviewed(2, ["T1"]),
+    reviewed(3, ["T1"]),
+    reviewed(3, []),
+    { head: change.head, activity: null, owner, status: "failed", reason: "the reviewer stopped", ownerNoted: false },
+  ];
+  const notes = records.map((record) => ownerNote(change, record, "3f9c2e0", change.followUp, undefined, threads)?.fields["text"] ?? "");
+
+  const named = { key: change.key, name: change.name, rerun: change.rerun, summaryAt: change.summaryAt } as const;
+  const results: readonly ReviewResult[] = [
+    { ...named, outcome: "reviewed", exit: 2, commit: "8d21a4f", round: 1, cap: 3, newFindings: 1, threads, recorded: false, followUp: change.followUp },
+    { ...named, outcome: "reviewed", exit: 3, closedAt: "round cap", commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads, recorded: false },
+    { ...named, outcome: "reviewing", wait: "under review", commit: "3f9c2e0" },
+    { ...named, outcome: "closed unreviewed", exit: 3, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads, summarised: false },
+  ];
+  const outputs = results.map((result) => {
+    const printed = composeReview(result, join(worktree, ".squiz", "local", "review.txt"));
+    return printed.stdout + printed.stderr;
+  });
+
+  const all = [...notes, ...outputs];
+  assert.ok(all.join("\n").includes(`${change.rerun}\``), "no output gives the change's rerun, so none was checked");
+  assert.ok(all.join("\n").includes("&& squiz reply <id> <text>)`"), "no output gives the reply command, so none was checked");
+  for (const text of all) {
+    assert.doesNotMatch(text, /(?<!\()cd '/u, `this output gives a cd that would move the caller's shell:\n${text}`);
+  }
 });
 
 test("two reads of an unchanged working tree are one head, and an edit is another", (t) => {
