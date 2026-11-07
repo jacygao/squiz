@@ -715,13 +715,15 @@ test("#838: a start in a linked worktree takes the venue from the main worktree'
   });
 });
 
-test("a start outside any repository records nothing, and says why in one line", async () => {
+// The start hooks fire for every session opened anywhere, so a line here would reach every user who opens one outside git.
+test("#838: a start outside any git repository records nothing and says nothing", async () => {
   await withPlace(async (place) => {
-    const fired = await fire(place, { payload: sessionStartPayload(place.bin), trigger: { as: "recording" } });
+    for (const payload of [sessionStartPayload(place.bin), copilotSubagentStartPayload(place.bin)]) {
+      const fired = await fire(place, { payload, trigger: { as: "recording" } });
 
-    assert.equal(fired.code, 0);
-    assert.match(fired.stderr, /^squiz: no base was recorded: the main worktree, which holds \.squiz\.json, could not be found: [^\n]*\n$/u);
-    assert.equal(existsSync(join(place.bin, ".squiz")), false);
+      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.equal(existsSync(join(place.bin, ".squiz")), false);
+    }
   });
 });
 

@@ -449,7 +449,9 @@ request, record no owner and queue nothing. The GitHub venue records nothing at
 a start, so under it these two firings change nothing. Claude Code and Copilot
 both fire them from the plugin, each with a `cwd`, before the session or the
 subagent does any work. A start hook takes its worktree from the payload's `cwd`,
-as the stop hooks do.
+as the stop hooks do. A start whose `cwd` is in no git repository records nothing
+and writes nothing on stderr, because both runtimes fire it for every session,
+wherever it is opened.
 
 **The plugin root is quoted in the command, so a root with a space in its path
 stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under

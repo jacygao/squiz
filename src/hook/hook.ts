@@ -15,6 +15,7 @@ import type { Owner } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import type { Firing, HookEnvironment } from "../sessions/firing.ts";
 import { venueAt } from "../venues/venue.ts";
+import { worktreeToplevel } from "../worktree/toplevel.ts";
 import { readPayloadFrom, type PayloadStream } from "./payload.ts";
 import { reportFailure } from "./report.ts";
 import type { HookExit } from "./trap.ts";
@@ -22,6 +23,9 @@ import type { HookExit } from "./trap.ts";
 // Queuing is a few git and gh calls. One that hangs past this costs the review,
 // not the turn.
 const QUEUE_BUDGET_MS = 30_000;
+
+// Git's own words for a directory in no repository.
+const NOT_A_REPOSITORY = /fatal: not a git repository/u;
 
 export type HookCall = {
   /** The hook's stdin, which the runtime wrote the payload to. */
@@ -70,6 +74,10 @@ export async function runHook(call: HookCall): Promise<HookExit> {
 /** Hand `directory`, where a session or subagent is starting, to the venue its `.squiz.json` names. */
 function recordStart(directory: string): void {
   const until = deadlineIn(QUEUE_BUDGET_MS);
+  // A start fires for every session opened anywhere, and one outside git has
+  // nothing to review, so it says nothing rather than speak to every such user.
+  const toplevel = worktreeToplevel(directory, until);
+  if (toplevel.outcome === "failed" && NOT_A_REPOSITORY.test(toplevel.reason)) return;
   const chosen = venueAt(directory, until);
   if (chosen.outcome === "failed") {
     reportFailure(`no base was recorded: ${chosen.reason}`);
