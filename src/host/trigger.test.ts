@@ -9,7 +9,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { renderComment, renderReply } from "../findings/comment.ts";
-import { episodeAt, type Episode } from "../loop/episode.ts";
+import type { Episode } from "../loop/episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -121,7 +122,7 @@ function withFixture(body: (fixture: Fixture) => void | Promise<void>): Promise<
   writeFileSync(join(bin, "graphql.out"), listing([]), "utf8");
   standIn(bin, "gh", fakeGh(bin));
   const path = `${bin}:${originalPath}`;
-  const fixture: Fixture = { worktree, bin, episode: episodeAt(worktree, NUMBER), hostLog: join(bin, "hosts.log"), path };
+  const fixture: Fixture = { worktree, bin, episode: githubEpisode(worktree, NUMBER), hostLog: join(bin, "hosts.log"), path };
   process.env["PATH"] = path;
   return (async () => {
     try {
@@ -225,6 +226,31 @@ test("a state with no record is queued with its owner and workspace, and a host 
   });
 });
 
+test("a pull request's number keys the episode at .squiz/<number>/, and the host is started with it as before (#792)", async () => {
+  await withFixture(async (fixture) => {
+    const keys: unknown[] = [];
+    const directory = join(fixture.worktree, ".squiz", String(NUMBER));
+    const result = decided(
+      trigger(request(fixture, {
+        host: (key) => {
+          keys.push(key);
+          return { command: process.execPath, args: [standInHost, directory, fixture.hostLog] };
+        },
+      })),
+    );
+
+    assert.deepEqual(keys, ["41"], "the host was not started with the key, spelled as the number");
+    assert.deepEqual(
+      { worktree: result.episode.worktree, directory: result.episode.directory, stateFile: result.episode.stateFile },
+      { worktree: fixture.worktree, directory, stateFile: join(directory, "state.json") },
+    );
+    assert.equal(readFileSync(join(directory, "../.gitignore"), "utf8"), "*\n");
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+    assert.ok(existsSync(join(directory, "host.lock")), "the host's lock is not at .squiz/41/host.lock");
+    assert.ok(existsSync(join(directory, "host.log")), "the host's log is not at .squiz/41/host.log");
+  });
+});
+
 test("the state is keyed by the newest reply on the reviewer's threads", async () => {
   await withFixture((fixture) => {
     writeFileSync(join(fixture.bin, "graphql.out"), listing([
@@ -295,7 +321,7 @@ test("a pull request whose head is not the branch checked out queues nothing and
   await withFixture((fixture) => {
     writeFileSync(join(fixture.bin, "list.out"), pullRequestRow(BRANCH, 12), "utf8");
 
-    const result = trigger(request(fixture, { trigger: "review", pullRequest: NUMBER }));
+    const result = trigger(request(fixture, { trigger: "review", key: String(NUMBER) }));
 
     assert.equal(result.outcome, "no review", JSON.stringify(result));
     assert.match(result.outcome === "no review" ? result.reason : "", /PR #41.*"feature-a"/u);
@@ -325,7 +351,7 @@ test("a draft queues nothing, lists no threads, starts no host and makes no .squ
   await withFixture((fixture) => {
     writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
 
-    for (const asked of [request(fixture), request(fixture, { trigger: "review", pullRequest: NUMBER })]) {
+    for (const asked of [request(fixture), request(fixture, { trigger: "review", key: String(NUMBER) })]) {
       const result = trigger(asked);
 
       assert.deepEqual(result, { outcome: "held", line: DRAFT_LINE });
@@ -341,7 +367,7 @@ test("a draft whose episode closed is still a draft, rather than the close (#720
     seed(fixture.episode, { closeReported: true });
     writeFileSync(join(fixture.bin, "list.out"), draftRow(), "utf8");
 
-    assert.deepEqual(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })), { outcome: "held", line: DRAFT_LINE });
+    assert.deepEqual(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })), { outcome: "held", line: DRAFT_LINE });
   });
 });
 
@@ -401,7 +427,7 @@ test("a hook leaves a failed state failed, and squiz review queues it again", as
     assert.deepEqual(records(fixture.episode), [failed]);
     assert.deepEqual(byHook.host, { outcome: "not started" });
 
-    const byReview = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+    const byReview = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
     assert.deepEqual(byReview.decision, { outcome: "queue", startHost: true });
     assert.equal(byReview.queued, true);
     assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }]);
@@ -422,7 +448,7 @@ test("#424: a failed state squiz review queues again goes behind every state rec
     };
     seed(fixture.episode, { records: [failed, clean] });
 
-    const byReview = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+    const byReview = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
 
     assert.equal(byReview.queued, true);
     assert.deepEqual(records(fixture.episode), [clean, { ...state, status: "queued" }]);
@@ -583,7 +609,7 @@ test("a trigger for a state still under review when the close is written leaves 
       records: [{ ...state, status: "reviewing", host: ownIdentity(), round: { number: 1 } }],
     });
 
-    const result = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+    const result = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
 
     assert.deepEqual(result.decision, { outcome: "in-hand" }, "a run on the state under review would print the close before its record");
   });
@@ -601,7 +627,7 @@ test("a trigger for a state queued behind the round at the cap leaves it in hand
       ],
     });
 
-    const result = decided(trigger(request(fixture, { trigger: "review", pullRequest: NUMBER })));
+    const result = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
 
     assert.notDeepEqual(result.decision, { outcome: "closed" }, "a run on a queued state would print the close without saying why it was not reviewed");
   });

@@ -64,6 +64,6 @@ const adapter: Adapter = {
 
 await runHost({
   worktree: process.cwd(),
-  pullRequest: Number(number),
+  key: number,
   round: { venue: githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
 });

@@ -186,8 +186,8 @@ export type RoundSetup = {
   readonly resumeUnwritten?: (reason: string) => void;
 };
 
-/** An episode's lock as its caller took it, and the pull request it was taken for. */
-export type HeldLock = { readonly pullRequest: number; readonly lock: HostLock };
+/** An episode's lock as its caller took it, and the key of the change it was taken for. */
+export type HeldLock = { readonly key: string; readonly lock: HostLock };
 
 /** What a round that reviewed hands `endsOn` to decide from. */
 export type RoundTally = {
@@ -211,7 +211,7 @@ export type RoundFailure =
 
 /** What the round did, whatever it concluded. */
 export type RoundAccount = {
-  readonly pullRequest: number;
+  readonly key: string;
   /**
    * The threads this round's findings opened, by id.
    *
@@ -255,7 +255,7 @@ export type RoundConclusion =
    * Another round of the episode holds its lock, so this firing ran nothing and
    * posted nothing.
    */
-  | { readonly outcome: "round-running"; readonly pullRequest: number }
+  | { readonly outcome: "round-running"; readonly key: string }
   /**
    * The pull request has moved past the state the caller took: a later commit,
    * or different replies. No reviewer ran. `by` is the state the pull request
@@ -263,7 +263,7 @@ export type RoundConclusion =
    */
   | {
       readonly outcome: "superseded";
-      readonly pullRequest: number;
+      readonly key: string;
       readonly by: StateKey;
       /**
        * Present where `by` was reviewed clean with the episode open and nothing
@@ -329,7 +329,7 @@ export type RoundConclusion =
        * reports the comment's reason beside the round's own.
        */
       readonly failureComment?: {
-        readonly pullRequest: number;
+        readonly key: string;
         readonly posting: CommentPosting;
       };
     });
@@ -414,24 +414,24 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   const change = gated.step;
   opened.change = change;
   // A lock taken for one pull request says nothing about another's rounds.
-  if (setup.held !== undefined && String(setup.held.pullRequest) !== change.key) {
+  if (setup.held !== undefined && setup.held.key !== change.key) {
     return failed(
       "harness",
-      `no review ran: PR #${setup.held.pullRequest}'s head is not the branch checked out in ${directory}, whose change is ${change.name}`,
+      `no review ran: PR #${setup.held.key}'s head is not the branch checked out in ${directory}, whose change is ${change.name}`,
     );
   }
 
-  const keyed = keyedBy(directory, change);
+  const keyed = keyedBy(setup.venue, directory, change);
   if ("ended" in keyed) return keyed.ended;
   const episode = keyed.step;
-  const number = Number(episode.id);
+  const { key } = episode;
 
   // Two subagents that stop at once in one worktree fire on one pull request.
   // Everything from the state read to the last post is one round's, because two
   // rounds that each read the state before the other wrote would both pass the
   // cap, both review, and keep only one of their costs.
   const locked: Step<HostLock> =
-    setup.held === undefined ? lockOf(episode, number) : { step: setup.held.lock };
+    setup.held === undefined ? lockOf(episode, key) : { step: setup.held.lock };
   if ("ended" in locked) return locked.ended;
   opened.held = { lock: locked.step, owned: setup.held === undefined };
 
@@ -458,7 +458,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
     setup,
     opened,
     episode,
-    number,
+    key,
     preReview,
     posting,
     stopwatch,
@@ -469,7 +469,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
       : {
           ...concluded,
           failureComment: {
-            pullRequest: number,
+            key,
             posting: timed(stopwatch, posting(), () => postFailure(setup.venue, change, concluded, posting())),
           },
         };
@@ -546,8 +546,8 @@ type AfterTheGate = {
   /** Where the round notes the snapshot it made, for removal once it ends. */
   readonly opened: Opened;
   readonly episode: Episode;
-  /** The pull request's number, which keys the episode and names the snapshot and the session. */
-  readonly number: number;
+  /** The change's key, which names the episode, the snapshot and the session. */
+  readonly key: string;
   readonly preReview: PreReview;
   /**
    * The posting reserve, the same deadline every time it is asked for. The first
@@ -586,7 +586,7 @@ async function readDiff(
 async function reviewOn(
   change: Change,
   onFile: EpisodeState | null,
-  { setup, opened, episode, number, preReview, posting: startPosting, stopwatch }: AfterTheGate,
+  { setup, opened, episode, key, preReview, posting: startPosting, stopwatch }: AfterTheGate,
 ): Promise<RoundConclusion> {
   const { config } = setup;
   const directory = episode.worktree;
@@ -595,7 +595,7 @@ async function reviewOn(
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return closeBeforeReview(over, change, { setup, episode, number, preReview, posting: startPosting, stopwatch });
+    return closeBeforeReview(over, change, { setup, episode, key, preReview, posting: startPosting, stopwatch });
   }
 
   const listing = handOver(setup.venue, change, preReview);
@@ -605,7 +605,7 @@ async function reviewOn(
   // result recorded against any other state would claim a review it never had.
   const now: StateKey = { head: change.head, activity: listing.step.activity };
   if (setup.state !== undefined && !sameState(now, setup.state)) {
-    return supersededBy(now, change, handedOver, { setup, episode, number, posting: startPosting, stopwatch });
+    return supersededBy(now, change, handedOver, { setup, episode, key, posting: startPosting, stopwatch });
   }
 
   const ordinal = state.rounds.length + 1;
@@ -619,7 +619,7 @@ async function reviewOn(
   const snapshot = addSnapshot(
     directory,
     {
-      pullRequest: number,
+      key,
       round: ordinal,
       commit: setup.state?.head ?? change.head,
       base: change.base,
@@ -664,7 +664,7 @@ async function reviewOn(
       ...(setup.sessionEnvironment === undefined ? {} : { environment: setup.sessionEnvironment }),
       ...(setup.sessionBackends === undefined ? {} : { backends: setup.sessionBackends }),
       ...(setup.workspace === undefined ? {} : { workspace: setup.workspace }),
-      name: `squiz-${number}-r${ordinal}`,
+      name: `squiz-${key}-r${ordinal}`,
       started: (place, boundEndsAt) =>
         setup.reviewerStarted?.({ ...placeOf(place), process: place.identity, boundEndsAt, snapshot: tree }),
       ...(setup.paneLeftOpen === undefined ? {} : { paneLeftOpen: setup.paneLeftOpen }),
@@ -707,7 +707,7 @@ async function reviewOn(
   const posting: Posting = {
     venue: setup.venue,
     change,
-    number,
+    key,
     diff: read.diff,
     reserve,
     stopwatch,
@@ -809,18 +809,18 @@ function gate(venue: Venue, call: PreReview): Step<Change> {
  * A holder that might still be running is never taken for gone, so a lock that
  * cannot be read runs no review either.
  */
-function lockOf(episode: Episode, pullRequest: number): Step<HostLock> {
+function lockOf(episode: Episode, key: string): Step<HostLock> {
   const taking = takeEpisodeHostLock(episode, { boundMs: LOCK_BOUND_MS });
   switch (taking.outcome) {
     case "taken":
       return { step: taking.lock };
     case "held":
-      return { ended: { outcome: "round-running", pullRequest } };
+      return { ended: { outcome: "round-running", key } };
     case "unknown":
       return {
         ended: failed(
           "harness",
-          `no review ran: whether a round is already running on PR #${pullRequest} could not be told: ${taking.reason}`,
+          `no review ran: whether a round is already running on PR #${key} could not be told: ${taking.reason}`,
         ),
       };
   }
@@ -828,17 +828,12 @@ function lockOf(episode: Episode, pullRequest: number): Step<HostLock> {
 
 /**
  * The episode `change` keys in `worktree`, or the conclusion the round ended on
- * where its key is no pull request's number.
- *
- * The venue spells any positive whole number as a key, and the episode refuses
- * one too large to be spelled exactly. Nothing is opened then.
+ * where the venue names no directory for its key. Nothing is opened then.
  */
-function keyedBy(worktree: string, change: Change): Step<Episode> {
-  try {
-    return { step: episodeAt(worktree, Number(change.key)) };
-  } catch (cause) {
-    return { ended: failed("harness", `no review ran: ${reasonFor(cause)}`) };
-  }
+function keyedBy(venue: Venue, worktree: string, change: Change): Step<Episode> {
+  const named = episodeAt(venue, worktree, change.key);
+  if (named.outcome === "failed") return { ended: failed("harness", `no review ran: ${named.reason}`) };
+  return { step: named.episode };
 }
 
 /**
@@ -909,9 +904,9 @@ function closedBy(state: EpisodeState, bounds: EpisodeBounds): ClosedBy | undefi
 }
 
 /** What a round that ran nothing did, which is nothing, said rather than implied. */
-function nothingDone(pullRequest: number): RoundAccount {
+function nothingDone(key: string): RoundAccount {
   return {
-    pullRequest,
+    key,
     posted: [],
     findings: { outcomes: [] },
     verdicts: { threads: [], unapplied: [] },
@@ -1164,7 +1159,7 @@ function isRound(review: Review): boolean {
 type Posting = {
   readonly venue: Venue;
   readonly change: Change;
-  readonly number: number;
+  readonly key: string;
   /** The change's diff, which decides where each finding's comment can hang. */
   readonly diff: string;
   /**
@@ -1213,7 +1208,7 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
   );
 
   return {
-    pullRequest: on.number,
+    key: on.key,
     posted: threadsOpened(findings).map((thread) => thread.id),
     findings,
     verdicts,
@@ -1319,7 +1314,7 @@ function closeAfterReview(
 function closeBeforeReview(
   bound: StoppingBound,
   change: Change,
-  { setup, episode, number, preReview, posting, stopwatch }: Omit<AfterTheGate, "opened">,
+  { setup, episode, key, preReview, posting, stopwatch }: Omit<AfterTheGate, "opened">,
 ): RoundConclusion {
   const listing = handOver(setup.venue, change, preReview);
   if ("ended" in listing) return listing.ended;
@@ -1341,7 +1336,7 @@ function closeBeforeReview(
   }
 
   const state = written.state;
-  const account = nothingDone(number);
+  const account = nothingDone(key);
   const summary =
     state.rounds.length === 0 && threads.length === 0
       ? closedBeforeAnyRound
@@ -1382,9 +1377,9 @@ function supersededBy(
   now: StateKey,
   change: Change,
   threads: readonly ReviewThread[],
-  { setup, episode, number, posting, stopwatch }: Pick<AfterTheGate, "setup" | "episode" | "number" | "posting" | "stopwatch">,
+  { setup, episode, key, posting, stopwatch }: Pick<AfterTheGate, "setup" | "episode" | "key" | "posting" | "stopwatch">,
 ): RoundConclusion {
-  const moved = { outcome: "superseded", pullRequest: number, by: now } as const;
+  const moved = { outcome: "superseded", key, by: now } as const;
   const reserve = posting();
   let clean: Extract<StateRecord, { readonly result: "clean, episode open" }> | undefined;
   const written = updateState(
@@ -1418,7 +1413,7 @@ function supersededBy(
         rounds: state.rounds,
         handedOver: threads,
         verdicts: standing(threads, state.rulings),
-        findings: nothingDone(number).findings,
+        findings: nothingDone(key).findings,
         // No reviewer ran after the clean round, so nothing settled what it left on no thread.
         earlier: closing.unthreaded ?? [],
         because: "nothing-open",

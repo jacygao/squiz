@@ -20,13 +20,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { readState } from "../loop/episode-state.ts";
-import { episodeAt } from "../loop/episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
 
 const hookModule = new URL("./hook.ts", import.meta.url).href;
 const triggerModule = new URL("../host/trigger.ts", import.meta.url).href;
-const episodeModule = new URL("../loop/episode.ts", import.meta.url).href;
+const episodeModule = new URL("../testing/episode.ts", import.meta.url).href;
 const standInHost = fileURLToPath(new URL("../testing/host-stand-in.ts", import.meta.url));
 
 const NUMBER = 41;
@@ -159,7 +159,7 @@ function triggerSource(place: Place, trigger: TriggerAs): string {
       const host =
         "hostCommand" in trigger
           ? `() => ({ command: ${JSON.stringify(trigger.hostCommand)}, args: [] })`
-          : `(number) => { appendFileSync(${log}, "asked\\n"); return { command: process.execPath, args: [${JSON.stringify(standInHost)}, episodeAt(${JSON.stringify(place.worktree)}, number).directory, ${log}] }; }`;
+          : `(number) => { appendFileSync(${log}, "asked\\n"); return { command: process.execPath, args: [${JSON.stringify(standInHost)}, githubEpisode(${JSON.stringify(place.worktree)}, number).directory, ${log}] }; }`;
       return `(request) => trigger({ ...request, host: ${host} })`;
     }
     case "recording":
@@ -184,7 +184,7 @@ async function fire(place: Place, firing: HookFiring): Promise<Fired> {
       `import { Readable } from "node:stream";`,
       `import { runHook } from ${JSON.stringify(hookModule)};`,
       `import { trigger } from ${JSON.stringify(triggerModule)};`,
-      `import { episodeAt } from ${JSON.stringify(episodeModule)};`,
+      `import { githubEpisode } from ${JSON.stringify(episodeModule)};`,
       ``,
       `process.exitCode = await runHook({`,
       `  stdin: Readable.from([${JSON.stringify(firing.payload)}]),`,
@@ -225,7 +225,7 @@ async function eventually(done: () => boolean, what: string): Promise<void> {
 }
 
 function recordsIn(place: Place): readonly unknown[] {
-  const read = readState(episodeAt(place.worktree, NUMBER));
+  const read = readState(githubEpisode(place.worktree, NUMBER));
   assert.equal(read.outcome, "read", `state read as ${JSON.stringify(read)}`);
   return read.outcome === "read" ? (read.state.records ?? []) : [];
 }
@@ -300,7 +300,7 @@ test("the trigger is asked as a hook, from the payload's cwd, with its environme
     assert.equal(request["trigger"], "hook");
     assert.equal(request["directory"], place.worktree);
     assert.deepEqual(request["environment"], environment);
-    assert.equal(request["pullRequest"], undefined, "a hook names no pull request, and reviews the branch's");
+    assert.equal(request["key"], undefined, "a hook names no pull request, and reviews the branch's");
     assert.ok(Number(request["remainingMs"]) > 0, "the trigger was given no time");
   });
 });
@@ -529,7 +529,7 @@ test("a trigger that could not read what it decides from says so in one line", a
 
 test("a state file that cannot be read queues nothing, starts no host, posts no comment, and says why in one line", async () => {
   await withPlace(async (place) => {
-    const episode = episodeAt(place.worktree, NUMBER);
+    const episode = githubEpisode(place.worktree, NUMBER);
     mkdirSync(episode.directory, { recursive: true });
     writeFileSync(episode.stateFile, "{ not json", "utf8");
 

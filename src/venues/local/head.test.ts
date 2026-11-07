@@ -248,7 +248,7 @@ test("the snapshot of the built head, given its alternates, diffs to the working
       "the head was written into the repository",
     );
 
-    const added = addSnapshot(agent, { pullRequest: 1, round: 1, commit: head, base, alternates }, deadlineIn(30_000));
+    const added = addSnapshot(agent, { key: "1", round: 1, commit: head, base, alternates }, deadlineIn(30_000));
     assert.equal(added.outcome, "added", added.outcome === "failed" ? added.reason : "");
     const snapshot = added.outcome === "added" ? added.path : "";
     try {

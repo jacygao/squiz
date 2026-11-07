@@ -105,7 +105,7 @@ function reasonOf(result: { readonly outcome: string; readonly reason?: string }
   return result.reason ?? "";
 }
 
-const roundTwo = { pullRequest: 41, round: 2 } as const;
+const roundTwo = { key: "41", round: 2 } as const;
 
 /** The pull request's base: the commit `main` holds in the repository of `worktree`. */
 function baseIn(worktree: string): string {

@@ -48,7 +48,7 @@ export type SnapshotRemoval =
 
 /** Which round the snapshot is for, the head commit under review, and the pull request's base commit. */
 export type SnapshotOf = {
-  readonly pullRequest: number;
+  readonly key: string;
   readonly round: number;
   readonly commit: string;
   readonly base: string;
@@ -226,9 +226,9 @@ export function removeSnapshot(path: string): SnapshotRemoval {
  * The same worktree, pull request and round always give the same path, so a
  * killed round's snapshot is found from its record's round number.
  */
-export function snapshotPath(worktree: string, of: Pick<SnapshotOf, "pullRequest" | "round">): string {
+export function snapshotPath(worktree: string, of: Pick<SnapshotOf, "key" | "round">): string {
   const digest = createHash("sha256").update(worktree).digest("hex").slice(0, 16);
-  return join(snapshotsDirectory(), `${digest}-${of.pullRequest}`, "rounds", String(of.round), "tree");
+  return join(snapshotsDirectory(), `${digest}-${of.key}`, "rounds", String(of.round), "tree");
 }
 
 // `os.userInfo` throws for a user with no password entry, and this never does.

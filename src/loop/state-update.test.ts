@@ -9,7 +9,8 @@ import { pathToFileURL } from "node:url";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf, type IdentityRead, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { type EpisodeState, readState } from "./episode-state.ts";
-import { type Episode, episodeAt } from "./episode.ts";
+import type { Episode } from "./episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { putRecord } from "./state-record.ts";
 import { updateState } from "./state-update.ts";
 
@@ -23,7 +24,7 @@ const LONG_MS = 120_000;
 function episodeIn(t: TestContext): Episode {
   const worktree = mkdtempSync(join(tmpdir(), "squiz-state-update-"));
   t.after(() => rmSync(worktree, { recursive: true, force: true }));
-  return episodeAt(worktree, pullRequest);
+  return githubEpisode(worktree, pullRequest);
 }
 
 /** Run one racer to its end, and return what it printed: how many of its updates failed. */

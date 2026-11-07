@@ -1,11 +1,10 @@
 /**
- * An episode's identity, and the paths it owns inside its worktree.
+ * An episode's identity, and the paths it owns.
  *
- * The key is the number of the pull request the episode reviews. This is the
- * module where that number becomes a path component, so the check that makes it
- * safe sits here rather than at each caller: `episodeAt` is the only way to
- * obtain a path under the episode's directory, and nothing but a positive whole
- * number reaches the filesystem as a key.
+ * The key is the change's, and the venue names the directory it keys. This is
+ * the only place that asks the venue for it, so the hook, the round host and
+ * the commands all reach the one directory, and no caller builds the path from
+ * the key itself.
  *
  * Each round's directory hangs off the episode's own directory and is derived
  * here too. A second place that computed it would be a second place for it to
@@ -16,77 +15,41 @@
 
 import { join } from "node:path";
 
-// Everything one worktree's episodes write goes here. It ignores itself in git, and it
-// goes with the worktree, so nothing in it outlives the episode.
-const episodesDirectory = ".squiz";
+import type { Failed, Venue } from "../venues/venue.ts";
 
 const stateFileName = "state.json";
 
-/** How a key is spelled as a directory name, and the only spelling read back as one. */
-const keySpelling = /^[1-9][0-9]*$/u;
-
-/** One pull request's rounds, and where everything they write lives. */
+/** One change's rounds, and where everything they write lives. */
 export type Episode = {
-  /** The git work tree the rounds review, and the root the paths below sit in. */
+  /** The git work tree the rounds review. */
   readonly worktree: string;
-  /** The pull request's number, as the episode's directory spells it. */
-  readonly id: string;
-  /** `<worktree>/.squiz/<number>`, which holds the whole episode. */
+  /** The change's key, which names the episode across processes. */
+  readonly key: string;
+  /** The directory the venue names for the key, which holds the whole episode. */
   readonly directory: string;
-  /** The pull request, what each round spent, and what was spent outside them. */
+  /** The change, what each round spent, and what was spent outside them. */
   readonly stateFile: string;
 };
 
 /**
- * The episode of pull request `pullRequest`, and every path it owns, inside
- * `worktree`.
- *
- * Throws for anything but a positive whole number a JavaScript number holds
- * exactly. A larger one would be spelled as some other number, or in exponent
- * notation. The number arrives from GitHub, so a throw means something handed
- * over a value no pull request has.
+ * The episode `key` names in `worktree`, in the directory `venue` gives it, or
+ * the venue's reason for giving it none.
  */
-export function episodeAt(worktree: string, pullRequest: number): Episode {
-  if (typeof pullRequest !== "number" || !Number.isSafeInteger(pullRequest) || pullRequest < 1) {
-    throw new Error(
-      `${describe(pullRequest)} is no pull request's number, so no episode is keyed by it`,
-    );
-  }
-  const id = String(pullRequest);
-  const directory = join(worktree, episodesDirectory, id);
-  return {
-    worktree,
-    id,
-    directory,
-    stateFile: join(directory, stateFileName),
-  };
+export function episodeAt(
+  venue: Pick<Venue, "episodeDirectory">,
+  worktree: string,
+  key: string,
+): { readonly outcome: "found"; readonly episode: Episode } | Failed {
+  const named = venue.episodeDirectory(worktree, key);
+  if (named.outcome !== "found") return named;
+  const { directory } = named;
+  return { outcome: "found", episode: { worktree, key, directory, stateFile: join(directory, stateFileName) } };
 }
 
 /**
- * `<worktree>/.squiz/<number>/rounds/<round>`, which holds what one round
- * wrote: its report file, the reviewer's session under `session/` and its
- * `resume.txt`.
+ * `<episode>/rounds/<round>`, which holds what one round wrote: its report
+ * file, the reviewer's session under `session/` and its `resume.txt`.
  */
 export function roundDirectory(episode: Episode, round: number): string {
   return join(episode.directory, "rounds", String(round));
-}
-
-/**
- * The episode whose state the directory named `name` holds, or nothing where no
- * key is spelled that way.
- *
- * A name that is not how a key is spelled is nobody's episode, and reading under
- * it would read at paths no episode owns.
- */
-export function episodeNamed(worktree: string, name: string): Episode | undefined {
-  if (!keySpelling.test(name)) return undefined;
-  try {
-    return episodeAt(worktree, Number(name));
-  } catch {
-    return undefined;
-  }
-}
-
-function describe(value: unknown): string {
-  return typeof value === "string" ? JSON.stringify(value) : String(value);
 }

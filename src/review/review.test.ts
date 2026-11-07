@@ -16,10 +16,12 @@ import { renderComment } from "../findings/comment.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
-import { episodeAt, type Episode } from "../loop/episode.ts";
+import type { Episode } from "../loop/episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import type { StateKey, StateRecord } from "../loop/state-record.ts";
 import type { TriggerDecision } from "../loop/trigger-decision.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
+import { githubVenue } from "../venues/github/venue.ts";
 import { runReview, type ReviewRequest } from "./review.ts";
 
 const NUMBER = 41;
@@ -91,7 +93,7 @@ async function withWorktree(body: (fixture: Fixture) => Promise<void>): Promise<
     const made = spawnSync("git", ["init", "--quiet", "--initial-branch", "feature-a"], { cwd: worktree });
     assert.equal(made.status, 0);
     writeFileSync(join(worktree, ".squiz.json"), "{}");
-    await body({ worktree, episode: episodeAt(worktree, NUMBER) });
+    await body({ worktree, episode: githubEpisode(worktree, NUMBER) });
   } finally {
     rmSync(worktree, { recursive: true, force: true });
   }
@@ -122,7 +124,7 @@ async function withLinkedWorktree(
     }
     if (mainSquizJson !== null) writeFileSync(join(main, ".squiz.json"), mainSquizJson);
     writeFileSync(join(worktree, ".squiz.json"), linkedSquizJson);
-    await body({ worktree, main, episode: episodeAt(worktree, NUMBER) });
+    await body({ worktree, main, episode: githubEpisode(worktree, NUMBER) });
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -160,7 +162,7 @@ type Run = {
 function request(fixture: Fixture, run: Run, handed: TriggerRequest[] = []): ReviewRequest {
   return {
     directory: fixture.worktree,
-    pullRequest: NUMBER,
+    key: String(NUMBER),
     environment: {},
     until: run.until ?? deadlineIn(10_000),
     pollMs: POLL_MS,
@@ -173,16 +175,17 @@ function request(fixture: Fixture, run: Run, handed: TriggerRequest[] = []): Rev
 }
 
 /**
- * A venue whose `listThreads` is `listThreads`. The trigger is a stand-in, so
- * listing is the one member a run reaches, and every other member throws.
+ * A venue whose `listThreads` is `listThreads`, and which names the GitHub
+ * venue's episode directory. The trigger is a stand-in, so those are the only
+ * members a run reaches, and every other member throws.
  */
 function venueListing(listThreads: Venue["listThreads"]): Venue {
   const unreached = (): never => {
-    throw new Error("the run reached a venue member other than listThreads");
+    throw new Error("the run reached a venue member other than listThreads and episodeDirectory");
   };
   return {
     readChange: unreached,
-    episodeDirectory: unreached,
+    episodeDirectory: githubVenue.episodeDirectory,
     provideCommits: unreached,
     listThreads,
     openThread: unreached,
@@ -250,7 +253,7 @@ test("the run's deadline is the trigger's, so the gate and the listing count aga
     assert.equal(handed.length, 1);
     assert.equal(handed[0]?.until, until);
     assert.equal(handed[0]?.trigger, "review");
-    assert.equal(handed[0]?.pullRequest, NUMBER);
+    assert.equal(handed[0]?.key, String(NUMBER));
   });
 });
 

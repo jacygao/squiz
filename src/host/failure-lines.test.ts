@@ -9,7 +9,7 @@ test("a failed round names each reason the reviewer gave that could not be poste
     failure: "unavailable",
     reason: "the reviewer stopped without finishing its review",
     salvaged: {
-      pullRequest: 41,
+      key: "41",
       posted: [],
       findings: { outcomes: [] },
       verdicts: {
@@ -41,7 +41,7 @@ test("a failed round names each ruling it could not apply, with what the reviewe
     failure: "unavailable",
     reason: "the reviewer stopped without finishing its review",
     salvaged: {
-      pullRequest: 41,
+      key: "41",
       posted: [],
       findings: { outcomes: [] },
       verdicts: {

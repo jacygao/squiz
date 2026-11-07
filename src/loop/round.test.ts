@@ -39,7 +39,7 @@ import type { Backends } from "../sessions/session.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { snapshotPath } from "../worktree/snapshot.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "./episode-state.ts";
-import { episodeAt } from "./episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
 import { githubVenue } from "../venues/github/venue.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
@@ -534,7 +534,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     if (setup.detached === true) git(worktree, ["checkout", "--quiet", "--detach", "HEAD"]);
     const head = headIn(worktree) ?? assert.fail("the fixture's own commit must read back");
 
-    const episode = episodeAt(worktree, PULL_REQUEST);
+    const episode = githubEpisode(worktree, PULL_REQUEST);
     // Where the episode's snapshots go, for the fake `gh` to look as each call is made.
     await writeFile(join(binaries, "snapshot-rounds"), snapshotRoundsOf(worktree), "utf8");
     const charterFile = join(root, "charter.md");
@@ -623,7 +623,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       ...(setup.preReviewMs === undefined ? {} : { preReviewMs: setup.preReviewMs }),
       ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
       ...(setup.clock === undefined ? {} : { now: setup.clock.now }),
-      ...(held === undefined ? {} : { held: { pullRequest: PULL_REQUEST, lock: held } }),
+      ...(held === undefined ? {} : { held: { key: String(PULL_REQUEST), lock: held } }),
       ...(setup.sessionBackends === undefined ? {} : { sessionBackends: setup.sessionBackends }),
     };
     if (setup.overlapping !== undefined) {
@@ -736,7 +736,7 @@ function slowBranchLookup(binaries: string, seconds: string): void {
 
 /** The directory holding one directory per round of the episode's snapshots of `worktree`. */
 function snapshotRoundsOf(worktree: string): string {
-  return dirname(dirname(snapshotPath(worktree, { pullRequest: PULL_REQUEST, round: 1 })));
+  return dirname(dirname(snapshotPath(worktree, { key: String(PULL_REQUEST), round: 1 })));
 }
 
 /** The round snapshots of `worktree` still standing. */
@@ -1968,7 +1968,7 @@ test("a pull request number no JavaScript number holds exactly opens no episode"
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
-  assert.match(ran.conclusion.reason, /^no review ran: 1e\+300 is no pull request's number/u);
+  assert.match(ran.conclusion.reason, /^no review ran: "1e\+300" is not a pull request number/u);
   assert.equal(ran.invocations.length, 0);
   assert.deepEqual(ran.kinds, ["prlist"]);
   assert.deepEqual(ran.episodesLeft, []);
@@ -3200,7 +3200,7 @@ test("the reviewer runs in a snapshot of the head commit", async () => {
   const ran = await runInFixture({ answers: POSTING, reviewer: reviews({}) });
 
   const directory = ran.invocations[0]?.directory ?? "";
-  assert.equal(directory, snapshotPath(ran.worktree, { pullRequest: PULL_REQUEST, round: 1 }));
+  assert.equal(directory, snapshotPath(ran.worktree, { key: String(PULL_REQUEST), round: 1 }));
   assert.deepEqual(ran.headsWhenStarted, [ran.head], "the snapshot holds the head commit");
 });
 
@@ -3464,7 +3464,7 @@ test("a failed round posts one failure comment after what it salvaged, naming th
   const [first, ...rest] = failureBody(ran).split("\n");
   assert.equal(first, `**Squiz review failed — ${ran.conclusion.reason}**`);
   assert.match(rest.join("\n"), /^\nThe finding is posted as a thread\. The review is still open\./u);
-  assert.deepEqual(ran.conclusion.failureComment, { pullRequest: PULL_REQUEST, posting: { outcome: "posted" } });
+  assert.deepEqual(ran.conclusion.failureComment, { key: String(PULL_REQUEST), posting: { outcome: "posted" } });
 });
 
 test("#544: a failed round that was the last the cap allows says the review closed", async () => {
@@ -3664,7 +3664,7 @@ test("each kind of failure says the same reason on the pull request and on stder
     const [first] = failureBody(ran).split("\n");
     const failed = {
       outcome: "failed",
-      pullRequest: PULL_REQUEST,
+      key: String(PULL_REQUEST),
       reason: ran.conclusion.reason,
       items: failureLinesOf(ran.conclusion),
     } as const;
@@ -3737,7 +3737,7 @@ test("a failed round names each ruling it could not apply in its failure comment
     /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the thread could not be resolved\)\n- A ruling of withdrawn on thread `PRRT_invented`, which was not handed to the reviewer, was not applied$/u,
   );
   const stderr = composeReview(
-    { outcome: "failed", pullRequest: PULL_REQUEST, reason: ran.conclusion.reason, items: failureLinesOf(ran.conclusion) },
+    { outcome: "failed", key: String(PULL_REQUEST), reason: ran.conclusion.reason, items: failureLinesOf(ran.conclusion) },
     "/unwritten",
   ).stderr;
   assert.match(

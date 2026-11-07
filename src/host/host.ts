@@ -80,7 +80,8 @@ const UNREPORTED: ReviewerPlace = { backend: "detached" };
 export type HostSetup = {
   /** The worktree whose episode the host serves. */
   readonly worktree: string;
-  readonly pullRequest: number;
+  /** The key of the change whose episode it serves, as `squiz host` was given it. */
+  readonly key: string;
   /** What every round runs with, less what the host decides for each. */
   readonly round: Omit<RoundSetup, "worktree" | "held" | "endsOn">;
   /** What changes the state file. `updateState` where not given. */
@@ -93,6 +94,8 @@ export type HostSetup = {
 
 /** Why the host exited. */
 export type HostEnd =
+  /** The venue names no episode for the key. Nothing was made, and nothing was logged. */
+  | { readonly outcome: "no episode"; readonly reason: string }
   | { readonly outcome: "nothing queued" }
   | { readonly outcome: "worktree gone" }
   | { readonly outcome: "lock held"; readonly holder: ProcessIdentity }
@@ -115,7 +118,9 @@ export async function runHost(setup: HostSetup): Promise<HostEnd> {
   // Taking the lock makes the episode's directory, which would make the
   // worktree's directory again where it has gone.
   if (worktreeGone(setup.worktree)) return { outcome: "worktree gone" };
-  const episode = episodeAt(setup.worktree, setup.pullRequest);
+  const named = episodeAt(setup.round.venue, setup.worktree, setup.key);
+  if (named.outcome === "failed") return { outcome: "no episode", reason: named.reason };
+  const { episode } = named;
   const log = logIn(episode);
 
   for (let first = true; ; first = false) {
@@ -221,7 +226,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     const roundSetup: RoundSetup = {
       ...setup.round,
       worktree: episode.worktree,
-      held: { pullRequest: Number(episode.id), lock },
+      held: { key: episode.key, lock },
       state: { head: round.record.head, activity: round.record.activity },
       ...(round.record.herdrWorkspace === undefined ? {} : { workspace: round.record.herdrWorkspace }),
       reviewerStarted: (session) => {
@@ -331,9 +336,9 @@ async function noteOwners(
     }
     const threads = listed !== undefined && "threads" in listed ? listed.threads : undefined;
     if (threads !== undefined && record.status === "reviewed" && record.result === "exited" && threadsToPrint(record.openThreads, threads).length === 0) {
-      log(`${named(record)}: none of the threads the round left open is open on PR #${episode.id}, so its note points to squiz review`);
+      log(`${named(record)}: none of the threads the round left open is open on PR #${episode.key}, so its note points to squiz review`);
     }
-    const note = ownerNote(Number(episode.id), record, name, read?.change.followUp ?? "", closed, threads);
+    const note = ownerNote(episode.key, record, name, read?.change.followUp ?? "", closed, threads);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);
     if (written.outcome === "failed") {
@@ -429,7 +434,7 @@ function resultOf(
       const record = { ...notReviewed(key, reason), supersededBy: by };
       const line = `${named(taken)} not reviewed: ${reason}`;
       if (conclusion.closing === undefined) return { records: () => inOrder([record]), line, problems: [] };
-      const problems = summaryProblems(conclusion.pullRequest, conclusion.closing.summary);
+      const problems = summaryProblems(conclusion.key, conclusion.closing.summary);
       return {
         // The clean round the pull request returned to closed the episode, so its
         // record becomes the close, and its owner is told.
@@ -486,7 +491,7 @@ function closedUnreviewed(
 ): Result {
   const bound = conclusion.because === "token-bound" ? "token-bound" : "round-cap";
   const reason = closedBeforeReview(bound);
-  const problems = summaryProblems(conclusion.pullRequest, conclusion.summary);
+  const problems = summaryProblems(conclusion.key, conclusion.summary);
   const closed: ClosedBeforeReview = {
     exitStatus: openThreads.length === 0 ? 0 : 3,
     openThreads,
@@ -504,9 +509,9 @@ function closedUnreviewed(
 }
 
 /** The line `squiz review` prints on stderr for a close with no summary on the pull request, or none. */
-function summaryProblems(pullRequest: number, summary: EpisodeSummary): readonly string[] {
+function summaryProblems(key: string, summary: EpisodeSummary): readonly string[] {
   if (summary.outcome === "posted") return [];
-  return [`the review of PR #${pullRequest} closed without its summary: ${summary.reason}`];
+  return [`the review of PR #${key} closed without its summary: ${summary.reason}`];
 }
 
 /** What a round that reviewed did beside its result, as `squiz review` prints it. */
@@ -517,7 +522,7 @@ function reportOf(
   const problems = [
     ...unpostedReasons(conclusion.verdicts),
     ...unappliedRulings(conclusion.verdicts),
-    ...(conclusion.outcome === "close" ? summaryProblems(conclusion.pullRequest, conclusion.summary) : []),
+    ...(conclusion.outcome === "close" ? summaryProblems(conclusion.key, conclusion.summary) : []),
   ];
   // Only a close that left threads open is printed with its bound.
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
@@ -543,8 +548,8 @@ export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly o
       ? []
       : [
           comment.posting.outcome === "posted"
-            ? `the failure is posted on PR #${comment.pullRequest}`
-            : `the failure could not be posted on PR #${comment.pullRequest}: ${comment.posting.reason}`,
+            ? `the failure is posted on PR #${comment.key}`
+            : `the failure could not be posted on PR #${comment.key}: ${comment.posting.reason}`,
         ];
   const verdicts = conclusion.salvaged?.verdicts;
   return [...(verdicts === undefined ? [] : [...unpostedReasons(verdicts), ...unappliedRulings(verdicts)]), ...went];
@@ -559,7 +564,7 @@ function failureOf(conclusion: Extract<RoundConclusion, { readonly outcome: "fai
       return `no review ran: ${conclusion.reason}`;
     case "round-running":
       // The round runs under the host's own lock, so only a defect reaches this.
-      return `no review ran: a round is already running on PR #${conclusion.pullRequest}`;
+      return `no review ran: a round is already running on PR #${conclusion.key}`;
   }
 }
 
@@ -591,6 +596,7 @@ function endLine(end: HostEnd): string {
       return "exiting: nothing is left queued";
     case "worktree gone":
       return "exiting: the worktree is gone";
+    case "no episode":
     case "state unreadable":
       return `exiting: ${end.reason}`;
     case "state unwritable":

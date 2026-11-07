@@ -7,9 +7,10 @@ import { after, test } from "node:test";
 
 import { unspent } from "../reviewers/adapter.ts";
 import type { Presence, ProcessIdentity } from "../sessions/process.ts";
-import { episodeAt } from "../loop/episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { writeState } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
+import { githubVenue } from "../venues/github/venue.ts";
 import { collectStatus, composeStatus, squizStatus, worktreesIn } from "./status.ts";
 
 // Started is printed in local time, and these tests fix what local time is.
@@ -28,7 +29,7 @@ function worktree(episodes: Record<number, readonly StateRecord[]>): string {
   const root = join(scratch, `wt-${made}`);
   mkdirSync(root, { recursive: true });
   for (const [number, records] of Object.entries(episodes)) {
-    const episode = episodeAt(root, Number(number));
+    const episode = githubEpisode(root, number);
     const written = writeState(episode, { rounds: [], spentOutsideRounds: unspent, records });
     assert.deepEqual(written, { outcome: "written" });
   }
@@ -105,7 +106,7 @@ test("a finished round prints every column § 6 shows, its resume line included"
   const line = "pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31";
   resume(root, 41, 2, line);
 
-  const collected = collectStatus([root], { main: scratch, presence: running, now });
+  const collected = collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue });
   const printed = composeStatus(collected);
 
   assert.equal(printed.stderr, "");
@@ -132,7 +133,7 @@ test("a reviewing record whose round host has gone is killed, and one nobody can
     502: { outcome: "unknown", reason: "ps did not answer within 2000ms" },
   });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence, now, venue: githubVenue })).stdout);
   const byPr = new Map(rows.slice(1).map((row) => [row[0], row]));
 
   assert.equal(byPr.get("#41")?.[3], "killed");
@@ -162,7 +163,7 @@ test("a failed state's result is its reason, and a state the episode closed befo
     ],
   });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue })).stdout);
 
   assert.deepEqual(rows.slice(1).map((row) => row.slice(3, 8)), [
     ["not reviewed", "—", "—", "the episode closed at the round cap, after reviewing a1b2c3d", "—"],
@@ -191,7 +192,7 @@ test("elapsed is the time so far while a review runs, and — where a record kee
     ],
   });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now: sevenOhSix + 192 })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now: sevenOhSix + 192, venue: githubVenue })).stdout);
 
   assert.deepEqual(rows.slice(1).map((row) => row.slice(3, 8)), [
     ["reviewing", "07:06:02", "3m 12s", "—", "herdr squiz-41-r3"],
@@ -220,7 +221,7 @@ test("resume is — until the round is over, even where its file is already ther
   });
   resume(root, 41, 1, "pi --session-dir .squiz/41/rounds/1/session --session x");
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue })).stdout);
 
   assert.equal(rows[1]?.[9], "—");
 });
@@ -274,7 +275,7 @@ test("newest first: an episode with a review waiting or running, then by the lat
     12: [{ head, activity: null, status: "not reviewed", reason: "the episode closed at the token bound, after reviewing x" }],
   });
 
-  const collected = collectStatus([timeless, older, active, newer], { main: scratch, presence: running, now });
+  const collected = collectStatus([timeless, older, active, newer], { main: scratch, presence: running, now, venue: githubVenue });
   const rows = rowsOf(composeStatus(collected).stdout).slice(1);
 
   assert.deepEqual(
@@ -297,7 +298,7 @@ test("a state file that cannot be read is named on stderr, and every other workt
   writeFileSync(join(bad, ".squiz", "38", "state.json"), "{ not json", "utf8");
   const alsoGood = worktree({ 39: [{ head: laterHead, activity: null, status: "queued" }] });
 
-  const printed = composeStatus(collectStatus([good, bad, alsoGood], { main: scratch, presence: running, now }));
+  const printed = composeStatus(collectStatus([good, bad, alsoGood], { main: scratch, presence: running, now, venue: githubVenue }));
 
   assert.deepEqual(rowsOf(printed.stdout).slice(1).map((row) => row[0]).sort(), ["#39", "#41"]);
   assert.match(printed.stderr, /^squiz: the reviews of #38 in .*wt-\d+ could not be read: .*state\.json is not valid JSON/u);
@@ -308,7 +309,7 @@ test("a worktree git lists that is gone from disk is skipped, and the rest are l
   const good = worktree({ 41: [{ head, activity: null, status: "queued" }] });
   const gone = join(scratch, "removed-long-ago");
 
-  const printed = composeStatus(collectStatus([gone, good], { main: scratch, presence: running, now }));
+  const printed = composeStatus(collectStatus([gone, good], { main: scratch, presence: running, now, venue: githubVenue }));
 
   assert.equal(printed.stderr, "");
   assert.deepEqual(rowsOf(printed.stdout).slice(1).map((row) => row[0]), ["#41"]);
@@ -317,8 +318,8 @@ test("a worktree git lists that is gone from disk is skipped, and the rest are l
 test("the main worktree is printed as ., and a worktree outside it by its whole path", () => {
   const root = worktree({ 41: [{ head, activity: null, status: "queued" }] });
 
-  const asMain = rowsOf(composeStatus(collectStatus([root], { main: root, presence: running, now })).stdout);
-  const outside = rowsOf(composeStatus(collectStatus([root], { main: join(scratch, "elsewhere"), presence: running, now })).stdout);
+  const asMain = rowsOf(composeStatus(collectStatus([root], { main: root, presence: running, now, venue: githubVenue })).stdout);
+  const outside = rowsOf(composeStatus(collectStatus([root], { main: join(scratch, "elsewhere"), presence: running, now, venue: githubVenue })).stdout);
 
   assert.equal(asMain[1]?.[8], ".");
   assert.equal(outside[1]?.[8], root);
@@ -327,7 +328,7 @@ test("the main worktree is printed as ., and a worktree outside it by its whole 
 test("no record anywhere says so rather than printing an empty table", () => {
   const empty = worktree({});
 
-  const printed = composeStatus(collectStatus([empty], { main: scratch, presence: running, now }));
+  const printed = composeStatus(collectStatus([empty], { main: scratch, presence: running, now, venue: githubVenue }));
 
   assert.equal(printed.stdout, "No review is recorded in any worktree of this repository.\n");
   assert.equal(printed.stderr, "");
@@ -371,7 +372,7 @@ test("session is the label squiz-<number>-r<k>, never the backend's own id, and 
     ],
   });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue })).stdout);
 
   assert.deepEqual(rows.slice(1).map((row) => row[7]), ["tmux squiz-41-r3", "tmux squiz-41-r2", "—"]);
 });
@@ -391,7 +392,7 @@ test("started is the time of day for a review started today, and the date and ti
     ],
   });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue })).stdout);
 
   assert.deepEqual(rows.slice(1).map((row) => row[4]), ["07:06:02", "2026-10-04 07:06"]);
 });
@@ -409,14 +410,14 @@ test("a worktree whose directory name holds a newline is listed whole", () => {
   git(repository, ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "x"]);
   const linked = join(scratch, `linked-${made}\nsecond line`);
   git(repository, ["worktree", "add", "--quiet", "--detach", linked]);
-  const written = writeState(episodeAt(linked, 41), {
+  const written = writeState(githubEpisode(linked, 41), {
     rounds: [],
     spentOutsideRounds: unspent,
     records: [{ head, activity: null, status: "queued" }],
   });
   assert.deepEqual(written, { outcome: "written" });
 
-  const printed = squizStatus(repository);
+  const printed = squizStatus(repository, githubVenue);
 
   assert.equal(printed.stderr, "");
   assert.deepEqual(rowsOf(printed.stdout).slice(1).map((row) => `${row[0]} ${row[3]}`), ["#41 queued"]);
@@ -427,7 +428,7 @@ test("a state file that cannot be read leaves stdout empty rather than saying no
   mkdirSync(join(bad, ".squiz", "50"), { recursive: true });
   writeFileSync(join(bad, ".squiz", "50", "state.json"), "{ not json", "utf8");
 
-  const printed = composeStatus(collectStatus([bad], { main: scratch, presence: running, now }));
+  const printed = composeStatus(collectStatus([bad], { main: scratch, presence: running, now, venue: githubVenue }));
 
   assert.equal(printed.stdout, "", "a coordinator reading no reviews here would stop waiting on one it could not see");
   assert.match(printed.stderr, /^squiz: the reviews of #50 in /u);
@@ -446,7 +447,7 @@ test("a reason that runs over several lines is printed on the state's one line",
     ],
   });
 
-  const printed = composeStatus(collectStatus([root], { main: scratch, presence: running, now }));
+  const printed = composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue }));
   const lines = printed.stdout.trimEnd().split("\n");
 
   assert.equal(lines.length, 2, "the header and one line for the one state");
@@ -467,7 +468,7 @@ test("a last round's result names the bound that closed the review", () => {
   });
   const root = worktree({ 41: [closing("round cap")], 42: [closing("token bound")] });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue })).stdout);
   const byPr = new Map(rows.slice(1).map((row) => [row[0], row]));
 
   assert.equal(byPr.get("#41")?.[6], "1 thread open, review closed at the round cap");
@@ -502,7 +503,7 @@ test("a round that could not post some of its findings says how many in its resu
     ],
   });
 
-  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now })).stdout);
+  const rows = rowsOf(composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue })).stdout);
   const byPr = new Map(rows.slice(1).map((row) => [row[0], row]));
 
   assert.equal(byPr.get("#41")?.[6], "2 threads open, 2 of 5 findings not posted");
@@ -530,7 +531,7 @@ test("a round's problems are printed under its line, a line each, indented by tw
     ],
   });
 
-  const printed = composeStatus(collectStatus([root], { main: scratch, presence: running, now }));
+  const printed = composeStatus(collectStatus([root], { main: scratch, presence: running, now, venue: githubVenue }));
   const lines = printed.stdout.trimEnd().split("\n");
 
   assert.equal(lines.length, 5, "the header, two states, and the reviewed state's two problems");
@@ -556,7 +557,7 @@ test("a reviewed record with no problems, unposted findings or bound prints its 
     43: [reviewed(latestHead, sevenOhSix + 120, { result: "exited", exitStatus: 0, openThreads: [] })],
   });
 
-  const printed = composeStatus(collectStatus([root], { main: root, presence: running, now }));
+  const printed = composeStatus(collectStatus([root], { main: root, presence: running, now, venue: githubVenue }));
 
   assert.equal(
     printed.stdout,

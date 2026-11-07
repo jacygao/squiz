@@ -32,7 +32,7 @@ import type { Change, ReviewThread } from "../venues/venue.ts";
  * `squiz review`.
  */
 export function ownerNote(
-  pullRequest: number,
+  key: string,
   record: StateRecord,
   name: string,
   followUp: Change["followUp"],
@@ -42,11 +42,11 @@ export function ownerNote(
   const { owner } = record;
   if (owner === undefined) return undefined;
   const at = owner.subagent === undefined ? name : `${name}, the work of subagent ${owner.subagent}`;
-  const text = textOf(pullRequest, record, at, followUp, closed, listed);
+  const text = textOf(key, record, at, followUp, closed, listed);
   if (text === undefined) return undefined;
   const fields = {
     to: owner.sessionId,
-    pr: String(pullRequest),
+    pr: key,
     head: record.head,
     ...(owner.subagent === undefined ? {} : { subagent: owner.subagent }),
     text,
@@ -60,21 +60,21 @@ export type OwnerNote = { readonly sessionId: string; readonly fields: NoteField
 const PRINTED_THREADS = 10;
 
 function textOf(
-  pullRequest: number,
+  key: string,
   record: StateRecord,
   at: string,
   followUp: string,
   closed: ClosedBy | undefined,
   listed: readonly ReviewThread[] | undefined,
 ): string | undefined {
-  const review = `\`squiz review ${pullRequest}\``;
+  const review = `\`squiz review ${key}\``;
   switch (record.status) {
     case "queued":
     case "reviewing":
       return undefined;
     case "reviewed": {
       if (record.result === "clean, episode open") return undefined;
-      const reviewed = `Squiz reviewed PR #${pullRequest} at ${at}`;
+      const reviewed = `Squiz reviewed PR #${key} at ${at}`;
       if (record.openThreads.length === 0) return `${reviewed}: nothing is open, and the episode has closed. Run ${review} to read the close.`;
       const open = threadsToPrint(record.openThreads, listed ?? []);
       const counted = open.length > 0 ? open.length : record.openThreads.length;
@@ -96,10 +96,10 @@ function textOf(
         closed === undefined
           ? [`A new commit, or running ${review} once, retries it.`]
           : closedLines(closed, `A new commit, or running ${review}, posts its summary.`);
-      return [`Squiz could not review PR #${pullRequest} at ${at}: ${sentence(record.reason)} \`squiz status\` lists it.`, ...next].join(" ");
+      return [`Squiz could not review PR #${key} at ${at}: ${sentence(record.reason)} \`squiz status\` lists it.`, ...next].join(" ");
     }
     case "not reviewed":
-      return `Squiz did not review PR #${pullRequest} at ${at}: ${sentence(record.reason)}`;
+      return `Squiz did not review PR #${key} at ${at}: ${sentence(record.reason)}`;
   }
 }
 
