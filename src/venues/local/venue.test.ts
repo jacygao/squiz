@@ -191,3 +191,15 @@ test("the summary and each failure are files in .squiz/local/", (t) => {
   assert.equal(readFileSync(join(local, "failure-2.md"), "utf8"), "another");
   assert.equal(git(worktree, ["status", "--porcelain", "--untracked-files=all"]), "");
 });
+
+test("a call whose deadline has passed is not made, and fails", (t) => {
+  const worktree = worktreeIn(t);
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+  const change = changeIn(worktree);
+  const gone = deadlineIn(0);
+
+  assert.equal(localVenue.listThreads(change, gone).outcome, "failed");
+  assert.equal(localVenue.provideCommits(change, gone).outcome, "failed");
+  assert.equal(localVenue.readChange(worktree, null, gone).outcome, "failed");
+  assert.equal(localVenue.recordStart(worktree, gone).outcome, "failed");
+});

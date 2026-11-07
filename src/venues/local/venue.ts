@@ -30,6 +30,7 @@ type WorkingTreeChange = Change & { readonly worktree: string };
 
 export const localVenue: Venue = {
   recordStart(worktree, until) {
+    if (until.passed()) return failed("the deadline had passed");
     const root = rootOf(worktree, until);
     if (typeof root !== "string") return root;
     return recordBase(root, until);
@@ -42,7 +43,8 @@ export const localVenue: Venue = {
   provideCommits(change, until) {
     return provideCommits(worktreeOf(change), change, until);
   },
-  listThreads(change) {
+  listThreads(change, until) {
+    if (until.passed()) return failed("the threads were not listed: the deadline had passed");
     return listThreads(localDirectory(worktreeOf(change)));
   },
   openThread(change, anchor, body, until) {

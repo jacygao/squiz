@@ -23,6 +23,7 @@ import { hostCommand } from "./host/command.ts";
 import { squizDoctor } from "./review/doctor.ts";
 import { squizInit } from "./review/init.ts";
 import { thisSquiz } from "./review/path-link.ts";
+import { unprinted } from "./review/output.ts";
 import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 import { squizVersion } from "./review/version.ts";
@@ -109,9 +110,12 @@ async function review(args: readonly string[]): Promise<number> {
   let [key] = args;
   if (key === undefined) {
     const chosen = venueFor(process.env);
-    if (chosen.outcome === "chosen" && chosen.venue.episodeDirectory(process.cwd(), LOCAL_KEY).outcome === "found") {
-      key = LOCAL_KEY;
+    if (chosen.outcome === "failed") {
+      const printed = unprinted(`no review ran: ${chosen.reason}`);
+      process.stderr.write(printed.stderr);
+      return printed.exit;
     }
+    if (chosen.venue.episodeDirectory(process.cwd(), LOCAL_KEY).outcome === "found") key = LOCAL_KEY;
   }
   if (args.length > 1 || key === undefined) {
     reportFailure("no review ran: squiz review <number>, where <number> is the pull request's");

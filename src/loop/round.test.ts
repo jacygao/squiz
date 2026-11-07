@@ -42,6 +42,7 @@ import { writeState, type EpisodeState, type RoundRecord } from "./episode-state
 import { githubEpisode } from "../testing/episode.ts";
 import type { EpisodeSummary } from "./post-summary.ts";
 import { githubVenue } from "../venues/github/venue.ts";
+import type { Venue } from "../venues/venue.ts";
 import { runRound, type RoundConclusion } from "./round.ts";
 
 const BRANCH = "review-me";
@@ -154,6 +155,8 @@ type Setup = {
   readonly overlapping?: number;
   /** What starts the reviewer, where it is not the real backends. */
   readonly sessionBackends?: Backends;
+  /** The GitHub venue where not given. */
+  readonly venue?: Venue;
 };
 
 /** One round after the first: what happened before it, and the reviewer it runs. */
@@ -611,7 +614,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
     const started = Date.now();
     const config = { ...defaultConfig, timeout: 5, ...setup.config };
     const roundSetup = {
-      venue: githubVenue,
+      venue: setup.venue ?? githubVenue,
       worktree,
       config,
       adapter,
@@ -3274,9 +3277,36 @@ test("a head commit the repository cannot get runs no review", async () => {
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
-  assert.match(ran.conclusion.reason, new RegExp(`^no review ran: ${missing} could not be fetched: `, "u"));
+  assert.match(ran.conclusion.reason, new RegExp(`^no review ran: the commits of PR #142 could not be provided: ${missing} could not be fetched: `, "u"));
   assert.deepEqual(ran.invocations, []);
   assert.deepEqual(ran.snapshotsLeft, []);
+});
+
+test("a venue that cannot provide the change's commits runs no review", async () => {
+  const ran = await runInFixture({
+    answers: FAILING,
+    reviewer: reviews({}),
+    venue: { ...githubVenue, provideCommits: () => ({ outcome: "failed", reason: "the objects are gone" }) },
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.equal(ran.conclusion.failure, "harness");
+  assert.match(ran.conclusion.reason, /^no review ran: the commits of PR #142 could not be provided: the objects are gone/u);
+  assert.deepEqual(ran.invocations, [], "a reviewer started on a snapshot of commits the venue could not provide");
+  assert.deepEqual(ran.snapshotsLeft, []);
+});
+
+test("the snapshot borrows the object directories the venue provides, as the local venue's head needs", async () => {
+  const ran = await runInFixture({
+    answers: FAILING,
+    reviewer: reviews({}),
+    // A relative directory is one the snapshot refuses, so the refusal shows it was handed over.
+    venue: { ...githubVenue, provideCommits: () => ({ outcome: "ready", alternates: ["relative/objects"] }) },
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed");
+  assert.match(ran.conclusion.reason, /"relative\/objects" is not an object directory the snapshot can borrow from/u);
+  assert.deepEqual(ran.invocations, []);
 });
 
 // A round that posted its findings and recorded nothing is one the next round

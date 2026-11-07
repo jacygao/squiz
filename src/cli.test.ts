@@ -1010,3 +1010,14 @@ test("squiz status under the local venue lists the worktree's .squiz/local/ with
     assert.match(result.stdout, /\nlocal +8d21a4f +— +queued +/u);
   });
 });
+
+test("squiz review with no number where no venue can be chosen exits 1 naming the variable, not asking for a number", async () => {
+  const result = await run(shim, ["review"], { cwd: elsewhere, venue: "lcoal" });
+
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    `squiz: no review ran: ${NO_VENUE}\nsquiz: put these lines in your report rather than running squiz review again\n`,
+  );
+  assert.equal(result.code, 1);
+});
