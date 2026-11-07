@@ -1108,7 +1108,7 @@ test("the first round of a first episode posts its finding, is handed no thread,
   assert.deepEqual(ran.conclusion.posted, ["PRRT_new"]);
   assert.equal(ran.invocations.length, 1);
   assert.equal(
-    ran.invocations[0]?.prompt.includes("## Threads already on this pull request"),
+    ran.invocations[0]?.prompt.includes("## Threads already on this change"),
     false,
     "a prompt that carried a threads section with nothing handed over would ask for a verdict on nothing",
   );
