@@ -186,6 +186,20 @@ test("a build changes nothing in the repository: not the worktree's index, its o
   });
 });
 
+test("a build changes nothing in a repository that splits its index", async () => {
+  await withFixture(({ main, agent, local, base }) => {
+    // A change of any size rewrites the shared part, which git keeps in the
+    // repository's git directory rather than beside the index it serves.
+    git(main, ["config", "core.splitIndex", "true"]);
+    git(main, ["config", "splitIndex.maxPercentChange", "0"]);
+    git(agent, ["update-index", "--split-index"]);
+    const gitDirectory = join(main, ".git");
+    const before = fingerprint(gitDirectory);
+    builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    assert.equal(fingerprint(gitDirectory), before);
+  });
+});
+
 test("the head holds what git add --all would: tracked, deleted, re-moded, relinked and untracked files, and no ignored one", async () => {
   await withFixture(({ agent, local, base }) => {
     const head = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));

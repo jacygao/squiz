@@ -105,13 +105,13 @@ export function buildHead(worktree: string, local: string, base: string, until: 
 
 function commitWorkingTree(worktree: string, base: string, env: NodeJS.ProcessEnv, until: Deadline): HeadBuild {
   // The monitor and a split index each keep state for the worktree's own
-  // index, which its copy must not share.
-  const added = runGit(worktree, ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false", "add", "--all"], {
-    until,
-    env,
-  });
+  // index, which its copy must not share. Every command that writes the copy
+  // takes them, since a split index writes its shared part into the
+  // repository's git directory.
+  const isolated = ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false"];
+  const added = runGit(worktree, [...isolated, "add", "--all"], { until, env });
   if (!added.ran) return failed(`the working tree could not be staged: ${added.reason}`);
-  const tree = runGit(worktree, ["write-tree"], { until, env });
+  const tree = runGit(worktree, [...isolated, "write-tree"], { until, env });
   if (!tree.ran) return failed(`the working tree's tree could not be written: ${tree.reason}`);
 
   // Signing, or an encoding header, would make the sha depend on the user's
