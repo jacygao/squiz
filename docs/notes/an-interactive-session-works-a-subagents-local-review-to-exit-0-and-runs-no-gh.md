@@ -44,9 +44,9 @@ finding about them.
   `SendMessage`, which fired `SubagentStart` again in its worktree.
 - **Count a worktree subagent as reviewed in its own worktree.** Each
   subagent's rounds, `state.json`, `threads.json` and `summary.md` are under
-  `.claude/worktrees/agent-<id>/.squiz/local/`, and every record there names
-  that subagent as owner. The root's `.squiz/local/` holds only the root's own
-  states.
+  `.claude/worktrees/agent-<id>/.squiz/local/`. Each record a hook queued
+  there names that subagent as owner, and the records `squiz review` queued
+  name no owner. The root's `.squiz/local/` holds only the root's own states.
 - **Count the wake as working in the local venue.** Every round a hook started
   ended with `noted its owner` and `woke its owner through
   /tmp/cc-socks/<pid>.sock` in `host.log`. The note reached the parent's pane
