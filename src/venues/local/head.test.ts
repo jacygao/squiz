@@ -388,3 +388,97 @@ test("a build with no time left runs nothing, and fails", async () => {
     assert.equal(existsSync(local), false);
   });
 });
+
+/** Git in `directory` with an identity, and with a local repository allowed as a submodule's source. */
+function gitAs(directory: string, args: readonly string[]): string {
+  return git(directory, [
+    "-c",
+    "user.email=squiz@example.invalid",
+    "-c",
+    "user.name=Squiz",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "protocol.file.allow=always",
+    ...args,
+  ]);
+}
+
+function treeOf(agent: string, local: string, head: string): string {
+  return gitWithHeads(agent, local, ["ls-tree", "-r", head]);
+}
+
+test("a subagent's worktree of the same repository is left out of the head, and the rest of the change is intact (#825)", async () => {
+  await withFixture(({ main, agent, local, base }) => {
+    const before = treeOf(agent, local, builtHead(buildHead(agent, base, deadlineIn(30_000))));
+    git(agent, ["worktree", "add", "--quiet", "--detach", ".claude/worktrees/agent-x"]);
+    const gitDirectory = join(main, ".git");
+    const repository = fingerprint(gitDirectory);
+
+    const first = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+    const second = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+
+    assert.equal(treeOf(agent, local, first), before, "the subagent's worktree changed the head's tree");
+    assert.equal(second, first, "two builds of an unchanged tree beside a subagent's worktree made two commits");
+    assert.equal(fingerprint(gitDirectory), repository, "a build changed the repository, its worktrees' indexes included");
+  });
+});
+
+test("a submodule the change adds stays in the head as a gitlink, though a linked worktree keeps it under worktrees/ (#825)", async () => {
+  await withFixture(async ({ root, agent, local, base }) => {
+    const other = join(root, "other");
+    await mkdir(other);
+    git(other, ["init", "--quiet", "--initial-branch", "main"]);
+    await writeFile(join(other, "o.txt"), "other\n");
+    const pinned = commit(other, "other");
+    gitAs(agent, ["submodule", "add", "--quiet", other, "sub"]);
+    assert.match(readFileSync(join(agent, "sub", ".git"), "utf8"), /\/worktrees\/agent\/modules\/sub/u);
+
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+    assert.match(treeOf(agent, local, head), new RegExp(`^160000 commit ${pinned}\tsub$`, "mu"));
+  });
+});
+
+test("a repository of its own inside the working tree stays in the head as a gitlink (#825)", async () => {
+  await withFixture(async ({ agent, local, base }) => {
+    const nested = join(agent, "nested");
+    await mkdir(nested);
+    git(nested, ["init", "--quiet", "--initial-branch", "main"]);
+    await writeFile(join(nested, "n.txt"), "nested\n");
+    const pinned = commit(nested, "nested");
+
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+    assert.match(treeOf(agent, local, head), new RegExp(`^160000 commit ${pinned}\tnested$`, "mu"));
+  });
+});
+
+test("a worktree of the same repository at a gitlink the base has stays, so the change shows no deletion (#825)", async () => {
+  await withFixture(({ main, base }) => {
+    // The base took a subagent's worktree in, as committing after `git add --all` does.
+    git(main, ["worktree", "add", "--quiet", "--detach", ".claude/worktrees/agent-x", base]);
+    const tracked = commit(main, "the base, with a worktree in it");
+    const local = join(main, ".squiz", "local");
+
+    const head = builtHead(buildHead(main, tracked, deadlineIn(30_000)));
+    assert.equal(
+      gitWithHeads(main, local, ["rev-parse", `${head}^{tree}`]),
+      git(main, ["rev-parse", `${tracked}^{tree}`]),
+      "the build dropped the gitlink the base has",
+    );
+  });
+});
+
+test("a worktree of the same repository where the base has a directory stays, so the change shows what replaced it (#825)", async () => {
+  await withFixture(async ({ agent, local, base }) => {
+    await mkdir(join(agent, "replaced"));
+    await writeFile(join(agent, "replaced", "file.txt"), "a directory\n");
+    const tracked = commit(agent, "the base, with a directory where the worktree will be");
+    // With the directory's files still in the index, `git add --all` takes the
+    // worktree's files rather than a gitlink.
+    git(agent, ["rm", "-r", "--quiet", "replaced"]);
+    git(agent, ["worktree", "add", "--quiet", "--detach", "replaced", base]);
+
+    const head = builtHead(buildHead(agent, tracked, deadlineIn(30_000)));
+    assert.match(treeOf(agent, local, head), new RegExp(`^160000 commit ${base}\treplaced$`, "mu"));
+  });
+});

@@ -878,6 +878,13 @@ rm .squiz/local/index.<pid>
   included, and every untracked file that `.gitignore` does not exclude. The
   copy is named for the building process and removed after, so two triggers
   never share one, and nothing an earlier build left changes a later one.
+- **A worktree of the same repository inside the working tree is left out,
+  unless the base has it.** `git add --all` takes such a directory as a
+  gitlink, and a subagent's worktree under `.claude/worktrees/` is one. The
+  build removes from its copy each gitlink whose directory's `.git` is a file
+  naming a directory directly under `worktrees/` in the repository's
+  `git rev-parse --git-common-dir`, and whose path the base does not have. A
+  submodule, or a repository of its own, stays in the tree as a gitlink.
 - **The objects go into `.squiz/local/objects/`.** Each command runs with
   `GIT_OBJECT_DIRECTORY` set there and the repository's own object directory as
   an alternate, so no object is written into the repository, and no ref is
