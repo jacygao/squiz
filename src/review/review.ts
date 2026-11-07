@@ -43,7 +43,7 @@ import { printReview, unprinted, type Printed, type ReviewResult } from "./outpu
 
 // Claude Code gives a shell command at most 600 seconds, and the minute left
 // covers the process starting and stopping.
-const REVIEW_BUDGET_MS = 540_000;
+export const REVIEW_BUDGET_MS = 540_000;
 
 const POLL_MS = 1_000;
 

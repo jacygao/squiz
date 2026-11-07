@@ -24,7 +24,7 @@ import { squizDoctor } from "./review/doctor.ts";
 import { squizInit } from "./review/init.ts";
 import { thisSquiz } from "./review/path-link.ts";
 import { unprinted } from "./review/output.ts";
-import { runReview } from "./review/review.ts";
+import { REVIEW_BUDGET_MS, runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 import { squizVersion } from "./review/version.ts";
 import { deadlineIn, type Deadline } from "./reviewers/deadline.ts";
@@ -107,9 +107,11 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
  * `local` reviews the working tree, and is named nothing.
  */
 async function review(args: readonly string[]): Promise<number> {
+  // The venue is read inside the run's one deadline, as everything the run does is.
+  const until = deadlineIn(REVIEW_BUDGET_MS);
   let [key] = args;
   if (key === undefined) {
-    const chosen = venueAt(process.cwd());
+    const chosen = venueAt(process.cwd(), until);
     if (chosen.outcome === "failed") {
       const printed = unprinted(`no review ran: ${chosen.reason}`);
       process.stderr.write(printed.stderr);
@@ -122,7 +124,7 @@ async function review(args: readonly string[]): Promise<number> {
     return 1;
   }
 
-  const printed = await runReview({ directory: process.cwd(), key, environment: process.env });
+  const printed = await runReview({ directory: process.cwd(), key, environment: process.env, until });
   process.stdout.write(printed.stdout);
   process.stderr.write(printed.stderr);
   return printed.exit;
