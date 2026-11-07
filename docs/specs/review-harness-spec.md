@@ -830,11 +830,16 @@ person never sets the base.
   remote-tracking, the one the worktree has checked out included.
 
 **The base is the newest of the recorded commit and the merge-base of `HEAD` with
-each recorded branch as it stands now.** A recorded branch the worktree has
-checked out now is left out, because it moves with the work. So is one that no
-longer exists, and one whose merge-base does not descend from the recorded
-commit. Of what
-remains, the base is the one every other one is an ancestor of, and the recorded
+each recorded branch as it stands now.** Three kinds of recorded branch are left
+out:
+
+- **The work's own branches, which move with the work.** These are the branch the
+  worktree has checked out now, its upstream, and every remote-tracking branch of
+  the same name, such as `origin/work` for `work`.
+- **A branch that no longer exists.**
+- **A branch whose merge-base does not descend from the recorded commit.**
+
+Of what remains, the base is the one every other one is an ancestor of, and the recorded
 commit where none is. A worktree rebased onto a branch that has moved on gets
 the moved branch's commit as its base, so its change holds its own commits and
 no one else's.
