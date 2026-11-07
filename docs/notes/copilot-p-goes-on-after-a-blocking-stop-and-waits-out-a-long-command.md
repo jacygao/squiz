@@ -25,10 +25,12 @@ recheck-when: Copilot CLI upgrades past 1.0.105, or changes how a Stop hook's de
   reason arrived as the agent's next message and the run went on.
   The next `Stop` carried `"stop_hook_active":true`, and returning nothing then
   let the run exit 0.
-- **Choose the local venue with an environment variable on the run,
-  `SQUIZ_VENUE=local`.** The variables measured were `SQUIZ_LOCAL` and
-  `SQUIZ_BASE`, which squiz no longer reads. Set on `copilot -p`, both reached
-  the hook and the script the agent ran in its shell.
+- **Choose the local venue with `"venue": "local"` in `.squiz.json`.**
+  Superseded on 2026-11-08: squiz reads the venue from the setting and no
+  environment variable, because a variable reaches only the processes its run
+  started. The fact below stands. The variables measured were `SQUIZ_LOCAL`
+  and `SQUIZ_BASE`, which squiz no longer reads. Set on `copilot -p`, both
+  reached the hook and the script the agent ran in its shell.
 - **Start the round host from the hook as now.** A process the hook started
   with Node's `spawn(…, {detached: true})` and `unref()` went on after the run
   that started it had exited.

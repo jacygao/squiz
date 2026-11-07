@@ -95,6 +95,7 @@ test("every dependency present prints a line each and exits 0", () => {
     printed.stdout,
     [
       "git 2.51.0",
+      "Venue github",
       "gh 2.97.0, signed in as ana",
       "Claude Code 2.4.1",
       "Node 24.6.0",
@@ -116,6 +117,7 @@ test("nothing on PATH names every required dependency as not found and exits 1",
     printed.stdout,
     [
       "git: not found",
+      "Venue: the repository could not be found: git is not on PATH",
       "gh: not found",
       "Claude Code: not found",
       "Node 24.6.0",
@@ -1253,13 +1255,18 @@ test("a different version in Copilot's copy leaves the exit at 0, and copilot --
   assert.equal(readFileSync(asked, "utf8"), "asked\n", "copilot --version is asked once per run");
 });
 
-test("under the local venue gh is not required: its absence passes, and a line says the local venue is in use", () => {
+/** The venue's line in `stdout`. */
+function venueLine(stdout: string): string {
+  return stdout.split("\n").find((row) => row.startsWith("Venue")) ?? "no venue line";
+}
+
+test("#838: under the local venue .squiz.json names, gh is not required: its absence passes, and the venue's line names the file", () => {
   const { gh: _gh, ...withoutGh } = EVERY_FAKE;
   const base = context(withoutGh);
 
-  const printed = squizDoctor({ ...base, environment: { ...base.environment, SQUIZ_VENUE: "local" } });
+  const printed = squizDoctor({ ...base, directory: repository('{"venue":"local"}') });
 
-  assert.match(printed.stdout, /^Venue local, from SQUIZ_VENUE: reviews run on the working tree, and gh is not required$/mu);
+  assert.equal(venueLine(printed.stdout), `Venue local (${squizFile()}): reviews run on the working tree, and gh is not required`);
   assert.match(printed.stdout, /^gh: not found\. Not required under the local venue$/mu);
   assert.equal(printed.exit, 0, "a gh the local venue never runs failed the check");
 });
@@ -1267,17 +1274,49 @@ test("under the local venue gh is not required: its absence passes, and a line s
 test("under the local venue a gh that is not signed in is a warning, not a failure", () => {
   const base = context({ ...EVERY_FAKE, gh: ghAnswering('{"hosts":{}}') });
 
-  const printed = squizDoctor({ ...base, environment: { ...base.environment, SQUIZ_VENUE: "local" } });
+  const printed = squizDoctor({ ...base, directory: repository('{"venue":"local"}') });
 
   assert.match(printed.stdout, /^gh 2\.97\.0: warning: not signed in\. Run gh auth login\. Not required under the local venue$/mu);
   assert.equal(printed.exit, 0);
 });
 
-test("a SQUIZ_VENUE that names no venue fails the check, naming the value", () => {
+test("#838: the GitHub venue's line names the .squiz.json it was read from, or the one that is not there", () => {
   const base = context(EVERY_FAKE);
 
-  const printed = squizDoctor({ ...base, environment: { ...base.environment, SQUIZ_VENUE: "lcoal" } });
+  const read = squizDoctor({ ...base, directory: repository('{"venue":"github"}') });
+  assert.equal(venueLine(read.stdout), `Venue github (${squizFile()})`);
 
-  assert.match(printed.stdout, /^Venue: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local$/mu);
+  const absent = squizDoctor({ ...base, directory: repository() });
+  assert.equal(venueLine(absent.stdout), `Venue github (no ${squizFile()})`);
+  assert.match(absent.stdout, /^Venue github \(no [^\n]*\)\ngh 2\.97\.0, signed in as ana$/mu);
+});
+
+test("#838: SQUIZ_VENUE=local with no .squiz.json leaves the venue GitHub, and gh required", () => {
+  const { gh: _gh, ...withoutGh } = EVERY_FAKE;
+  const base = context(withoutGh);
+
+  const printed = squizDoctor({ ...base, directory: repository(), environment: { ...base.environment, SQUIZ_VENUE: "local" } });
+
+  assert.equal(venueLine(printed.stdout), `Venue github (no ${squizFile()})`);
+  assert.match(printed.stdout, /^gh: not found$/mu);
+  assert.equal(printed.exit, 1);
+});
+
+test("#838: in a linked worktree the venue is the main worktree's, never the linked worktree's own", () => {
+  const { main, linked } = linkedWorktree('{"venue":"local"}', '{"venue":"github"}');
+  const base = context(EVERY_FAKE);
+
+  const printed = squizDoctor({ ...base, directory: linked });
+
+  assert.equal(venueLine(printed.stdout), `Venue local (${main}/.squiz.json): reviews run on the working tree, and gh is not required`);
+});
+
+test("#838: a venue .squiz.json names that is no venue fails the check, naming the setting and the value", () => {
+  const base = context(EVERY_FAKE);
+  const project = repository('{"venue":"lcoal"}');
+
+  const printed = squizDoctor({ ...base, directory: project });
+
+  assert.equal(venueLine(printed.stdout), `Venue: .squiz.json refused: ${project}/.squiz.json: "venue" is "lcoal", but it must be "github" or "local"`);
   assert.equal(printed.exit, 1);
 });

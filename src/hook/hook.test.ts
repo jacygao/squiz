@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -598,13 +598,23 @@ function headOf(directory: string): string {
   return result.stdout.trim();
 }
 
-const LOCAL = { SQUIZ_VENUE: "local" };
+/**
+ * Write `contents` as the `.squiz.json` of `worktree`, kept out of the working
+ * tree's state so that the local venue reviews the same tree with or without it.
+ */
+function squizJsonIn(worktree: string, contents: string): void {
+  writeFileSync(join(worktree, ".squiz.json"), contents, "utf8");
+  appendFileSync(join(worktree, ".git", "info", "exclude"), ".squiz.json\n", "utf8");
+}
 
-test("a SessionStart under the local venue records the base at the worktree's root, and does nothing else", async () => {
+const LOCAL = '{"venue": "local"}';
+
+test("#838: a SessionStart where .squiz.json says local records the base at the worktree's root with nothing in the environment, and does nothing else", async () => {
   await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
     mkdirSync(join(place.worktree, "sub"));
     // Fired from outside the worktree, as Copilot runs a plugin's hook.
-    const fired = await fire(place, { payload: sessionStartPayload(join(place.worktree, "sub")), environment: LOCAL, trigger: { as: "recording" } });
+    const fired = await fire(place, { payload: sessionStartPayload(join(place.worktree, "sub")), environment: {}, trigger: { as: "recording" } });
 
     assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
     assert.equal(existsSync(baseFileIn(place)), true, "the start recorded no base, and said nothing");
@@ -616,9 +626,10 @@ test("a SessionStart under the local venue records the base at the worktree's ro
 
 test("Copilot's SubagentStart, which carries no hook_event_name and no session_id, records the base and says nothing", async () => {
   await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
     const fired = await fire(place, {
       payload: copilotSubagentStartPayload(place.worktree),
-      environment: { ...LOCAL, COPILOT_CLI: "1" },
+      environment: { COPILOT_CLI: "1" },
       trigger: { as: "recording" },
     });
 
@@ -629,14 +640,14 @@ test("Copilot's SubagentStart, which carries no hook_event_name and no session_i
 
 test("a resumed session's SessionStart, after commits, leaves the base the first start recorded", async () => {
   await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
     const start = headOf(place.worktree);
-    await fire(place, { payload: sessionStartPayload(place.worktree), environment: LOCAL, trigger: { as: "recording" } });
+    await fire(place, { payload: sessionStartPayload(place.worktree), trigger: { as: "recording" } });
     git(place.worktree, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false",
       "commit", "--quiet", "--allow-empty", "--message", "the work");
 
     const fired = await fire(place, {
       payload: sessionStartPayload(place.worktree, { source: "resume" }),
-      environment: LOCAL,
       trigger: { as: "recording" },
     });
 
@@ -656,38 +667,74 @@ test("a start under the GitHub venue writes nothing, runs no gh, queues nothing 
   });
 });
 
-test("a start under a SQUIZ_VENUE that names no venue records nothing, and says why in the line the venue choice gives", async () => {
+test("#838: a start with SQUIZ_VENUE=local and no .squiz.json is under the GitHub venue, and records nothing", async () => {
   await withPlace(async (place) => {
-    const fired = await fire(place, {
-      payload: sessionStartPayload(place.worktree),
-      environment: { SQUIZ_VENUE: "lcoal" },
-      trigger: { as: "recording" },
-    });
+    const fired = await fire(place, { payload: sessionStartPayload(place.worktree), environment: { SQUIZ_VENUE: "local" }, trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false, "SQUIZ_VENUE chose the local venue");
+  });
+});
+
+test("#838: a start whose .squiz.json names no venue records nothing, and names the setting on stderr", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, '{"venue": "lcoal"}');
+    const fired = await fire(place, { payload: sessionStartPayload(place.worktree), trigger: { as: "recording" } });
 
     assert.equal(fired.code, 0);
-    assert.equal(fired.stderr, 'squiz: no review ran: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local\n');
+    assert.equal(
+      fired.stderr,
+      `squiz: no base was recorded: ${join(place.worktree, ".squiz.json")}: "venue" is "lcoal", but it must be "github" or "local"\n`,
+    );
     assert.equal(existsSync(join(place.worktree, ".squiz")), false);
   });
 });
 
-test("a start the local venue could not record exits 0, and says why in one line", async () => {
+test("#838: a start whose .squiz.json says local but is not JSON says so on stderr, rather than running under GitHub in silence", async () => {
   await withPlace(async (place) => {
-    const fired = await fire(place, { payload: sessionStartPayload(place.bin), environment: LOCAL, trigger: { as: "recording" } });
+    squizJsonIn(place.worktree, '{"venue": "local",}');
+    const fired = await fire(place, { payload: sessionStartPayload(place.worktree), trigger: { as: "recording" } });
 
     assert.equal(fired.code, 0);
-    assert.match(fired.stderr, /^squiz: no base was recorded: the worktree could not be resolved: [^\n]*\n$/u);
-    assert.equal(existsSync(join(place.bin, ".squiz")), false);
+    assert.match(fired.stderr, new RegExp(`^squiz: no base was recorded: ${escaped(join(place.worktree, ".squiz.json"))} is not valid JSON: [^\n]*\n$`, "u"));
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false);
+  });
+});
+
+test("#838: a start in a linked worktree takes the venue from the main worktree's .squiz.json, never its own", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+    const linked = join(place.bin, "linked");
+    git(place.worktree, "worktree", "add", "--quiet", "--detach", linked);
+    writeFileSync(join(linked, ".squiz.json"), '{"venue": "github"}', "utf8");
+
+    const fired = await fire(place, { payload: sessionStartPayload(linked), trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(join(realpathSync(linked), ".squiz", "local", "base.json")), true, "the linked worktree's own github was read");
+  });
+});
+
+// The start hooks fire for every session opened anywhere, so a line here would reach every user who opens one outside git.
+test("#838: a start outside any git repository records nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    for (const payload of [sessionStartPayload(place.bin), copilotSubagentStartPayload(place.bin)]) {
+      const fired = await fire(place, { payload, trigger: { as: "recording" } });
+
+      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.equal(existsSync(join(place.bin, ".squiz")), false);
+    }
   });
 });
 
 test("a Stop under the local venue queues the working tree's state in .squiz/local/, and runs no gh", async () => {
   await withPlace(async (place) => {
-    await fire(place, { payload: sessionStartPayload(place.worktree), environment: LOCAL, trigger: { as: "recording" } });
+    squizJsonIn(place.worktree, LOCAL);
+    await fire(place, { payload: sessionStartPayload(place.worktree), trigger: { as: "recording" } });
     writeFileSync(join(place.worktree, "work.txt"), "the work\n");
 
     const fired = await fire(place, {
       payload: stopPayload(place.worktree),
-      environment: LOCAL,
       trigger: { as: "real", hostCommand: "/usr/bin/true" },
     });
 
@@ -702,3 +749,7 @@ test("a Stop under the local venue queues the working tree's state in .squiz/loc
     assert.equal(existsSync(join(place.bin, "calls.log")), false, "the local venue ran gh");
   });
 });
+
+function escaped(text: string): string {
+  return text.replaceAll(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
+}

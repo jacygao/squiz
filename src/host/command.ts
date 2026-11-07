@@ -44,12 +44,6 @@ export async function hostCommand(args: readonly string[], directory: string): P
   }
   const { config } = project;
 
-  const chosen = venueFor(process.env);
-  if (chosen.outcome === "failed") {
-    reportFailure(`no round host started: ${chosen.reason}`);
-    return 0;
-  }
-
   const note = defaultsLine(project);
   // The trigger that started the host ran in the coding agent's terminal, and
   // its environment names the Herdr or tmux server the reviewer's pane opens on.
@@ -57,7 +51,7 @@ export async function hostCommand(args: readonly string[], directory: string): P
     worktree: worktree.path,
     key,
     round: {
-      venue: chosen.venue,
+      venue: venueFor(config),
       config,
       adapter: adapterFor(config.reviewer),
       charterFile,

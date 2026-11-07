@@ -7,6 +7,7 @@
  * of reason, and a call whose deadline has nothing left is not made.
  */
 
+import { findProjectConfig, type Config, type ProjectConfig } from "../config/config.ts";
 import type { Deadline } from "../reviewers/deadline.ts";
 import { githubVenue } from "./github/venue.ts";
 import { localVenue } from "./local/venue.ts";
@@ -111,25 +112,25 @@ export interface Venue {
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }
 
-/**
- * The venue this process's environment chooses from `SQUIZ_VENUE`: GitHub where
- * it is unset, empty or `github`, and local where it is `local`.
- *
- * Any other value chooses none, rather than having GitHub review a change that
- * was meant to stay off it.
- */
-export function venueFor(
-  environment: NodeJS.ProcessEnv,
-): { readonly outcome: "chosen"; readonly venue: Venue } | Failed {
-  const named = venueNamed(environment);
-  if (typeof named !== "string") return named;
-  return { outcome: "chosen", venue: named === "local" ? localVenue : githubVenue };
+/** The venue `config` names. */
+export function venueFor(config: Pick<Config, "venue">): Venue {
+  return config.venue === "local" ? localVenue : githubVenue;
 }
 
-/** The name of the venue `venueFor` chooses, for `squiz doctor` to print. */
-export function venueNamed(environment: NodeJS.ProcessEnv): "github" | "local" | Failed {
-  const named = environment["SQUIZ_VENUE"];
-  if (named === undefined || named === "" || named === "github") return "github";
-  if (named === "local") return "local";
-  return { outcome: "failed", reason: `SQUIZ_VENUE is ${JSON.stringify(named)}, and squiz has the venues github and local` };
+/**
+ * The venue the `.squiz.json` of `directory`'s main worktree names, with the
+ * settings it was read from. A file that cannot be read fails, rather than
+ * choosing GitHub for a project that may have chosen local.
+ */
+export function venueAt(
+  directory: string,
+  until?: Deadline,
+): { readonly outcome: "chosen"; readonly venue: Venue; readonly project: ProjectConfig } | Failed {
+  let project: ProjectConfig;
+  try {
+    project = findProjectConfig(directory, until);
+  } catch (cause) {
+    return { outcome: "failed", reason: cause instanceof Error ? cause.message : String(cause) };
+  }
+  return { outcome: "chosen", venue: venueFor(project.config), project };
 }

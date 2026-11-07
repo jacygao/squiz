@@ -102,7 +102,7 @@ type Run = {
 async function run(
   command: string,
   args: readonly string[],
-  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string; venue?: string },
+  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string },
 ): Promise<Run> {
   return await new Promise<Run>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -112,7 +112,6 @@ async function run(
         ...(options.path === undefined ? {} : { PATH: options.path }),
         ...(options.home === undefined ? {} : { HOME: options.home }),
         ...(options.claudeConfig === undefined ? {} : { CLAUDE_CONFIG_DIR: options.claudeConfig }),
-        SQUIZ_VENUE: options.venue ?? "",
       },
     });
     // A child that reads no stdin can exit before the write lands, and the
@@ -517,33 +516,59 @@ test("squiz reply on a draft posts nothing and says why in the venue's line", as
   assert.equal(result.sent, "", "a reply went to GitHub for a change the venue held");
 });
 
-const NO_VENUE = 'SQUIZ_VENUE is "lcoal", and squiz has the venues github and local';
+/** Run `body` in a repository whose `.squiz.json` names no venue, with the line its refusal gives. */
+async function withMisnamedVenue(body: (root: string, refusal: string) => Promise<void>): Promise<void> {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), "squiz-cli-misnamed-")));
+  try {
+    gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
+    await writeFile(join(root, ".squiz.json"), '{"venue": "lcoal"}');
+    await body(root, `${join(root, ".squiz.json")}: "venue" is "lcoal", but it must be "github" or "local"`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
 
-test("squiz threads where no venue can be chosen lists nothing and names the variable", async () => {
-  const result = await run(shim, ["threads"], { cwd: elsewhere, venue: "lcoal" });
+test("squiz threads where .squiz.json names no venue lists nothing and names the setting", async () => {
+  await withMisnamedVenue(async (root, refusal) => {
+    const result = await run(shim, ["threads"], { cwd: root });
 
-  assert.equal(result.stdout, "");
-  assert.equal(result.stderr, `squiz: no threads listed: ${NO_VENUE}\n`);
-  assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, `squiz: no threads listed: ${refusal}\n`);
+    assert.equal(result.code, 0);
+  });
 });
 
-test("squiz reply where no venue can be chosen posts nothing and names the variable", async () => {
-  const result = await run(shim, ["reply", "PRRT_somewhere", "a reply"], { cwd: elsewhere, venue: "lcoal" });
+test("squiz reply where .squiz.json names no venue posts nothing and names the setting", async () => {
+  await withMisnamedVenue(async (root, refusal) => {
+    const result = await run(shim, ["reply", "PRRT_somewhere", "a reply"], { cwd: root });
 
-  assert.equal(result.stdout, "");
-  assert.equal(result.stderr, `squiz: nothing replied: ${NO_VENUE}\n`);
-  assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, `squiz: nothing replied: ${refusal}\n`);
+    assert.equal(result.code, 0);
+  });
 });
 
-test("squiz review where no venue can be chosen exits 1 naming the variable", async () => {
-  const result = await run(shim, ["review", "41"], { cwd: elsewhere, venue: "lcoal" });
+test("squiz status where .squiz.json names no venue lists nothing and names the setting", async () => {
+  await withMisnamedVenue(async (root, refusal) => {
+    const result = await run(shim, ["status"], { cwd: root });
 
-  assert.equal(result.stdout, "");
-  assert.equal(
-    result.stderr,
-    `squiz: no review ran: ${NO_VENUE}\nsquiz: put these lines in your report rather than running squiz review again\n`,
-  );
-  assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, `squiz: no reviews listed: ${refusal}\n`);
+    assert.equal(result.code, 0);
+  });
+});
+
+test("squiz review where .squiz.json names no venue exits 1 naming the setting", async () => {
+  await withMisnamedVenue(async (root, refusal) => {
+    const result = await run(shim, ["review", "41"], { cwd: root });
+
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: ${refusal}\nsquiz: put these lines in your report rather than running squiz review again\n`,
+    );
+    assert.equal(result.code, 1);
+  });
 });
 
 /** The comment body inside the reply mutation the fake `gh` was sent. */
@@ -717,7 +742,7 @@ test("a throw inside squiz review exits 1, which never reads as a result", async
         "      return {",
         '        format: "module",',
         "        shortCircuit: true,",
-        '        source: \'export async function runReview() { throw new Error("the wait exploded"); }\',',
+        '        source: \'export const REVIEW_BUDGET_MS = 540000; export async function runReview() { throw new Error("the wait exploded"); }\',',
         "      };",
         "    }",
         "    return nextLoad(url, context);",
@@ -869,6 +894,8 @@ test("a throw inside squiz init exits 1, which never reads as the link made", as
   }
 });
 
+const LOCAL_VENUE = '{"venue": "local"}';
+
 /** A repository with no remote, whose base a SessionStart through the binary recorded, and a `gh` that says whether it ran. */
 type LocalPlace = { readonly worktree: string; readonly path: string; readonly ghRan: string };
 
@@ -878,8 +905,7 @@ async function withLocalPlace(body: (place: LocalPlace) => Promise<void>): Promi
     const worktree = join(root, "work");
     await mkdir(worktree);
     gitIn(worktree, ["init", "--quiet", "--initial-branch", "main"]);
-    // A file of its own, so that no run adds the line saying the defaults are in use.
-    await writeFile(join(worktree, ".squiz.json"), "{}");
+    await writeFile(join(worktree, ".squiz.json"), LOCAL_VENUE);
     gitIn(worktree, ["add", "--all"]);
     gitIn(worktree, [...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start"]);
     const fakes = join(root, "fakes");
@@ -890,7 +916,6 @@ async function withLocalPlace(body: (place: LocalPlace) => Promise<void>): Promi
     const started = await run(shim, ["hook"], {
       cwd: root,
       path,
-      venue: "local",
       input: JSON.stringify({ hook_event_name: "SessionStart", session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb", cwd: worktree, source: "startup" }),
     });
     assert.deepEqual(started, { code: 0, stdout: "", stderr: "" });
@@ -929,7 +954,7 @@ const LOCAL_THREADS = {
 
 test("squiz review under the local venue refuses a pull request's number, and makes nothing", async () => {
   await withLocalPlace(async ({ worktree, path }) => {
-    const result = await run(shim, ["review", "41"], { cwd: worktree, path, venue: "local" });
+    const result = await run(shim, ["review", "41"], { cwd: worktree, path });
 
     assert.equal(result.code, 1);
     assert.equal(result.stdout, "");
@@ -946,11 +971,11 @@ test("squiz review under the local venue with no recorded base exits 1, naming t
   const root = realpathSync(await mkdtemp(join(tmpdir(), "squiz-cli-unrecorded-")));
   try {
     gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
-    await writeFile(join(root, ".squiz.json"), "{}");
+    await writeFile(join(root, ".squiz.json"), LOCAL_VENUE);
     gitIn(root, ["add", "--all"]);
     gitIn(root, [...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start"]);
 
-    const result = await run(shim, ["review"], { cwd: root, venue: "local" });
+    const result = await run(shim, ["review"], { cwd: root });
 
     assert.equal(result.code, 1);
     assert.equal(result.stdout, "");
@@ -965,11 +990,11 @@ test("squiz review under the local venue with no recorded base exits 1, naming t
 
 test("squiz threads under the local venue lists the open threads on the working tree", async () => {
   await withLocalPlace(async ({ worktree, path }) => {
-    const none = await run(shim, ["threads"], { cwd: worktree, path, venue: "local" });
+    const none = await run(shim, ["threads"], { cwd: worktree, path });
     assert.deepEqual(none, { code: 0, stdout: "no open threads on the working tree\n", stderr: "" });
 
     await writeFile(join(worktree, ".squiz", "local", "threads.json"), JSON.stringify(LOCAL_THREADS));
-    const listed = await run(shim, ["threads"], { cwd: worktree, path, venue: "local" });
+    const listed = await run(shim, ["threads"], { cwd: worktree, path });
 
     assert.deepEqual(listed, {
       code: 0,
@@ -986,8 +1011,8 @@ test("squiz reply under the local venue adds the coding agent's reply to threads
   await withLocalPlace(async ({ worktree, path }) => {
     await writeFile(join(worktree, ".squiz", "local", "threads.json"), JSON.stringify(LOCAL_THREADS));
 
-    const replied = await run(shim, ["reply", "T1", "Fixed", "in", "place."], { cwd: join(worktree, ".squiz"), path, venue: "local" });
-    const refused = await run(shim, ["reply", "T9", "No."], { cwd: worktree, path, venue: "local" });
+    const replied = await run(shim, ["reply", "T1", "Fixed", "in", "place."], { cwd: join(worktree, ".squiz"), path });
+    const refused = await run(shim, ["reply", "T9", "No."], { cwd: worktree, path });
 
     assert.deepEqual(replied, { code: 0, stdout: "replied in T1 on the working tree\n", stderr: "" });
     const record = JSON.parse(await readFile(join(worktree, ".squiz", "local", "threads.json"), "utf8")) as typeof LOCAL_THREADS;
@@ -1002,7 +1027,7 @@ test("squiz status under the local venue lists the worktree's .squiz/local/ with
     const state = { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 }, records: [record] };
     await writeFile(join(worktree, ".squiz", "local", "state.json"), JSON.stringify(state), "utf8");
 
-    const result = await run(shim, ["status"], { cwd: worktree, path, venue: "local" });
+    const result = await run(shim, ["status"], { cwd: worktree, path });
 
     assert.equal(result.stderr, "");
     assert.equal(result.code, 0);
@@ -1011,13 +1036,47 @@ test("squiz status under the local venue lists the worktree's .squiz/local/ with
   });
 });
 
-test("squiz review with no number where no venue can be chosen exits 1 naming the variable, not asking for a number", async () => {
-  const result = await run(shim, ["review"], { cwd: elsewhere, venue: "lcoal" });
+test("squiz review with no number where .squiz.json names no venue exits 1 naming the setting, not asking for a number", async () => {
+  await withMisnamedVenue(async (root, refusal) => {
+    const result = await run(shim, ["review"], { cwd: root });
 
-  assert.equal(result.stdout, "");
-  assert.equal(
-    result.stderr,
-    `squiz: no review ran: ${NO_VENUE}\nsquiz: put these lines in your report rather than running squiz review again\n`,
-  );
-  assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      `squiz: no review ran: ${refusal}\nsquiz: put these lines in your report rather than running squiz review again\n`,
+    );
+    assert.equal(result.code, 1);
+  });
+});
+
+test("#838: squiz threads with SQUIZ_VENUE=local and no .squiz.json asks GitHub, not the working tree", async () => {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), "squiz-cli-ignored-")));
+  try {
+    gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
+    gitIn(root, [...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "start"]);
+    const fakes = join(root, "fakes");
+    await mkdir(fakes);
+    const ghRan = join(root, "gh-ran");
+    standIn(fakes, "gh", `#!/bin/sh
+touch '${ghRan}'
+echo 'no GitHub here' >&2
+exit 1
+`);
+    const before = process.env["SQUIZ_VENUE"];
+    process.env["SQUIZ_VENUE"] = "local";
+    let result: Run;
+    try {
+      result = await run(shim, ["threads"], { cwd: root, path: `${fakes}:${process.env["PATH"] ?? ""}` });
+    } finally {
+      if (before === undefined) delete process.env["SQUIZ_VENUE"];
+      else process.env["SQUIZ_VENUE"] = before;
+    }
+
+    await stat(ghRan);
+    assert.equal(result.code, 0);
+    assert.doesNotMatch(result.stderr, /working tree|recorded base/u, "SQUIZ_VENUE chose the local venue");
+    assert.match(result.stderr, /^squiz: no threads listed: /u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

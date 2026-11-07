@@ -12,6 +12,9 @@ import { mainWorktree } from "../worktree/toplevel.ts";
 
 export const configFileName = ".squiz.json";
 
+/** Where a review happens: on a pull request, or on the working tree. */
+export type VenueName = "github" | "local";
+
 /** The reviewer CLIs a project can choose between. */
 export type Reviewer = "pi" | "copilot";
 
@@ -23,6 +26,7 @@ export type Reviewer = "pi" | "copilot";
 export type Thinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type Config = {
+  venue: VenueName;
   reviewer: Reviewer;
   // The round cap.
   rounds: number;
@@ -40,6 +44,7 @@ export type Config = {
 
 // Every setting has a default, so a project that writes no file still runs.
 export const defaultConfig: Readonly<Config> = Object.freeze({
+  venue: "github",
   reviewer: "pi",
   rounds: 3,
   timeout: 900,
@@ -64,9 +69,11 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["reviewer", "rounds", "timeout", "tokens", "thinking", "model"] as const;
+const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model"] as const;
 
 const settingList = `${settingNames.slice(0, -1).map((name) => `"${name}"`).join(", ")} and "${settingNames.at(-1)}"`;
+
+const venues = ["github", "local"] as const;
 
 const reviewers = ["pi", "copilot"] as const;
 
@@ -174,6 +181,7 @@ function parse(source: string, path: string): Config {
   // is truthy. `0` is a value a person wrote, and it is refused as out of range
   // rather than replaced by the default.
   return {
+    venue: has(raw, "venue") ? venueOf(path, raw["venue"]) : defaultConfig.venue,
     reviewer: has(raw, "reviewer") ? reviewerOf(path, raw["reviewer"]) : defaultConfig.reviewer,
     rounds: has(raw, "rounds")
       ? wholeNumber(path, "rounds", raw["rounds"], 1, 8, "a whole number from 1 to 8")
@@ -231,6 +239,12 @@ function wholeNumber(
 
 export function isReviewer(value: unknown): value is Reviewer {
   return reviewers.some((reviewer) => value === reviewer);
+}
+
+function venueOf(path: string, value: unknown): VenueName {
+  const named = venues.find((venue) => value === venue);
+  if (named !== undefined) return named;
+  throw new ConfigError(reject(path, "venue", value, `"github" or "local"`));
 }
 
 function reviewerOf(path: string, value: unknown): Reviewer {

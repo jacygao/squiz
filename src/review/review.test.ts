@@ -310,18 +310,18 @@ test("#745: a run whose main worktree has no .squiz.json says on stderr that the
   });
 });
 
-test("a run where no venue can be chosen still leads with the line saying the defaults are in use", async () => {
-  await withLinkedWorktree(null, "{}", async (fixture) => {
-    const { venue: _, ...chosenFromEnvironment } = request(fixture, { triggered: decided(fixture, { outcome: "result" }) });
+test("#838: a run given no venue takes it from the main worktree's .squiz.json, never its own, and not from SQUIZ_VENUE", async () => {
+  await withLinkedWorktree('{"venue": "local"}', '{"venue": "github"}', async (fixture) => {
+    const { venue: _, ...unchosen } = request(fixture, { triggered: decided(fixture, { outcome: "result" }) });
 
-    const printed = await runReview({ ...chosenFromEnvironment, environment: { SQUIZ_VENUE: "lcoal" } });
+    const printed = await runReview({ ...unchosen, environment: { SQUIZ_VENUE: "github" } });
 
     assert.equal(printed.exit, 1);
     assert.equal(
       printed.stderr,
-      `squiz: no .squiz.json was found in the main worktree, ${fixture.main}, so the defaults are in use\n` +
-        `squiz: no review ran: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local\n` +
+      "squiz: no review ran: the local venue reviews the working tree, and takes no pull request number\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
+      "the local venue, which refuses a pull request's number, was not the one chosen",
     );
   });
 });

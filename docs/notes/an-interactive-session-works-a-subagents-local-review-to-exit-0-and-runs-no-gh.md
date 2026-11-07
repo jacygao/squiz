@@ -9,7 +9,7 @@ recheck-when: Claude Code changes where it puts a worktree-isolated subagent's w
 # An interactive session works a subagent's local review to exit 0, and runs no `gh`
 
 An interactive Claude Code session ran in a Herdr tab, in a scratch repository
-with no remote, under `SQUIZ_VENUE=local`. It dispatched two `general-purpose`
+with no remote, under the local venue. It dispatched two `general-purpose`
 subagents with `isolation: "worktree"`, one after the other. Each brief planted
 an off-by-one: `pageCount` with `Math.floor`, then `pageOf` slicing to
 `start + size - 1`. In each subagent's worktree the reviewer opened one thread
@@ -128,7 +128,9 @@ written.
 ### How the run was set up
 
 - The session was started from a script in a new Herdr tab, with every
-  `CLAUDE*` variable unset, `SQUIZ_VENUE=local`, `DISABLE_AUTOUPDATER=1`, the
+  `CLAUDE*` variable unset, `SQUIZ_VENUE=local`, which squiz no longer reads
+  (`"venue": "local"` in `.squiz.json` chooses the venue now),
+  `DISABLE_AUTOUPDATER=1`, the
   logging `gh` first on `PATH`, and `claude --plugin-dir
   /Users/jacy/Documents/Dev/squiz-plugin --permission-mode auto --debug-file
   <file>` under `caffeinate -i`. Input was typed with `herdr pane send-text`
