@@ -17,6 +17,14 @@ directory the layout does not have.
 the release's version bumps it. Every other pull request leaves it alone, so
 that two of them never conflict on the version line.
 
+## Configuration
+
+**When adding a setting, put it in `.squiz.json`, not in an environment
+variable.** Every squiz process reads `.squiz.json`, so the hook, the round host
+and the commands all see the same value. A variable is easy to forget, and
+reaches only the processes its run started. § 10 Configuration of the
+specification lists the settings.
+
 ## Notes
 
 **Load the `skills:writing-notes` skill before writing or editing anything under
