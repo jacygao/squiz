@@ -171,7 +171,7 @@ function leaveOutWorktrees(
     .filter((path) => isWorktreeOf(join(worktree, path), commonDirectory));
   if (worktrees.length === 0) return undefined;
 
-  const listed = runGit(worktree, ["--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", base, "--", ...worktrees], {
+  const listed = runGit(worktree, ["--literal-pathspecs", "ls-tree", "-r", "-t", "-z", "--name-only", base, "--", ...worktrees], {
     until,
     env,
   });

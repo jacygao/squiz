@@ -467,3 +467,18 @@ test("a worktree of the same repository at a gitlink the base has stays, so the 
     );
   });
 });
+
+test("a worktree of the same repository where the base has a directory stays, so the change shows what replaced it (#825)", async () => {
+  await withFixture(async ({ agent, local, base }) => {
+    await mkdir(join(agent, "replaced"));
+    await writeFile(join(agent, "replaced", "file.txt"), "a directory\n");
+    const tracked = commit(agent, "the base, with a directory where the worktree will be");
+    // With the directory's files still in the index, `git add --all` takes the
+    // worktree's files rather than a gitlink.
+    git(agent, ["rm", "-r", "--quiet", "replaced"]);
+    git(agent, ["worktree", "add", "--quiet", "--detach", "replaced", base]);
+
+    const head = builtHead(buildHead(agent, tracked, deadlineIn(30_000)));
+    assert.match(treeOf(agent, local, head), new RegExp(`^160000 commit ${base}\treplaced$`, "mu"));
+  });
+});
