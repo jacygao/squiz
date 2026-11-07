@@ -676,6 +676,8 @@ type Change = {
   readonly name: string;
   /** The command that reviews it again, from anywhere: "squiz review 41", or "cd '/work/squiz-a' && squiz review". */
   readonly rerun: string;
+  /** Where the summary is, as a message says it: "on the pull request", or "in /work/squiz-a/.squiz/local/summary.md". */
+  readonly summaryAt: string;
   /**
    * The paragraph after the open threads, in a note and in `squiz review`'s
    * output: what to fix, how to reply, and what to run next.
@@ -767,7 +769,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 
 | Member | In the GitHub venue |
 |---|---|
-| `key`, `name`, `rerun` | The pull request's number, `PR #41`, `squiz review 41` |
+| `key`, `name`, `rerun`, `summaryAt` | The pull request's number, `PR #41`, `squiz review 41`, `on the pull request` |
 | `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
 | `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
@@ -791,7 +793,7 @@ writes becomes part of the change.
 | Its description | `.squiz/local/description.md`, else none |
 | `.squiz/<number>/` | `.squiz/local/`. `Change.key` is `local`, and `episodeDirectory` fails for any other key. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
-| The summary comment | `summary.md` |
+| The summary comment | `summary.md`. `Change.summaryAt` is `in` and its path, such as `in /work/squiz-a/.squiz/local/summary.md`. |
 | A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written |
 | `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but `local`. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |

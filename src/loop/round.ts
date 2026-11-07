@@ -431,7 +431,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   // rounds that each read the state before the other wrote would both pass the
   // cap, both review, and keep only one of their costs.
   const locked: Step<HostLock> =
-    setup.held === undefined ? lockOf(episode, key) : { step: setup.held.lock };
+    setup.held === undefined ? lockOf(episode, change) : { step: setup.held.lock };
   if ("ended" in locked) return locked.ended;
   opened.held = { lock: locked.step, owned: setup.held === undefined };
 
@@ -817,18 +817,18 @@ function gate(venue: Venue, call: PreReview): Step<Change> {
  * A holder that might still be running is never taken for gone, so a lock that
  * cannot be read runs no review either.
  */
-function lockOf(episode: Episode, key: string): Step<HostLock> {
+function lockOf(episode: Episode, change: Change): Step<HostLock> {
   const taking = takeEpisodeHostLock(episode, { boundMs: LOCK_BOUND_MS });
   switch (taking.outcome) {
     case "taken":
       return { step: taking.lock };
     case "held":
-      return { ended: { outcome: "round-running", key } };
+      return { ended: { outcome: "round-running", key: change.key } };
     case "unknown":
       return {
         ended: failed(
           "harness",
-          `no review ran: whether a round is already running on PR #${key} could not be told: ${taking.reason}`,
+          `no review ran: whether a round is already running on ${change.name} could not be told: ${taking.reason}`,
         ),
       };
   }

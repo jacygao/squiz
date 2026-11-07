@@ -16,12 +16,14 @@ import { renderComment } from "../findings/comment.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
-import type { Episode } from "../loop/episode.ts";
+import { episodeAt, type Episode } from "../loop/episode.ts";
 import { githubEpisode } from "../testing/episode.ts";
 import type { StateKey, StateRecord } from "../loop/state-record.ts";
 import type { TriggerDecision } from "../loop/trigger-decision.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { githubVenue } from "../venues/github/venue.ts";
+import { LOCAL_KEY, localVenue } from "../venues/local/venue.ts";
+import type { Printed } from "./output.ts";
 import { runReview, type ReviewRequest } from "./review.ts";
 
 const NUMBER = 41;
@@ -75,6 +77,7 @@ const CHANGE: Change = {
   key: String(NUMBER),
   name: `PR #${NUMBER}`,
   rerun: `squiz review ${NUMBER}`,
+  summaryAt: "on the pull request",
   followUp: [
     "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
     "what you changed or why you disagree. Commit and push what you changed, then run",
@@ -918,4 +921,171 @@ test("a round host whose start is unknown, with the deadline passed and no host 
     assert.equal(printed.exit, 1);
     assert.match(printed.stderr, /could not be told, and none has taken the review since/u);
   });
+});
+
+/** The working tree as the local venue reads it, at the run's own head. */
+const WORKING_TREE: Change = {
+  key: LOCAL_KEY,
+  name: "the working tree",
+  rerun: "cd '/work/squiz-a' && squiz review",
+  summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
+  followUp: "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.",
+  base: CHANGE.base,
+  head: OWN.head,
+  description: "",
+};
+
+type LocalRun = {
+  readonly until?: Deadline;
+  readonly threads?: readonly ReviewThread[];
+  readonly listThreads?: Venue["listThreads"];
+  readonly host?: HostStart;
+  readonly hostStartMs?: number;
+};
+
+/** A run under the local venue, in a worktree whose one episode holds `held`, on a trigger that decided `decision`. */
+async function localReview(
+  held: readonly StateRecord[],
+  more: Partial<EpisodeState>,
+  decision: TriggerDecision,
+  run: LocalRun = {},
+): Promise<Printed> {
+  const worktree = realpathSync(mkdtempSync(join(tmpdir(), "squiz-review-local-")));
+  try {
+    const made = spawnSync("git", ["init", "--quiet", "--initial-branch", "feature-a"], { cwd: worktree });
+    assert.equal(made.status, 0);
+    writeFileSync(join(worktree, ".squiz.json"), "{}");
+    const found = episodeAt(localVenue, worktree, LOCAL_KEY);
+    assert.ok(found.outcome === "found", "the local venue must name the episode");
+    records({ worktree, episode: found.episode }, held, more);
+    const triggered: Triggered = {
+      outcome: "decided",
+      change: WORKING_TREE,
+      episode: found.episode,
+      state: OWN,
+      threads: run.threads ?? [],
+      decision,
+      queued: decision.outcome === "queue",
+      host: run.host ?? { outcome: "not started" },
+    };
+    const listThreads = run.listThreads ?? (() => ({ outcome: "listed" as const, threads: run.threads ?? [] }));
+    return await runReview({
+      directory: worktree,
+      key: LOCAL_KEY,
+      environment: {},
+      until: run.until ?? deadlineIn(10_000),
+      pollMs: POLL_MS,
+      trigger: () => triggered,
+      venue: { ...venueListing(listThreads), episodeDirectory: localVenue.episodeDirectory },
+      ...(run.hostStartMs === undefined ? {} : { hostStartMs: run.hostStartMs }),
+    });
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+}
+
+/** `printed` says `line`, and names no pull request anywhere. */
+function callsItTheWorkingTree(printed: Printed, line: string): void {
+  const all = printed.stdout + printed.stderr;
+  assert.doesNotMatch(all, /PR #/u, `the output names a pull request:\n${all}`);
+  assert.ok(all.includes(line), `the output does not say ${JSON.stringify(line)}:\n${all}`);
+}
+
+test("#820: a round's heading and its unposted findings under the local venue name the working tree", async () => {
+  const printed = await localReview(
+    [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, unposted: { failed: 1, of: 2 }, round: ran(1) }],
+    { rounds: [ROUND] },
+    { outcome: "in-hand" },
+    { threads: [OPEN_THREAD] },
+  );
+
+  assert.equal(printed.exit, 2, printed.stderr);
+  callsItTheWorkingTree(printed, "Squiz reviewed the working tree at 3f9c2e0: round 1 of 3, 1 new finding.");
+  callsItTheWorkingTree(printed, "round 1 could not post 1 of its 2 findings to the working tree");
+});
+
+test("#820: a close at the cap that left the run's state unreviewed names the working tree on both its lines", async () => {
+  const printed = await localReview(
+    [
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(3) },
+      { ...OWN, status: "not reviewed", reason: "the episode closed at the round cap, after reviewing 8d21a4f" },
+    ],
+    { closeReported: true, rounds: [ROUND, ROUND, ROUND] },
+    { outcome: "in-hand" },
+  );
+
+  assert.equal(printed.exit, 0, printed.stderr);
+  callsItTheWorkingTree(printed, "Squiz reviewed the working tree at 8d21a4f: round 3 of 3, no new findings.");
+  callsItTheWorkingTree(printed, "Squiz did not review the working tree at 3f9c2e0: the episode closed at the round cap");
+});
+
+test("#820: a run still waiting at its deadline under the local venue names the working tree", async () => {
+  const printed = await localReview([reviewing(OWN)], {}, { outcome: "in-hand" }, { until: deadlineIn(POLL_MS * 5) });
+
+  assert.equal(printed.exit, 4, printed.stderr);
+  callsItTheWorkingTree(printed, "Squiz is still reviewing the working tree at 3f9c2e0.");
+});
+
+test("#823: a run still waiting at its deadline under the local venue says to run the change's rerun, never squiz review local", async () => {
+  const printed = await localReview([reviewing(OWN)], {}, { outcome: "in-hand" }, { until: deadlineIn(POLL_MS * 5) });
+
+  assert.equal(printed.exit, 4, printed.stderr);
+  assert.ok(printed.stdout.includes(`Run \`${WORKING_TREE.rerun}\` again to wait for it.`), printed.stdout);
+  assert.doesNotMatch(printed.stdout, /squiz review local/u);
+});
+
+test("#820: a closed episode under the local venue names the working tree", async () => {
+  const printed = await localReview(
+    [{ ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(3) }],
+    { closeReported: true, rounds: [ROUND, ROUND, ROUND] },
+    { outcome: "closed" },
+  );
+
+  assert.equal(printed.exit, 0, printed.stderr);
+  callsItTheWorkingTree(printed, "Squiz's review of the working tree closed after 3 rounds, with nothing open.");
+});
+
+test("#820: a round host under the local venue that cannot be told running, or that stopped, is named for the working tree", async () => {
+  const unknown = await localReview([reviewing(OWN)], {}, { outcome: "host-unknown", reason: "ps did not answer within 2000ms" });
+  assert.equal(unknown.exit, 1);
+  callsItTheWorkingTree(unknown, "whether round host 4242 for the working tree is still running could not be told");
+
+  const stopped = await localReview([reviewing(OWN)], {}, { outcome: "recover", afterwards: { outcome: "start-host" } });
+  assert.equal(stopped.exit, 1);
+  callsItTheWorkingTree(stopped, "round host 4242 for the working tree stopped before its round ended");
+});
+
+test("#820: threads that cannot be listed under the local venue are named for the working tree", async () => {
+  const printed = await localReview(
+    [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(1) }],
+    { rounds: [ROUND] },
+    { outcome: "in-hand" },
+    { listThreads: () => ({ outcome: "failed", reason: "the record could not be read" }) },
+  );
+
+  assert.equal(printed.exit, 1);
+  callsItTheWorkingTree(printed, "the threads on the working tree could not all be listed");
+});
+
+test("#820: a round host whose start is unknown under the local venue is named for the working tree", async () => {
+  const printed = await localReview(
+    [queued(OWN)],
+    {},
+    { outcome: "queue", startHost: true },
+    { host: { outcome: "unknown", reason: UNKNOWN_START }, hostStartMs: 200 },
+  );
+
+  assert.equal(printed.exit, 1);
+  callsItTheWorkingTree(printed, "whether the round host for the working tree started could not be told");
+});
+
+test("#820: a state no round took, with the episode open, is named for the working tree", async () => {
+  const printed = await localReview(
+    [{ ...OWN, status: "not reviewed", reason: "the reviewer was never configured" }],
+    {},
+    { outcome: "in-hand" },
+  );
+
+  assert.equal(printed.exit, 1);
+  callsItTheWorkingTree(printed, "the working tree at 3f9c2e0 was not reviewed: the reviewer was never configured");
 });

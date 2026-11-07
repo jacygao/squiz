@@ -91,9 +91,14 @@ export function setResolved(directory: string, threadId: string, isResolved: boo
   return change(directory, what, options, (record) => onThread(record, threadId, (thread) => ({ ...thread, isResolved })));
 }
 
+/** Where `writeSummary` writes the summary in `directory`. */
+export function summaryPath(directory: string): string {
+  return join(directory, SUMMARY_FILE);
+}
+
 /** Write `body` as `summary.md`, whole, in place of any summary before it. */
 export function writeSummary(directory: string, body: string, until: Deadline): Posting {
-  const path = join(directory, SUMMARY_FILE);
+  const path = summaryPath(directory);
   if (until.passed()) return failed(`${path} was not written: the deadline had passed`);
   const written = writeWhole(path, body);
   return written.outcome === "written" ? { outcome: "posted" } : written;

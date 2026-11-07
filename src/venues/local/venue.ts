@@ -16,7 +16,7 @@ import { worktreeToplevel } from "../../worktree/toplevel.ts";
 import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venue.ts";
 import { localDirectory, readBase, recordBase } from "./base.ts";
 import { buildHead, provideCommits } from "./head.ts";
-import { addReply, listThreads, openThread, setResolved, writeFailure, writeSummary, type NewAnchor, type Opened } from "./record.ts";
+import { addReply, listThreads, openThread, setResolved, summaryPath, writeFailure, writeSummary, type NewAnchor, type Opened } from "./record.ts";
 
 /** The one key the local venue names an episode by. */
 export const LOCAL_KEY = "local";
@@ -96,6 +96,7 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
     key: LOCAL_KEY,
     name: "the working tree",
     rerun: `cd ${quoted} && squiz review`,
+    summaryAt: `in ${summaryPath(localDirectory(root))}`,
     followUp: [
       `Fix what applies in ${root}, and reply on each thread with`,
       `\`cd ${quoted} && squiz reply <id> <text>\` to say what you changed or why`,

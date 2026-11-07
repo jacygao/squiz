@@ -130,7 +130,7 @@ function indexCopies(local: string): readonly string[] {
 }
 
 function changeOf(base: string, head: string): Change {
-  return { key: "k", name: "the working tree", rerun: "squiz review", followUp: "", base, head, description: "" };
+  return { key: "k", name: "the working tree", rerun: "squiz review", summaryAt: "in .squiz/local/summary.md", followUp: "", base, head, description: "" };
 }
 
 test("two builds of an unchanged worktree are the same commit, whatever the clock, identity and config say", async () => {

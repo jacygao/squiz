@@ -255,6 +255,7 @@ function post(findings: readonly Finding[], against = diff): PostedFindings {
       key: String(PULL_REQUEST),
       name: `PR #${PULL_REQUEST}`,
       rerun: `squiz review ${PULL_REQUEST}`,
+      summaryAt: "on the pull request",
       followUp: "",
       base: HEAD_SHA,
       head: HEAD_SHA,

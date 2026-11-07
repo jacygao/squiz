@@ -23,6 +23,8 @@ export type Change = {
   readonly name: string;
   /** The command that reviews it again, from anywhere: "squiz review 41", or "cd '/work/squiz-a' && squiz review". */
   readonly rerun: string;
+  /** Where the summary is, as a message says it: "on the pull request", or "in /work/squiz-a/.squiz/local/summary.md". */
+  readonly summaryAt: string;
   /**
    * The paragraph after the open threads, in a note and in `squiz review`'s
    * output: what to fix, how to reply, and what to run next.
