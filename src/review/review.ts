@@ -132,7 +132,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
   if (first.outcome !== "decided") return notRun(first.reason);
 
   let triggered = first;
-  let context: Context = { key, cap, own: first.state, followUp: first.change.followUp };
+  let context: Context = { key, name: first.change.name, rerun: first.change.rerun, cap, own: first.state, followUp: first.change.followUp };
   const read = (): EpisodeState | string => {
     const found = readState(episode);
     if (found.outcome === "unreadable") return found.reason;
@@ -156,14 +156,15 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         return print(closedResult(context, state, threads));
       }
       case "host-unknown":
-        return notRun(`whether ${hostNamed()} for PR #${key} is still running could not be told: ${decision.reason}`);
+        return notRun(`whether ${hostNamed()} for ${context.name} is still running could not be told: ${decision.reason}`);
       case "recover":
         // Nothing here recovers the round, so the run reports it killed, which is
         // what its record reads as. A new commit or reply is a state it never held.
         return print({
           outcome: "failed",
           key,
-          reason: `${hostNamed()} for PR #${key} stopped before its round ended`,
+          name: context.name, rerun: context.rerun,
+          reason: `${hostNamed()} for ${context.name} stopped before its round ended`,
           items: [],
         });
       case "result": {
@@ -201,7 +202,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       if (settled.kind === "result") return print(settled.result);
       const listed = venue.listThreads(triggered.change, until.remaining() < READ_BACK_FLOOR_MS ? deadlineIn(READ_BACK_FLOOR_MS) : until);
       if (listed.outcome !== "listed") {
-        const reason = `the threads on PR #${key} could not all be listed to print the review of ${context.own.head.slice(0, 7)}: ${listed.reason}`;
+        const reason = `the threads on ${context.name} could not all be listed to print the review of ${context.own.head.slice(0, 7)}: ${listed.reason}`;
         return unprinted(reason);
       }
       return finish(settled, listed.threads);
@@ -215,7 +216,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
       }
       triggered = again;
-      context = { ...context, followUp: again.change.followUp };
+      context = { ...context, name: again.change.name, rerun: again.change.rerun, followUp: again.change.followUp };
       // A trigger that read a state other than the one the record names waits on what it read.
       if (!sameState(again.state, unqueued)) context = { ...context, own: again.state };
       const acted = decided();
@@ -236,7 +237,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       return print({
         outcome: "not run",
         key,
-        reason: `whether the round host for PR #${key} started could not be told, and none has taken the review since: ${startUnknown}`,
+        reason: `whether the round host for ${context.name} started could not be told, and none has taken the review since: ${startUnknown}`,
         problems: [`\`squiz status ${key}\` shows whether one takes it later, and ${relative(episode.worktree, join(episode.directory, "host.log"))} holds what the host wrote`],
       });
     }
@@ -275,6 +276,8 @@ function hostRunning(
 
 type Context = {
   readonly key: string;
+  readonly name: Change["name"];
+  readonly rerun: Change["rerun"];
   readonly cap: number;
   readonly own: StateKey;
   readonly followUp: Change["followUp"];
@@ -313,7 +316,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
     case "failed":
       return {
         kind: "result",
-        result: { outcome: "failed", key: waiting.key, reason: record.reason, items: record.lines ?? [] },
+        result: { outcome: "failed", key: waiting.key, name: waiting.name, rerun: waiting.rerun, reason: record.reason, items: record.lines ?? [] },
       };
     case "reviewed":
       if (record.result === "exited") return compose((threads) => roundResult(waiting, state, record, threads));
@@ -376,7 +379,7 @@ function notReviewed(
     return compose((threads) => roundResult(waiting, state, closing, threads, { state: name, closedAt }));
   }
   if (state.closeReported === true) return closed(waiting, state);
-  const reason = `PR #${waiting.key} at ${record.head.slice(0, 7)} was not reviewed: ${record.reason}`;
+  const reason = `${waiting.name} at ${record.head.slice(0, 7)} was not reviewed: ${record.reason}`;
   return { kind: "result", result: { outcome: "not run", key: waiting.key, reason } };
 }
 
@@ -404,6 +407,7 @@ function closedUnreviewed(
   return {
     outcome: "closed unreviewed",
     key: waiting.key,
+    name: waiting.name, rerun: waiting.rerun,
     exit: closed.exitStatus,
     state: names[left.findIndex((held) => sameState(held, record))] ?? record.head.slice(0, 7),
     reason: record.reason,
@@ -449,7 +453,7 @@ function roundResult(
   const lost =
     unposted === undefined
       ? []
-      : [`round ${round} could not post ${unposted.failed} of its ${unposted.of} findings to PR #${waiting.key}`];
+      : [`round ${round} could not post ${unposted.failed} of its ${unposted.of} findings to ${waiting.name}`];
   // A round that left the episode open posted no summary, so stderr is where the
   // coding agent working it reads what no thread holds.
   const unthreaded = (record.unthreaded ?? []).map((note) => `round ${round} raised this on no thread: ${note}`);
@@ -457,6 +461,7 @@ function roundResult(
   const base = {
     outcome: "reviewed" as const,
     key: waiting.key,
+    name: waiting.name, rerun: waiting.rerun,
     commit: record.head.slice(0, 7),
     round,
     cap: waiting.cap,
@@ -495,6 +500,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
   return {
     outcome: "closed",
     key: context.key,
+    name: context.name, rerun: context.rerun,
     exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
     rounds: state.rounds.length,
     threads: left,
@@ -506,7 +512,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
 function stillReviewing(context: Context, records: readonly StateRecord[]): ReviewResult {
   const record = recordFor(records, context.own);
   const commit = context.own.head.slice(0, 7);
-  const about = { outcome: "reviewing" as const, key: context.key };
+  const about = { outcome: "reviewing" as const, key: context.key, name: context.name, rerun: context.rerun };
   const underway = records.find((held) => held.status === "reviewing" && !sameState(held, context.own));
   if (record?.status === "queued" && underway !== undefined) {
     return { ...about, wait: "queued", commit, reviewing: underway.head.slice(0, 7) };

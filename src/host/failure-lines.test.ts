@@ -28,7 +28,7 @@ test("a failed round names each reason the reviewer gave that could not be poste
       unappliedNotes: [],
       unpostedReplyNotes: [],
     },
-  });
+  }, { name: "PR #41" });
 
   assert.deepEqual(lines, [
     "the reviewer's reply on thread PRRT_lost could not be posted: GitHub could not be reached",
@@ -53,7 +53,7 @@ test("a failed round names each ruling it could not apply, with what the reviewe
       unappliedNotes: [],
       unpostedReplyNotes: [],
     },
-  });
+  }, { name: "PR #41" });
 
   assert.deepEqual(lines, [
     "the reviewer ruled thread PRRT_refused fixed, and it could not be resolved: GitHub answered 502",

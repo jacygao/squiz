@@ -2003,3 +2003,59 @@ test("a venue that finds no change here runs no reviewer, posts nothing, and rec
   assert.equal(record.reason, "no review ran: the fake venue has nothing here");
 });
 
+/** `fakeVenue`, with the change it finds named the way the local venue names its own. */
+function workingTreeVenue(failing: Partial<Venue> = {}): Venue {
+  const { venue } = fakeVenue(failing);
+  return {
+    ...venue,
+    readChange: (worktree, asked, until) => {
+      const found = venue.readChange(worktree, asked, until);
+      return found.outcome === "found" ? { ...found, change: { ...found.change, name: "the working tree" } } : found;
+    },
+  };
+}
+
+test("#820: the note and host.log for a round on a change named the working tree call it that, never PR #", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, MAIN)],
+    findings: [[finding("The name says nothing.")]],
+    // An empty listing never holds the thread the round opens, so host.log says so.
+    round: { venue: workingTreeVenue({ listThreads: () => ({ outcome: "listed", threads: [] }) }) },
+  });
+
+  const short = ran.firstHead.slice(0, 7);
+  const text = onlyNote(ran, MAIN)["text"] ?? "";
+  assert.equal(text, `Squiz reviewed the working tree at ${short}: 1 thread is open. Run \`squiz review ${PULL_REQUEST}\` to read it.`);
+  assert.match(ran.log, new RegExp(`${short}.*: none of the threads the round left open is open on the working tree, so its note points to squiz review`, "u"));
+  assert.doesNotMatch(text + ran.log, /PR #/u);
+});
+
+test("#820: a failed round on a change named the working tree says where its failure comment went by that name", async () => {
+  const ran = await host({
+    records: atHead,
+    findings: [[finding("The flag is never read")]],
+    round: {
+      venue: workingTreeVenue({
+        openThread: () => ({ outcome: "failed", reason: "the venue would not take the thread" }),
+        postFailure: () => ({ outcome: "failed", reason: "the venue would not take the comment" }),
+      }),
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.lines?.at(-1), "the failure could not be posted on the working tree: the venue would not take the comment");
+});
+
+test("#820: a close on a change named the working tree whose summary was refused records the refusal by that name", async () => {
+  const ran = await host({
+    records: atHead,
+    config: { rounds: 1 },
+    round: { venue: workingTreeVenue({ postSummary: () => ({ outcome: "failed", reason: "the venue would not take the summary" }) }) },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed", `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(record.problems, ["the review of the working tree closed without its summary: the venue would not take the summary"]);
+});
+

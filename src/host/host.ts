@@ -256,6 +256,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
         const result = resultOf(
           conclusion,
+          episodeChange(episode, change),
           ended,
           round.record,
           { number: round.number, startedAt, endedAt: nowSeconds() },
@@ -327,6 +328,7 @@ async function noteOwners(
   read?: { readonly venue: Venue; readonly change: Change },
 ): Promise<void> {
   const notes = join(episode.directory, "notes");
+  const change = episodeChange(episode, read?.change);
   // Listed once for all the notes, and only where one prints threads.
   let listing: Listing | undefined;
   for (const { record, name, closed } of recorded) {
@@ -336,9 +338,9 @@ async function noteOwners(
     }
     const threads = listed !== undefined && "threads" in listed ? listed.threads : undefined;
     if (threads !== undefined && record.status === "reviewed" && record.result === "exited" && threadsToPrint(record.openThreads, threads).length === 0) {
-      log(`${named(record)}: none of the threads the round left open is open on PR #${episode.key}, so its note points to squiz review`);
+      log(`${named(record)}: none of the threads the round left open is open on ${change.name}, so its note points to squiz review`);
     }
-    const note = ownerNote(episode.key, record, name, read?.change.followUp ?? "", closed, threads);
+    const note = ownerNote(change, record, name, read?.change.followUp ?? "", closed, threads);
     if (note === undefined) continue;
     const written = writeNote(notes, note.sessionId, note.fields);
     if (written.outcome === "failed") {
@@ -355,6 +357,18 @@ async function noteOwners(
     else if (woken.outcome === "already delivered") log(`${named(record)}: its note was delivered before the host could post it`);
     else log(`${named(record)}: did not wake its owner: ${woken.reason}`);
   }
+}
+
+/**
+ * The episode's change as its records and notes name it: the change the round
+ * read, where it read the episode's own.
+ *
+ * Where it read none, or another, the venue has named nothing, and the name and
+ * the rerun are made from the key alone, as a pull request's would be.
+ */
+function episodeChange(episode: Episode, read: Change | undefined): Pick<Change, "key" | "name" | "rerun"> {
+  if (read !== undefined && read.key === episode.key) return read;
+  return { key: episode.key, name: `PR #${episode.key}`, rerun: `squiz review ${episode.key}` };
 }
 
 type Listing = { readonly threads: readonly ReviewThread[] } | { readonly reason: string };
@@ -392,6 +406,7 @@ type Result = {
  */
 function resultOf(
   conclusion: RoundConclusion,
+  change: Pick<Change, "name">,
   ended: RoundEnd | undefined,
   taken: QueuedRecord,
   timing: Timing,
@@ -403,7 +418,7 @@ function resultOf(
     case "clean, episode open":
     case "close": {
       if (conclusion.outcome === "close" && conclusion.beforeReview !== undefined) {
-        return closedUnreviewed(conclusion, conclusion.beforeReview.openThreads, taken);
+        return closedUnreviewed(conclusion, change, conclusion.beforeReview.openThreads, taken);
       }
       if (ended === undefined) {
         // A round that reviewed always asks for its end, so only a defect reaches this.
@@ -415,7 +430,7 @@ function resultOf(
         };
       }
       const round = { ...timing, reviewer: reviewer ?? UNREPORTED };
-      const report = reportOf(conclusion, ended);
+      const report = reportOf(conclusion, change, ended);
       const reviewed: Recorded = {
         record: { ...ended.record, round, ...report },
         name: taken.head.slice(0, 7),
@@ -434,7 +449,7 @@ function resultOf(
       const record = { ...notReviewed(key, reason), supersededBy: by };
       const line = `${named(taken)} not reviewed: ${reason}`;
       if (conclusion.closing === undefined) return { records: () => inOrder([record]), line, problems: [] };
-      const problems = summaryProblems(conclusion.key, conclusion.closing.summary);
+      const problems = summaryProblems(change, conclusion.closing.summary);
       return {
         // The clean round the pull request returned to closed the episode, so its
         // record becomes the close, and its owner is told.
@@ -466,9 +481,9 @@ function resultOf(
     case "failed":
     case "no-pull-request":
     case "round-running": {
-      const reason = failureOf(conclusion);
+      const reason = failureOf(conclusion, change);
       const round = reviewer === undefined ? timing : { ...timing, reviewer };
-      const lines = conclusion.outcome === "failed" ? failureLinesOf(conclusion) : [];
+      const lines = conclusion.outcome === "failed" ? failureLinesOf(conclusion, change) : [];
       const failed = { ...failedRecord(key, reason), round, ...(lines.length === 0 ? {} : { lines }) };
       const closed = conclusion.outcome === "failed" ? conclusion.closed : undefined;
       return {
@@ -486,12 +501,13 @@ function resultOf(
  */
 function closedUnreviewed(
   conclusion: Extract<RoundConclusion, { readonly outcome: "close" }>,
+  change: Pick<Change, "name">,
   openThreads: readonly string[],
   taken: QueuedRecord,
 ): Result {
   const bound = conclusion.because === "token-bound" ? "token-bound" : "round-cap";
   const reason = closedBeforeReview(bound);
-  const problems = summaryProblems(conclusion.key, conclusion.summary);
+  const problems = summaryProblems(change, conclusion.summary);
   const closed: ClosedBeforeReview = {
     exitStatus: openThreads.length === 0 ? 0 : 3,
     openThreads,
@@ -509,20 +525,21 @@ function closedUnreviewed(
 }
 
 /** The line `squiz review` prints on stderr for a close with no summary on the pull request, or none. */
-function summaryProblems(key: string, summary: EpisodeSummary): readonly string[] {
+function summaryProblems(change: Pick<Change, "name">, summary: EpisodeSummary): readonly string[] {
   if (summary.outcome === "posted") return [];
-  return [`the review of PR #${key} closed without its summary: ${summary.reason}`];
+  return [`the review of ${change.name} closed without its summary: ${summary.reason}`];
 }
 
 /** What a round that reviewed did beside its result, as `squiz review` prints it. */
 function reportOf(
   conclusion: Extract<RoundConclusion, { readonly outcome: "block" | "clean, episode open" | "close" }>,
+  change: Pick<Change, "name">,
   ended: RoundEnd,
 ): RoundReport & { readonly closedAt?: ClosingBound } {
   const problems = [
     ...unpostedReasons(conclusion.verdicts),
     ...unappliedRulings(conclusion.verdicts),
-    ...(conclusion.outcome === "close" ? summaryProblems(conclusion.key, conclusion.summary) : []),
+    ...(conclusion.outcome === "close" ? summaryProblems(change, conclusion.summary) : []),
   ];
   // Only a close that left threads open is printed with its bound.
   const bound = ended.outcome === "closed" && ended.record.result === "exited" && ended.record.exitStatus === 3 ? ended.because : undefined;
@@ -541,22 +558,28 @@ function reportOf(
 }
 
 /** Where a failed round's comment went, as `squiz review` prints it after the reason. */
-export function failureLinesOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>): readonly string[] {
+export function failureLinesOf(
+  conclusion: Extract<RoundConclusion, { readonly outcome: "failed" }>,
+  change: Pick<Change, "name">,
+): readonly string[] {
   const comment = conclusion.failureComment;
   const went =
     comment === undefined
       ? []
       : [
           comment.posting.outcome === "posted"
-            ? `the failure is posted on PR #${comment.key}`
-            : `the failure could not be posted on PR #${comment.key}: ${comment.posting.reason}`,
+            ? `the failure is posted on ${change.name}`
+            : `the failure could not be posted on ${change.name}: ${comment.posting.reason}`,
         ];
   const verdicts = conclusion.salvaged?.verdicts;
   return [...(verdicts === undefined ? [] : [...unpostedReasons(verdicts), ...unappliedRulings(verdicts)]), ...went];
 }
 
 /** Why a round that reviewed nothing for its state failed. */
-function failureOf(conclusion: Extract<RoundConclusion, { readonly outcome: "failed" | "no-pull-request" | "round-running" }>): string {
+function failureOf(
+  conclusion: Extract<RoundConclusion, { readonly outcome: "failed" | "no-pull-request" | "round-running" }>,
+  change: Pick<Change, "name">,
+): string {
   switch (conclusion.outcome) {
     case "failed":
       return conclusion.reason;
@@ -564,7 +587,7 @@ function failureOf(conclusion: Extract<RoundConclusion, { readonly outcome: "fai
       return `no review ran: ${conclusion.reason}`;
     case "round-running":
       // The round runs under the host's own lock, so only a defect reaches this.
-      return `no review ran: a round is already running on PR #${conclusion.key}`;
+      return `no review ran: a round is already running on ${change.name}`;
   }
 }
 

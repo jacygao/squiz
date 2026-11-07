@@ -34,8 +34,11 @@ type About = {
   readonly problems?: readonly string[];
 };
 
+/** A result whose lines name the change, and the command that reviews it again. */
+type Named = About & { readonly name: Change["name"]; readonly rerun: Change["rerun"] };
+
 /** A round's result: the state it reviewed, and what it left open. */
-type RoundResult = About & {
+type RoundResult = Named & {
   readonly outcome: "reviewed";
   /** The head commit the round reviewed, as printed. */
   readonly commit: string;
@@ -81,13 +84,13 @@ type ClosedOpen = RoundResult & {
  * - `superseded`: the pull request moved on to `reviewing` before a round took
  *   the run's state.
  */
-type StillReviewing = About & { readonly outcome: "reviewing" } & (
+type StillReviewing = Named & { readonly outcome: "reviewing" } & (
     | { readonly wait: "under review"; readonly commit: string }
     | { readonly wait: "queued" | "clean" | "superseded"; readonly commit: string; readonly reviewing: string }
   );
 
 /** A run on an episode whose close is already recorded, exiting as the close did. */
-type AlreadyClosed = About & {
+type AlreadyClosed = Named & {
   readonly outcome: "closed";
   readonly exit: 0 | 3;
   readonly rounds: number;
@@ -98,7 +101,7 @@ type AlreadyClosed = About & {
  * A run whose own state the episode's spent cap or token bound stopped before a
  * round took it, handed the close, exiting as the close did.
  */
-type ClosedUnreviewed = About & {
+type ClosedUnreviewed = Named & {
   readonly outcome: "closed unreviewed";
   readonly exit: 0 | 3;
   /** The run's own state, as `namedStates` names it. */
@@ -113,7 +116,7 @@ type ClosedUnreviewed = About & {
 };
 
 /** A round that failed, exit 1, with what its failure comment says and where it went. */
-type Failed = About & {
+type Failed = Named & {
   readonly outcome: "failed";
   readonly reason: string;
   /** The lines the failed round's record keeps for after the reason, one each. */
@@ -129,7 +132,7 @@ type NotRun = About & { readonly outcome: "not run"; readonly reason: string };
 type Held = About & { readonly outcome: "held"; readonly line: string };
 
 /** A round whose findings could not be posted, exit 1. */
-type Unposted = About & {
+type Unposted = Named & {
   readonly outcome: "unposted";
   readonly round: number;
   readonly findings: number;
@@ -234,7 +237,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
   const verb = result.recorded ? "already reviewed" : "reviewed";
   const findings =
     result.newFindings === 0 ? "no new findings" : counted(result.newFindings, "new finding");
-  const heading = `Squiz ${verb} PR #${result.key} at ${result.commit}: round ${result.round} of ${result.cap}, ${findings}.`;
+  const heading = `Squiz ${verb} ${result.name} at ${result.commit}: round ${result.round} of ${result.cap}, ${findings}.`;
 
   switch (result.exit) {
     case 2:
@@ -252,7 +255,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         unreviewed === undefined ? undefined : { state: unreviewed, closedAt: result.closedAt };
       return [
         withNotReviewed(heading, result, notReviewed),
-        boundReached(result.closedAt, open.length, result.key),
+        boundReached(result.closedAt, open.length, result.rerun),
         ...open.map(printedThread),
       ];
     }
@@ -265,29 +268,29 @@ const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is 
  * What a close at a bound with threads open tells the coding agent to do.
  * `summarised` is false where the close has no summary on the pull request.
  */
-function boundReached(closedAt: Bound, open: number, key: string, summarised = true): string {
+function boundReached(closedAt: Bound, open: number, rerun: string, summarised = true): string {
   if (!summarised) {
     return [
       `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open. A person takes`,
-      `it from here, so do not run \`squiz review ${key}\` again.`,
+      `it from here, so do not run \`${rerun}\` again.`,
     ].join("\n");
   }
   return [
     `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
     "is on the pull request. A person takes it from here, so do not run",
-    `\`squiz review ${key}\` again.`,
+    `\`${rerun}\` again.`,
   ].join("\n");
 }
 
 function unreviewedBlocks(result: ClosedUnreviewed): readonly string[] {
-  const heading = `Squiz did not review PR #${result.key} at ${result.state}: ${result.reason}.`;
+  const heading = `Squiz did not review ${result.name} at ${result.state}: ${result.reason}.`;
   const open = result.threads.filter((thread) => !thread.isResolved);
   if (result.exit === 0) {
     return [heading, result.summarised ? NOTHING_OPEN : "Nothing is open, and the review is closed."];
   }
   return [
     heading,
-    boundReached(result.closedAt, open.length, result.key, result.summarised),
+    boundReached(result.closedAt, open.length, result.rerun, result.summarised),
     ...open.map(printedThread),
   ];
 }
@@ -300,21 +303,20 @@ function withNotReviewed(
 ): string {
   if (notReviewed === undefined) return heading;
   const why = `the episode closed at the ${notReviewed.closedAt}, after reviewing ${result.commit}`;
-  return `${heading}\nSquiz did not review PR #${result.key} at ${notReviewed.state}: ${why}.`;
+  return `${heading}\nSquiz did not review ${result.name} at ${notReviewed.state}: ${why}.`;
 }
 
 function stillReviewing(result: StillReviewing): string {
-  const again = `Run \`squiz review ${result.key}\` again to wait for it.`;
-  const pr = `PR #${result.key}`;
+  const again = `Run \`${result.rerun}\` again to wait for it.`;
   switch (result.wait) {
     case "under review":
-      return `Squiz is still reviewing ${pr} at ${result.commit}. ${again}`;
+      return `Squiz is still reviewing ${result.name} at ${result.commit}. ${again}`;
     case "queued":
-      return `Squiz is reviewing ${pr} at ${result.reviewing} first, and ${result.commit} is next. ${again}`;
+      return `Squiz is reviewing ${result.name} at ${result.reviewing} first, and ${result.commit} is next. ${again}`;
     case "clean":
-      return `Squiz found nothing open in ${pr} at ${result.commit}, and is reviewing ${result.reviewing} before it closes the review. ${again}`;
+      return `Squiz found nothing open in ${result.name} at ${result.commit}, and is reviewing ${result.reviewing} before it closes the review. ${again}`;
     case "superseded":
-      return `Squiz is reviewing ${pr} at ${result.reviewing} instead of ${result.commit}. ${again}`;
+      return `Squiz is reviewing ${result.name} at ${result.reviewing} instead of ${result.commit}. ${again}`;
   }
 }
 
@@ -322,7 +324,7 @@ function closedBlocks(result: AlreadyClosed): readonly string[] {
   const open = result.threads.filter((thread) => !thread.isResolved);
   const left = open.length === 0 ? "nothing open" : `${counted(open.length, "thread")} open`;
   return [
-    `Squiz's review of PR #${result.key} closed after ${counted(result.rounds, "round")}, with ${left}. No round runs again in this worktree.`,
+    `Squiz's review of ${result.name} closed after ${counted(result.rounds, "round")}, with ${left}. No round runs again in this worktree.`,
     ...open.map(printedThread),
   ];
 }
@@ -335,15 +337,15 @@ function failedLines(result: Failed): string {
       ? []
       : [
           comment.posted
-            ? `the failure is posted on PR #${result.key}`
-            : `the failure could not be posted on PR #${result.key}: ${comment.reason}`,
+            ? `the failure is posted on ${result.name}`
+            : `the failure could not be posted on ${result.name}: ${comment.reason}`,
         ];
   return [`review failed: ${result.reason}`, ...result.items, ...went].map(failureLine).join("");
 }
 
 function unpostedLine(result: Unposted): string {
   const them = result.findings === 1 ? "it" : "them";
-  return `round ${result.round} found ${counted(result.findings, "finding")} and could not post ${them} to PR #${result.key}`;
+  return `round ${result.round} found ${counted(result.findings, "finding")} and could not post ${them} to ${result.name}`;
 }
 
 /**
