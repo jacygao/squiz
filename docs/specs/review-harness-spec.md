@@ -834,8 +834,10 @@ each recorded branch as it stands now.** Three kinds of recorded branch are left
 out:
 
 - **The work's own branches, which move with the work.** These are the branch the
-  worktree has checked out now, its upstream, and every remote-tracking branch of
-  the same name, such as `origin/work` for `work`.
+  worktree has checked out now, and every remote-tracking branch of the same
+  name, such as `origin/work` for `work`. An upstream of another name is kept:
+  a branch made with `git switch -c work origin/main` tracks `origin/main`, and
+  that is the branch its base follows.
 - **A branch that no longer exists.**
 - **A branch whose merge-base does not descend from the recorded commit.**
 
