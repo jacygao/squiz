@@ -105,10 +105,11 @@ export function buildHead(worktree: string, local: string, base: string, until: 
 
 function commitWorkingTree(worktree: string, base: string, env: NodeJS.ProcessEnv, until: Deadline): HeadBuild {
   // The monitor and a split index each keep state for the worktree's own
-  // index, which its copy must not share. Every command that writes the copy
-  // takes them, since a split index writes its shared part into the
-  // repository's git directory.
-  const isolated = ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false"];
+  // index, which its copy must not share, and a split index writes its shared
+  // part into the repository's git directory. A hook on writing an index runs
+  // in the worktree and can write anything. Every command that writes the
+  // copy takes all three.
+  const isolated = ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false", "-c", "core.hooksPath=/dev/null"];
   const added = runGit(worktree, [...isolated, "add", "--all"], { until, env });
   if (!added.ran) return failed(`the working tree could not be staged: ${added.reason}`);
   const tree = runGit(worktree, [...isolated, "write-tree"], { until, env });

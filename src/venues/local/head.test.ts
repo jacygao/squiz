@@ -200,6 +200,15 @@ test("a build changes nothing in a repository that splits its index", async () =
   });
 });
 
+test("a build runs none of the repository's hooks", async () => {
+  await withFixture(async ({ root, main, agent, local, base }) => {
+    const ran = join(root, "hook-ran");
+    await writeFile(join(main, ".git", "hooks", "post-index-change"), `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 });
+    builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    assert.equal(existsSync(ran), false, "the post-index-change hook ran");
+  });
+});
+
 test("the head holds what git add --all would: tracked, deleted, re-moded, relinked and untracked files, and no ignored one", async () => {
   await withFixture(({ agent, local, base }) => {
     const head = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
