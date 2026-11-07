@@ -95,6 +95,7 @@ test("the change is the working tree against its base, named for the worktree, a
   assert.equal(change.key, "local");
   assert.equal(change.name, "the working tree");
   assert.equal(change.rerun, `cd ${quoted} && squiz review`);
+  assert.equal(change.summaryAt, `in ${join(worktree, ".squiz", "local", "summary.md")}`);
   assert.equal(
     change.followUp,
     [

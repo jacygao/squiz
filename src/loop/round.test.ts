@@ -3697,6 +3697,7 @@ test("each kind of failure says the same reason on the pull request and on stder
       key: String(PULL_REQUEST),
       name: `PR #${PULL_REQUEST}`,
       rerun: `squiz review ${PULL_REQUEST}`,
+      summaryAt: "on the pull request",
       reason: ran.conclusion.reason,
       items: failureLinesOf(ran.conclusion, { name: `PR #${PULL_REQUEST}` }),
     } as const;
@@ -3769,7 +3770,7 @@ test("a failed round names each ruling it could not apply in its failure comment
     /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the thread could not be resolved\)\n- A ruling of withdrawn on thread `PRRT_invented`, which was not handed to the reviewer, was not applied$/u,
   );
   const stderr = composeReview(
-    { outcome: "failed", key: String(PULL_REQUEST), name: `PR #${PULL_REQUEST}`, rerun: `squiz review ${PULL_REQUEST}`, reason: ran.conclusion.reason, items: failureLinesOf(ran.conclusion, { name: `PR #${PULL_REQUEST}` }) },
+    { outcome: "failed", key: String(PULL_REQUEST), name: `PR #${PULL_REQUEST}`, rerun: `squiz review ${PULL_REQUEST}`, summaryAt: "on the pull request", reason: ran.conclusion.reason, items: failureLinesOf(ran.conclusion, { name: `PR #${PULL_REQUEST}` }) },
     "/unwritten",
   ).stderr;
   assert.match(

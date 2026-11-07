@@ -1887,6 +1887,7 @@ function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; reado
         key: String(PULL_REQUEST),
         name: `PR #${PULL_REQUEST}`,
         rerun: `squiz review ${PULL_REQUEST}`,
+        summaryAt: "on the pull request",
         followUp: "Fix it.",
         base: commit("HEAD^"),
         head: commit("HEAD"),
@@ -2045,6 +2046,18 @@ test("#820: a failed round on a change named the working tree says where its fai
   const [record] = recordsOf(ran.state);
   assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
   assert.equal(record.lines?.at(-1), "the failure could not be posted on the working tree: the venue would not take the comment");
+});
+
+test("#820: a failed round on a change named the working tree whose failure comment went up says so by that name", async () => {
+  const ran = await host({
+    records: atHead,
+    findings: [[finding("The flag is never read")]],
+    round: { venue: workingTreeVenue({ openThread: () => ({ outcome: "failed", reason: "the venue would not take the thread" }) }) },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.lines?.at(-1), "the failure is posted on the working tree");
 });
 
 test("#820: a close on a change named the working tree whose summary was refused records the refusal by that name", async () => {

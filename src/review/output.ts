@@ -34,8 +34,12 @@ type About = {
   readonly problems?: readonly string[];
 };
 
-/** A result whose lines name the change, and the command that reviews it again. */
-type Named = About & { readonly name: Change["name"]; readonly rerun: Change["rerun"] };
+/** A result whose lines name the change, the command that reviews it again, and where its summary is. */
+type Named = About & {
+  readonly name: Change["name"];
+  readonly rerun: Change["rerun"];
+  readonly summaryAt: Change["summaryAt"];
+};
 
 /** A round's result: the state it reviewed, and what it left open. */
 type RoundResult = Named & {
@@ -248,28 +252,30 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         result.followUp,
       ];
     case 0:
-      return [withNotReviewed(heading, result, result.notReviewed), NOTHING_OPEN];
+      return [withNotReviewed(heading, result, result.notReviewed), nothingOpen(result.summaryAt)];
     case 3: {
       const unreviewed = result.notReviewed?.state;
       const notReviewed =
         unreviewed === undefined ? undefined : { state: unreviewed, closedAt: result.closedAt };
       return [
         withNotReviewed(heading, result, notReviewed),
-        boundReached(result.closedAt, open.length, result.rerun),
+        boundReached(result.closedAt, open.length, result.rerun, result.summaryAt),
         ...open.map(printedThread),
       ];
     }
   }
 }
 
-const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is on the pull request.";
+function nothingOpen(summaryAt: string): string {
+  return `Nothing is open. The review is closed, and its summary is ${summaryAt}.`;
+}
 
 /**
  * What a close at a bound with threads open tells the coding agent to do.
- * `summarised` is false where the close has no summary on the pull request.
+ * `summaryAt` is undefined where the close has no summary.
  */
-function boundReached(closedAt: Bound, open: number, rerun: string, summarised = true): string {
-  if (!summarised) {
+function boundReached(closedAt: Bound, open: number, rerun: string, summaryAt: string | undefined): string {
+  if (summaryAt === undefined) {
     return [
       `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open. A person takes`,
       `it from here, so do not run \`${rerun}\` again.`,
@@ -277,7 +283,7 @@ function boundReached(closedAt: Bound, open: number, rerun: string, summarised =
   }
   return [
     `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
-    "is on the pull request. A person takes it from here, so do not run",
+    `is ${summaryAt}. A person takes it from here, so do not run`,
     `\`${rerun}\` again.`,
   ].join("\n");
 }
@@ -286,11 +292,11 @@ function unreviewedBlocks(result: ClosedUnreviewed): readonly string[] {
   const heading = `Squiz did not review ${result.name} at ${result.state}: ${result.reason}.`;
   const open = result.threads.filter((thread) => !thread.isResolved);
   if (result.exit === 0) {
-    return [heading, result.summarised ? NOTHING_OPEN : "Nothing is open, and the review is closed."];
+    return [heading, result.summarised ? nothingOpen(result.summaryAt) : "Nothing is open, and the review is closed."];
   }
   return [
     heading,
-    boundReached(result.closedAt, open.length, result.rerun, result.summarised),
+    boundReached(result.closedAt, open.length, result.rerun, result.summarised ? result.summaryAt : undefined),
     ...open.map(printedThread),
   ];
 }

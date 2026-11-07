@@ -79,7 +79,7 @@ const skewThread = raised(
 function reviewed(overrides: Partial<ReviewResult> & { exit: 0 | 2 | 3 }): ReviewResult {
   return {
     outcome: "reviewed",
-    key: "41", name: "PR #41", rerun: "squiz review 41",
+    key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
     commit: "3f9c2e0",
     round: 1,
     cap: 3,
@@ -275,7 +275,7 @@ test("a thread whose only comment is its first line prints as the line alone", (
 
 test("still reviewing, exit 4: the run's own state is under review", () => {
   const printed = composeReview(
-    { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", wait: "under review", commit: "3f9c2e0" },
+    { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", wait: "under review", commit: "3f9c2e0" },
     PATH,
   );
 
@@ -290,7 +290,7 @@ Squiz is still reviewing PR #41 at 3f9c2e0. Run \`squiz review 41\` again to wai
 
 test("still reviewing, exit 4: the run's state is queued behind the round of an older one", () => {
   const printed = composeReview(
-    { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", wait: "queued", commit: "8d21a4f", reviewing: "3f9c2e0" },
+    { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", wait: "queued", commit: "8d21a4f", reviewing: "3f9c2e0" },
     PATH,
   );
 
@@ -305,7 +305,7 @@ Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run \`squiz rev
 
 test("still reviewing, exit 4: the run's state was clean and a later one is under review", () => {
   const printed = composeReview(
-    { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", wait: "clean", commit: "3f9c2e0", reviewing: "8d21a4f" },
+    { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", wait: "clean", commit: "3f9c2e0", reviewing: "8d21a4f" },
     PATH,
   );
 
@@ -320,7 +320,7 @@ Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before i
 
 test("an episode already closed prints its close, exiting as the close did", () => {
   const printed = composeReview(
-    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", exit: 0, rounds: 2, threads: [] },
+    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 0, rounds: 2, threads: [] },
     PATH,
   );
 
@@ -335,11 +335,11 @@ Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs
 
 test("an episode closed after one round, with threads open, counts both in the words they need", () => {
   const one = composeReview(
-    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", exit: 3, rounds: 1, threads: [skewThread] },
+    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 3, rounds: 1, threads: [skewThread] },
     PATH,
   );
   const two = composeReview(
-    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", exit: 3, rounds: 3, threads: [backoffThread, skewThread] },
+    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 3, rounds: 3, threads: [backoffThread, skewThread] },
     PATH,
   );
 
@@ -359,7 +359,7 @@ test("a close before a round took the run's state, with a thread open, names the
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
-      key: "41", name: "PR #41", rerun: "squiz review 41",
+      key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       exit: 3,
       state: "8d21a4f",
       reason: "the episode closed at the token bound before a round took this state",
@@ -390,7 +390,7 @@ test("a close before a round took the run's state, with a thread open and its su
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
-      key: "41", name: "PR #41", rerun: "squiz review 41",
+      key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       exit: 3,
       state: "8d21a4f",
       reason: "the episode closed at the round cap before a round took this state",
@@ -415,7 +415,7 @@ test("a close before a round took the run's state, with nothing open, exits 0", 
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
-      key: "41", name: "PR #41", rerun: "squiz review 41",
+      key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       exit: 0,
       state: "8d21a4f",
       reason: "the episode closed at the round cap before a round took this state",
@@ -441,7 +441,7 @@ test("a close before any round ran, with no summary, says so on stderr and claim
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
-      key: "41", name: "PR #41", rerun: "squiz review 41",
+      key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       exit: 0,
       state: "3f9c2e0",
       reason: "the episode closed at the token bound before a round took this state",
@@ -508,7 +508,7 @@ test("exit 1 for a failed round prints nothing on stdout, and on stderr its reas
   const printed = composeReview(
     {
       outcome: "failed",
-      key: "41", name: "PR #41", rerun: "squiz review 41",
+      key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       reason: "the reviewer was stopped at the time bound of 900 seconds, after reporting 2 findings",
       items: ["the failure is posted on PR #41"],
     },
@@ -531,7 +531,7 @@ test("exit 1 for a failed round whose comment could not be posted says why", () 
     {
       outcome: "failed",
       key: "142",
-      name: "PR #142", rerun: "squiz review 142",
+      name: "PR #142", rerun: "squiz review 142", summaryAt: "on the pull request",
       reason: "the reviewer's output could not be read",
       items: [],
       comment: { posted: false, reason: "GitHub answered 502" },
@@ -553,7 +553,7 @@ test("exit 1 for a failed round with no comment named prints its reason and its 
   const printed = composeReview(
     {
       outcome: "failed",
-      key: "41", name: "PR #41", rerun: "squiz review 41",
+      key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       reason: "the round host 4242 for PR #41 stopped before its round ended",
       items: [],
     },
@@ -576,8 +576,8 @@ test("exit 1 before any round, or with findings it could not post, prints the li
     { outcome: "not run", key: "41", reason: "PR #41 is closed" },
     PATH,
   );
-  const unposted = composeReview({ outcome: "unposted", key: "41", name: "PR #41", rerun: "squiz review 41", round: 2, findings: 3 }, PATH);
-  const unpostedOne = composeReview({ outcome: "unposted", key: "41", name: "PR #41", rerun: "squiz review 41", round: 1, findings: 1 }, PATH);
+  const unposted = composeReview({ outcome: "unposted", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", round: 2, findings: 3 }, PATH);
+  const unpostedOne = composeReview({ outcome: "unposted", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", round: 1, findings: 1 }, PATH);
 
   for (const printed of [notRun, closed, unposted, unpostedOne]) {
     assert.equal(printed.exit, 1);
@@ -622,7 +622,7 @@ test("review.txt holds exactly what was printed on stdout, path line included, a
     assert.equal(await readFile(path, "utf8"), first.stdout, "the file drifted from stdout");
 
     const second = printReview(
-      { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", wait: "under review", commit: "8d21a4f" },
+      { outcome: "reviewing", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", wait: "under review", commit: "8d21a4f" },
       githubEpisode(worktree, 41),
     );
     assert.equal(await readFile(path, "utf8"), second.stdout, "the file kept an earlier run's output");
@@ -663,7 +663,12 @@ test("a review.txt that cannot be written is a stderr line, and changes neither 
 });
 
 test("#820: every result that names the change calls it by its name, so the working tree is never PR #local", () => {
-  const named = { key: "local", name: "the working tree", rerun: "cd '/work/squiz-a' && squiz review" } as const;
+  const named = {
+    key: "local",
+    name: "the working tree",
+    rerun: "cd '/work/squiz-a' && squiz review",
+    summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
+  } as const;
   const results: readonly ReviewResult[] = [
     { ...named, outcome: "reviewed", exit: 0, commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads: [], recorded: false, notReviewed: { state: "3f9c2e0", closedAt: "round cap" } },
     { ...named, outcome: "reviewing", wait: "under review", commit: "3f9c2e0" },
@@ -686,7 +691,12 @@ test("#820: every result that names the change calls it by its name, so the work
 });
 
 test("#823: every result that says to run squiz review again gives the change's own rerun, so never squiz review local", () => {
-  const named = { key: "local", name: "the working tree", rerun: "cd '/work/squiz-a' && squiz review" } as const;
+  const named = {
+    key: "local",
+    name: "the working tree",
+    rerun: "cd '/work/squiz-a' && squiz review",
+    summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
+  } as const;
   const results: readonly ReviewResult[] = [
     { ...named, outcome: "reviewed", exit: 3, closedAt: "round cap", commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads: [skewThread], recorded: false },
     { ...named, outcome: "reviewing", wait: "under review", commit: "3f9c2e0" },
@@ -698,6 +708,27 @@ test("#823: every result that says to run squiz review again gives the change's 
     const { stdout } = composeReview(result, PATH);
     assert.doesNotMatch(stdout, /squiz review local/u, `the ${result.outcome} result names the key as an argument:\n${stdout}`);
     assert.ok(stdout.includes("`cd '/work/squiz-a' && squiz review`"), `the ${result.outcome} result does not give the change's rerun:\n${stdout}`);
+  }
+});
+
+test("#820: every result that says where the summary is gives the venue's place for it, never the pull request", () => {
+  const named = {
+    key: "local",
+    name: "the working tree",
+    rerun: "cd '/work/squiz-a' && squiz review",
+    summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
+  } as const;
+  const results: readonly ReviewResult[] = [
+    { ...named, outcome: "reviewed", exit: 0, commit: "8d21a4f", round: 2, cap: 3, newFindings: 0, threads: [], recorded: false },
+    { ...named, outcome: "reviewed", exit: 3, closedAt: "round cap", commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads: [skewThread], recorded: false },
+    { ...named, outcome: "closed unreviewed", exit: 0, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [], summarised: true },
+    { ...named, outcome: "closed unreviewed", exit: 3, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [skewThread], summarised: true },
+  ];
+
+  for (const result of results) {
+    const { stdout } = composeReview(result, PATH);
+    assert.doesNotMatch(stdout, /pull request/u, `the ${result.outcome} result names a pull request:\n${stdout}`);
+    assert.match(stdout, /summary\s+is in \/work\/squiz-a\/\.squiz\/local\/summary\.md\./u, `the ${result.outcome} result does not say where the summary is:\n${stdout}`);
   }
 });
 

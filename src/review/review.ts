@@ -132,7 +132,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
   if (first.outcome !== "decided") return notRun(first.reason);
 
   let triggered = first;
-  let context: Context = { key, name: first.change.name, rerun: first.change.rerun, cap, own: first.state, followUp: first.change.followUp };
+  let context: Context = { key, name: first.change.name, rerun: first.change.rerun, summaryAt: first.change.summaryAt, cap, own: first.state, followUp: first.change.followUp };
   const read = (): EpisodeState | string => {
     const found = readState(episode);
     if (found.outcome === "unreadable") return found.reason;
@@ -163,7 +163,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         return print({
           outcome: "failed",
           key,
-          name: context.name, rerun: context.rerun,
+          name: context.name, rerun: context.rerun, summaryAt: context.summaryAt,
           reason: `${hostNamed()} for ${context.name} stopped before its round ended`,
           items: [],
         });
@@ -216,7 +216,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
       }
       triggered = again;
-      context = { ...context, name: again.change.name, rerun: again.change.rerun, followUp: again.change.followUp };
+      context = { ...context, name: again.change.name, rerun: again.change.rerun, summaryAt: again.change.summaryAt, followUp: again.change.followUp };
       // A trigger that read a state other than the one the record names waits on what it read.
       if (!sameState(again.state, unqueued)) context = { ...context, own: again.state };
       const acted = decided();
@@ -278,6 +278,7 @@ type Context = {
   readonly key: string;
   readonly name: Change["name"];
   readonly rerun: Change["rerun"];
+  readonly summaryAt: Change["summaryAt"];
   readonly cap: number;
   readonly own: StateKey;
   readonly followUp: Change["followUp"];
@@ -316,7 +317,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
     case "failed":
       return {
         kind: "result",
-        result: { outcome: "failed", key: waiting.key, name: waiting.name, rerun: waiting.rerun, reason: record.reason, items: record.lines ?? [] },
+        result: { outcome: "failed", key: waiting.key, name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt, reason: record.reason, items: record.lines ?? [] },
       };
     case "reviewed":
       if (record.result === "exited") return compose((threads) => roundResult(waiting, state, record, threads));
@@ -407,7 +408,7 @@ function closedUnreviewed(
   return {
     outcome: "closed unreviewed",
     key: waiting.key,
-    name: waiting.name, rerun: waiting.rerun,
+    name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt,
     exit: closed.exitStatus,
     state: names[left.findIndex((held) => sameState(held, record))] ?? record.head.slice(0, 7),
     reason: record.reason,
@@ -461,7 +462,7 @@ function roundResult(
   const base = {
     outcome: "reviewed" as const,
     key: waiting.key,
-    name: waiting.name, rerun: waiting.rerun,
+    name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt,
     commit: record.head.slice(0, 7),
     round,
     cap: waiting.cap,
@@ -500,7 +501,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
   return {
     outcome: "closed",
     key: context.key,
-    name: context.name, rerun: context.rerun,
+    name: context.name, rerun: context.rerun, summaryAt: context.summaryAt,
     exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
     rounds: state.rounds.length,
     threads: left,
@@ -512,7 +513,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
 function stillReviewing(context: Context, records: readonly StateRecord[]): ReviewResult {
   const record = recordFor(records, context.own);
   const commit = context.own.head.slice(0, 7);
-  const about = { outcome: "reviewing" as const, key: context.key, name: context.name, rerun: context.rerun };
+  const about = { outcome: "reviewing" as const, key: context.key, name: context.name, rerun: context.rerun, summaryAt: context.summaryAt };
   const underway = records.find((held) => held.status === "reviewing" && !sameState(held, context.own));
   if (record?.status === "queued" && underway !== undefined) {
     return { ...about, wait: "queued", commit, reviewing: underway.head.slice(0, 7) };

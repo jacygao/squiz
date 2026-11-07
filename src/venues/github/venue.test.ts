@@ -148,6 +148,7 @@ const foreign: Change = {
   key: "142",
   name: "PR #142",
   rerun: "squiz review 142",
+  summaryAt: "on the pull request",
   followUp,
   base: BASE,
   head: HEAD,

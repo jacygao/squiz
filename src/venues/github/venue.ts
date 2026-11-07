@@ -140,6 +140,7 @@ function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange
     key: String(number),
     name: `PR #${number}`,
     rerun: `squiz review ${number}`,
+    summaryAt: "on the pull request",
     followUp: followUpFor(number),
     base: pullRequest.baseSha,
     head: pullRequest.headSha,

@@ -77,6 +77,7 @@ const CHANGE: Change = {
   key: String(NUMBER),
   name: `PR #${NUMBER}`,
   rerun: `squiz review ${NUMBER}`,
+  summaryAt: "on the pull request",
   followUp: [
     "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
     "what you changed or why you disagree. Commit and push what you changed, then run",
@@ -927,6 +928,7 @@ const WORKING_TREE: Change = {
   key: LOCAL_KEY,
   name: "the working tree",
   rerun: "cd '/work/squiz-a' && squiz review",
+  summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
   followUp: "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.",
   base: CHANGE.base,
   head: OWN.head,

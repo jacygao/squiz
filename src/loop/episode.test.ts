@@ -68,6 +68,7 @@ function oneKeyVenue(tree: string, head: string, asked: { key: string; worktree:
     key: "k41",
     name: "the k41 change",
     rerun: "squiz review k41",
+    summaryAt: "on the pull request",
     followUp: "Fix it.",
     base: head,
     head,
