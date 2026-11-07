@@ -32,7 +32,7 @@ import { startDetached, type Detached } from "../sessions/detach.ts";
 import { isHerdrWorkspace } from "../sessions/herdr.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
-import { venueFor, type Change, type ReviewThread, type Venue } from "../venues/venue.ts";
+import { venueAt, type Change, type ReviewThread, type Venue } from "../venues/venue.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
 
 const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
@@ -49,7 +49,7 @@ export type TriggerRequest = {
   readonly trigger: TriggerKind;
   /** The key `squiz review` was given. A hook gives none, and reviews the change the venue finds. */
   readonly key?: string;
-  /** The venue `environment` chooses where not given. */
+  /** The venue the main worktree's `.squiz.json` names where not given. */
   readonly venue?: Venue;
   /** The session that owns the work, where the caller knows it. */
   readonly owner?: Owner;
@@ -65,7 +65,7 @@ export type TriggerRequest = {
 export type HostStart = { readonly outcome: "not started" } | Detached;
 
 export type Triggered =
-  /** The venue has no change to review here, or none could be chosen. Nothing was written. */
+  /** The venue has no change to review here. Nothing was written. */
   | { readonly outcome: "no review"; readonly reason: string }
   /**
    * The venue holds the change back, as the GitHub venue holds a draft until it
@@ -73,7 +73,7 @@ export type Triggered =
    * of one where it says nothing of a state it chose not to queue.
    */
   | { readonly outcome: "held"; readonly line: string }
-  /** What the decision needs could not be read, or the queue could not be written. Nothing was queued. */
+  /** The venue, or what the decision needs, could not be read, or the queue could not be written. Nothing was queued. */
   | { readonly outcome: "failed"; readonly reason: string }
   | {
       readonly outcome: "decided";
@@ -98,8 +98,8 @@ export function trigger(request: TriggerRequest): Triggered {
 
   let venue = request.venue;
   if (venue === undefined) {
-    const chosen = venueFor(request.environment);
-    if (chosen.outcome === "failed") return noReview(chosen.reason);
+    const chosen = venueAt(toplevel.path, until);
+    if (chosen.outcome === "failed") return failed(chosen.reason);
     venue = chosen.venue;
   }
   const lookup = venue.readChange(directory, request.key ?? null, until);

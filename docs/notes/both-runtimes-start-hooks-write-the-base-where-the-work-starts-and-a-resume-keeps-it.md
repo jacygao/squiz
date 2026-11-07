@@ -16,7 +16,7 @@ recheck-when: Claude Code or Copilot CLI changes a start hook's payload, when it
   worktree before it does any work.
 - Whether Copilot's plugin `SessionStart` and `SubagentStart` reach it the same
   way.
-- Whether, with `SQUIZ_VENUE=local`, each writes `.squiz/local/base.json`, and a
+- Whether, under the local venue, each writes `.squiz/local/base.json`, and a
   resumed session leaves it as it was.
 
 ## Decisions
@@ -103,8 +103,9 @@ In each repository, `HEAD` at the start had `main`, `extra`, `origin/main` and
 
 ### Reproducing it
 
-From a clone of a bare origin, with `SQUIZ_VENUE=local`, and the released squiz
-off: `.claude/settings.local.json` holding
+From a clone of a bare origin whose `.squiz.json` holds `{"venue": "local"}`,
+and the released squiz off. The run measured chose the venue with
+`SQUIZ_VENUE=local`, which squiz no longer reads. The release off means: `.claude/settings.local.json` holding
 `{ "enabledPlugins": { "squiz@squiz": false } }`, and
 `copilot plugin disable squiz@squiz`.
 

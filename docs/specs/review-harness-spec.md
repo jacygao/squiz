@@ -630,8 +630,8 @@ the summary and the failure comment. Squiz has two:
 
 | Venue | The change | The record | Used for |
 |---|---|---|---|
-| **GitHub** | A pull request, at its head commit | Review threads and comments on the pull request | Every review, unless `SQUIZ_VENUE` is `local` |
-| **Local** | The working tree, against the commit its work started from | Files in `.squiz/local/` in the worktree | A change with no remote and no pull request |
+| **GitHub** | A pull request, at its head commit | Review threads and comments on the pull request | Every review, unless `.squiz.json` sets `venue` to `local` |
+| **Local** | The working tree, against the commit its work started from | Files in `.squiz/local/` in the worktree | Every review where `.squiz.json` sets `venue` to `local`: a change with no remote and no pull request |
 
 § 3 describes the loop in the GitHub venue's terms. The loop is the same in
 both venues: the state file, the hooks, the queue, the round host, the owner's
@@ -640,32 +640,39 @@ what each of § 3's terms means there.
 
 ### Choosing the venue
 
-**Every squiz process chooses its venue from `SQUIZ_VENUE`, the same way.**
+**Every squiz process chooses its venue from the `venue` setting in
+`.squiz.json`**, `github` or `local`, and `github` where the file does not set
+it (§ 10 Configuration). Each process reads the `.squiz.json` of the main
+worktree of the worktree it acts on, so every worktree of a repository, a
+subagent's isolated worktree included, reviews in one venue:
 
-| `SQUIZ_VENUE` | The venue |
+| Process | The worktree it acts on |
 |---|---|
-| Unset, the empty string, or `github` | GitHub |
-| `local` | Local |
-| Anything else | None. Nothing is reviewed. |
+| The hook, at a start and at a stop | The one holding the payload's `cwd` |
+| The round host | Its episode's |
+| `squiz review`, `squiz threads`, `squiz reply`, `squiz status`, `squiz doctor` | The one holding the directory it is run in |
 
-The hook, the round host, `squiz review`, `squiz threads`, `squiz reply`,
-`squiz status` and `squiz doctor` each read the variable for themselves. A
-coding agent's hooks and shell inherit it from the run, and the round host
-inherits it from the trigger that started it, so all of them agree.
+The environment plays no part, so a round host started with nothing in its
+environment chooses the same venue as the hook that started it.
 
-A value that names no venue reviews nothing. `squiz review` exits 1 and the hook
-says why on stderr:
+**A `.squiz.json` that cannot be read chooses no venue**, and nothing is
+reviewed under GitHub in its place. So does one whose `venue` names no venue,
+which § 10 rejects as it rejects any setting outside its range. `squiz review`
+exits 1, and a hook writes the line on stderr and exits 0:
 
 ```
-squiz: no review ran: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local
+squiz: no base was recorded: /work/squiz/.squiz.json: "venue" is "lcoal", but it must be "github" or "local"
 ```
+
+A stop writes it after `squiz: nothing was queued:`, and a command after the
+words it gives any change it cannot read, such as `squiz: no threads listed:`.
 
 ### The contract
 
 **Every venue meets one interface, and nothing outside a venue asks which venue
 it has.** The loop, the round host, the hook and the commands call the venue
-they were handed. One factory, `venueFor`, reads the environment and builds the
-venue.
+they were handed. One factory, `venueFor`, builds the venue the settings name,
+and `venueAt` reads the settings for a directory and calls it.
 
 ```ts
 /** The change under review. */
@@ -735,8 +742,11 @@ interface Venue {
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }
 
-function venueFor(environment: NodeJS.ProcessEnv):
-  | { readonly outcome: "chosen"; readonly venue: Venue }
+function venueFor(config: Config): Venue;
+
+/** The venue the `.squiz.json` of `directory`'s main worktree names, or why it could not be read. */
+function venueAt(directory: string, until?: Deadline):
+  | { readonly outcome: "chosen"; readonly venue: Venue; readonly project: ProjectConfig }
   | Failed;
 ```
 
@@ -1019,12 +1029,12 @@ the worktree they are run in, as § 7 sets out for a pull request:
   `squiz: nothing replied in T9: threads.json holds no thread "T9"`.
 - `squiz status` lists each worktree's `.squiz/local/` as it lists a pull
   request's episode, with `local` in the PR column.
-- `squiz doctor` prints the venue on a line of its own, and does not require
-  `gh`. A missing `gh` is reported present, and one that cannot be used is a
-  warning.
+- `squiz doctor` does not require `gh`. A missing `gh` is reported present, and
+  one that cannot be used is a warning. The venue's line (§ 7 `squiz doctor`)
+  says so:
 
   ```
-  Venue local, from SQUIZ_VENUE: reviews run on the working tree, and gh is not required
+  Venue local (/work/squiz/.squiz.json): reviews run on the working tree, and gh is not required
   gh: not found. Not required under the local venue
   ```
 
@@ -2757,6 +2767,7 @@ one. It prints one line per dependency, and exits 1 where any line failed:
 
 ```
 git 2.51.0
+Venue github (/Users/ana/app/.squiz.json)
 gh 2.97.0, signed in as ana
 Claude Code 2.4.1
 copilot 1.0.92, experimental features on
@@ -2787,7 +2798,8 @@ The rows, in the order they print:
 | Row | Required | Present where |
 |---|---|---|
 | `git` | Yes | It answers. |
-| `gh` | Yes | It answers, and `gh auth status --json` reports an account whose check succeeded. `gh auth token` is not used, because it can print a token `gh` itself does not use. |
+| The venue | Yes | `.squiz.json` reads as a round reads it. |
+| `gh` | Under the GitHub venue | It answers, and `gh auth status --json` reports an account whose check succeeded. `gh auth token` is not used, because it can print a token `gh` itself does not use. |
 | Claude Code | Only where `copilot` is missing or cannot be run, since either can be the coding agent | It answers. |
 | Copilot as a coding agent | No, and printed only where `copilot` is on `PATH` | It answers, its experimental features are on, and its extension's socket path fits. |
 | Node | Yes | The Node running squiz is 24 or later. |
@@ -2795,6 +2807,17 @@ The rows, in the order they print:
 | The `squiz` link | No, and never a failure | `PATH` holds a link to this squiz, read as `squiz init` reads it. Anything `squiz init` would refuse or change is a warning. |
 | Copilot's copies of squiz | No, and printed only where Copilot has one | Each copy under `<COPILOT_HOME>/installed-plugins/` is this squiz's version. A different one is a warning naming the older, since Copilot's hook runs its own copy and two versions would write one state file. |
 | The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, for Copilot the sign-in prompt succeeds, and for `pi` the model runs at the configured thinking level. |
+
+**The venue is the one `venue` names in `.squiz.json`**, read as § 4 Choosing
+the venue sets out, or GitHub outside a repository. Its row names the file as
+the reviewer's row does, below, and under the local venue says that `gh` is not
+required:
+
+```
+Venue github (no /work/squiz/.squiz.json)
+Venue local (/work/squiz/.squiz.json): reviews run on the working tree, and gh is not required
+Venue: .squiz.json refused: /work/squiz/.squiz.json: "venue" is "lcoal", but it must be "github" or "local"
+```
 
 **The reviewer is the one `reviewer` names in `.squiz.json`**, read from the
 main worktree as § 10 Configuration sets out, or `pi` outside a repository or
@@ -3346,6 +3369,7 @@ worktree is a configuration that cannot be read.
 
 | Setting | Default | |
 |---|---|---|
+| `venue` | `github` | Where reviews happen, `github` or `local` (§ 4 Choosing the venue) |
 | `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |

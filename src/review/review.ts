@@ -26,7 +26,7 @@
 import { join, relative } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { defaultsLine, findProjectConfig, type ProjectConfig } from "../config/config.ts";
+import { defaultsLine, findProjectConfig, type Config, type ProjectConfig } from "../config/config.ts";
 import { readComment } from "../findings/comment.ts";
 import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
@@ -68,7 +68,7 @@ export type ReviewRequest = {
   readonly hostStartMs?: number;
   /** `trigger` where not given. */
   readonly trigger?: (request: TriggerRequest) => Triggered;
-  /** The venue `environment` chooses where not given. */
+  /** The venue the main worktree's `.squiz.json` names where not given. */
   readonly venue?: Venue;
   readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
   readonly host?: (key: string) => HostCommand;
@@ -91,23 +91,18 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     return notRun(cause instanceof Error ? cause.message : String(cause));
   }
 
-  const printed = await reviewUnder(request, toplevel.path, until, project.config.rounds);
+  const printed = await reviewUnder(request, toplevel.path, until, project.config);
   // Running on the defaults changes neither the outcome nor the status, and is
   // otherwise told from running on a file only by the summary's reviewer line.
   const note = defaultsLine(project);
   return note === undefined ? printed : { ...printed, stderr: failureLine(note) + printed.stderr };
 }
 
-/** The run once its settings are read in `worktree`, `cap` being the round cap they set. */
-async function reviewUnder(request: ReviewRequest, worktree: string, until: Deadline, cap: number): Promise<Printed> {
+/** The run once `config` is read for `worktree`. */
+async function reviewUnder(request: ReviewRequest, worktree: string, until: Deadline, config: Config): Promise<Printed> {
   const { directory, key } = request;
-
-  let venue = request.venue;
-  if (venue === undefined) {
-    const chosen = venueFor(request.environment);
-    if (chosen.outcome === "failed") return unprinted(`no review ran: ${chosen.reason}`);
-    venue = chosen.venue;
-  }
+  const cap = config.rounds;
+  const venue = request.venue ?? venueFor(config);
   // Named before the change is read, so a key that names no episode reads
   // nothing and makes nothing.
   const named = episodeAt(venue, worktree, key);

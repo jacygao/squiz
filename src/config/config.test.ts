@@ -48,8 +48,9 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the six defaults", () => {
+test("an absent .squiz.json is not an error, and yields the seven defaults", () => {
   assert.deepEqual(load(null), {
+    venue: "github",
     reviewer: "pi",
     rounds: 3,
     timeout: 900,
@@ -59,7 +60,7 @@ test("an absent .squiz.json is not an error, and yields the six defaults", () =>
   });
 });
 
-test("a .squiz.json with no keys yields the same six defaults", () => {
+test("a .squiz.json with no keys yields the same seven defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -72,9 +73,10 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
+      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
     ),
     {
+      venue: "local",
       reviewer: "copilot",
       rounds: 5,
       timeout: 90,
@@ -83,6 +85,23 @@ test("every setting the file names is read", () => {
       model: "gpt-5-mini",
     },
   );
+});
+
+test("venue accepts github and local, and refuses anything else, naming the value and the venues", () => {
+  assert.equal(load(`{"venue": "github"}`).venue, "github");
+  assert.equal(load(`{"venue": "local"}`).venue, "local");
+  for (const contents of [`{"venue": "lcoal"}`, `{"venue": ""}`, `{"venue": "GitHub"}`, `{"venue": null}`, `{"venue": 1}`]) {
+    assert.match(rejection(contents).message, /: "venue" is .*, but it must be "github" or "local"$/u, contents);
+  }
+});
+
+test("#838: a linked worktree takes the venue from the main worktree's .squiz.json, never its own", () => {
+  const pair = linkedPair(`{"venue": "local"}`, `{"venue": "github"}`);
+  try {
+    assert.equal(findProjectConfig(pair.linked).config.venue, "local");
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
+  }
 });
 
 // The ranges are inclusive on both sides, so each is checked at the last value

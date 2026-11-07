@@ -8,7 +8,7 @@
  *
  * It starts each tool once to ask its version, `gh` a second time for its
  * sign-in, and `git` a second time for the repository whose `.squiz.json`
- * names the reviewer, which every row that reads the repository shares. Where
+ * names the venue and the reviewer, which every row that reads it shares. Where
  * that reviewer is `pi`, it starts `pi` a second time to ask the thinking level
  * a round runs at, which sends no prompt. Where the reviewer is Copilot, it
  * sends Copilot one prompt to test its sign-in. It
@@ -24,7 +24,6 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
-import { venueNamed } from "../venues/venue.ts";
 import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
 import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
@@ -265,16 +264,17 @@ const gh = (context: DoctorContext): Row => {
 };
 
 /**
- * `gh` as the venue `SQUIZ_VENUE` chooses needs it, after a line naming the
- * venue where it is not GitHub. The local venue never runs `gh`, so there a
- * `gh` that is missing is present and one that is unusable is a warning.
+ * The venue `.squiz.json` names and the file it was read from, then `gh` as
+ * that venue needs it. The local venue never runs `gh`, so there a `gh` that is
+ * missing is present and one that is unusable is a warning.
  */
 const venueAndGh: Check = (context) => {
-  const named = venueNamed(context.environment);
-  if (typeof named !== "string") return [{ level: "failed", line: `Venue: ${named.reason}` }, gh(context)];
-  if (named === "github") return gh(context);
+  const project = projectOf(context);
+  if (project.outcome === "failed") return [{ level: "failed", line: `Venue: ${project.reason}` }, gh(context)];
+  const named = `Venue ${project.config.venue}${fromFile(project)}`;
+  if (project.config.venue === "github") return [{ level: "present", line: named }, gh(context)];
 
-  const venue: Row = { level: "present", line: "Venue local, from SQUIZ_VENUE: reviews run on the working tree, and gh is not required" };
+  const venue: Row = { level: "present", line: `${named}: reviews run on the working tree, and gh is not required` };
   const row = gh(context);
   if (row.level === "present") return [venue, row];
   if (row.line === "gh: not found") return [venue, { level: "present", line: `${row.line}. ${GH_NOT_REQUIRED}` }];
@@ -520,12 +520,9 @@ function codeOf(error: unknown): unknown {
  */
 const reviewer: Check = (context) => {
   const project = projectOf(context);
-  if (project.outcome === "failed") return { level: "failed", line: project.line };
-  const { config, file, main } = project;
-
-  // The file is named because it is the main worktree's, never the one in the
-  // worktree the check ran in, and the two may differ.
-  const from = file !== null ? ` (${file})` : main === undefined ? "" : ` (no ${join(main, configFileName)})`;
+  if (project.outcome === "failed") return { level: "failed", line: `Reviewer: ${project.reason}` };
+  const { config } = project;
+  const from = fromFile(project);
   const found = versionOf(config.reviewer, ["--version"], context);
   if (found.outcome === "absent") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: not found` };
   if (found.outcome === "failed") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: could not be run: ${found.reason}` };
@@ -640,7 +637,18 @@ function withIndentedDetail(output: string): string {
  */
 type Project =
   | { readonly outcome: "found"; readonly root: string | undefined; readonly config: Config; readonly file: string | null; readonly main: string | undefined }
-  | { readonly outcome: "failed"; readonly line: string };
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * The `.squiz.json` a row's settings came from, as ` (/work/squiz/.squiz.json)`,
+ * ` (no /work/squiz/.squiz.json)`, or nothing outside a repository. It is named
+ * because it is the main worktree's, never the one in the worktree the check
+ * ran in, and the two may differ.
+ */
+function fromFile(project: Extract<Project, { readonly outcome: "found" }>): string {
+  if (project.file !== null) return ` (${project.file})`;
+  return project.main === undefined ? "" : ` (no ${join(project.main, configFileName)})`;
+}
 
 const projects = new WeakMap<DoctorContext, Project>();
 
@@ -655,13 +663,13 @@ function projectOf(context: DoctorContext): Project {
 
 function findProject(context: DoctorContext): Project {
   const root = repositoryRoot(context);
-  if (root.outcome === "failed") return { outcome: "failed", line: `Reviewer: the repository could not be found: ${root.reason}` };
+  if (root.outcome === "failed") return { outcome: "failed", reason: `the repository could not be found: ${root.reason}` };
   if (root.outcome === "outside") return { outcome: "found", root: undefined, config: { ...defaultConfig }, file: null, main: undefined };
   try {
     const { config, file, main } = projectConfigIn(root.main);
     return { outcome: "found", root: root.path, config, file, main };
   } catch (cause) {
-    return { outcome: "failed", line: `Reviewer: ${configFileName} refused: ${reasonFor(cause)}` };
+    return { outcome: "failed", reason: `${configFileName} refused: ${reasonFor(cause)}` };
   }
 }
 

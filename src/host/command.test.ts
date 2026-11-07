@@ -73,3 +73,29 @@ test("#745: a round host whose main worktree has no .squiz.json says in host.log
     rmSync(pair.base, { recursive: true, force: true });
   }
 });
+
+test("#838: a round host started with nothing but PATH in its environment takes the local venue from the main worktree's .squiz.json", () => {
+  const pair = linkedPair('{"venue": "local"}', '{"venue": "github"}');
+  try {
+    const ran = spawnSync(binary, ["host", "local"], { cwd: pair.linked, encoding: "utf8", timeout: 30_000, env: { PATH: process.env["PATH"] ?? "" } });
+
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.equal(ran.stderr, "", "the host chose no venue, or the GitHub one");
+    assert.equal(existsSync(join(pair.linked, ".squiz", "local", "host.log")), true, "the host wrote no host.log in the local venue's episode");
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
+  }
+});
+
+test("#838: a round host with SQUIZ_VENUE=local and no .squiz.json is under the GitHub venue", () => {
+  const pair = linkedPair(null, '{"venue": "local"}');
+  try {
+    const ran = spawnSync(binary, ["host", "local"], { cwd: pair.linked, encoding: "utf8", timeout: 30_000, env: { PATH: process.env["PATH"] ?? "", SQUIZ_VENUE: "local" } });
+
+    assert.equal(ran.status, 0);
+    assert.notEqual(ran.stderr, "", "the GitHub venue took the key local");
+    assert.equal(existsSync(join(pair.linked, ".squiz", "local")), false, "SQUIZ_VENUE chose the local venue");
+  } finally {
+    rmSync(pair.base, { recursive: true, force: true });
+  }
+});

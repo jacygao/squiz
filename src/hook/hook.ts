@@ -14,7 +14,7 @@ import { trigger, type TriggerRequest, type Triggered } from "../host/trigger.ts
 import type { Owner } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import type { Firing, HookEnvironment } from "../sessions/firing.ts";
-import { venueFor } from "../venues/venue.ts";
+import { venueAt } from "../venues/venue.ts";
 import { readPayloadFrom, type PayloadStream } from "./payload.ts";
 import { reportFailure } from "./report.ts";
 import type { HookExit } from "./trap.ts";
@@ -48,7 +48,7 @@ export async function runHook(call: HookCall): Promise<HookExit> {
     }
     const { firing } = read;
     if (firing.event === "SessionStart" || firing.event === "SubagentStart") {
-      recordStart(firing.directory, environment);
+      recordStart(firing.directory);
       return 0;
     }
 
@@ -67,14 +67,15 @@ export async function runHook(call: HookCall): Promise<HookExit> {
   return 0;
 }
 
-/** Hand `directory`, where a session or subagent is starting, to the venue `environment` chooses. */
-function recordStart(directory: string, environment: HookEnvironment): void {
-  const chosen = venueFor(environment);
+/** Hand `directory`, where a session or subagent is starting, to the venue its `.squiz.json` names. */
+function recordStart(directory: string): void {
+  const until = deadlineIn(QUEUE_BUDGET_MS);
+  const chosen = venueAt(directory, until);
   if (chosen.outcome === "failed") {
-    reportFailure(`no review ran: ${chosen.reason}`);
+    reportFailure(`no base was recorded: ${chosen.reason}`);
     return;
   }
-  const recorded = chosen.venue.recordStart(directory, deadlineIn(QUEUE_BUDGET_MS));
+  const recorded = chosen.venue.recordStart(directory, until);
   if (recorded.outcome === "failed") reportFailure(`no base was recorded: ${recorded.reason}`);
 }
 

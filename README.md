@@ -96,6 +96,7 @@ its own:
 
 | Setting | Default | Range |
 |---|---|---|
+| `venue` | `github` | Where reviews happen: `github`, on the pull request, or `local`, on the working tree of a repository with no remote |
 | `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
 | `rounds` | 3 | The most rounds one review runs, 1 to 8 |
 | `timeout` | 900 | Seconds one round's reviewer may run, 60 to 3,600 |
@@ -126,6 +127,7 @@ or signed out:
 
 ```
 git 2.54.0
+Venue github (/Users/jacy/squiz/.squiz.json)
 gh 2.97.0, signed in as jacygao
 Claude Code 2.1.292
 Node 24.15.0

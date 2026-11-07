@@ -29,7 +29,7 @@ import { squizStatus } from "./review/status.ts";
 import { squizVersion } from "./review/version.ts";
 import { deadlineIn, type Deadline } from "./reviewers/deadline.ts";
 import { LOCAL_KEY } from "./venues/local/venue.ts";
-import { venueFor, type Change, type Venue } from "./venues/venue.ts";
+import { venueAt, type Change, type Venue } from "./venues/venue.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
@@ -59,7 +59,7 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return postReply(argv.slice(1));
   }
   if (command === "status") {
-    const chosen = venueFor(process.env);
+    const chosen = venueAt(process.cwd());
     if (chosen.outcome === "failed") {
       reportFailure(`no reviews listed: ${chosen.reason}`);
       return 0;
@@ -109,7 +109,7 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
 async function review(args: readonly string[]): Promise<number> {
   let [key] = args;
   if (key === undefined) {
-    const chosen = venueFor(process.env);
+    const chosen = venueAt(process.cwd());
     if (chosen.outcome === "failed") {
       const printed = unprinted(`no review ran: ${chosen.reason}`);
       process.stderr.write(printed.stderr);
@@ -139,7 +139,7 @@ type Target =
  * same way, carrying the venue's line for which of them happened.
  */
 function targetOf(directory: string, until: Deadline): Target {
-  const chosen = venueFor(process.env);
+  const chosen = venueAt(directory, until);
   if (chosen.outcome === "failed") return { outcome: "unavailable", reason: chosen.reason };
   const lookup = chosen.venue.readChange(directory, null, until);
   switch (lookup.outcome) {
