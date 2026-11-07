@@ -1,17 +1,20 @@
 /**
- * The `Stop` and `SubagentStop` entry point.
+ * The `Stop`, `SubagentStop`, `SessionStart` and `SubagentStart` entry point.
  *
- * A firing queues the pull request's state for the round host and returns. It
- * never runs a round and never waits on one, and it exits 0 on every path: a
- * non-zero exit is the one thing that stops the coding agent finishing its turn.
- * What it could not do, and a branch with no pull request, it says in one line
- * on stderr. Exiting 0 in silence over a failure would read as a state queued.
+ * A stop queues the change's state for the round host and returns. It never
+ * runs a round and never waits on one. A start hands the worktree to the
+ * venue's `recordStart` and does nothing else. Every firing exits 0, on every
+ * path: a non-zero exit is the one thing that stops the coding agent finishing
+ * its turn. What it could not do, and a branch with no pull request, it says in
+ * one line on stderr. Exiting 0 in silence over a failure would read as a state
+ * queued, or a base recorded.
  */
 
 import { trigger, type TriggerRequest, type Triggered } from "../host/trigger.ts";
 import type { Owner } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import type { Firing, HookEnvironment } from "../sessions/firing.ts";
+import { venueFor } from "../venues/venue.ts";
 import { readPayloadFrom, type PayloadStream } from "./payload.ts";
 import { reportFailure } from "./report.ts";
 import type { HookExit } from "./trap.ts";
@@ -43,11 +46,16 @@ export async function runHook(call: HookCall): Promise<HookExit> {
       reportFailure(`nothing was queued: ${read.reason}`);
       return 0;
     }
+    const { firing } = read;
+    if (firing.event === "SessionStart" || firing.event === "SubagentStart") {
+      recordStart(firing.directory, environment);
+      return 0;
+    }
 
     const triggered = (call.trigger ?? trigger)({
-      directory: read.firing.directory,
+      directory: firing.directory,
       trigger: "hook",
-      owner: ownerOf(read.firing),
+      owner: ownerOf(firing),
       environment,
       until: deadlineIn(QUEUE_BUDGET_MS),
     });
@@ -59,7 +67,18 @@ export async function runHook(call: HookCall): Promise<HookExit> {
   return 0;
 }
 
-function ownerOf(firing: Firing): Owner {
+/** Hand `directory`, where a session or subagent is starting, to the venue `environment` chooses. */
+function recordStart(directory: string, environment: HookEnvironment): void {
+  const chosen = venueFor(environment);
+  if (chosen.outcome === "failed") {
+    reportFailure(`no review ran: ${chosen.reason}`);
+    return;
+  }
+  const recorded = chosen.venue.recordStart(directory, deadlineIn(QUEUE_BUDGET_MS));
+  if (recorded.outcome === "failed") reportFailure(`no base was recorded: ${recorded.reason}`);
+}
+
+function ownerOf(firing: Extract<Firing, { readonly owner: unknown }>): Owner {
   return {
     sessionId: firing.owner.sessionId,
     ...(firing.event === "SubagentStop" ? { subagent: firing.subagent } : {}),

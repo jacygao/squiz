@@ -1880,6 +1880,7 @@ function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; reado
     return { outcome: "posted", threadId: `thread-${opened}`, commentId: `comment-${opened}`, url: `fake://thread-${opened}` };
   };
   const healthy: Venue = {
+    recordStart: () => ({ outcome: "done" }),
     readChange: (worktree) => {
       const commit = (name: string): string => execFileSync("git", ["rev-parse", name], { cwd: worktree, encoding: "utf8" }).trim();
       const change: Change = {

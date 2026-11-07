@@ -75,6 +75,7 @@ function oneKeyVenue(tree: string, head: string, asked: { key: string; worktree:
   };
   const refuse = (): { outcome: "failed"; reason: string } => ({ outcome: "failed", reason: "not asked of this venue" });
   return {
+    recordStart: refuse,
     readChange: () => ({ outcome: "found", change }),
     episodeDirectory: (where, key) => {
       asked.push({ key, worktree: where });
@@ -126,7 +127,7 @@ test("the hook's trigger, squiz review's wait, squiz status and the round host a
 
     const status = collectStatus([tree], { main: tree, presence: () => ({ outcome: "gone" }), now: 0, venue });
     assert.deepEqual(status.problems, []);
-    assert.deepEqual(status.episodes.map((episode) => episode.rows[0]?.row[0]), ["#k41"], "squiz status did not list the episode");
+    assert.deepEqual(status.episodes.map((episode) => episode.rows[0]?.row[0]), ["k41"], "squiz status did not list the episode");
 
     const hosted = await runHost({
       worktree: tree,

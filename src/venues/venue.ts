@@ -9,6 +9,7 @@
 
 import type { Deadline } from "../reviewers/deadline.ts";
 import { githubVenue } from "./github/venue.ts";
+import { localVenue } from "./local/venue.ts";
 import type { Anchor } from "./github/post-thread.ts";
 import type { CommentPosting } from "./github/summary.ts";
 import type { ThreadAction } from "./github/thread-actions.ts";
@@ -16,7 +17,7 @@ import type { ReviewThread, ThreadAnchor, ThreadComment } from "./github/threads
 
 /** The change under review. */
 export type Change = {
-  /** What names the episode across processes: "41", or the local directory. */
+  /** What names the episode across processes: "41", or "local". */
   readonly key: string;
   /** What every message calls it: "PR #41", or "the working tree". */
   readonly name: string;
@@ -71,6 +72,11 @@ export type Posting = CommentPosting;
 
 export interface Venue {
   /**
+   * Called when a session or a subagent starts in `worktree`, before it has
+   * done any work. A venue that needs nothing from the start returns "done".
+   */
+  recordStart(worktree: string, until: Deadline): { readonly outcome: "done" } | Failed;
+  /**
    * The change to review in `worktree`. `asked` is the key a command was given,
    * such as the 41 of `squiz review 41` or `squiz host 41`, or null for a hook,
    * which finds the change from the worktree alone.
@@ -104,18 +110,24 @@ export interface Venue {
 }
 
 /**
- * The venue this process's environment chooses: local where `SQUIZ_LOCAL` is
- * set to anything but the empty string, and GitHub otherwise.
+ * The venue this process's environment chooses from `SQUIZ_VENUE`: GitHub where
+ * it is unset, empty or `github`, and local where it is `local`.
  *
- * A `SQUIZ_LOCAL` no local venue takes fails, rather than having GitHub review
- * a change that was meant to stay off it.
+ * Any other value chooses none, rather than having GitHub review a change that
+ * was meant to stay off it.
  */
 export function venueFor(
   environment: NodeJS.ProcessEnv,
 ): { readonly outcome: "chosen"; readonly venue: Venue } | Failed {
-  const local = environment["SQUIZ_LOCAL"];
-  if (local !== undefined && local !== "") {
-    return { outcome: "failed", reason: `SQUIZ_LOCAL is ${JSON.stringify(local)}, and this squiz has no local venue` };
-  }
-  return { outcome: "chosen", venue: githubVenue };
+  const named = venueNamed(environment);
+  if (typeof named !== "string") return named;
+  return { outcome: "chosen", venue: named === "local" ? localVenue : githubVenue };
+}
+
+/** The name of the venue `venueFor` chooses, for `squiz doctor` to print. */
+export function venueNamed(environment: NodeJS.ProcessEnv): "github" | "local" | Failed {
+  const named = environment["SQUIZ_VENUE"];
+  if (named === undefined || named === "" || named === "github") return "github";
+  if (named === "local") return "local";
+  return { outcome: "failed", reason: `SQUIZ_VENUE is ${JSON.stringify(named)}, and squiz has the venues github and local` };
 }

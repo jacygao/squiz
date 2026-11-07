@@ -24,6 +24,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
+import { venueNamed } from "../venues/venue.ts";
 import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
 import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
@@ -235,7 +236,7 @@ function optional(label: string, command: string, args: readonly string[], absen
  * login's state and says it per host. `gh auth token` is no test: it can print
  * a token from the system's credential store that `gh` itself does not use.
  */
-const gh: Check = (context) => {
+const gh = (context: DoctorContext): Row => {
   const found = versionOf("gh", ["--version"], context);
   if (found.outcome === "absent") return { level: "failed", line: "gh: not found" };
   if (found.outcome === "failed") return { level: "failed", line: `gh: could not be run: ${found.reason}` };
@@ -262,6 +263,25 @@ const gh: Check = (context) => {
     line: `${label}: not signed in: the login ${refused.login} on ${refused.host} failed its check${detail}`,
   };
 };
+
+/**
+ * `gh` as the venue `SQUIZ_VENUE` chooses needs it, after a line naming the
+ * venue where it is not GitHub. The local venue never runs `gh`, so there a
+ * `gh` that is missing is present and one that is unusable is a warning.
+ */
+const venueAndGh: Check = (context) => {
+  const named = venueNamed(context.environment);
+  if (typeof named !== "string") return [{ level: "failed", line: `Venue: ${named.reason}` }, gh(context)];
+  if (named === "github") return gh(context);
+
+  const venue: Row = { level: "present", line: "Venue local, from SQUIZ_VENUE: reviews run on the working tree, and gh is not required" };
+  const row = gh(context);
+  if (row.level === "present") return [venue, row];
+  if (row.line === "gh: not found") return [venue, { level: "present", line: `${row.line}. ${GH_NOT_REQUIRED}` }];
+  return [venue, { level: "warning", line: `${row.line.replace(/^([^:]*): /u, "$1: warning: ")}. ${GH_NOT_REQUIRED}` }];
+};
+
+const GH_NOT_REQUIRED = "Not required under the local venue";
 
 type Account = { readonly state: string; readonly host: string; readonly login: string; readonly error: string };
 
@@ -680,7 +700,7 @@ function reasonFor(cause: unknown): string {
 /** Every dependency a project needs, in the order they print. */
 export const CHECKS: readonly Check[] = [
   required("git", "git", ["--version"]),
-  gh,
+  venueAndGh,
   claudeCode,
   copilot,
   node,

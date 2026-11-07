@@ -614,6 +614,13 @@ async function reviewOn(
   const unmade = makeSessionDirectory(sessionDirectory);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
+  // A head the venue built, rather than one the repository holds, is readable
+  // only through the object directories it names.
+  const provided = setup.venue.provideCommits(change, preReview.until);
+  if (provided.outcome === "failed") {
+    return failed("harness", `no review ran: the commits of ${change.name} could not be provided: ${provided.reason}`);
+  }
+
   // The coding agent may edit its worktree while the review runs, so the reviewer
   // gets a tree of its own.
   const snapshot = addSnapshot(
@@ -623,6 +630,7 @@ async function reviewOn(
       round: ordinal,
       commit: setup.state?.head ?? change.head,
       base: change.base,
+      alternates: provided.alternates,
     },
     preReview.until,
   );

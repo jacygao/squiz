@@ -1,6 +1,9 @@
 /**
- * A `Stop` or `SubagentStop` hook's payload, read into the session that owns the
- * work that just ended.
+ * A hook's payload: a `Stop` or `SubagentStop` read into the session that owns
+ * the work that just ended, or a `SessionStart` or `SubagentStart` read into the
+ * directory work is starting in.
+ *
+ * A start names no owner, so it is read for its `cwd` alone.
  *
  * The owner is the session in the payload's `session_id`. On `Stop` that is the
  * session whose turn ended. On `SubagentStop` it is the session that dispatched
@@ -45,6 +48,8 @@ export type Owner = {
 };
 
 export type Firing =
+  | { readonly event: "SessionStart"; readonly directory: string }
+  | { readonly event: "SubagentStart"; readonly directory: string }
   | { readonly event: "Stop"; readonly directory: string; readonly owner: Owner }
   | { readonly event: "SubagentStop"; readonly directory: string; readonly owner: Owner; readonly subagent: string };
 
@@ -72,9 +77,14 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   }
   const payload = parsed as Readonly<Record<string, unknown>>;
 
-  const event = payload["hook_event_name"];
+  const event = payload["hook_event_name"] ?? copilotSubagentStart(payload);
+  if (event === "SessionStart" || event === "SubagentStart") {
+    const directory = absoluteCwd(payload);
+    if (directory === undefined) return unreadable(NO_CWD);
+    return { outcome: "read", firing: { event, directory } };
+  }
   if (event !== "Stop" && event !== "SubagentStop") {
-    return unreadable('the payload\'s "hook_event_name" is neither Stop nor SubagentStop');
+    return unreadable('the payload\'s "hook_event_name" is not Stop, SubagentStop, SessionStart or SubagentStart');
   }
 
   const agentType = payload["agent_type"];
@@ -97,11 +107,8 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
     if (named !== undefined && named !== sessionId) return { outcome: "a subagent's turn" };
   }
 
-  const directory = payload["cwd"];
-  // A relative path would be resolved against the hook's own directory.
-  if (typeof directory !== "string" || !isAbsolute(directory)) {
-    return unreadable('the payload carries no absolute "cwd", which the worktree is resolved from');
-  }
+  const directory = absoluteCwd(payload);
+  if (directory === undefined) return unreadable(NO_CWD);
   if (event === "Stop") return { outcome: "read", firing: { event, directory, owner } };
 
   const agentId = payload["agent_id"];
@@ -109,6 +116,26 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
   return { outcome: "read", firing: { event, directory, owner, subagent: agentId } };
+}
+
+/**
+ * `SubagentStart` for a payload naming no event that carries what Copilot's
+ * subagent start carries, `agentName`, `sessionId` and an absolute `cwd`, and
+ * `undefined` for any other. Copilot sends that one with no event name, and a
+ * payload with none is never read as a stop.
+ */
+function copilotSubagentStart(payload: Readonly<Record<string, unknown>>): "SubagentStart" | undefined {
+  const { agentName, sessionId } = payload;
+  const named = typeof agentName === "string" && agentName !== "" && typeof sessionId === "string" && sessionId !== "";
+  return named && absoluteCwd(payload) !== undefined ? "SubagentStart" : undefined;
+}
+
+const NO_CWD ='the payload carries no absolute "cwd", which the worktree is resolved from';
+
+function absoluteCwd(payload: Readonly<Record<string, unknown>>): string | undefined {
+  const directory = payload["cwd"];
+  // A relative path would be resolved against the hook's own directory.
+  return typeof directory === "string" && isAbsolute(directory) ? directory : undefined;
 }
 
 /**
@@ -123,7 +150,7 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
  */
 export async function readFiringWithSocket(text: string, environment: HookEnvironment): Promise<FiringRead> {
   const read = readFiring(text, environment);
-  if (read.outcome !== "read" || !underCopilot(environment)) return read;
+  if (read.outcome !== "read" || !underCopilot(environment) || !("owner" in read.firing)) return read;
   const { sessionId } = read.firing.owner;
   const socket = extensionSocket(text, sessionId);
   if (socket === undefined || !(await listening(socket, PROBE_BOUND_MS))) return read;

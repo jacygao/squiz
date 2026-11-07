@@ -574,3 +574,131 @@ test("a place's clean-up leaves no host the firing started running, one that has
     assert.deepEqual(processesNaming(directory), [], `a process naming ${directory} outlived the clean-up that removed it`);
   }
 });
+
+function sessionStartPayload(cwd: string, over: Readonly<Record<string, unknown>> = {}): string {
+  return JSON.stringify({ session_id: SESSION_ID, cwd, hook_event_name: "SessionStart", source: "startup", ...over });
+}
+
+/**
+ * Copilot 1.0.107's `SubagentStart` as captured, with only its `cwd` moved:
+ * no `hook_event_name`, no `session_id`, and the session in camelCase.
+ */
+function copilotSubagentStartPayload(cwd: string): string {
+  const captured = '{"sessionId":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78","timestamp":1794041278779,"cwd":"/abs/proj","transcriptPath":"/Users/x/.copilot/session-state/f1a68b9a-73c2-42c1-ac30-8882b95ebe78/events.jsonl","agentName":"general-purpose","agent_id":"a8be9a13-9ff3-42eb-9fad-059e10c0037d","agent_type":"general-purpose","parent_agent_id":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78"}';
+  return JSON.stringify({ ...(JSON.parse(captured) as Record<string, unknown>), cwd });
+}
+
+function baseFileIn(place: Place): string {
+  return join(place.worktree, ".squiz", "local", "base.json");
+}
+
+function headOf(directory: string): string {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+const LOCAL = { SQUIZ_VENUE: "local" };
+
+test("a SessionStart under the local venue records the base at the worktree's root, and does nothing else", async () => {
+  await withPlace(async (place) => {
+    mkdirSync(join(place.worktree, "sub"));
+    // Fired from outside the worktree, as Copilot runs a plugin's hook.
+    const fired = await fire(place, { payload: sessionStartPayload(join(place.worktree, "sub")), environment: LOCAL, trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(baseFileIn(place)), true, "the start recorded no base, and said nothing");
+    assert.deepEqual(JSON.parse(readFileSync(baseFileIn(place), "utf8")), { commit: headOf(place.worktree), branches: [`refs/heads/${BRANCH}`] });
+    assert.equal(reported(place), "", "the start asked the trigger to queue a review");
+    assert.equal(existsSync(join(place.bin, "calls.log")), false, "the start ran gh");
+  });
+});
+
+test("Copilot's SubagentStart, which carries no hook_event_name and no session_id, records the base and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: copilotSubagentStartPayload(place.worktree),
+      environment: { ...LOCAL, COPILOT_CLI: "1" },
+      trigger: { as: "recording" },
+    });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(baseFileIn(place)), true, "the start recorded no base, and said nothing");
+  });
+});
+
+test("a resumed session's SessionStart, after commits, leaves the base the first start recorded", async () => {
+  await withPlace(async (place) => {
+    const start = headOf(place.worktree);
+    await fire(place, { payload: sessionStartPayload(place.worktree), environment: LOCAL, trigger: { as: "recording" } });
+    git(place.worktree, "-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false",
+      "commit", "--quiet", "--allow-empty", "--message", "the work");
+
+    const fired = await fire(place, {
+      payload: sessionStartPayload(place.worktree, { source: "resume" }),
+      environment: LOCAL,
+      trigger: { as: "recording" },
+    });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal((JSON.parse(readFileSync(baseFileIn(place), "utf8")) as { commit: string }).commit, start, "the resume overwrote the base");
+  });
+});
+
+test("a start under the GitHub venue writes nothing, runs no gh, queues nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: sessionStartPayload(place.worktree), trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false);
+    assert.equal(existsSync(join(place.bin, "calls.log")), false, "the start ran gh");
+    assert.equal(reported(place), "", "the start asked the trigger to queue a review");
+  });
+});
+
+test("a start under a SQUIZ_VENUE that names no venue records nothing, and says why in the line the venue choice gives", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: sessionStartPayload(place.worktree),
+      environment: { SQUIZ_VENUE: "lcoal" },
+      trigger: { as: "recording" },
+    });
+
+    assert.equal(fired.code, 0);
+    assert.equal(fired.stderr, 'squiz: no review ran: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local\n');
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false);
+  });
+});
+
+test("a start the local venue could not record exits 0, and says why in one line", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: sessionStartPayload(place.bin), environment: LOCAL, trigger: { as: "recording" } });
+
+    assert.equal(fired.code, 0);
+    assert.match(fired.stderr, /^squiz: no base was recorded: the worktree could not be resolved: [^\n]*\n$/u);
+    assert.equal(existsSync(join(place.bin, ".squiz")), false);
+  });
+});
+
+test("a Stop under the local venue queues the working tree's state in .squiz/local/, and runs no gh", async () => {
+  await withPlace(async (place) => {
+    await fire(place, { payload: sessionStartPayload(place.worktree), environment: LOCAL, trigger: { as: "recording" } });
+    writeFileSync(join(place.worktree, "work.txt"), "the work\n");
+
+    const fired = await fire(place, {
+      payload: stopPayload(place.worktree),
+      environment: LOCAL,
+      trigger: { as: "real", hostCommand: "/usr/bin/true" },
+    });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    const state = JSON.parse(readFileSync(join(place.worktree, ".squiz", "local", "state.json"), "utf8")) as {
+      records: readonly { head: string; status: string; owner: unknown }[];
+    };
+    assert.equal(state.records.length, 1);
+    assert.equal(state.records[0]?.status, "queued");
+    assert.deepEqual(state.records[0]?.owner, { sessionId: SESSION_ID });
+    assert.notEqual(state.records[0]?.head, headOf(place.worktree), "the head is the built commit, not the worktree's HEAD");
+    assert.equal(existsSync(join(place.bin, "calls.log")), false, "the local venue ran gh");
+  });
+});

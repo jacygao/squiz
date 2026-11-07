@@ -85,7 +85,7 @@ function withoutSeverity(finding: LineFinding): string {
 }
 
 test("the listing names each open thread by its id and its file and line", () => {
-  const printed = threadListing("80", [
+  const printed = threadListing("#80", [
     thread({ id: "PRRT_one", path: "scratch/target.txt", anchor: { at: "line", line: 7 } }),
     thread({ id: "PRRT_two", path: "scratch/target.txt", anchor: { at: "line", line: 12 } }),
   ]);
@@ -99,7 +99,7 @@ test("the listing names each open thread by its id and its file and line", () =>
 });
 
 test("a resolved thread is not on the listing", () => {
-  const printed = threadListing("80", [
+  const printed = threadListing("#80", [
     thread({ id: "PRRT_open", anchor: { at: "line", line: 7 } }),
     thread({ id: "PRRT_closed", isResolved: true, anchor: { at: "line", line: 19 } }),
   ]);
@@ -114,14 +114,14 @@ test("a resolved thread is not on the listing", () => {
 test("a pull request with nothing open says so in words", () => {
   const none = "no open threads on #80\n";
 
-  assert.equal(threadListing("80", []), none, "printing nothing would read as a command that failed");
-  assert.equal(threadListing("80", [thread({ isResolved: true })]), none);
+  assert.equal(threadListing("#80", []), none, "printing nothing would read as a command that failed");
+  assert.equal(threadListing("#80", [thread({ isResolved: true })]), none);
 });
 
 test("a thread on the file as a whole is listed as its file, not as its first line", () => {
   // Both threads are on one pull request, and GitHub reads both back on line 1.
   // Listing them alike is what this exists to stop.
-  const printed = threadListing("80", [
+  const printed = threadListing("#80", [
     thread({
       id: "PRRT_kwDOUEd2qM6hqMTt",
       path: "scratch/target.txt",
@@ -147,7 +147,7 @@ test("a thread on the file as a whole is listed as its file, not as its first li
 });
 
 test("a thread on a line GitHub would not name says so rather than claiming the file", () => {
-  const printed = threadListing("80", [thread({ id: "PRRT_lost", anchor: { at: "unnamed-line" } })]);
+  const printed = threadListing("#80", [thread({ id: "PRRT_lost", anchor: { at: "unnamed-line" } })]);
 
   assert.equal(
     printed,
@@ -157,7 +157,7 @@ test("a thread on a line GitHub would not name says so rather than claiming the 
 });
 
 test("a thread whose anchored line was edited is listed on the line it was anchored to", () => {
-  const printed = threadListing("80", [
+  const printed = threadListing("#80", [
     thread({ id: "PRRT_old", isOutdated: true, anchor: { at: "line", line: 12 } }),
   ]);
 
@@ -170,7 +170,7 @@ test("the identifier is the whole of the first field, so it copies into squiz re
   // the first field; a path outside ASCII; and a headline holding both spaces and
   // the separator the severity sits in front of.
   const dashed: LineFinding = { ...partialPage, headline: "pageCount — the last one — drops a page" };
-  const printed = threadListing("80", [
+  const printed = threadListing("#80", [
     thread({
       id: ids[0],
       path: "scratch/a file with spaces.txt",
@@ -193,7 +193,7 @@ test("the identifier is the whole of the first field, so it copies into squiz re
 });
 
 test("each open thread carries the severity and the headline of the finding on it (#200)", () => {
-  const printed = threadListing("185", [
+  const printed = threadListing("#185", [
     raised("PRRT_kwDOUEd2qM6mPuUP", partialPage),
     raised("PRRT_kwDOUEd2qM6mPuVO", pageTooFar),
   ]);
@@ -216,7 +216,7 @@ test("each open thread carries the severity and the headline of the finding on i
  * location.
  */
 test("a thread carrying no finding ends at its location", () => {
-  const printed = threadListing("185", [
+  const printed = threadListing("#185", [
     thread({ id: "PRRT_asked", comments: [comment("Can you check the line above?")] }),
   ]);
 
@@ -228,7 +228,7 @@ test("a thread carrying no finding ends at its location", () => {
 });
 
 test("a finding naming one of the two fields reads as a line rather than one with a hole in it", () => {
-  const printed = threadListing("185", [
+  const printed = threadListing("#185", [
     thread({
       id: "PRRT_unsaid",
       comments: [comment(renderComment({ ...partialPage, headline: " " }))],
@@ -254,7 +254,7 @@ test("a finding naming one of the two fields reads as a line rather than one wit
  * stray line's first field is what a reader would take for an identifier.
  */
 test("a path that is not one line still prints as one thread on one line (#213)", () => {
-  const printed = threadListing("185", [
+  const printed = threadListing("#185", [
     thread({ id: "PRRT_split", path: "src/a\nb.ts", anchor: { at: "line", line: 3 } }),
     thread({ id: "PRRT_plain", path: "src/c.ts", anchor: { at: "line", line: 4 } }),
   ]);
@@ -274,7 +274,7 @@ test("a headline that is not one line still prints as one thread on one line", (
 
   for (const headline of headlines) {
     const edited = renderComment(partialPage).replace(partialPage.headline, headline);
-    const printed = threadListing("185", [thread({ id: "PRRT_wrapped", comments: [comment(edited)] })]);
+    const printed = threadListing("#185", [thread({ id: "PRRT_wrapped", comments: [comment(edited)] })]);
 
     const listed = printed.trimEnd().split("\n").slice(1);
     assert.equal(listed.length, 1, `one thread printed as ${listed.length} lines: ${printed}`);

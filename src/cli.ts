@@ -23,10 +23,12 @@ import { hostCommand } from "./host/command.ts";
 import { squizDoctor } from "./review/doctor.ts";
 import { squizInit } from "./review/init.ts";
 import { thisSquiz } from "./review/path-link.ts";
+import { unprinted } from "./review/output.ts";
 import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 import { squizVersion } from "./review/version.ts";
 import { deadlineIn, type Deadline } from "./reviewers/deadline.ts";
+import { LOCAL_KEY } from "./venues/local/venue.ts";
 import { venueFor, type Change, type Venue } from "./venues/venue.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
@@ -97,13 +99,25 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
 }
 
 /**
- * Review the pull request `args` names, wait for the round, and exit as its
- * result says. Unlike the hook's, every status here is the coding agent's to
- * read, so a review that could not run exits 1.
+ * Review the change `args` names, wait for the round, and exit as its result
+ * says. Unlike the hook's, every status here is the coding agent's to read, so
+ * a review that could not run exits 1.
+ *
+ * A pull request is named by its number. A venue whose one episode is keyed
+ * `local` reviews the working tree, and is named nothing.
  */
 async function review(args: readonly string[]): Promise<number> {
-  const [key] = args;
-  if (args.length !== 1 || key === undefined) {
+  let [key] = args;
+  if (key === undefined) {
+    const chosen = venueFor(process.env);
+    if (chosen.outcome === "failed") {
+      const printed = unprinted(`no review ran: ${chosen.reason}`);
+      process.stderr.write(printed.stderr);
+      return printed.exit;
+    }
+    if (chosen.venue.episodeDirectory(process.cwd(), LOCAL_KEY).outcome === "found") key = LOCAL_KEY;
+  }
+  if (args.length > 1 || key === undefined) {
     reportFailure("no review ran: squiz review <number>, where <number> is the pull request's");
     return 1;
   }
@@ -151,12 +165,17 @@ function listThreads(): HookExit {
   const { venue, change } = target;
   const listing = venue.listThreads(change, until);
   if (listing.outcome !== "listed") {
-    reportFailure(`the threads on #${change.key} could not be listed: ${listing.reason}`);
+    reportFailure(`the threads on ${listedName(change)} could not be listed: ${listing.reason}`);
     return 0;
   }
 
-  process.stdout.write(threadListing(change.key, listing.threads));
+  process.stdout.write(threadListing(listedName(change), listing.threads));
   return 0;
+}
+
+/** What the thread commands call `change`: `#41` for a pull request, as they always have, and the change's name otherwise. */
+function listedName(change: Change): string {
+  return change.name === `PR #${change.key}` ? `#${change.key}` : change.name;
 }
 
 /**
@@ -195,7 +214,7 @@ function postReply(args: readonly string[]): HookExit {
     return 0;
   }
 
-  process.stdout.write(`replied in ${id} on #${target.change.key}\n`);
+  process.stdout.write(`replied in ${id} on ${listedName(target.change)}\n`);
   return 0;
 }
 

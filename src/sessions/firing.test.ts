@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { readFiring, readFiringWithSocket, type Firing, type FiringRead, type HookEnvironment } from "./firing.ts";
+import { readFiring, readFiringWithSocket, type Firing, type FiringRead, type HookEnvironment, type Owner } from "./firing.ts";
 
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const AGENT_ID = "a1e3196c5ad0f2410";
@@ -95,6 +95,12 @@ function firingIn(read: FiringRead): Firing {
   return read.firing;
 }
 
+function ownerIn(read: FiringRead): Owner {
+  const firing = firingIn(read);
+  assert.ok("owner" in firing, `the firing names no owner: ${JSON.stringify(firing)}`);
+  return firing.owner;
+}
+
 function reasonFrom(read: FiringRead): string {
   assert.equal(read.outcome, "unreadable", `the payload was read: ${JSON.stringify(read)}`);
   const reason = read.outcome === "unreadable" ? read.reason : "";
@@ -124,7 +130,7 @@ test("on SubagentStop, the owner is the dispatching session, with its socket, an
 test("an environment with no messaging socket gives an owner with no socket", () => {
   for (const environment of [{}, { CLAUDE_CODE_MESSAGING_SOCKET: undefined }]) {
     for (const text of [stopText(), subagentStopText()]) {
-      const owner = firingIn(readFiring(text, environment)).owner;
+      const owner = ownerIn(readFiring(text, environment));
       assert.equal("socket" in owner, false, `a socket was given: ${JSON.stringify(owner)}`);
     }
   }
@@ -132,7 +138,7 @@ test("an environment with no messaging socket gives an owner with no socket", ()
 
 test("an empty messaging socket is no socket, rather than one a post would try", () => {
   for (const text of [stopText(), subagentStopText()]) {
-    const owner = firingIn(readFiring(text, { CLAUDE_CODE_MESSAGING_SOCKET: "" })).owner;
+    const owner = ownerIn(readFiring(text, { CLAUDE_CODE_MESSAGING_SOCKET: "" }));
     assert.equal("socket" in owner, false, `a socket was given: ${JSON.stringify(owner)}`);
   }
 });
@@ -140,7 +146,7 @@ test("an empty messaging socket is no socket, rather than one a post would try",
 test("a socket named in the payload is not read", () => {
   const text = stopText({ CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/cc-socks/1.sock", socket: "/tmp/x.sock" });
 
-  const owner = firingIn(readFiring(text, {})).owner;
+  const owner = ownerIn(readFiring(text, {}));
 
   assert.equal("socket" in owner, false, `a socket was given: ${JSON.stringify(owner)}`);
 });
@@ -369,11 +375,11 @@ test("under Copilot with no extension listening, the owner has no socket, even o
     const stop = transcriptUnder(home, COPILOT_PARENT, copilotStopText(COPILOT_PARENT));
     const owners = [];
     // Nothing at the path, as in a session started without experimental features.
-    owners.push(firingIn(await readFiringWithSocket(stop, UNDER_COPILOT)).owner);
+    owners.push(ownerIn(await readFiringWithSocket(stop, UNDER_COPILOT)));
     // A file nothing listens on, as an extension that was killed leaves.
     mkdirSync(join(home, "session-state", COPILOT_PARENT), { recursive: true });
     writeFileSync(join(home, "session-state", COPILOT_PARENT, "squiz.sock"), "", "utf8");
-    owners.push(firingIn(await readFiringWithSocket(stop, UNDER_COPILOT)).owner);
+    owners.push(ownerIn(await readFiringWithSocket(stop, UNDER_COPILOT)));
 
     assert.deepEqual(owners, [{ sessionId: COPILOT_PARENT }, { sessionId: COPILOT_PARENT }]);
   });
@@ -396,7 +402,7 @@ test("under Copilot, a transcript that is not the owner's session's names no soc
         JSON.stringify({ ...fields, session_id: "..", transcript_path: `${home}/session-state/../events.jsonl` }),
       ];
       const owners = [];
-      for (const text of texts) owners.push(firingIn(await readFiringWithSocket(text, UNDER_COPILOT)).owner);
+      for (const text of texts) owners.push(ownerIn(await readFiringWithSocket(text, UNDER_COPILOT)));
 
       assert.deepEqual(owners, [
         { sessionId: COPILOT_PARENT },
@@ -416,7 +422,7 @@ test("outside Copilot, the owner's socket is its environment's, whatever listens
     try {
       const read = await readFiringWithSocket(transcriptUnder(home, SESSION_ID, stopText()), WITH_SOCKET);
 
-      assert.deepEqual(firingIn(read).owner, { sessionId: SESSION_ID, socket: SOCKET });
+      assert.deepEqual(ownerIn(read), { sessionId: SESSION_ID, socket: SOCKET });
     } finally {
       await closed(server);
     }
@@ -426,5 +432,89 @@ test("outside Copilot, the owner's socket is its environment's, whatever listens
 test("a payload with no firing in it reads the same with the socket looked for", async () => {
   for (const text of [copilotStopText(COPILOT_SUBAGENT), phantomText(), "not json"]) {
     assert.deepEqual(await readFiringWithSocket(text, UNDER_COPILOT), readFiring(text, UNDER_COPILOT));
+  }
+});
+
+/** A `SessionStart` firing as Claude Code writes it, for a session started fresh or resumed. */
+function sessionStartText(over: Readonly<Record<string, unknown>> = {}): string {
+  return JSON.stringify({
+    session_id: SESSION_ID,
+    transcript_path: `/transcripts/${SESSION_ID}.jsonl`,
+    cwd: DIRECTORY,
+    hook_event_name: "SessionStart",
+    source: "startup",
+    ...over,
+  });
+}
+
+/** A `SubagentStart` firing as Claude Code writes it. */
+function subagentStartText(over: Readonly<Record<string, unknown>> = {}): string {
+  return JSON.stringify({
+    session_id: SESSION_ID,
+    transcript_path: `/transcripts/${SESSION_ID}.jsonl`,
+    cwd: DIRECTORY,
+    hook_event_name: "SubagentStart",
+    agent_id: AGENT_ID,
+    agent_type: "general-purpose",
+    ...over,
+  });
+}
+
+/** Copilot's `SubagentStart`, which names the session in camelCase and has no `session_id`. */
+/**
+ * Copilot 1.0.107's `SubagentStart` through the plugin's Claude-format
+ * registration, as captured: no `hook_event_name`, and the session in camelCase.
+ */
+const COPILOT_SUBAGENT_START =
+  '{"sessionId":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78","timestamp":1794041278779,"cwd":"/abs/proj","transcriptPath":"/Users/x/.copilot/session-state/f1a68b9a-73c2-42c1-ac30-8882b95ebe78/events.jsonl","agentName":"general-purpose","agent_id":"a8be9a13-9ff3-42eb-9fad-059e10c0037d","agent_type":"general-purpose","parent_agent_id":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78"}';
+
+/** The captured payload with `over` laid on it, a field set to `undefined` dropped. */
+function copilotSubagentStartWith(over: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify({ ...(JSON.parse(COPILOT_SUBAGENT_START) as Record<string, unknown>), ...over });
+}
+
+test("a SessionStart and a SubagentStart are read as starts in the payload's cwd, with no owner", () => {
+  for (const source of ["startup", "resume", "clear", "compact"]) {
+    assert.deepEqual(firingIn(readFiring(sessionStartText({ source }), WITH_SOCKET)), { event: "SessionStart", directory: DIRECTORY });
+  }
+  assert.deepEqual(firingIn(readFiring(subagentStartText(), WITH_SOCKET)), { event: "SubagentStart", directory: DIRECTORY });
+});
+
+test("a start needs no session_id, and Copilot's SubagentStart, which has none, is read", async () => {
+  assert.deepEqual(firingIn(readFiring(sessionStartText({ session_id: undefined }), WITH_SOCKET)), {
+    event: "SessionStart",
+    directory: DIRECTORY,
+  });
+});
+
+test("Copilot's SubagentStart, which has no hook_event_name, is read as a start in its cwd", async () => {
+  assert.deepEqual(firingIn(await readFiringWithSocket(COPILOT_SUBAGENT_START, UNDER_COPILOT)), {
+    event: "SubagentStart",
+    directory: "/abs/proj",
+  });
+});
+
+test("a payload with no hook_event_name is a start only with agentName, sessionId and an absolute cwd, and never a stop", () => {
+  for (const over of [
+    { agentName: undefined },
+    { agentName: "" },
+    { sessionId: undefined },
+    { cwd: undefined },
+    { cwd: "abs/proj" },
+    // A stop's own fields name no event either way.
+    { agentName: undefined, session_id: SESSION_ID, last_assistant_message: SECRET },
+  ]) {
+    const read = readFiring(copilotSubagentStartWith(over), UNDER_COPILOT);
+    assert.equal(read.outcome, "unreadable", `${JSON.stringify(over)} was read as ${JSON.stringify(read)}`);
+  }
+  const stopFields = readFiring(copilotSubagentStartWith({ session_id: SESSION_ID, stop_reason: "end_turn" }), UNDER_COPILOT);
+  assert.deepEqual(stopFields, { outcome: "read", firing: { event: "SubagentStart", directory: "/abs/proj" } });
+});
+
+test("a start carrying no usable cwd is unreadable, since the worktree is resolved from it", () => {
+  for (const cwd of [undefined, "", 42, null, "work/session-directory"]) {
+    for (const text of [sessionStartText({ cwd }), subagentStartText({ cwd })]) {
+      assert.match(reasonFrom(readFiring(text, WITH_SOCKET)), /cwd/u, `for ${JSON.stringify(cwd)}`);
+    }
   }
 });
