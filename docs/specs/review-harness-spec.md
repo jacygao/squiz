@@ -411,11 +411,12 @@ and not before.
 
 ### The hooks
 
-**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`.**
-`Stop` fires when a regular session's turn ends, and `SubagentStop` when a
-subagent's does. Each firing resolves the pull request whose head is the branch
-checked out in the payload's `cwd`, records the session that owns the work,
-queues the state as The state file sets out, and returns. It never runs a round
+**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`, and
+on its `SessionStart` and `SubagentStart`.** `Stop` fires when a regular
+session's turn ends, and `SubagentStop` when a subagent's does. Each stop
+firing resolves the pull request whose head is the branch checked out in the
+payload's `cwd`, records the session that owns the work, queues the state as The
+state file sets out, and returns. It never runs a round
 and never blocks the agent: it exits 0 whatever it found. Where it finds no pull
 request it writes the line under step 1 naming the branch and the directory.
 Where it finds a draft it writes nothing.
@@ -433,8 +434,22 @@ worktree.
 ],
 "SubagentStop": [
   { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
+],
+"SessionStart": [
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
+],
+"SubagentStart": [
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
 ]
 ```
+
+**`SessionStart` and `SubagentStart` hand the worktree to the venue's
+`recordStart` (§ 4 The contract), and do nothing else.** They resolve no pull
+request, record no owner and queue nothing. The GitHub venue records nothing at
+a start, so under it these two firings change nothing. Claude Code and Copilot
+both fire them from the plugin, each with a `cwd`, before the session or the
+subagent does any work. A start hook takes its worktree from the payload's `cwd`,
+as the stop hooks do.
 
 **The plugin root is quoted in the command, so a root with a space in its path
 stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under
@@ -445,7 +460,7 @@ stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under
 | `Stop` | The session itself, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one |
 | `SubagentStop` | The session that dispatched the subagent, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one; and the subagent, from its `agent_id` |
 
-**GitHub Copilot CLI runs the same two registrations from the plugin, and the
+**GitHub Copilot CLI runs the same registrations from the plugin, and the
 socket the hook records under it is the plugin's extension's.** Copilot fires the
 plugin's `Stop` and `SubagentStop` with Claude Code's payload fields, and the
 owner and the subagent come from the same fields as in the table. A firing is
@@ -615,8 +630,8 @@ the summary and the failure comment. Squiz has two:
 
 | Venue | The change | The record | Used for |
 |---|---|---|---|
-| **GitHub** | A pull request, at its head commit | Review threads and comments on the pull request | Every review, unless `SQUIZ_LOCAL` is set |
-| **Local** | The working tree, against a base commit it is given | Files in a directory outside the repository | A change with no remote and no pull request |
+| **GitHub** | A pull request, at its head commit | Review threads and comments on the pull request | Every review, unless `SQUIZ_VENUE` is `local` |
+| **Local** | The working tree, against the commit its work started from | Files in `.squiz/local/` in the worktree | A change with no remote and no pull request |
 
 § 3 describes the loop in the GitHub venue's terms. The loop is the same in
 both venues: the state file, the hooks, the queue, the round host, the owner's
@@ -625,24 +640,24 @@ what each of § 3's terms means there.
 
 ### Choosing the venue
 
-**Every squiz process chooses its venue from its environment, the same way.**
-Where `SQUIZ_LOCAL` is set to anything but the empty string, the venue is local;
-otherwise it is GitHub. The hook, the round host, `squiz review`, `squiz
-threads`, `squiz reply` and `squiz status` each read the variable for
-themselves. A coding agent's hooks and shell inherit it from the run, and the
-round host inherits it from the trigger that started it, so all of them agree.
+**Every squiz process chooses its venue from `SQUIZ_VENUE`, the same way.**
 
-| Variable | Holds |
+| `SQUIZ_VENUE` | The venue |
 |---|---|
-| `SQUIZ_LOCAL` | The local venue's directory: an absolute path outside every worktree it reviews. It holds a directory for each worktree, under The record below. Squiz makes it where it is missing. |
-| `SQUIZ_BASE` | The base commit, as a full sha the repository has. Read only where `SQUIZ_LOCAL` is set. |
+| Unset, the empty string, or `github` | GitHub |
+| `local` | Local |
+| Anything else | None. Nothing is reviewed. |
 
-A local venue whose variables cannot be used reviews nothing. `squiz review`
-exits 1 and the hook says why on stderr, naming the variable:
+The hook, the round host, `squiz review`, `squiz threads`, `squiz reply` and
+`squiz status` each read the variable for themselves. A coding agent's hooks and
+shell inherit it from the run, and the round host inherits it from the trigger
+that started it, so all of them agree.
+
+A value that names no venue reviews nothing. `squiz review` exits 1 and the hook
+says why on stderr:
 
 ```
-squiz: no review ran: SQUIZ_BASE is "main", and the local venue takes a full commit sha
-squiz: no review ran: SQUIZ_LOCAL is "/work/squiz/.review", which is inside the worktree /work/squiz
+squiz: no review ran: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local
 ```
 
 ### The contract
@@ -655,7 +670,7 @@ venue.
 ```ts
 /** The change under review. */
 type Change = {
-  /** What names the episode across processes: "41", or the local directory. */
+  /** What names the episode across processes: "41", or "local". */
   readonly key: string;
   /** What every message calls it: "PR #41", or "the working tree". */
   readonly name: string;
@@ -683,6 +698,11 @@ type ChangeLookup =
   | Failed;
 
 interface Venue {
+  /**
+   * Called when a session or a subagent starts in `worktree`, before it has
+   * done any work. A venue that needs nothing from the start returns "done".
+   */
+  recordStart(worktree: string, until: Deadline): { readonly outcome: "done" } | Failed;
   /**
    * The change to review in `worktree`. `asked` is the key a command was given,
    * such as the 41 of `squiz review 41` or `squiz host 41`, or null for a hook,
@@ -749,6 +769,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 |---|---|
 | `key`, `name`, `rerun` | The pull request's number, `PR #41`, `squiz review 41` |
 | `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
+| `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
 | `episodeDirectory` | `.squiz/<key>/` in the worktree, which keeps itself out of git (§ 3 The state file), for a key that is a pull request's number. Any other key is a failure. It runs no `gh`. |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
@@ -757,23 +778,24 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 
 ### The local venue
 
-**The local venue reviews the working tree's change against a base commit, and
-keeps everything it writes in one directory outside the repository.** It runs no
-`gh` and needs no remote, pull request or issue. Nothing it writes lands in the
-worktree, so nothing it writes becomes part of the change.
+**The local venue reviews the working tree's change against the commit its work
+started from, and keeps everything it writes in `.squiz/local/` in the
+worktree.** It runs no `gh` and needs no remote, pull request or issue.
+`.squiz/` keeps itself out of git (§ 3 The state file), so nothing the venue
+writes becomes part of the change.
 
 | § 3 says | In the local venue |
 |---|---|
-| The pull request | The working tree's change against `SQUIZ_BASE` |
+| The pull request | The working tree's change against its base, under The base below |
 | Its head commit | The commit built from the working tree, under The change below |
-| Its description | `description.md` in the worktree's directory, else `description.md` in `SQUIZ_LOCAL`, else none |
-| `.squiz/<number>/` | The worktree's directory in `SQUIZ_LOCAL`, under The record below. `Change.key` is its path. `episodeDirectory` returns the key where it is the directory The record names for the worktree. Any other key is a failure, and so is a directory that holds another worktree's review. |
+| Its description | `.squiz/local/description.md`, else none |
+| `.squiz/<number>/` | `.squiz/local/`. `Change.key` is `local`, and `episodeDirectory` fails for any other key. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md` |
 | A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written |
-| `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but that worktree's directory. |
+| `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but `local`. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |
-| The owner's note and its wake | As § 3 sets out. The note is written in the worktree's directory. |
+| The owner's note and its wake | As § 3 sets out. The note is written in `.squiz/local/notes/`. |
 | The paragraph after the open threads | `followUp`, below |
 
 **`followUp` names the worktree, and asks for no commit or push.** The local
@@ -788,18 +810,63 @@ Fix what applies in /work/squiz-a, and reply on each thread with
 you disagree. Then run `cd '/work/squiz-a' && squiz review` again.
 ```
 
+#### The base
+
+**Squiz records where a worktree's work started, when the first session or
+subagent starts in it.** `recordStart` writes `.squiz/local/base.json` where it
+is missing, and leaves one that exists as it is, so a resumed session, a second
+session, or a subagent sharing its parent's directory keeps the first record. A
+person never sets the base.
+
+```json
+{
+  "commit": "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
+  "branches": ["refs/heads/main", "refs/remotes/origin/main"]
+}
+```
+
+- **`commit` is the worktree's `HEAD` when the record is written.**
+- **`branches` are the branches that point at that commit then**, local and
+  remote-tracking, the one the worktree has checked out included.
+
+**The base is the newest of the recorded commit and the merge-base of `HEAD` with
+each recorded branch as it stands now.** Three kinds of recorded branch are left
+out:
+
+- **The work's own branches, which move with the work.** These are the branch the
+  worktree has checked out now, and every remote-tracking branch of the same
+  name, such as `origin/work` for `work`. An upstream of another name is kept:
+  a branch made with `git switch -c work origin/main` tracks `origin/main`, and
+  that is the branch its base follows.
+- **A branch that no longer exists.**
+- **A branch whose merge-base does not descend from the recorded commit.**
+
+Of what remains, the base is the one every other one is an ancestor of, and the recorded
+commit where none is. A worktree rebased onto a branch that has moved on gets
+the moved branch's commit as its base, so its change holds its own commits and
+no one else's.
+
+`readChange` is `none` where the worktree has no `base.json`, and where its
+commit is not one the repository has:
+
+```
+squiz: no review ran: /work/squiz has no recorded base, which squiz records when a session or subagent starts there
+squiz: no review ran: the recorded base 7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9 is not a commit in /work/squiz
+```
+
 #### The change
 
 **The head is a commit squiz builds from the working tree, and two builds of the
-same worktree are the same commit.** Each trigger builds it before it reads the
-state, in an index of its own that starts as a copy of the worktree's:
+same worktree against the same base are the same commit.** Each trigger builds
+it before it reads the state, in an index of its own that starts as a copy of
+the worktree's:
 
 ```
-cp "$(git rev-parse --git-path index)" $SQUIZ_LOCAL/index.<pid>
-GIT_INDEX_FILE=$SQUIZ_LOCAL/index.<pid> git add --all
-GIT_INDEX_FILE=$SQUIZ_LOCAL/index.<pid> git write-tree
-git commit-tree <tree> -p $SQUIZ_BASE -m "squiz: the working tree"
-rm $SQUIZ_LOCAL/index.<pid>
+cp "$(git rev-parse --git-path index)" .squiz/local/index.<pid>
+GIT_INDEX_FILE=.squiz/local/index.<pid> git add --all
+GIT_INDEX_FILE=.squiz/local/index.<pid> git write-tree
+git commit-tree <tree> -p <base> -m "squiz: the working tree"
+rm .squiz/local/index.<pid>
 ```
 
 - **Each build copies the worktree's index afresh, and never changes the
@@ -808,54 +875,37 @@ rm $SQUIZ_LOCAL/index.<pid>
   included, and every untracked file that `.gitignore` does not exclude. The
   copy is named for the building process and removed after, so two triggers
   never share one, and nothing an earlier build left changes a later one.
-- **The objects go into the venue's directory.** Each command runs with
-  `GIT_OBJECT_DIRECTORY` set to `$SQUIZ_LOCAL/objects` and the repository's own
-  object directory as an alternate, so no object is written into the
-  repository, and no ref is written anywhere.
+- **The objects go into `.squiz/local/objects/`.** Each command runs with
+  `GIT_OBJECT_DIRECTORY` set there and the repository's own object directory as
+  an alternate, so no object is written into the repository, and no ref is
+  written anywhere.
 - **The commit's author and committer are `squiz <squiz@localhost>`, dated
   `1970-01-01T00:00:00Z`.** The commit's sha then depends only on its tree and
   its base, so a tree that has not changed is a state that has not changed, and
   § 3's "one state gets one review" holds.
 
-`provideCommits` returns `$SQUIZ_LOCAL/objects` as the one alternate, and the
-snapshot adds it to the clone's `objects/info/alternates`. The snapshot is
+`provideCommits` returns the absolute path of the worktree's
+`.squiz/local/objects/` as the one alternate, and the snapshot adds it to the clone's `objects/info/alternates`. The snapshot is
 otherwise made as § 5 The snapshot sets out, from the commit and the base, and
 `git diff refs/squiz/base...HEAD` there is the change.
-
-`readChange` is `none` where the base is not a commit the repository has:
-
-```
-squiz: no review ran: SQUIZ_BASE 7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9 is not a commit in /work/squiz
-```
 
 A working tree whose tree is the base's has no change, and its review is a round
 like any other, with nothing in the list of files it changes.
 
 #### The record
 
-**Each worktree the local venue reviews has a directory of its own in
-`SQUIZ_LOCAL`, and that directory is its episode's.** It is named for the
-worktree's absolute path, with the leading `/` dropped and every other `/` made
-`-`, so `/work/squiz` is `work-squiz`. Its `worktree` file holds the path it was
-made for, and a directory whose file names another worktree is that worktree's:
+**`.squiz/local/` is the worktree's one episode.** It holds the state file and
+the rounds that § 3 The state file puts in an episode's directory, beside the
+venue's own files:
 
 ```
-squiz: no review ran: /work/squiz-review/work-squiz-a holds the review of /work/squiz-a, not /work-squiz/a
-```
-
-The worktree's directory holds the state file and the rounds that § 3 The state
-file puts in an episode's directory, beside the venue's own files:
-
-```
-$SQUIZ_LOCAL/
+.squiz/local/
+  base.json                                                        where the work started
   objects/                                                         the objects of every head built here
-  description.md                                                   for a worktree with none of its own
-  work-squiz/                                                      the directory of the worktree /work/squiz
-    worktree
-    state.json  state.lock  host.lock  host.log  notes/  rounds/  review.txt   as under § 3
-    threads.json   threads.lock
-    summary.md     failure-1.md …
-    description.md
+  state.json  state.lock  host.lock  host.log  notes/  rounds/  review.txt   as under § 3
+  threads.json   threads.lock
+  summary.md     failure-1.md …
+  description.md
 ```
 
 `description.md` is written by whoever starts the run. Squiz reads it and never
@@ -891,7 +941,7 @@ broken while it lives. The round host and `squiz reply` both take it.
   refuses a line, and never answers `posted-without-thread-id`.
 - **`isOutdated` is always false, and every comment's author is `local`.**
 
-**A worktree's outcome is read from its directory once the run has ended.**
+**A worktree's outcome is read from `.squiz/local/` once the run has ended.**
 `threads.json` gives each finding, its replies and whether it is resolved. The
 state file gives the reviewer's last ruling on each thread, and `summary.md`
 counts them as § 6 sets out, `disputed` where the coding agent replied to a
@@ -900,27 +950,34 @@ thread still open. A run that ended before the episode closed has no
 
 #### The hooks
 
+**`SessionStart` and `SubagentStart` record the base, under The base above.**
+Claude Code fires `SubagentStart` in the subagent's own worktree when it was
+dispatched with isolation, before the subagent has done any work. A Copilot
+subagent works in its parent's directory, so the record its session's start
+wrote is the one it keeps.
+
 **`Stop` and `SubagentStop` queue a state and record its owner as § 3 The hooks
 sets out, after building the worktree's head.** A subagent dispatched into a
-worktree of its own is reviewed in that worktree's directory, and its result
-wakes the session that dispatched it, as in the GitHub venue.
+worktree of its own is reviewed in that worktree's `.squiz/local/`, and its
+result wakes the session that dispatched it, as in the GitHub venue.
 
 **A headless run has ended by the time its review does.** Under `claude -p` or
 `copilot -p` the review still runs, its threads and summary are written, and its
-note waits in the worktree's directory, as § 3 says of a note no wake reached.
+note waits in `.squiz/local/notes/`, as § 3 says of a note no wake reached.
 Nothing hands those findings to a coding agent once the run has exited.
 
 #### The commands
 
-`squiz review`, `squiz threads` and `squiz reply` work on the directory of the
-worktree they are run in, as § 7 sets out for a pull request:
+`squiz review`, `squiz threads` and `squiz reply` work on the `.squiz/local/` of
+the worktree they are run in, as § 7 sets out for a pull request:
 
 - `squiz review` takes no number, and refuses one: `squiz: the local venue
   reviews the working tree, and takes no pull request number`.
 - `squiz threads` heads its list `2 open threads on the working tree`.
 - `squiz reply <id> <text>` adds the coding agent's reply to thread `<id>` in
-  that directory's `threads.json`, and refuses an id the file does not hold.
-- `squiz status` lists one row for each worktree's directory in `SQUIZ_LOCAL`.
+  that worktree's `threads.json`, and refuses an id the file does not hold.
+- `squiz status` lists each worktree's `.squiz/local/` as it lists a pull
+  request's episode, with `local` in the PR column.
 - `squiz doctor` does not require `gh`, and says the local venue is in use.
 
 ## 5. The reviewer
