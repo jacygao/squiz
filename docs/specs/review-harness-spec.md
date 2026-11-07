@@ -827,12 +827,13 @@ person never sets the base.
 
 - **`commit` is the worktree's `HEAD` when the record is written.**
 - **`branches` are the branches that point at that commit then**, local and
-  remote-tracking, leaving out the branch the worktree has checked out. That
-  branch moves with the work, so it says nothing about where the work started.
+  remote-tracking, the one the worktree has checked out included.
 
 **The base is the newest of the recorded commit and the merge-base of `HEAD` with
-each recorded branch as it stands now.** A merge-base that does not descend from
-the recorded commit, or from a branch that no longer exists, is left out. Of what
+each recorded branch as it stands now.** A recorded branch the worktree has
+checked out now is left out, because it moves with the work. So is one that no
+longer exists, and one whose merge-base does not descend from the recorded
+commit. Of what
 remains, the base is the one every other one is an ancestor of, and the recorded
 commit where none is. A worktree rebased onto a branch that has moved on gets
 the moved branch's commit as its base, so its change holds its own commits and
@@ -876,8 +877,8 @@ rm .squiz/local/index.<pid>
   its base, so a tree that has not changed is a state that has not changed, and
   § 3's "one state gets one review" holds.
 
-`provideCommits` returns `.squiz/local/objects/` as the one alternate, and the
-snapshot adds it to the clone's `objects/info/alternates`. The snapshot is
+`provideCommits` returns the absolute path of the worktree's
+`.squiz/local/objects/` as the one alternate, and the snapshot adds it to the clone's `objects/info/alternates`. The snapshot is
 otherwise made as § 5 The snapshot sets out, from the commit and the base, and
 `git diff refs/squiz/base...HEAD` there is the change.
 
