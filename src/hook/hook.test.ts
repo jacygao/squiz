@@ -579,9 +579,13 @@ function sessionStartPayload(cwd: string, over: Readonly<Record<string, unknown>
   return JSON.stringify({ session_id: SESSION_ID, cwd, hook_event_name: "SessionStart", source: "startup", ...over });
 }
 
-/** Copilot's `SubagentStart`, which names its session in camelCase and carries no `session_id`. */
+/**
+ * Copilot 1.0.107's `SubagentStart` as captured, with only its `cwd` moved:
+ * no `hook_event_name`, no `session_id`, and the session in camelCase.
+ */
 function copilotSubagentStartPayload(cwd: string): string {
-  return JSON.stringify({ hook_event_name: "SubagentStart", sessionId: SESSION_ID, transcriptPath: "/nowhere/events.jsonl", cwd, agent_id: AGENT_ID });
+  const captured = '{"sessionId":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78","timestamp":1794041278779,"cwd":"/abs/proj","transcriptPath":"/Users/x/.copilot/session-state/f1a68b9a-73c2-42c1-ac30-8882b95ebe78/events.jsonl","agentName":"general-purpose","agent_id":"a8be9a13-9ff3-42eb-9fad-059e10c0037d","agent_type":"general-purpose","parent_agent_id":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78"}';
+  return JSON.stringify({ ...(JSON.parse(captured) as Record<string, unknown>), cwd });
 }
 
 function baseFileIn(place: Place): string {
@@ -610,7 +614,7 @@ test("a SessionStart under the local venue records the base at the worktree's ro
   });
 });
 
-test("Copilot's SubagentStart, which carries no session_id, records the base", async () => {
+test("Copilot's SubagentStart, which carries no hook_event_name and no session_id, records the base and says nothing", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
       payload: copilotSubagentStartPayload(place.worktree),

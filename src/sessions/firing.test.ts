@@ -461,15 +461,16 @@ function subagentStartText(over: Readonly<Record<string, unknown>> = {}): string
 }
 
 /** Copilot's `SubagentStart`, which names the session in camelCase and has no `session_id`. */
-function copilotSubagentStartText(): string {
-  return JSON.stringify({
-    hook_event_name: "SubagentStart",
-    sessionId: COPILOT_PARENT,
-    transcriptPath: COPILOT_TRANSCRIPT,
-    timestamp: "2026-10-06T05:34:50.000Z",
-    cwd: "/work/repo",
-    agent_id: COPILOT_SUBAGENT,
-  });
+/**
+ * Copilot 1.0.107's `SubagentStart` through the plugin's Claude-format
+ * registration, as captured: no `hook_event_name`, and the session in camelCase.
+ */
+const COPILOT_SUBAGENT_START =
+  '{"sessionId":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78","timestamp":1794041278779,"cwd":"/abs/proj","transcriptPath":"/Users/x/.copilot/session-state/f1a68b9a-73c2-42c1-ac30-8882b95ebe78/events.jsonl","agentName":"general-purpose","agent_id":"a8be9a13-9ff3-42eb-9fad-059e10c0037d","agent_type":"general-purpose","parent_agent_id":"f1a68b9a-73c2-42c1-ac30-8882b95ebe78"}';
+
+/** The captured payload with `over` laid on it, a field set to `undefined` dropped. */
+function copilotSubagentStartWith(over: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify({ ...(JSON.parse(COPILOT_SUBAGENT_START) as Record<string, unknown>), ...over });
 }
 
 test("a SessionStart and a SubagentStart are read as starts in the payload's cwd, with no owner", () => {
@@ -484,10 +485,30 @@ test("a start needs no session_id, and Copilot's SubagentStart, which has none, 
     event: "SessionStart",
     directory: DIRECTORY,
   });
-  assert.deepEqual(firingIn(await readFiringWithSocket(copilotSubagentStartText(), UNDER_COPILOT)), {
+});
+
+test("Copilot's SubagentStart, which has no hook_event_name, is read as a start in its cwd", async () => {
+  assert.deepEqual(firingIn(await readFiringWithSocket(COPILOT_SUBAGENT_START, UNDER_COPILOT)), {
     event: "SubagentStart",
-    directory: "/work/repo",
+    directory: "/abs/proj",
   });
+});
+
+test("a payload with no hook_event_name is a start only with agentName, sessionId and an absolute cwd, and never a stop", () => {
+  for (const over of [
+    { agentName: undefined },
+    { agentName: "" },
+    { sessionId: undefined },
+    { cwd: undefined },
+    { cwd: "abs/proj" },
+    // A stop's own fields name no event either way.
+    { agentName: undefined, session_id: SESSION_ID, last_assistant_message: SECRET },
+  ]) {
+    const read = readFiring(copilotSubagentStartWith(over), UNDER_COPILOT);
+    assert.equal(read.outcome, "unreadable", `${JSON.stringify(over)} was read as ${JSON.stringify(read)}`);
+  }
+  const stopFields = readFiring(copilotSubagentStartWith({ session_id: SESSION_ID, stop_reason: "end_turn" }), UNDER_COPILOT);
+  assert.deepEqual(stopFields, { outcome: "read", firing: { event: "SubagentStart", directory: "/abs/proj" } });
 });
 
 test("a start carrying no usable cwd is unreadable, since the worktree is resolved from it", () => {

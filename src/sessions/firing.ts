@@ -3,8 +3,7 @@
  * the work that just ended, or a `SessionStart` or `SubagentStart` read into the
  * directory work is starting in.
  *
- * A start names no owner, so it is read for its `cwd` alone. Copilot's
- * `SubagentStart` names its session in camelCase and has no `session_id`.
+ * A start names no owner, so it is read for its `cwd` alone.
  *
  * The owner is the session in the payload's `session_id`. On `Stop` that is the
  * session whose turn ended. On `SubagentStop` it is the session that dispatched
@@ -78,7 +77,7 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   }
   const payload = parsed as Readonly<Record<string, unknown>>;
 
-  const event = payload["hook_event_name"];
+  const event = payload["hook_event_name"] ?? copilotSubagentStart(payload);
   if (event === "SessionStart" || event === "SubagentStart") {
     const directory = absoluteCwd(payload);
     if (directory === undefined) return unreadable(NO_CWD);
@@ -119,7 +118,19 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   return { outcome: "read", firing: { event, directory, owner, subagent: agentId } };
 }
 
-const NO_CWD = 'the payload carries no absolute "cwd", which the worktree is resolved from';
+/**
+ * `SubagentStart` for a payload naming no event that carries what Copilot's
+ * subagent start carries, `agentName`, `sessionId` and an absolute `cwd`, and
+ * `undefined` for any other. Copilot sends that one with no event name, and a
+ * payload with none is never read as a stop.
+ */
+function copilotSubagentStart(payload: Readonly<Record<string, unknown>>): "SubagentStart" | undefined {
+  const { agentName, sessionId } = payload;
+  const named = typeof agentName === "string" && agentName !== "" && typeof sessionId === "string" && sessionId !== "";
+  return named && absoluteCwd(payload) !== undefined ? "SubagentStart" : undefined;
+}
+
+const NO_CWD ='the payload carries no absolute "cwd", which the worktree is resolved from';
 
 function absoluteCwd(payload: Readonly<Record<string, unknown>>): string | undefined {
   const directory = payload["cwd"];
