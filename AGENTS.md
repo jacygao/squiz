@@ -17,6 +17,15 @@ directory the layout does not have.
 the release's version bumps it. Every other pull request leaves it alone, so
 that two of them never conflict on the version line.
 
+## Configuration
+
+**A user's choice is a setting in `.squiz.json`, not an environment variable.**
+Every squiz process reads `.squiz.json` from the repository's main worktree, so
+the hook, the round host and the commands agree without the choice having to be
+passed down to each of them. A variable is set per run, is easy to forget, and
+does not reach a process its run did not start. § 10 Configuration of the
+specification lists the settings and how each is checked.
+
 ## Notes
 
 **Load the `skills:writing-notes` skill before writing or editing anything under
