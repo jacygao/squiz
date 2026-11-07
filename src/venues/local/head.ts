@@ -9,8 +9,8 @@
  * Nothing here throws. Each failure comes back as a reason.
  */
 
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { copyFileSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import { makeStateDirectory } from "../../loop/state-directory.ts";
 import type { Deadline } from "../../reviewers/deadline.ts";
@@ -50,8 +50,8 @@ export function headObjects(worktree: string): string {
  * in the venue's object directory in `.squiz/local/`.
  *
  * The tree is what `git add --all` in the worktree would stage, the worktree's
- * own ignore rules and filters applied, in a copy of its index named for this
- * process. The copy is removed however the build ends.
+ * own ignore rules and filters applied, less any worktree of the same
+ * repository inside it, in a copy of its index named for this process. The copy is removed however the build ends.
  */
 export function buildHead(worktree: string, base: string, until: Deadline): HeadBuild {
   if (!FULL_COMMIT_NAME.test(base)) return failed(`${JSON.stringify(base)} is not a full commit name`);
@@ -62,11 +62,11 @@ export function buildHead(worktree: string, base: string, until: Deadline): Head
 
   const paths = runGit(
     worktree,
-    ["rev-parse", "--path-format=absolute", "--git-path", "index", "--git-path", "objects"],
+    ["rev-parse", "--path-format=absolute", "--git-path", "index", "--git-path", "objects", "--git-common-dir"],
     { until, env: plain },
   );
   if (!paths.ran) return failed(`the repository of ${worktree} could not be found: ${paths.reason}`);
-  const [index = "", repositoryObjects = ""] = paths.stdout.split("\n");
+  const [index = "", repositoryObjects = "", commonDirectory = ""] = paths.stdout.split("\n");
 
   const local = localDirectory(worktree);
   const objects = headObjects(worktree);
@@ -93,6 +93,7 @@ export function buildHead(worktree: string, base: string, until: Deadline): Head
   const built = commitWorkingTree(
     worktree,
     base,
+    commonDirectory,
     { ...plain, GIT_INDEX_FILE: copy, GIT_OBJECT_DIRECTORY: objects, GIT_ALTERNATE_OBJECT_DIRECTORIES: repositoryObjects },
     until,
   );
@@ -104,7 +105,13 @@ export function buildHead(worktree: string, base: string, until: Deadline): Head
   return built;
 }
 
-function commitWorkingTree(worktree: string, base: string, env: NodeJS.ProcessEnv, until: Deadline): HeadBuild {
+function commitWorkingTree(
+  worktree: string,
+  base: string,
+  commonDirectory: string,
+  env: NodeJS.ProcessEnv,
+  until: Deadline,
+): HeadBuild {
   // The monitor and a split index each keep state for the worktree's own
   // index, which its copy must not share, and a split index writes its shared
   // part into the repository's git directory. A hook on writing an index runs
@@ -113,6 +120,8 @@ function commitWorkingTree(worktree: string, base: string, env: NodeJS.ProcessEn
   const isolated = ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false", "-c", "core.hooksPath=/dev/null"];
   const added = runGit(worktree, [...isolated, "add", "--all"], { until, env });
   if (!added.ran) return failed(`the working tree could not be staged: ${added.reason}`);
+  const left = leaveOutWorktrees(worktree, base, commonDirectory, isolated, env, until);
+  if (left !== undefined) return failed(left);
   const tree = runGit(worktree, [...isolated, "write-tree"], { until, env });
   if (!tree.ran) return failed(`the working tree's tree could not be written: ${tree.reason}`);
 
@@ -137,6 +146,64 @@ function commitWorkingTree(worktree: string, base: string, env: NodeJS.ProcessEn
   );
   if (!made.ran) return failed(`the head could not be committed: ${made.reason}`);
   return { outcome: "built", head: made.stdout.trim() };
+}
+
+/**
+ * Remove from the index copy each gitlink `git add --all` took for a worktree
+ * of this repository, such as a subagent's, at a path the base does not have.
+ *
+ * Returns why it could not, or nothing once it has.
+ */
+function leaveOutWorktrees(
+  worktree: string,
+  base: string,
+  commonDirectory: string,
+  isolated: readonly string[],
+  env: NodeJS.ProcessEnv,
+  until: Deadline,
+): string | undefined {
+  const staged = runGit(worktree, ["ls-files", "--stage", "-z"], { until, env });
+  if (!staged.ran) return `the staged gitlinks could not be listed: ${staged.reason}`;
+  const worktrees = staged.stdout
+    .split("\0")
+    .filter((entry) => entry.startsWith("160000 "))
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1))
+    .filter((path) => isWorktreeOf(join(worktree, path), commonDirectory));
+  if (worktrees.length === 0) return undefined;
+
+  const listed = runGit(worktree, ["--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", base, "--", ...worktrees], {
+    until,
+    env,
+  });
+  if (!listed.ran) return `the base's entries at the worktrees in the working tree could not be listed: ${listed.reason}`;
+  const inBase = new Set(listed.stdout.split("\0"));
+  const leftOut = worktrees.filter((path) => !inBase.has(path));
+  if (leftOut.length === 0) return undefined;
+  const removed = runGit(worktree, ["--literal-pathspecs", ...isolated, "update-index", "--force-remove", "--", ...leftOut], {
+    until,
+    env,
+  });
+  if (!removed.ran) return `the worktrees in the working tree could not be left out: ${removed.reason}`;
+  return undefined;
+}
+
+/**
+ * Whether `directory` is a linked worktree of the repository whose common git
+ * directory is `commonDirectory`. A submodule in a linked worktree keeps its
+ * git directory deeper under `worktrees/`, so only a direct child counts.
+ */
+function isWorktreeOf(directory: string, commonDirectory: string): boolean {
+  try {
+    const dotGit = join(directory, ".git");
+    if (!lstatSync(dotGit).isFile()) return false;
+    const named = /^gitdir: (.+)$/mu.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
+    if (named === undefined) return false;
+    const gitDirectory = realpathSync(resolve(directory, named));
+    return dirname(gitDirectory) === join(realpathSync(commonDirectory), "worktrees");
+  } catch {
+    // A `.git` that cannot be read or resolved names no worktree of this one.
+    return false;
+  }
 }
 
 /**
