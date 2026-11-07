@@ -484,6 +484,18 @@ test("a commit that is not a full object name is refused before git sees it", as
   });
 });
 
+test("an alternate that is relative, or that the alternates list cannot hold, is refused before anything is made", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, head } = await repositoryWithLinkedWorktree(root);
+
+    for (const alternate of ["review/objects", `${root}/a:b/objects`]) {
+      const addition = addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: head, alternates: [alternate] }, deadlineIn(30_000));
+      assert.equal(reasonOf(addition), `${JSON.stringify(alternate)} is not an object directory the snapshot can borrow from`);
+      assert.equal(existsSync(roundTwoPath(agent)), false);
+    }
+  });
+});
+
 test("the project's checkout hooks do not run in a snapshot", async () => {
   await withTemporaryDirectory(async (root) => {
     const { main, agent, head } = await repositoryWithLinkedWorktree(root);

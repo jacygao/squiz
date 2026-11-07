@@ -22,7 +22,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, rmdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, rmdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
@@ -52,6 +52,11 @@ export type SnapshotOf = {
   readonly round: number;
   readonly commit: string;
   readonly base: string;
+  /**
+   * Object directories outside the repository that the commit or the base is
+   * in, absolute, which the snapshot borrows from beside the repository's own.
+   */
+  readonly alternates?: readonly string[];
 };
 
 /** The snapshot's ref naming the pull request's base commit, which the change is diffed against. */
@@ -65,8 +70,9 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * Add the round's snapshot of `worktree`, the coding agent's worktree root, at
  * the path `snapshotPath` gives.
  *
- * Where the repository lacks the commit or the base, the missing ones are
- * fetched from `origin` first, and checked for again before anything is added:
+ * The snapshot borrows from `of.alternates` too, and a commit or a base found
+ * there is not fetched. Where the repository and the alternates lack either,
+ * the missing ones are fetched from `origin` first, and checked for again before anything is added:
  * a snapshot of anything else is worse than none. The base is written into the
  * snapshot as `BASE_REF`.
  *
@@ -74,6 +80,7 @@ const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  * started. Fails where:
  *
  * - the commit or the base is not a full object name;
+ * - an alternate is relative, or holds a newline, `:`, `"` or `\`;
  * - the snapshots directory cannot be made, or is not this user's alone;
  * - anything already stands at the path, which is a killed round's snapshot
  *   for recovery to remove;
@@ -95,9 +102,21 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
   // is not enough to keep a leftover from being reused.
   if (existsSync(path)) return failed(`something already stands at ${path}`);
 
+  const alternates = of.alternates ?? [];
+  for (const directory of alternates) {
+    // The alternates file is one path a line, and the variable the presence
+    // check passes them in splits on `:`. A relative one resolves against the
+    // clone's own objects.
+    if (!isAbsolute(directory) || /[\n:"\\]/u.test(directory)) {
+      return failed(`${JSON.stringify(directory)} is not an object directory the snapshot can borrow from`);
+    }
+  }
+  const borrowing =
+    alternates.length === 0 ? process.env : { ...process.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: alternates.join(":") };
+
   const missing: string[] = [];
   for (const name of new Set([of.commit, of.base])) {
-    const present = hasCommit(worktree, name, until);
+    const present = hasCommit(worktree, name, until, borrowing);
     if (!present.known) return failed(`whether ${name} is here could not be told: ${present.reason}`);
     if (!present.has) missing.push(name);
   }
@@ -112,7 +131,7 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
     );
     if (!fetched.ran) return failed(`${named} could not be fetched: ${fetched.reason}`);
     for (const name of missing) {
-      const arrived = hasCommit(worktree, name, until);
+      const arrived = hasCommit(worktree, name, until, borrowing);
       if (!arrived.known) return failed(`whether ${name} arrived could not be told: ${arrived.reason}`);
       if (!arrived.has) return failed(`the fetch finished without bringing ${name}`);
     }
@@ -144,6 +163,15 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
     ),
   );
   if (cloned !== null) return cloned;
+  if (alternates.length > 0) {
+    const listed = join(path, ".git", "objects", "info", "alternates");
+    try {
+      appendFileSync(listed, alternates.map((directory) => `${directory}\n`).join(""));
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      return { outcome: "failed", reason: `the snapshot at ${path} could not borrow from ${alternates.join(" and ")}: ${reason}`, leftBehind: path };
+    }
+  }
   // A checkout hook from the user's own config or template would spend the
   // deadline, and could write outside the snapshot.
   const checkedOut = madeAt(
@@ -243,13 +271,14 @@ type Presence =
   | { readonly known: true; readonly has: boolean }
   | { readonly known: false; readonly reason: string };
 
-function hasCommit(worktree: string, commit: string, until: Deadline): Presence {
+function hasCommit(worktree: string, commit: string, until: Deadline, env: NodeJS.ProcessEnv): Presence {
   // Exit 1 with nothing said is a commit the repository does not have. A
   // `cat-file -e` of the same name exits 128 for that, as it does for a
   // repository it cannot read.
   const checked = runGit(worktree, ["rev-parse", "--quiet", "--verify", `${commit}^{commit}`], {
     until,
     answers: [0, 1],
+    env,
   });
   if (!checked.ran) return { known: false, reason: checked.reason };
   return { known: true, has: checked.status === 0 };
