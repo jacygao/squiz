@@ -235,7 +235,7 @@ test("open threads end with the follow-up the venue's change carries", async () 
     records(fixture, [
       { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(1) },
     ], { rounds: [ROUND] });
-    const followUp = "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.";
+    const followUp = "Fix what applies in /work/squiz-a, then run `(cd '/work/squiz-a' && squiz review)` again.";
     const triggered = decided(fixture, { outcome: "in-hand" });
     const withFollowUp = { ...triggered, change: { ...CHANGE, followUp } };
 
@@ -927,9 +927,9 @@ test("a round host whose start is unknown, with the deadline passed and no host 
 const WORKING_TREE: Change = {
   key: LOCAL_KEY,
   name: "the working tree",
-  rerun: "cd '/work/squiz-a' && squiz review",
+  rerun: "(cd '/work/squiz-a' && squiz review)",
   summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
-  followUp: "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.",
+  followUp: "Fix what applies in /work/squiz-a, then run `(cd '/work/squiz-a' && squiz review)` again.",
   base: CHANGE.base,
   head: OWN.head,
   description: "",

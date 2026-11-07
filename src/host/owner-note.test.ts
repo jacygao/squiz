@@ -9,7 +9,7 @@ import { ownerNote } from "./owner-note.ts";
 const HEAD = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
 const OWNER: Owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
 const PR_41 = { key: "41", name: "PR #41", rerun: "squiz review 41" };
-const WORKING_TREE = { key: "local", name: "the working tree", rerun: "cd '/work/squiz-a' && squiz review" };
+const WORKING_TREE = { key: "local", name: "the working tree", rerun: "(cd '/work/squiz-a' && squiz review)" };
 
 function reviewed(exitStatus: 2 | 3, openThreads: readonly string[]): StateRecord {
   return {
@@ -78,7 +78,7 @@ test("a note for open threads carries each one as squiz review prints it, and wh
 
 test("a note for open threads ends with the follow-up it was handed, which the change carries", () => {
   const threads = [thread("PRRT_a", 134, "Retry backoff resets")];
-  const followUp = "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.";
+  const followUp = "Fix what applies in /work/squiz-a, then run `(cd '/work/squiz-a' && squiz review)` again.";
 
   const text = textOf(ownerNote(PR_41, reviewed(2, ["PRRT_a"]), "3f9c2e0", followUp, undefined, threads));
 

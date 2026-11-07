@@ -21,7 +21,7 @@ export type Change = {
   readonly key: string;
   /** What every message calls it: "PR #41", or "the working tree". */
   readonly name: string;
-  /** The command that reviews it again, from anywhere: "squiz review 41", or "cd '/work/squiz-a' && squiz review". */
+  /** The command that reviews it again, from anywhere: "squiz review 41", or "(cd '/work/squiz-a' && squiz review)". */
   readonly rerun: string;
   /** Where the summary is, as a message says it: "on the pull request", or "in /work/squiz-a/.squiz/local/summary.md". */
   readonly summaryAt: string;

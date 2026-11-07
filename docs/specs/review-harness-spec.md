@@ -674,7 +674,7 @@ type Change = {
   readonly key: string;
   /** What every message calls it: "PR #41", or "the working tree". */
   readonly name: string;
-  /** The command that reviews it again, from anywhere: "squiz review 41", or "cd '/work/squiz-a' && squiz review". */
+  /** The command that reviews it again, from anywhere: "squiz review 41", or "(cd '/work/squiz-a' && squiz review)". */
   readonly rerun: string;
   /** Where the summary is, as a message says it: "on the pull request", or "in /work/squiz-a/.squiz/local/summary.md". */
   readonly summaryAt: string;
@@ -804,12 +804,13 @@ writes becomes part of the change.
 venue builds its head from the working tree, so an edit is the whole of a fix.
 Its thread ids count up from `T1` in every worktree, so a reply run from any
 other worktree lands on a different thread. Every command it gives runs in the
-reviewed worktree:
+reviewed worktree, inside a subshell, so the shell that runs it stays in its own
+directory and its own stops review its own tree:
 
 ```
 Fix what applies in /work/squiz-a, and reply on each thread with
-`cd '/work/squiz-a' && squiz reply <id> <text>` to say what you changed or why
-you disagree. Then run `cd '/work/squiz-a' && squiz review` again.
+`(cd '/work/squiz-a' && squiz reply <id> <text>)` to say what you changed or why
+you disagree. Then run `(cd '/work/squiz-a' && squiz review)` again.
 ```
 
 #### The base
