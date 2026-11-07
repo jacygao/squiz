@@ -77,6 +77,12 @@ test("SubagentStop runs the binary through the plugin root, under the runtime's 
   assert.deepEqual(commandsOn("SubagentStop"), [{ type: "command", command }]);
 });
 
+test("SessionStart and SubagentStart run the same command as the stop hooks, so the venue records where work starts", () => {
+  assert.deepEqual(commandsOn("SessionStart"), [{ type: "command", command }]);
+  assert.deepEqual(commandsOn("SubagentStart"), [{ type: "command", command }]);
+  assert.deepEqual(Object.keys(registration.hooks ?? {}).sort(), ["SessionStart", "Stop", "SubagentStart", "SubagentStop"]);
+});
+
 test("each registered command runs bin/squiz hook from a plugin root with a space in its path (#662)", () => {
   const root = join(mkdtempSync(join(tmpdir(), "squiz-662-")), "plugin root");
   try {
@@ -88,7 +94,7 @@ test("each registered command runs bin/squiz hook from a plugin root with a spac
     let ran = 0;
     // Claude Code runs a shell-form command under /bin/sh and Copilot under /bin/bash.
     for (const shell of ["/bin/sh", "/bin/bash"]) {
-      for (const event of ["Stop", "SubagentStop"]) {
+      for (const event of ["Stop", "SubagentStop", "SessionStart", "SubagentStart"]) {
         for (const hook of commandsOn(event) as { command?: string }[]) {
           rmSync(argvFile, { force: true });
           const run = spawnSync(shell, ["-c", hook.command ?? ""], {
@@ -101,7 +107,7 @@ test("each registered command runs bin/squiz hook from a plugin root with a spac
         }
       }
     }
-    assert.equal(ran, 4, "a registration this test never ran would pass it");
+    assert.equal(ran, 8, "a registration this test never ran would pass it");
   } finally {
     rmSync(join(root, ".."), { recursive: true, force: true });
   }

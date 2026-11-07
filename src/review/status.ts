@@ -131,7 +131,7 @@ export function collectStatus(worktrees: readonly string[], options: StatusOptio
       const read = readState(episode);
       if (read.outcome === "absent") continue;
       if (read.outcome === "unreadable") {
-        problems.push(`the reviews of #${episode.key} in ${worktree} could not be read: ${read.reason}`);
+        problems.push(`the reviews of ${keyColumn(episode.key)} in ${worktree} could not be read: ${read.reason}`);
         continue;
       }
       const records = read.state.records ?? [];
@@ -168,6 +168,11 @@ export function composeStatus(collected: Collected): { readonly stdout: string; 
   return { stdout: table(rows), stderr };
 }
 
+/** The PR column for an episode keyed `key`: `#41` for a pull request's number, and any other key as it is. */
+function keyColumn(key: string): string {
+  return /^[1-9][0-9]*$/u.test(key) ? `#${key}` : key;
+}
+
 function newestFirst(one: EpisodeLines, other: EpisodeLines): number {
   if (one.active !== other.active) return one.active ? -1 : 1;
   const latest = (other.latest ?? -1) - (one.latest ?? -1);
@@ -194,7 +199,7 @@ function linesOf(
     if (record.status === "queued" || record.status === "reviewing") active = true;
     for (const time of line.times) latest = latest === undefined ? time : Math.max(latest, time);
     const row: Row = [
-      `#${episode.key}`,
+      keyColumn(episode.key),
       record.head.slice(0, 7),
       record.activity === null ? NONE : record.activity.slice(-6),
       line.state,

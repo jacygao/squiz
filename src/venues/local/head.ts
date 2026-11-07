@@ -10,17 +10,15 @@
  */
 
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
+import { makeStateDirectory } from "../../loop/state-directory.ts";
 import type { Deadline } from "../../reviewers/deadline.ts";
-import { runGit } from "../../worktree/git.ts";
+import { runGit, withoutGitVariables } from "../../worktree/git.ts";
 import type { Change, Failed } from "../venue.ts";
+import { localDirectory } from "./base.ts";
 
-export type HeadBuild =
-  | { readonly outcome: "built"; readonly head: string }
-  /** The line `squiz review` exits 1 with. */
-  | { readonly outcome: "none"; readonly reason: string }
-  | Failed;
+export type HeadBuild = { readonly outcome: "built"; readonly head: string } | Failed;
 
 // A full object name, SHA-1 or SHA-256. Anything else may name a branch that
 // moves, or reach git as an option.
@@ -38,30 +36,29 @@ const IDENTITY: NodeJS.ProcessEnv = {
   GIT_COMMITTER_DATE: "@0 +0000",
 };
 
-/** Where the venue in `local` keeps the objects of every head it builds. */
-export function headObjects(local: string): string {
-  return join(local, "objects");
+/**
+ * Where the venue keeps the objects of every head it builds in the worktree
+ * whose root is `worktree`. Absolute, because the snapshot refuses a relative
+ * alternate.
+ */
+export function headObjects(worktree: string): string {
+  return resolve(localDirectory(worktree), "objects");
 }
 
 /**
  * Build the head of `worktree`, a worktree's root, on `base`, with its objects
- * in `local`'s object directory.
+ * in the venue's object directory in `.squiz/local/`.
  *
  * The tree is what `git add --all` in the worktree would stage, the worktree's
  * own ignore rules and filters applied, in a copy of its index named for this
  * process. The copy is removed however the build ends.
- *
- * `none` is a base that is not a full commit sha, or not a commit the
- * repository has.
  */
-export function buildHead(worktree: string, local: string, base: string, until: Deadline): HeadBuild {
-  if (!FULL_COMMIT_NAME.test(base)) {
-    return { outcome: "none", reason: `SQUIZ_BASE is ${JSON.stringify(base)}, and the local venue takes a full commit sha` };
-  }
+export function buildHead(worktree: string, base: string, until: Deadline): HeadBuild {
+  if (!FULL_COMMIT_NAME.test(base)) return failed(`${JSON.stringify(base)} is not a full commit name`);
   const plain = withoutGitVariables();
   const known = isCommit(worktree, base, plain, until);
-  if (typeof known === "string") return failed(`whether SQUIZ_BASE ${base} is a commit could not be told: ${known}`);
-  if (!known) return { outcome: "none", reason: `SQUIZ_BASE ${base} is not a commit in ${worktree}` };
+  if (typeof known === "string") return failed(`whether the base ${base} is a commit could not be told: ${known}`);
+  if (!known) return failed(`the base ${base} is not a commit in ${worktree}`);
 
   const paths = runGit(
     worktree,
@@ -71,8 +68,12 @@ export function buildHead(worktree: string, local: string, base: string, until: 
   if (!paths.ran) return failed(`the repository of ${worktree} could not be found: ${paths.reason}`);
   const [index = "", repositoryObjects = ""] = paths.stdout.split("\n");
 
-  const objects = headObjects(local);
+  const local = localDirectory(worktree);
+  const objects = headObjects(worktree);
   try {
+    // `git add --all` would take the venue's own objects and index copy into
+    // the tree, but for the `.gitignore` this writes in `.squiz/`.
+    makeStateDirectory(local);
     mkdirSync(objects, { recursive: true });
   } catch (cause) {
     return failed(`${objects} could not be made: ${messageOf(cause)}`);
@@ -143,12 +144,11 @@ function commitWorkingTree(worktree: string, base: string, env: NodeJS.ProcessEn
  * directory, once both the head and the base can be read through it.
  */
 export function provideCommits(
-  local: string,
   worktree: string,
   change: Change,
   until: Deadline,
 ): { readonly outcome: "ready"; readonly alternates: readonly string[] } | Failed {
-  const objects = headObjects(local);
+  const objects = headObjects(worktree);
   const env = { ...withoutGitVariables(), GIT_ALTERNATE_OBJECT_DIRECTORIES: objects };
   for (const name of [change.head, change.base]) {
     if (!FULL_COMMIT_NAME.test(name)) return failed(`${JSON.stringify(name)} is not a full commit name`);
@@ -173,18 +173,6 @@ function isCommit(worktree: string, name: string, env: NodeJS.ProcessEnv, until:
   const type = runGit(worktree, ["cat-file", "-t", name], { until, env });
   if (!type.ran) return type.reason;
   return type.stdout.trim() === "commit";
-}
-
-/**
- * This process's environment less every `GIT_` variable, any of which could
- * name another repository, index or object directory.
- */
-function withoutGitVariables(): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith("GIT_")) environment[key] = value;
-  }
-  return environment;
 }
 
 function messageOf(cause: unknown): string {

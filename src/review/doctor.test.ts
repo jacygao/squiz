@@ -1252,3 +1252,32 @@ test("a different version in Copilot's copy leaves the exit at 0, and copilot --
   assert.equal(printed.exit, 0, printed.stdout);
   assert.equal(readFileSync(asked, "utf8"), "asked\n", "copilot --version is asked once per run");
 });
+
+test("under the local venue gh is not required: its absence passes, and a line says the local venue is in use", () => {
+  const { gh: _gh, ...withoutGh } = EVERY_FAKE;
+  const base = context(withoutGh);
+
+  const printed = squizDoctor({ ...base, environment: { ...base.environment, SQUIZ_VENUE: "local" } });
+
+  assert.match(printed.stdout, /^Venue local, from SQUIZ_VENUE: reviews run on the working tree, and gh is not required$/mu);
+  assert.match(printed.stdout, /^gh: not found\. Not required under the local venue$/mu);
+  assert.equal(printed.exit, 0, "a gh the local venue never runs failed the check");
+});
+
+test("under the local venue a gh that is not signed in is a warning, not a failure", () => {
+  const base = context({ ...EVERY_FAKE, gh: ghAnswering('{"hosts":{}}') });
+
+  const printed = squizDoctor({ ...base, environment: { ...base.environment, SQUIZ_VENUE: "local" } });
+
+  assert.match(printed.stdout, /^gh 2\.97\.0: warning: not signed in\. Run gh auth login\. Not required under the local venue$/mu);
+  assert.equal(printed.exit, 0);
+});
+
+test("a SQUIZ_VENUE that names no venue fails the check, naming the value", () => {
+  const base = context(EVERY_FAKE);
+
+  const printed = squizDoctor({ ...base, environment: { ...base.environment, SQUIZ_VENUE: "lcoal" } });
+
+  assert.match(printed.stdout, /^Venue: SQUIZ_VENUE is "lcoal", and squiz has the venues github and local$/mu);
+  assert.equal(printed.exit, 1);
+});

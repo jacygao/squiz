@@ -236,6 +236,6 @@ test("the hook records the socket the shipped extension listens on", async () =>
 
     const read = await readFiringWithSocket(payload, { COPILOT_CLI: "1" });
 
-    assert.deepEqual(read.outcome === "read" ? read.firing.owner : read, { sessionId: SESSION_ID, socket });
+    assert.deepEqual(read.outcome === "read" && "owner" in read.firing ? read.firing.owner : read, { sessionId: SESSION_ID, socket });
   });
 });

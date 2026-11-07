@@ -29,8 +29,13 @@ const IGNORE_EVERYTHING = "*\n";
  * throws.
  */
 export function makeEpisodeDirectory(episode: Episode): void {
-  const states = dirname(episode.directory);
-  mkdirSync(episode.directory, { recursive: true });
+  makeStateDirectory(episode.directory);
+}
+
+/** Make `directory`, a directory in `.squiz/`, as `makeEpisodeDirectory` makes an episode's. */
+export function makeStateDirectory(directory: string): void {
+  const states = dirname(directory);
+  mkdirSync(directory, { recursive: true });
   const ignore = join(states, ".gitignore");
   if (present(ignore)) return;
 

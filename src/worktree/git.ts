@@ -74,3 +74,15 @@ function timedOut(error: Error): boolean {
 function describeExit(status: number | null, signal: NodeJS.Signals | null): string {
   return status === null ? `git was killed by ${signal ?? "a signal"}` : `git exited ${status}`;
 }
+
+/**
+ * `environment` less every `GIT_` variable, any of which could name another
+ * repository, index or object directory than the worktree's own.
+ */
+export function withoutGitVariables(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const kept: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(environment)) {
+    if (!key.startsWith("GIT_")) kept[key] = value;
+  }
+  return kept;
+}

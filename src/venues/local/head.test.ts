@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +46,7 @@ type Fixture = {
   readonly main: string;
   /** A linked worktree, whose index is not at `.git/index`, holding every kind of change. */
   readonly agent: string;
+  /** The agent's `.squiz/local/`, where the venue keeps its objects and index copies. */
   readonly local: string;
   readonly base: string;
 };
@@ -89,7 +90,7 @@ async function withFixture<T>(body: (fixture: Fixture) => Promise<T> | T): Promi
     await mkdir(join(agent, "build"));
     await writeFile(join(agent, "build", "out.txt"), "output\n");
 
-    return await body({ root, main, agent, local: join(root, "review"), base });
+    return await body({ root, main, agent, local: join(agent, ".squiz", "local"), base });
   } finally {
     if (previous === undefined) delete process.env["TMPDIR"];
     else process.env["TMPDIR"] = previous;
@@ -134,7 +135,7 @@ function changeOf(base: string, head: string): Change {
 
 test("two builds of an unchanged worktree are the same commit, whatever the clock, identity and config say", async () => {
   await withFixture(async ({ root, agent, local, base }) => {
-    const first = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    const first = builtHead(buildHead(agent, base, deadlineIn(30_000)));
 
     // A home whose config signs every commit with a program that fails, and
     // names another identity and encoding, with the dates and names git reads
@@ -161,7 +162,7 @@ test("two builds of an unchanged worktree are the same commit, whatever the cloc
     Object.assign(process.env, changed);
     let second: string;
     try {
-      second = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+      second = builtHead(buildHead(agent, base, deadlineIn(30_000)));
     } finally {
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[key];
@@ -181,7 +182,7 @@ test("a build changes nothing in the repository: not the worktree's index, its o
   await withFixture(({ main, agent, local, base }) => {
     const gitDirectory = join(main, ".git");
     const before = fingerprint(gitDirectory);
-    builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    builtHead(buildHead(agent, base, deadlineIn(30_000)));
     assert.equal(fingerprint(gitDirectory), before);
   });
 });
@@ -195,7 +196,7 @@ test("a build changes nothing in a repository that splits its index", async () =
     git(agent, ["update-index", "--split-index"]);
     const gitDirectory = join(main, ".git");
     const before = fingerprint(gitDirectory);
-    builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    builtHead(buildHead(agent, base, deadlineIn(30_000)));
     assert.equal(fingerprint(gitDirectory), before);
   });
 });
@@ -204,14 +205,14 @@ test("a build runs none of the repository's hooks", async () => {
   await withFixture(async ({ root, main, agent, local, base }) => {
     const ran = join(root, "hook-ran");
     await writeFile(join(main, ".git", "hooks", "post-index-change"), `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 });
-    builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    builtHead(buildHead(agent, base, deadlineIn(30_000)));
     assert.equal(existsSync(ran), false, "the post-index-change hook ran");
   });
 });
 
 test("the head holds what git add --all would: tracked, deleted, re-moded, relinked and untracked files, and no ignored one", async () => {
   await withFixture(({ agent, local, base }) => {
-    const head = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
     const blob = (content: string): string => hashOf(agent, content);
     const listed = gitWithHeads(agent, local, ["ls-tree", "-r", head]);
     assert.equal(
@@ -238,8 +239,8 @@ function hashOf(directory: string, content: string): string {
 
 test("the snapshot of the built head, given its alternates, diffs to the working tree's change byte for byte", async () => {
   await withFixture(async ({ root, agent, local, base }) => {
-    const head = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
-    const provided = provideCommits(local, agent, changeOf(base, head), deadlineIn(30_000));
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+    const provided = provideCommits(agent, changeOf(base, head), deadlineIn(30_000));
     assert.deepEqual(provided, { outcome: "ready", alternates: [join(local, "objects")] });
     const alternates = provided.outcome === "ready" ? provided.alternates : [];
     assert.equal(
@@ -273,38 +274,63 @@ test("the snapshot of the built head, given its alternates, diffs to the working
 test("provideCommits fails where the head is not among the venue's objects", async () => {
   await withFixture(({ agent, local, base }) => {
     const missing = "0123456789abcdef0123456789abcdef01234567";
-    const provided = provideCommits(local, agent, changeOf(base, missing), deadlineIn(30_000));
+    const provided = provideCommits(agent, changeOf(base, missing), deadlineIn(30_000));
     assert.equal(provided.outcome, "failed");
     assert.match(provided.outcome === "failed" ? provided.reason : "", new RegExp(missing, "u"));
   });
 });
 
-test("a SQUIZ_BASE the repository lacks is none, with the line the local venue gives", async () => {
-  await withFixture(({ agent, local, base }) => {
+test("a base the repository lacks fails, naming it", async () => {
+  await withFixture(({ agent, base }) => {
     const absent = "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9";
-    assert.deepEqual(buildHead(agent, local, absent, deadlineIn(30_000)), {
-      outcome: "none",
-      reason: `SQUIZ_BASE ${absent} is not a commit in ${agent}`,
+    assert.deepEqual(buildHead(agent, absent, deadlineIn(30_000)), {
+      outcome: "failed",
+      reason: `the base ${absent} is not a commit in ${agent}`,
     });
 
     // A head built earlier is among the venue's objects and not the repository's.
-    const head = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
-    assert.deepEqual(buildHead(agent, local, head, deadlineIn(30_000)), {
-      outcome: "none",
-      reason: `SQUIZ_BASE ${head} is not a commit in ${agent}`,
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+    assert.deepEqual(buildHead(agent, head, deadlineIn(30_000)), {
+      outcome: "failed",
+      reason: `the base ${head} is not a commit in ${agent}`,
     });
 
     const tree = git(agent, ["rev-parse", `${base}^{tree}`]).trim();
-    assert.equal(buildHead(agent, local, tree, deadlineIn(30_000)).outcome, "none");
+    assert.equal(buildHead(agent, tree, deadlineIn(30_000)).outcome, "failed");
   });
 });
 
-test("a SQUIZ_BASE that is not a full commit sha is none, with the line the local venue gives", async () => {
-  await withFixture(({ agent, local }) => {
-    assert.deepEqual(buildHead(agent, local, "--output=/tmp/x", deadlineIn(30_000)), {
-      outcome: "none",
-      reason: 'SQUIZ_BASE is "--output=/tmp/x", and the local venue takes a full commit sha',
+test("a base that is not a full commit sha is never handed to git", async () => {
+  await withFixture(({ agent }) => {
+    assert.deepEqual(buildHead(agent, "--output=/tmp/x", deadlineIn(30_000)), {
+      outcome: "failed",
+      reason: '"--output=/tmp/x" is not a full commit name',
     });
+  });
+});
+
+test("the head's tree holds nothing of .squiz/, though the build writes there and the worktree had no .squiz/.gitignore", async () => {
+  await withFixture(async ({ agent, local, base }) => {
+    assert.equal(existsSync(join(agent, ".squiz")), false);
+
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+
+    const paths = gitWithHeads(agent, local, ["ls-tree", "-r", "--name-only", head]).split("\n");
+    assert.deepEqual(
+      paths.filter((path) => path.startsWith(".squiz")),
+      [],
+      "the venue's own objects and index copy were taken into the reviewed tree",
+    );
+    assert.equal(readFileSync(join(agent, ".squiz", ".gitignore"), "utf8"), "*\n");
+  });
+});
+
+test("provideCommits names the venue's objects by an absolute path, which the snapshot requires", async () => {
+  await withFixture(({ agent, local, base }) => {
+    const head = builtHead(buildHead(agent, base, deadlineIn(30_000)));
+    const provided = provideCommits(relative(process.cwd(), agent), changeOf(base, head), deadlineIn(30_000));
+    assert.deepEqual(provided, { outcome: "ready", alternates: [join(local, "objects")] });
+    assert.ok(isAbsolute(provided.outcome === "ready" ? (provided.alternates[0] ?? "") : ""));
   });
 });
 
@@ -313,7 +339,7 @@ test("concurrent builds each use an index copy of their own, and none is left af
     const at = Date.now() + 3_000;
     const race = (): Promise<string> =>
       new Promise((done, fail) => {
-        const child = spawn(process.execPath, [RACER, agent, local, base, String(at)], { stdio: ["ignore", "pipe", "inherit"] });
+        const child = spawn(process.execPath, [RACER, agent, base, String(at)], { stdio: ["ignore", "pipe", "inherit"] });
         let out = "";
         child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
         child.on("error", fail);
@@ -332,7 +358,7 @@ test("a build that fails leaves no index copy behind", async () => {
     await writeFile(unreadable, "secret\n");
     chmodSync(unreadable, 0o000);
     try {
-      const build = buildHead(agent, local, base, deadlineIn(30_000));
+      const build = buildHead(agent, base, deadlineIn(30_000));
       assert.equal(build.outcome, "failed");
       assert.match(build.outcome === "failed" ? build.reason : "", /unreadable\.txt|Permission denied/u);
       assert.ok(existsSync(local), "the build never reached the copy");
@@ -348,16 +374,16 @@ test("a copy an earlier build left under this process's name changes nothing, ev
     // With no index to copy, the build starts from none, so a leftover is all
     // there would be to start from.
     await unlink(git(agent, ["rev-parse", "--path-format=absolute", "--git-path", "index"]).trim());
-    const first = builtHead(buildHead(agent, local, base, deadlineIn(30_000)));
+    const first = builtHead(buildHead(agent, base, deadlineIn(30_000)));
     await writeFile(join(local, `index.${process.pid}`), "not an index");
-    assert.equal(builtHead(buildHead(agent, local, base, deadlineIn(30_000))), first);
+    assert.equal(builtHead(buildHead(agent, base, deadlineIn(30_000))), first);
     assert.deepEqual(indexCopies(local), []);
   });
 });
 
 test("a build with no time left runs nothing, and fails", async () => {
   await withFixture(({ agent, local, base }) => {
-    const build = buildHead(agent, local, base, deadlineIn(0));
+    const build = buildHead(agent, base, deadlineIn(0));
     assert.equal(build.outcome, "failed");
     assert.equal(existsSync(local), false);
   });

@@ -1,6 +1,6 @@
 /**
  * The local venue's record: the threads, the summary and the failure comments
- * of one worktree's review, as files in that worktree's directory.
+ * of one worktree's review, as files in its `.squiz/local/`.
  *
  * `threads.json` is written whole under `threads.lock`, by a new file renamed
  * over the old, so a reader needs no lock and never sees half a file. What the

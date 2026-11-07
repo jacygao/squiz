@@ -102,7 +102,7 @@ type Run = {
 async function run(
   command: string,
   args: readonly string[],
-  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string; local?: string },
+  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string; venue?: string },
 ): Promise<Run> {
   return await new Promise<Run>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -112,7 +112,7 @@ async function run(
         ...(options.path === undefined ? {} : { PATH: options.path }),
         ...(options.home === undefined ? {} : { HOME: options.home }),
         ...(options.claudeConfig === undefined ? {} : { CLAUDE_CONFIG_DIR: options.claudeConfig }),
-        SQUIZ_LOCAL: options.local ?? "",
+        SQUIZ_VENUE: options.venue ?? "",
       },
     });
     // A child that reads no stdin can exit before the write lands, and the
@@ -517,31 +517,31 @@ test("squiz reply on a draft posts nothing and says why in the venue's line", as
   assert.equal(result.sent, "", "a reply went to GitHub for a change the venue held");
 });
 
-const NO_LOCAL_VENUE = 'SQUIZ_LOCAL is "/work/squiz-review", and this squiz has no local venue';
+const NO_VENUE = 'SQUIZ_VENUE is "lcoal", and squiz has the venues github and local';
 
 test("squiz threads where no venue can be chosen lists nothing and names the variable", async () => {
-  const result = await run(shim, ["threads"], { cwd: elsewhere, local: "/work/squiz-review" });
+  const result = await run(shim, ["threads"], { cwd: elsewhere, venue: "lcoal" });
 
   assert.equal(result.stdout, "");
-  assert.equal(result.stderr, `squiz: no threads listed: ${NO_LOCAL_VENUE}\n`);
+  assert.equal(result.stderr, `squiz: no threads listed: ${NO_VENUE}\n`);
   assert.equal(result.code, 0);
 });
 
 test("squiz reply where no venue can be chosen posts nothing and names the variable", async () => {
-  const result = await run(shim, ["reply", "PRRT_somewhere", "a reply"], { cwd: elsewhere, local: "/work/squiz-review" });
+  const result = await run(shim, ["reply", "PRRT_somewhere", "a reply"], { cwd: elsewhere, venue: "lcoal" });
 
   assert.equal(result.stdout, "");
-  assert.equal(result.stderr, `squiz: nothing replied: ${NO_LOCAL_VENUE}\n`);
+  assert.equal(result.stderr, `squiz: nothing replied: ${NO_VENUE}\n`);
   assert.equal(result.code, 0);
 });
 
 test("squiz review where no venue can be chosen exits 1 naming the variable", async () => {
-  const result = await run(shim, ["review", "41"], { cwd: elsewhere, local: "/work/squiz-review" });
+  const result = await run(shim, ["review", "41"], { cwd: elsewhere, venue: "lcoal" });
 
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    `squiz: no review ran: ${NO_LOCAL_VENUE}\nsquiz: put these lines in your report rather than running squiz review again\n`,
+    `squiz: no review ran: ${NO_VENUE}\nsquiz: put these lines in your report rather than running squiz review again\n`,
   );
   assert.equal(result.code, 1);
 });
@@ -867,4 +867,146 @@ test("a throw inside squiz init exits 1, which never reads as the link made", as
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+/** A repository with no remote, whose base a SessionStart through the binary recorded, and a `gh` that says whether it ran. */
+type LocalPlace = { readonly worktree: string; readonly path: string; readonly ghRan: string };
+
+async function withLocalPlace(body: (place: LocalPlace) => Promise<void>): Promise<void> {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), "squiz-cli-local-")));
+  try {
+    const worktree = join(root, "work");
+    await mkdir(worktree);
+    gitIn(worktree, ["init", "--quiet", "--initial-branch", "main"]);
+    // A file of its own, so that no run adds the line saying the defaults are in use.
+    await writeFile(join(worktree, ".squiz.json"), "{}");
+    gitIn(worktree, ["add", "--all"]);
+    gitIn(worktree, [...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start"]);
+    const fakes = join(root, "fakes");
+    await mkdir(fakes);
+    const ghRan = join(root, "gh-ran");
+    standIn(fakes, "gh", `#!/bin/sh\ntouch '${ghRan}'\nexit 1\n`);
+    const path = `${fakes}:${process.env["PATH"] ?? ""}`;
+    const started = await run(shim, ["hook"], {
+      cwd: root,
+      path,
+      venue: "local",
+      input: JSON.stringify({ hook_event_name: "SessionStart", session_id: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb", cwd: worktree, source: "startup" }),
+    });
+    assert.deepEqual(started, { code: 0, stdout: "", stderr: "" });
+    await body({ worktree, path, ghRan });
+    await assert.rejects(stat(ghRan), "the local venue ran gh");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+const LOCAL_THREADS = {
+  threads: [
+    {
+      id: "T1",
+      path: "queue.ts",
+      anchor: { at: "line", line: 3 },
+      isResolved: false,
+      comments: [{ id: "C1", body: "**Squiz reviewer · high — Retry backoff resets on every enqueue**\n\n- …" }],
+    },
+    {
+      id: "T2",
+      path: "queue.ts",
+      anchor: { at: "file" },
+      isResolved: false,
+      comments: [{ id: "C2", body: "**Squiz reviewer · low — The name says nothing**\n\n- …" }],
+    },
+    {
+      id: "T3",
+      path: "queue.ts",
+      anchor: { at: "file" },
+      isResolved: true,
+      comments: [{ id: "C3", body: "**Squiz reviewer · low — Gone**\n\n- …" }],
+    },
+  ],
+};
+
+test("squiz review under the local venue refuses a pull request's number, and makes nothing", async () => {
+  await withLocalPlace(async ({ worktree, path }) => {
+    const result = await run(shim, ["review", "41"], { cwd: worktree, path, venue: "local" });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "squiz: no review ran: the local venue reviews the working tree, and takes no pull request number\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+    await assert.rejects(stat(join(worktree, ".squiz", "41")), "squiz review 41 made an episode");
+  });
+});
+
+test("squiz review under the local venue with no recorded base exits 1, naming the worktree", async () => {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), "squiz-cli-unrecorded-")));
+  try {
+    gitIn(root, ["init", "--quiet", "--initial-branch", "main"]);
+    await writeFile(join(root, ".squiz.json"), "{}");
+    gitIn(root, ["add", "--all"]);
+    gitIn(root, [...identity, "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start"]);
+
+    const result = await run(shim, ["review"], { cwd: root, venue: "local" });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.match(
+      result.stderr,
+      new RegExp(`^squiz: no review ran: ${root.replaceAll(/[.*+?^${}()|[\]\\/]/gu, "\\$&")} has no recorded base, which squiz records when a session or subagent starts there\n`, "u"),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("squiz threads under the local venue lists the open threads on the working tree", async () => {
+  await withLocalPlace(async ({ worktree, path }) => {
+    const none = await run(shim, ["threads"], { cwd: worktree, path, venue: "local" });
+    assert.deepEqual(none, { code: 0, stdout: "no open threads on the working tree\n", stderr: "" });
+
+    await writeFile(join(worktree, ".squiz", "local", "threads.json"), JSON.stringify(LOCAL_THREADS));
+    const listed = await run(shim, ["threads"], { cwd: worktree, path, venue: "local" });
+
+    assert.deepEqual(listed, {
+      code: 0,
+      stdout:
+        "2 open threads on the working tree\n" +
+        "T1 queue.ts:3 high — Retry backoff resets on every enqueue\n" +
+        "T2 queue.ts (whole file) low — The name says nothing\n",
+      stderr: "",
+    });
+  });
+});
+
+test("squiz reply under the local venue adds the coding agent's reply to threads.json, and refuses an id it does not hold", async () => {
+  await withLocalPlace(async ({ worktree, path }) => {
+    await writeFile(join(worktree, ".squiz", "local", "threads.json"), JSON.stringify(LOCAL_THREADS));
+
+    const replied = await run(shim, ["reply", "T1", "Fixed", "in", "place."], { cwd: join(worktree, ".squiz"), path, venue: "local" });
+    const refused = await run(shim, ["reply", "T9", "No."], { cwd: worktree, path, venue: "local" });
+
+    assert.deepEqual(replied, { code: 0, stdout: "replied in T1 on the working tree\n", stderr: "" });
+    const record = JSON.parse(await readFile(join(worktree, ".squiz", "local", "threads.json"), "utf8")) as typeof LOCAL_THREADS;
+    assert.deepEqual(record.threads[0]?.comments.at(-1), { id: "C4", body: "**Squiz coding agent**\n\nFixed in place." });
+    assert.deepEqual(refused, { code: 0, stdout: "", stderr: 'squiz: nothing replied in T9: threads.json holds no thread "T9"\n' });
+  });
+});
+
+test("squiz status under the local venue lists the worktree's .squiz/local/ with local in the PR column", async () => {
+  await withLocalPlace(async ({ worktree, path }) => {
+    const record = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null, status: "queued" };
+    const state = { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 }, records: [record] };
+    await writeFile(join(worktree, ".squiz", "local", "state.json"), JSON.stringify(state), "utf8");
+
+    const result = await run(shim, ["status"], { cwd: worktree, path, venue: "local" });
+
+    assert.equal(result.stderr, "");
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /^PR +Commit +Replies +State/u);
+    assert.match(result.stdout, /\nlocal +8d21a4f +— +queued +/u);
+  });
 });
