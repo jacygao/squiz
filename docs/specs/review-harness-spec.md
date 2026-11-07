@@ -648,10 +648,10 @@ what each of § 3's terms means there.
 | `local` | Local |
 | Anything else | None. Nothing is reviewed. |
 
-The hook, the round host, `squiz review`, `squiz threads`, `squiz reply` and
-`squiz status` each read the variable for themselves. A coding agent's hooks and
-shell inherit it from the run, and the round host inherits it from the trigger
-that started it, so all of them agree.
+The hook, the round host, `squiz review`, `squiz threads`, `squiz reply`,
+`squiz status` and `squiz doctor` each read the variable for themselves. A
+coding agent's hooks and shell inherit it from the run, and the round host
+inherits it from the trigger that started it, so all of them agree.
 
 A value that names no venue reviews nothing. `squiz review` exits 1 and the hook
 says why on stderr:
@@ -758,9 +758,31 @@ function venueFor(environment: NodeJS.ProcessEnv):
   `posted-without-thread-id` only where the comment landed and its thread's id
   could not be read back. The caller falls back as § 5 Pull request comments
   sets out.
+- **Act on a thread in the worktree the process runs in.** `reply`, `resolve`
+  and `reopen` are handed no change, so they act from the process's directory.
+  The GitHub venue runs `gh` there, and the local venue uses the `.squiz/local/`
+  of the worktree that `git rev-parse --show-toplevel` names for it. The round
+  host runs in the worktree it serves, and `squiz reply` in the one it is run
+  in.
 
 The renderers stay outside the venue. A summary or a failure comment is
 composed once, as markdown, whichever venue takes it.
+
+**Four places outside a venue still tell the venues apart**, because the
+contract gives them nothing to ask instead. The first three print the right
+line under both venues, and the last prints a wrong one under the local venue:
+
+- `squiz threads` and `squiz reply` call a change `#41` where its `name` is
+  `PR #41`, and by its `name` otherwise (#835).
+- A bare `squiz review` reviews the key `local` where `episodeDirectory` finds
+  a directory for it, and otherwise prints its usage line (#835).
+- `squiz status` prints a key that is a number as `#41`, and any other key as
+  it is (#835).
+- The round host names a change it has only the key of as `PR #<key>`, with
+  `squiz review <key>` as its rerun. That is the note for a round that failed
+  before its change was read, for a state whose reviewing record could not be
+  written, and for states left not reviewed because the episode had closed.
+  Under the local venue these say `PR #local` and `squiz review local` (#829).
 
 ### The GitHub venue
 
@@ -791,10 +813,10 @@ writes becomes part of the change.
 | The pull request | The working tree's change against its base, under The base below |
 | Its head commit | The commit built from the working tree, under The change below |
 | Its description | `.squiz/local/description.md`, else none |
-| `.squiz/<number>/` | `.squiz/local/`. `Change.key` is `local`, and `episodeDirectory` fails for any other key. |
+| The pull request's number, wherever it names the episode | `local`, which is `Change.key`: the directory `.squiz/local/`, the snapshot's `<digest>-local`, and the pane `squiz-local-r2`. `episodeDirectory` fails for any other key. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md`. `Change.summaryAt` is `in` and its path, such as `in /work/squiz-a/.squiz/local/summary.md`. |
-| A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written |
+| A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written. The line that says where it went reads `squiz: the failure is posted on the working tree`. |
 | `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but `local`. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |
 | The owner's note and its wake | As § 3 sets out. The note is written in `.squiz/local/notes/`. |
@@ -947,8 +969,11 @@ broken while it lives. The round host and `squiz reply` both take it.
   across every thread, in the order they were written. The newest reply is the
   one with the highest number, and that is the state's latest activity (§ 3 The
   state file).
-- **A thread's anchor is the one the round asked for.** The local venue never
-  refuses a line, and never answers `posted-without-thread-id`.
+- **A thread's anchor is the one the round asked for: a line, or the file as a
+  whole.** A line is always the head's, so the anchor holds no side. The local
+  venue never refuses a line, and never answers `posted-without-thread-id`.
+- **A thread's `url` is the `file://` URL of `threads.json`, then `#` and the
+  thread's id**, such as `file:///work/squiz-a/.squiz/local/threads.json#T1`.
 - **`isOutdated` is always false, and every comment's author is `local`.**
 
 **A worktree's outcome is read from `.squiz/local/` once the run has ended.**
@@ -981,14 +1006,27 @@ Nothing hands those findings to a coding agent once the run has exited.
 `squiz review`, `squiz threads` and `squiz reply` work on the `.squiz/local/` of
 the worktree they are run in, as § 7 sets out for a pull request:
 
-- `squiz review` takes no number, and refuses one: `squiz: the local venue
-  reviews the working tree, and takes no pull request number`.
+- `squiz review` takes no number. Given one, it exits 1 as for any change it
+  cannot review:
+
+  ```
+  squiz: no review ran: the local venue reviews the working tree, and takes no pull request number
+  ```
+
 - `squiz threads` heads its list `2 open threads on the working tree`.
 - `squiz reply <id> <text>` adds the coding agent's reply to thread `<id>` in
-  that worktree's `threads.json`, and refuses an id the file does not hold.
+  that worktree's `threads.json`, and refuses an id the file does not hold:
+  `squiz: nothing replied in T9: threads.json holds no thread "T9"`.
 - `squiz status` lists each worktree's `.squiz/local/` as it lists a pull
   request's episode, with `local` in the PR column.
-- `squiz doctor` does not require `gh`, and says the local venue is in use.
+- `squiz doctor` prints the venue on a line of its own, and does not require
+  `gh`. A missing `gh` is reported present, and one that cannot be used is a
+  warning.
+
+  ```
+  Venue local, from SQUIZ_VENUE: reviews run on the working tree, and gh is not required
+  gh: not found. Not required under the local venue
+  ```
 
 ## 5. The reviewer
 
@@ -1009,8 +1047,8 @@ Five things are handed to it:
 
 | | |
 |---|---|
-| **A working directory** | A snapshot of the pull request's head commit, in a clone of its own (The snapshot, below). The reviewer runs with this as its current directory. |
-| **The pull request** | Its name, `PR #41` or `the working tree`, the short sha of the base commit it is diffed against, its description, the files it changes, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness reads all of this and passes it in. The diff itself is not passed in: the reviewer reads it through `git_diff` (Tools, below). |
+| **A working directory** | A snapshot of the change's head commit, in a clone of its own (The snapshot, below). The reviewer runs with this as its current directory. |
+| **The change** | Its name, `PR #41` or `the working tree`, the short sha of the base commit it is diffed against, its description, the files it touches, and the threads the reviewer opened on it, each with its replies and whether it is resolved. The harness reads all of this and passes it in. The diff itself is not passed in: the reviewer reads it through `git_diff` (Tools, below). |
 | **A charter** | The standing instructions describing what a good review is. It ships with the harness and is the same every round. |
 | **A thinking level** | How hard the reviewer thinks. The harness sets it every round, so the level never comes from the reviewer CLI's own configuration. The levels are listed under Configuration. |
 | **A model** | The model the project configured, in the reviewer CLI's own spelling, or none, which leaves the CLI on the user's default. |
@@ -1018,7 +1056,7 @@ Five things are handed to it:
 The tools it may call are the same every round, as Tools below sets out.
 
 **The prompt tells the reviewer what the history tools are for, and lists the
-files the pull request changes.** Every prompt carries these two sections after
+files the change touches.** Every prompt carries these two sections after
 the description. The list is `git_diff`'s own, one file a line, with its status
 and the lines it adds and removes, a count of zero left out:
 
@@ -1029,7 +1067,7 @@ Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was
 
 ## Changes
 
-The diff is not in this prompt. Call `git_diff` with a file's path to read that file's change. The pull request changes these files, each with its status and the lines it adds and removes:
+The diff is not in this prompt. Call `git_diff` with a file's path to read that file's change. The change touches these files, each with its status and the lines it adds and removes:
 
 ```
 M  src/reviewers/prompt.ts            +12 -3
@@ -1049,6 +1087,12 @@ first page:
 ```
 
 The round host reads the whole list, which no page bounds.
+
+**The prompt names the change only in its heading**, `# Review PR #41` or
+`# Review the working tree`, and calls it "the change" everywhere else. A change
+with no description has `The change has no description.` under
+`## Description`, and the threads, where there are any, come last, under
+`## Threads already on this change`.
 
 **The prompt's size does not grow with the diff.** A pull request that changes
 3,899 lines of one file adds one line to the prompt.
@@ -1610,8 +1654,12 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
   through `gh`'s login (Tools), and reads the tree's `AGENTS.md` with `view`, as
   the charter tells it to.
 - **Reach no host but Copilot's own and its model's**: `--no-auto-update` and
-  `--disable-client-telemetry` on every run. A review then reaches
-  `api.github.com` and the plan's model host, and nothing else.
+  `--disable-client-telemetry` on every run. Measured on Copilot 1.0.107, a
+  review then reached `api.github.com` and the plan's model host, which on the
+  one plan measured was `api.enterprise.githubcopilot.com`, and nothing else.
+  Without the two flags it also reached `cafe.github.com` and
+  `telemetry.enterprise.githubcopilot.com`. Another plan's model host has not
+  been measured.
 - **Set the reasoning effort on every run**: `thinking` as it is, and `off` as
   `none`.
 - **Start the reporting server the adapter ships**, with `SQUIZ_REPORTS` and
@@ -1957,7 +2005,9 @@ and ruled on, and it carries across rounds.
 One comment is posted on the pull request when an episode closes. It carries the
 status of every finding, what each round did, and the cost of the review. It is
 never edited or replaced, so a second episode on the same pull request posts a
-second comment.
+second comment. The local venue writes it as `summary.md` instead (§ 4). Every
+line that says where the summary is, such as `squiz review`'s "its summary is
+on the pull request", says it as `Change.summaryAt` gives it.
 
 **An episode reports its close once.** The round that closes it writes the
 close to the episode's state, and then posts the comment, as The state file
@@ -2255,12 +2305,12 @@ through the link `squiz init` makes in a directory already on its `PATH`.
 
 | Command | Run by | What it does |
 |---|---|---|
-| `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. |
+| `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. Under the local venue it is `squiz review`, with no number, and reviews the working tree it is run in (§ 4). |
 | `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
 | `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
 | `squiz doctor` | A person | Prints a line per dependency, saying it is present or naming what is missing or unauthenticated, and exits 1 where a required one is not usable (The setup check). |
 | `squiz version` | A person | Prints the version and the `bin/squiz` path of the squiz that answers, as `squiz 0.1.0 /Users/ana/squiz/bin/squiz`. `squiz --version` is the same command. |
-| `squiz hook` | Claude Code | The `Stop` and `SubagentStop` entry point, named in `hooks.json`. Queues the review of the pull request for the payload's `cwd` and returns, as § 3 sets out. |
+| `squiz hook` | Claude Code, Copilot | The entry point for `Stop`, `SubagentStop`, `SessionStart` and `SubagentStart`, named in `hooks.json`. A stop queues the review of the change in the payload's `cwd` and returns. A start hands that `cwd` to the venue's `recordStart`. § 3 The hooks sets out both. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
@@ -2282,7 +2332,8 @@ space.
 ### `squiz review`
 
 `squiz review <number>` runs from the worktree pull request `<number>`'s branch is
-checked out in. It acts on the record for the pull request's state as § 3 The
+checked out in. Under the local venue it is `squiz review`, run in the worktree
+it reviews (§ 4). It acts on the record for the pull request's state as § 3 The
 state file sets out, and waits for the review within one deadline for the whole
 invocation (§ 8). The exit status says what the coding agent does next:
 
@@ -3100,7 +3151,7 @@ distributed.
 ```
 .claude-plugin/plugin.json   manifest: name, version, description, and the Copilot extensions directory
 .claude-plugin/marketplace.json  the marketplace named squiz, listing this repository's root as the one plugin
-hooks/hooks.json             the Stop and SubagentStop registrations, the Claude Code and Copilot triggers
+hooks/hooks.json             the Stop, SubagentStop, SessionStart and SubagentStart registrations, which Claude Code and Copilot both run
 extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
 bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
 charter.md                   the standing review instructions, shipped as one file
@@ -3108,7 +3159,7 @@ src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
   review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
-  hook/                      the Stop and SubagentStop trigger, which resolves the pull request and queues the review
+  hook/                      squiz hook: a stop resolves the change and queues its review, and a start hands the worktree to the venue
   host/                      the round host, which takes queued states and runs their rounds
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
   loop/                      episode state, round cap, verdict decisions

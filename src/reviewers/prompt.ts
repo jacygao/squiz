@@ -25,13 +25,13 @@ export type UnderReview = {
    */
   readonly change: Pick<Change, "name" | "base" | "description">;
   /**
-   * The files the pull request changes, as `git_diff` lists them. The diff
+   * The files the change touches, as `git_diff` lists them. The diff
    * itself is not carried: a large change would make a prompt the reviewer's
    * CLI cannot take, so the reviewer reads each file's change through the tool.
    */
   readonly changes: string;
   /**
-   * Every thread of this review already on the pull request.
+   * Every thread of this review already on the change.
    *
    * Empty where the reviewer has opened none yet. It is the only thing deciding
    * whether a verdict is asked for, so a round number beside it is a second
@@ -62,7 +62,7 @@ export function composePrompt(underReview: UnderReview): string {
     "## History",
     "Call `git_log_search`, `git_blame` and `git_show` to find out whether a line was meant: which commit wrote it, and what that commit said it was for.",
     "## Changes",
-    "The diff is not in this prompt. Call `git_diff` with a file's path to read that file's change. The pull request changes these files, each with its status and the lines it adds and removes:",
+    "The diff is not in this prompt. Call `git_diff` with a file's path to read that file's change. The change touches these files, each with its status and the lines it adds and removes:",
     block(changes, ""),
     ...threadSections(threads),
   ].join("\n\n");
@@ -77,7 +77,7 @@ export function composePrompt(underReview: UnderReview): string {
 function threadSections(threads: readonly ReviewThread[]): readonly string[] {
   if (threads.length === 0) return [];
   return [
-    "## Threads already on this pull request",
+    "## Threads already on this change",
     "Return a verdict on every thread below, naming each one by the identifier in its heading.",
     ...threads.map(threadSection),
   ];
@@ -129,9 +129,9 @@ function commentBlock(comment: ThreadComment, index: number): string {
   return `${said}\n\n${block(comment.body, "")}`;
 }
 
-/** An empty description is a pull request nobody described, and is said so. */
+/** An empty description is a change nobody described, and is said so. */
 function described(description: string): string {
-  if (description.trim() === "") return "The pull request has no description.";
+  if (description.trim() === "") return "The change has no description.";
   return block(description, "");
 }
 

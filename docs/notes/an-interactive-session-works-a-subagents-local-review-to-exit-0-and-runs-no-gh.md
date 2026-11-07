@@ -65,26 +65,28 @@ finding about them.
   `gh auth token`, whose parent was the `claude` process itself, at startup.
   Squiz made none.
 - **Ignore `.claude/worktrees/` in a repository reviewed locally, until #825 is
-  fixed.** Without that, the parent's change lists each subagent worktree as
+  fixed.** Superseded on 2026-11-08: the head build now leaves out a worktree
+  of the same repository whose path the base does not have, as § 4 The change
+  sets out, so nothing needs ignoring. In this run, which came first, the
+  parent's change listed each subagent worktree as
   `A  .claude/worktrees/agent-<id>  +1`. Round 1 of the root failed with `the
   reviewer reported nothing and did not finish its review`. Rounds 2 and 3
   kept one thread open, `Committing local worktree gitlinks makes the PR
   non-self-contained`, against the coding agent's reply that nothing was
   committed.
 - **Expect a woken parent to stay in the subagent's worktree after working it,
-  until #826 is fixed.** The note's commands begin `cd '<worktree>' &&`, and
-  Claude Code's shell keeps that directory. The parent's next `Stop` fired in
+  until #826 is fixed.** Superseded on 2026-11-08: the note's commands now run
+  in a subshell, `(cd '<worktree>' && …)`, so the shell stays where it was. In
+  this run they began `cd '<worktree>' &&`, and Claude Code's shell kept that
+  directory. The parent's next `Stop` fired in
   the first subagent's worktree, found its state already reviewed, and queued
   nothing for the root.
 
 ## Needs your input
 
-- **Whether the head build drops every gitlink the base lacks, or only
-  directories that are worktrees of the same repository** (#825). Both differ
-  from § 4 The change, which says the tree is what `git add --all` would take.
-  Recommendation: drop every gitlink the base lacks. A repository that adds a
-  real submodule commits `.gitmodules` with it, and the reviewer can read
-  neither kind.
+Nothing. Whether the head build drops every gitlink the base lacks, or only
+worktrees of the same repository, is settled for the second: § 4 The change
+keeps a submodule as a gitlink.
 
 ## Reference
 

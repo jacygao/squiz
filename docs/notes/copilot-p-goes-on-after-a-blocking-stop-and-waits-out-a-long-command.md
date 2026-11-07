@@ -25,9 +25,10 @@ recheck-when: Copilot CLI upgrades past 1.0.105, or changes how a Stop hook's de
   reason arrived as the agent's next message and the run went on.
   The next `Stop` carried `"stop_hook_active":true`, and returning nothing then
   let the run exit 0.
-- **Pass the local venue's settings as environment variables.** `SQUIZ_LOCAL`
-  and `SQUIZ_BASE`, set on `copilot -p`, reached the hook and the script the
-  agent ran in its shell.
+- **Choose the local venue with an environment variable on the run,
+  `SQUIZ_VENUE=local`.** The variables measured were `SQUIZ_LOCAL` and
+  `SQUIZ_BASE`, which squiz no longer reads. Set on `copilot -p`, both reached
+  the hook and the script the agent ran in its shell.
 - **Start the round host from the hook as now.** A process the hook started
   with Node's `spawn(…, {detached: true})` and `unref()` went on after the run
   that started it had exited.
@@ -74,7 +75,5 @@ The hook's answer, on standard output, exit 0:
   the turn back. That shows the command was not stopped across the sleep. It
   does not show what Copilot does with a command that runs longer than about
   10 awake minutes in one call.
-- **The reviewer's hosts were not observed.** No network was captured, so
-  whether a Copilot reviewer with `--no-auto-update` and
-  `--disable-client-telemetry` reaches only `api.github.com` and the model host
-  is still open.
+- **The reviewer's hosts were not observed.** No network was captured in these
+  runs.
