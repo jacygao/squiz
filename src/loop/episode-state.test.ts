@@ -17,7 +17,8 @@ import {
   recordUnpostedReplies,
   writeState,
 } from "./episode-state.ts";
-import { type Episode, episodeAt } from "./episode.ts";
+import type { Episode } from "./episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 
 const pullRequest = 41;
 
@@ -44,7 +45,7 @@ const NONE_OUTSIDE = `"spentOutsideRounds": {"dollars": 0, "tokens": 0, "message
 function episodeIn(t: TestContext): Episode {
   const worktree = mkdtempSync(join(tmpdir(), "squiz-episode-"));
   t.after(() => rmSync(worktree, { recursive: true, force: true }));
-  return episodeAt(worktree, pullRequest);
+  return githubEpisode(worktree, pullRequest);
 }
 
 /** The reason the state file `contents` came back unreadable. */

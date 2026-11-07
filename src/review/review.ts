@@ -1,5 +1,5 @@
 /**
- * `squiz review <number>`: trigger a review of the pull request's state, then
+ * `squiz review <key>`: trigger a review of the change's state, then
  * wait for that state's round and print what it reached.
  *
  * Five things here fail silently when wrong:
@@ -23,6 +23,7 @@
  * session of its own, and nothing here signals it.
  */
 
+import { join, relative } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { defaultsLine, findProjectConfig, type ProjectConfig } from "../config/config.ts";
@@ -30,6 +31,7 @@ import { readComment } from "../findings/comment.ts";
 import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
+import { episodeAt } from "../loop/episode.ts";
 import { lastReviewed, namedStates } from "../loop/round-end.ts";
 import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
@@ -55,7 +57,7 @@ const HOST_START_MS = 10_000;
 export type ReviewRequest = {
   /** Where the command ran. */
   readonly directory: string;
-  readonly pullRequest: number;
+  readonly key: string;
   /** Read for `HERDR_WORKSPACE_ID`. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   /** The run's one deadline, counted from its start. 540 seconds from now where not given. */
@@ -69,14 +71,15 @@ export type ReviewRequest = {
   /** The venue `environment` chooses where not given. */
   readonly venue?: Venue;
   readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
-  readonly host?: (pullRequest: number) => HostCommand;
+  readonly host?: (key: string) => HostCommand;
 };
 
 /** Trigger, wait and compose the run's output. Never throws for anything git, `gh` or the filesystem does. */
 export async function runReview(request: ReviewRequest): Promise<Printed> {
   const until = request.until ?? deadlineIn(REVIEW_BUDGET_MS);
-  const { directory, pullRequest } = request;
-  const notRun = (reason: string): Printed => printReview({ outcome: "not run", pullRequest, reason }, directory);
+  const { directory } = request;
+  // Nothing is written for a run that exits 1, so no episode is needed to print one.
+  const notRun = (reason: string): Printed => unprinted(`no review ran: ${reason}`);
 
   const toplevel = worktreeToplevel(directory, until);
   if (toplevel.outcome === "failed") return notRun(`the worktree could not be resolved: ${toplevel.reason}`);
@@ -88,30 +91,36 @@ export async function runReview(request: ReviewRequest): Promise<Printed> {
     return notRun(cause instanceof Error ? cause.message : String(cause));
   }
 
-  const printed = await reviewUnder(request, until, project.config.rounds);
+  const printed = await reviewUnder(request, toplevel.path, until, project.config.rounds);
   // Running on the defaults changes neither the outcome nor the status, and is
   // otherwise told from running on a file only by the summary's reviewer line.
   const note = defaultsLine(project);
   return note === undefined ? printed : { ...printed, stderr: failureLine(note) + printed.stderr };
 }
 
-/** The run once its settings are read, `cap` being the round cap they set. */
-async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number): Promise<Printed> {
-  const { directory, pullRequest } = request;
-  const notRun = (reason: string): Printed => printReview({ outcome: "not run", pullRequest, reason }, directory);
+/** The run once its settings are read in `worktree`, `cap` being the round cap they set. */
+async function reviewUnder(request: ReviewRequest, worktree: string, until: Deadline, cap: number): Promise<Printed> {
+  const { directory, key } = request;
 
   let venue = request.venue;
   if (venue === undefined) {
     const chosen = venueFor(request.environment);
-    if (chosen.outcome === "failed") return notRun(chosen.reason);
+    if (chosen.outcome === "failed") return unprinted(`no review ran: ${chosen.reason}`);
     venue = chosen.venue;
   }
+  // Named before the change is read, so a key that names no episode reads
+  // nothing and makes nothing.
+  const named = episodeAt(venue, worktree, key);
+  if (named.outcome === "failed") return unprinted(`no review ran: ${named.reason}`);
+  const { episode } = named;
+  const print = (result: ReviewResult): Printed => printReview(result, episode);
+  const notRun = (reason: string): Printed => print({ outcome: "not run", key, reason });
 
   const triggerNow = (): Triggered =>
     (request.trigger ?? triggerReview)({
       directory,
       trigger: "review",
-      pullRequest,
+      key,
       venue,
       environment: request.environment,
       until,
@@ -119,13 +128,11 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
       ...(request.host === undefined ? {} : { host: request.host }),
     });
   const first = triggerNow();
-  if (first.outcome === "held") return printReview({ outcome: "held", pullRequest, line: first.line }, directory);
+  if (first.outcome === "held") return print({ outcome: "held", key, line: first.line });
   if (first.outcome !== "decided") return notRun(first.reason);
 
-  const { episode } = first;
   let triggered = first;
-  let context: Context = { pullRequest, cap, own: first.state, followUp: first.change.followUp };
-  const print = (result: ReviewResult): Printed => printReview(result, episode.worktree);
+  let context: Context = { key, cap, own: first.state, followUp: first.change.followUp };
   const read = (): EpisodeState | string => {
     const found = readState(episode);
     if (found.outcome === "unreadable") return found.reason;
@@ -149,14 +156,14 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
         return print(closedResult(context, state, threads));
       }
       case "host-unknown":
-        return notRun(`whether ${hostNamed()} for PR #${pullRequest} is still running could not be told: ${decision.reason}`);
+        return notRun(`whether ${hostNamed()} for PR #${key} is still running could not be told: ${decision.reason}`);
       case "recover":
         // Nothing here recovers the round, so the run reports it killed, which is
         // what its record reads as. A new commit or reply is a state it never held.
         return print({
           outcome: "failed",
-          pullRequest,
-          reason: `${hostNamed()} for PR #${pullRequest} stopped before its round ended`,
+          key,
+          reason: `${hostNamed()} for PR #${key} stopped before its round ended`,
           items: [],
         });
       case "result": {
@@ -194,7 +201,7 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
       if (settled.kind === "result") return print(settled.result);
       const listed = venue.listThreads(triggered.change, until.remaining() < READ_BACK_FLOOR_MS ? deadlineIn(READ_BACK_FLOOR_MS) : until);
       if (listed.outcome !== "listed") {
-        const reason = `the threads on PR #${pullRequest} could not all be listed to print the review of ${context.own.head.slice(0, 7)}: ${listed.reason}`;
+        const reason = `the threads on PR #${key} could not all be listed to print the review of ${context.own.head.slice(0, 7)}: ${listed.reason}`;
         return unprinted(reason);
       }
       return finish(settled, listed.threads);
@@ -202,7 +209,7 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
     const unqueued = unqueuedSuccessor(state, context.own);
     if (unqueued !== undefined && !until.passed()) {
       const again = triggerNow();
-      if (again.outcome === "held") return printReview({ outcome: "held", pullRequest, line: again.line }, directory);
+      if (again.outcome === "held") return print({ outcome: "held", key, line: again.line });
       if (again.outcome !== "decided") {
         // A trigger the run's own deadline cut off is the deadline arriving, not a review that could not run.
         return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
@@ -228,9 +235,9 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
     if (startUnknown !== undefined && (startBy.passed() || until.passed())) {
       return print({
         outcome: "not run",
-        pullRequest,
-        reason: `whether the round host for PR #${pullRequest} started could not be told, and none has taken the review since: ${startUnknown}`,
-        problems: [`\`squiz status ${pullRequest}\` shows whether one takes it later, and .squiz/${pullRequest}/host.log holds what the host wrote`],
+        key,
+        reason: `whether the round host for PR #${key} started could not be told, and none has taken the review since: ${startUnknown}`,
+        problems: [`\`squiz status ${key}\` shows whether one takes it later, and ${relative(episode.worktree, join(episode.directory, "host.log"))} holds what the host wrote`],
       });
     }
     if (until.passed()) return print(stillReviewing(context, state.records ?? []));
@@ -267,7 +274,7 @@ function hostRunning(
 }
 
 type Context = {
-  readonly pullRequest: number;
+  readonly key: string;
   readonly cap: number;
   readonly own: StateKey;
   readonly followUp: Change["followUp"];
@@ -306,7 +313,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
     case "failed":
       return {
         kind: "result",
-        result: { outcome: "failed", pullRequest: waiting.pullRequest, reason: record.reason, items: record.lines ?? [] },
+        result: { outcome: "failed", key: waiting.key, reason: record.reason, items: record.lines ?? [] },
       };
     case "reviewed":
       if (record.result === "exited") return compose((threads) => roundResult(waiting, state, record, threads));
@@ -369,8 +376,8 @@ function notReviewed(
     return compose((threads) => roundResult(waiting, state, closing, threads, { state: name, closedAt }));
   }
   if (state.closeReported === true) return closed(waiting, state);
-  const reason = `PR #${waiting.pullRequest} at ${record.head.slice(0, 7)} was not reviewed: ${record.reason}`;
-  return { kind: "result", result: { outcome: "not run", pullRequest: waiting.pullRequest, reason } };
+  const reason = `PR #${waiting.key} at ${record.head.slice(0, 7)} was not reviewed: ${record.reason}`;
+  return { kind: "result", result: { outcome: "not run", key: waiting.key, reason } };
 }
 
 type NotReviewed = Extract<StateRecord, { readonly status: "not reviewed" }>;
@@ -396,7 +403,7 @@ function closedUnreviewed(
   const problems = closed.problems ?? [];
   return {
     outcome: "closed unreviewed",
-    pullRequest: waiting.pullRequest,
+    key: waiting.key,
     exit: closed.exitStatus,
     state: names[left.findIndex((held) => sameState(held, record))] ?? record.head.slice(0, 7),
     reason: record.reason,
@@ -442,14 +449,14 @@ function roundResult(
   const lost =
     unposted === undefined
       ? []
-      : [`round ${round} could not post ${unposted.failed} of its ${unposted.of} findings to PR #${waiting.pullRequest}`];
+      : [`round ${round} could not post ${unposted.failed} of its ${unposted.of} findings to PR #${waiting.key}`];
   // A round that left the episode open posted no summary, so stderr is where the
   // coding agent working it reads what no thread holds.
   const unthreaded = (record.unthreaded ?? []).map((note) => `round ${round} raised this on no thread: ${note}`);
   const problems = [...lost, ...unthreaded, ...(record.problems ?? [])];
   const base = {
     outcome: "reviewed" as const,
-    pullRequest: waiting.pullRequest,
+    key: waiting.key,
     commit: record.head.slice(0, 7),
     round,
     cap: waiting.cap,
@@ -487,7 +494,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
   const open = left.filter((thread) => !thread.isResolved);
   return {
     outcome: "closed",
-    pullRequest: context.pullRequest,
+    key: context.key,
     exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
     rounds: state.rounds.length,
     threads: left,
@@ -499,7 +506,7 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
 function stillReviewing(context: Context, records: readonly StateRecord[]): ReviewResult {
   const record = recordFor(records, context.own);
   const commit = context.own.head.slice(0, 7);
-  const about = { outcome: "reviewing" as const, pullRequest: context.pullRequest };
+  const about = { outcome: "reviewing" as const, key: context.key };
   const underway = records.find((held) => held.status === "reviewing" && !sameState(held, context.own));
   if (record?.status === "queued" && underway !== undefined) {
     return { ...about, wait: "queued", commit, reviewing: underway.head.slice(0, 7) };

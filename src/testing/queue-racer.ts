@@ -9,7 +9,7 @@
  */
 
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { episodeAt } from "../loop/episode.ts";
+import { githubEpisode } from "./episode.ts";
 import { putRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 
@@ -17,7 +17,7 @@ const [worktree = "", pullRequest = "0", head = ""] = process.argv.slice(2);
 
 let queued = false;
 const updated = updateState(
-  episodeAt(worktree, Number(pullRequest)),
+  githubEpisode(worktree, pullRequest),
   (state) => {
     if (state.closeReported === true) return state;
     queued = true;

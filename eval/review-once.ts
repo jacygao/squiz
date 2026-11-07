@@ -111,7 +111,7 @@ process.env["PATH"] = `${bin}:${process.env["PATH"] ?? ""}`;
 // Each run's own snapshot, so that runs of one case side by side do not meet.
 const snapshot = addSnapshot(
   prepared.repository,
-  { pullRequest: measured.number, round: process.pid, commit: prepared.head, base: prepared.base },
+  { key: String(measured.number), round: process.pid, commit: prepared.head, base: prepared.base },
   deadlineIn(120_000),
 );
 if (snapshot.outcome === "failed") {

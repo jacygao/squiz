@@ -632,8 +632,8 @@ test("squiz status names a state file that cannot be read on stderr, lists the r
   }
 });
 
-test("squiz host without a pull request's number reports how it is called, and starts nothing", async () => {
-  const result = await run(shim, ["host", "forty-one"], { cwd: onABranch });
+test("squiz host with nothing to name reports how it is called, and starts nothing", async () => {
+  const result = await run(shim, ["host"], { cwd: onABranch });
 
   assert.equal(result.code, 0);
   assert.equal(
@@ -642,6 +642,18 @@ test("squiz host without a pull request's number reports how it is called, and s
   );
   assert.equal(result.stdout, "");
   await assert.rejects(stat(join(onABranch, ".squiz")), "a host that never started made the episode's directory");
+});
+
+test("squiz host with a key the venue names no episode for says why, and makes nothing (#792)", async () => {
+  for (const key of ["forty-one", "abc", "../x"]) {
+    const result = await run(shim, ["host", key], { cwd: onABranch });
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, `squiz: no round host started: ${JSON.stringify(key)} is not a pull request number\n`);
+    assert.equal(result.stdout, "");
+    await assert.rejects(stat(join(onABranch, ".squiz")), `squiz host ${key} made .squiz/`);
+    await assert.rejects(stat(join(onABranch, "x")), `squiz host ${key} made a directory beside .squiz/`);
+  }
 });
 
 test("squiz host with nothing queued exits, and says so in host.log", async () => {
@@ -664,6 +676,23 @@ test("squiz review without a pull request's number exits 1, reporting how it is 
   assert.equal(result.code, 1);
   assert.equal(result.stderr, "squiz: no review ran: squiz review <number>, where <number> is the pull request's\n");
   assert.equal(result.stdout, "");
+});
+
+test("squiz review with a key the venue names no episode for exits 1 saying why, and makes nothing (#792)", async () => {
+  for (const key of ["../x", "abc"]) {
+    const result = await run(shim, ["review", key], { cwd: onABranch });
+
+    assert.equal(result.code, 1);
+    assert.ok(
+      result.stderr.endsWith(
+        `\nsquiz: no review ran: ${JSON.stringify(key)} is not a pull request number\nsquiz: put these lines in your report rather than running squiz review again\n`,
+      ),
+      result.stderr,
+    );
+    assert.equal(result.stdout, "");
+    await assert.rejects(stat(join(onABranch, ".squiz")), `squiz review ${key} made .squiz/`);
+    await assert.rejects(stat(join(onABranch, "x")), `squiz review ${key} made a directory beside .squiz/`);
+  }
 });
 
 test("squiz review on a detached HEAD exits 1 with the gate's line, and prints nothing on stdout", async () => {

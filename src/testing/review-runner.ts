@@ -14,10 +14,10 @@ const [number = "", planFile = ""] = process.argv.slice(2);
 
 const printed = await runReview({
   directory: process.cwd(),
-  pullRequest: Number(number),
+  key: number,
   environment: process.env,
   pollMs: 100,
-  host: (pullRequest) => ({ command: process.execPath, args: [hostFixture, String(pullRequest), planFile] }),
+  host: (key) => ({ command: process.execPath, args: [hostFixture, key, planFile] }),
 });
 process.stdout.write(printed.stdout);
 process.stderr.write(printed.stderr);

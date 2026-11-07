@@ -1,6 +1,6 @@
 /**
- * `squiz host <number>`: the round host as a command, run in the worktree it
- * serves.
+ * `squiz host <key>`: the round host as a command, run in the worktree it
+ * serves. The GitHub venue's key is the pull request's number.
  *
  * It answers nothing on stdout. What it did goes to the episode's host.log, and
  * only a host that never started says why on stderr.
@@ -20,13 +20,10 @@ import { runHost } from "./host.ts";
 // from a working directory that belongs to the project under review.
 const charterFile = fileURLToPath(new URL("../../charter.md", import.meta.url));
 
-const numberSpelling = /^[1-9][0-9]*$/u;
-
-/** Run the host for the pull request `args` names, in the worktree `directory` is in. */
+/** Run the host for the change whose key `args` names, in the worktree `directory` is in. */
 export async function hostCommand(args: readonly string[], directory: string): Promise<HookExit> {
-  const named = args[0] ?? "";
-  const pullRequest = Number(named);
-  if (args.length !== 1 || !numberSpelling.test(named) || !Number.isSafeInteger(pullRequest)) {
+  const [key] = args;
+  if (args.length !== 1 || key === undefined) {
     reportFailure("no round host started: squiz host <number>, where <number> is the pull request's");
     return 0;
   }
@@ -56,9 +53,9 @@ export async function hostCommand(args: readonly string[], directory: string): P
   const note = defaultsLine(project);
   // The trigger that started the host ran in the coding agent's terminal, and
   // its environment names the Herdr or tmux server the reviewer's pane opens on.
-  await runHost({
+  const ended = await runHost({
     worktree: worktree.path,
-    pullRequest,
+    key,
     round: {
       venue: chosen.venue,
       config,
@@ -68,5 +65,6 @@ export async function hostCommand(args: readonly string[], directory: string): P
     },
     ...(note === undefined ? {} : { note }),
   });
+  if (ended.outcome === "no episode") reportFailure(`no round host started: ${ended.reason}`);
   return 0;
 }

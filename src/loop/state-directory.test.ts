@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { episodeAt } from "./episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { makeEpisodeDirectory } from "./state-directory.ts";
 
 function worktreeFor(t: TestContext): string {
@@ -18,7 +18,7 @@ function worktreeFor(t: TestContext): string {
 test("making an episode's directory leaves .squiz/.gitignore holding * and nothing else beside the episode", (t) => {
   const worktree = worktreeFor(t);
 
-  makeEpisodeDirectory(episodeAt(worktree, 41));
+  makeEpisodeDirectory(githubEpisode(worktree, 41));
 
   assert.equal(readFileSync(join(worktree, ".squiz", ".gitignore"), "utf8"), "*\n");
   assert.deepEqual(readdirSync(join(worktree, ".squiz")).sort(), [".gitignore", "41"]);
@@ -28,7 +28,7 @@ test("a .squiz/ made before squiz ignored it itself gains the .gitignore on the 
   const worktree = worktreeFor(t);
   mkdirSync(join(worktree, ".squiz", "38"), { recursive: true });
 
-  makeEpisodeDirectory(episodeAt(worktree, 38));
+  makeEpisodeDirectory(githubEpisode(worktree, 38));
 
   assert.equal(readFileSync(join(worktree, ".squiz", ".gitignore"), "utf8"), "*\n");
 });
@@ -38,7 +38,7 @@ test("a .gitignore in .squiz/ that someone else wrote is left as it is", (t) => 
   mkdirSync(join(worktree, ".squiz"));
   writeFileSync(join(worktree, ".squiz", ".gitignore"), "*\n!keep.md\n");
 
-  makeEpisodeDirectory(episodeAt(worktree, 41));
+  makeEpisodeDirectory(githubEpisode(worktree, 41));
 
   assert.equal(readFileSync(join(worktree, ".squiz", ".gitignore"), "utf8"), "*\n!keep.md\n");
 });
@@ -50,14 +50,14 @@ test("a .gitignore in .squiz/ that someone else wrote is left as it is", (t) => 
  */
 function racer(worktrees: readonly string[], pullRequest: number, at: number): Promise<string> {
   const module = pathToFileURL(join(import.meta.dirname, "state-directory.ts")).href;
-  const episodes = pathToFileURL(join(import.meta.dirname, "episode.ts")).href;
+  const episodes = pathToFileURL(join(import.meta.dirname, "..", "testing", "episode.ts")).href;
   const script = [
     `import { makeEpisodeDirectory } from ${JSON.stringify(module)};`,
-    `import { episodeAt } from ${JSON.stringify(episodes)};`,
+    `import { githubEpisode } from ${JSON.stringify(episodes)};`,
     `const worktrees = ${JSON.stringify(worktrees)};`,
     `for (const [index, worktree] of worktrees.entries()) {`,
     `  while (Date.now() < ${at} + index * 20);`,
-    `  try { makeEpisodeDirectory(episodeAt(worktree, ${pullRequest})); }`,
+    `  try { makeEpisodeDirectory(githubEpisode(worktree, ${pullRequest})); }`,
     `  catch (error) { process.stdout.write(worktree + ": " + error.message + "\\n"); }`,
     `}`,
   ].join("\n");

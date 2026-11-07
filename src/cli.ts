@@ -42,8 +42,6 @@ const SIGN_IN_BOUND_MS = 60_000;
 // Under the two minutes Claude Code gives a shell command by default.
 const THREAD_COMMAND_BUDGET_MS = 100_000;
 
-const numberSpelling = /^[1-9][0-9]*$/u;
-
 function dispatch(argv: readonly string[]): number | Promise<number> {
   const command = argv[0];
   if (command === "review") {
@@ -59,7 +57,12 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
     return postReply(argv.slice(1));
   }
   if (command === "status") {
-    const printed = squizStatus(process.cwd());
+    const chosen = venueFor(process.env);
+    if (chosen.outcome === "failed") {
+      reportFailure(`no reviews listed: ${chosen.reason}`);
+      return 0;
+    }
+    const printed = squizStatus(process.cwd(), chosen.venue);
     process.stdout.write(printed.stdout);
     process.stderr.write(printed.stderr);
     return 0;
@@ -99,14 +102,13 @@ function dispatch(argv: readonly string[]): number | Promise<number> {
  * read, so a review that could not run exits 1.
  */
 async function review(args: readonly string[]): Promise<number> {
-  const named = args[0] ?? "";
-  const pullRequest = Number(named);
-  if (args.length !== 1 || !numberSpelling.test(named) || !Number.isSafeInteger(pullRequest)) {
+  const [key] = args;
+  if (args.length !== 1 || key === undefined) {
     reportFailure("no review ran: squiz review <number>, where <number> is the pull request's");
     return 1;
   }
 
-  const printed = await runReview({ directory: process.cwd(), pullRequest, environment: process.env });
+  const printed = await runReview({ directory: process.cwd(), key, environment: process.env });
   process.stdout.write(printed.stdout);
   process.stderr.write(printed.stderr);
   return printed.exit;
@@ -153,7 +155,7 @@ function listThreads(): HookExit {
     return 0;
   }
 
-  process.stdout.write(threadListing(Number(change.key), listing.threads));
+  process.stdout.write(threadListing(change.key, listing.threads));
   return 0;
 }
 

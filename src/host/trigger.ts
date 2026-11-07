@@ -47,8 +47,8 @@ export type TriggerRequest = {
   /** Where the work is: the payload's `cwd` for a hook. The worktree and its branch are resolved from it. */
   readonly directory: string;
   readonly trigger: TriggerKind;
-  /** The number `squiz review` was given. A hook gives none, and reviews the branch's pull request. */
-  readonly pullRequest?: number;
+  /** The key `squiz review` was given. A hook gives none, and reviews the change the venue finds. */
+  readonly key?: string;
   /** The venue `environment` chooses where not given. */
   readonly venue?: Venue;
   /** The session that owns the work, where the caller knows it. */
@@ -58,8 +58,8 @@ export type TriggerRequest = {
   readonly until: Deadline;
   /** Whether a host is still running, asked within `boundMs`. `stillRunning` where not given. */
   readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
-  /** What runs as the round host. `squiz host <number>` where not given. */
-  readonly host?: (pullRequest: number) => HostCommand;
+  /** What runs as the round host. `squiz host <key>` where not given. */
+  readonly host?: (key: string) => HostCommand;
 };
 
 export type HostStart = { readonly outcome: "not started" } | Detached;
@@ -102,8 +102,7 @@ export function trigger(request: TriggerRequest): Triggered {
     if (chosen.outcome === "failed") return noReview(chosen.reason);
     venue = chosen.venue;
   }
-  const asked = request.pullRequest === undefined ? null : String(request.pullRequest);
-  const lookup = venue.readChange(directory, asked, until);
+  const lookup = venue.readChange(directory, request.key ?? null, until);
   switch (lookup.outcome) {
     case "found":
       break;
@@ -122,9 +121,9 @@ export function trigger(request: TriggerRequest): Triggered {
   }
   const state: StateKey = { head: change.head, activity: latestActivity(listed.threads) };
 
-  // The episode and the host are named by the pull request's number, which is the GitHub venue's key.
-  const number = Number(change.key);
-  const episode = episodeAt(toplevel.path, number);
+  const named = episodeAt(venue, toplevel.path, change.key);
+  if (named.outcome === "failed") return failed(named.reason);
+  const { episode } = named;
   const read = readState(episode);
   if (read.outcome === "unreadable") return failed(read.reason);
   const found = read.outcome === "read" ? read.state : undefined;
@@ -171,7 +170,7 @@ export function trigger(request: TriggerRequest): Triggered {
   const needsHost =
     decision.outcome === "start-host" ||
     (decision.outcome === "queue" && (decision.startHost || hostPresence(episode, undefined, request).outcome !== "running"));
-  const host = needsHost ? startHost(request, episode, number) : ({ outcome: "not started" } as const);
+  const host = needsHost ? startHost(request, episode) : ({ outcome: "not started" } as const);
   return { outcome: "decided", change, episode, state, threads: listed.threads, decision, queued, host };
 }
 
@@ -189,8 +188,8 @@ function hostPresence(episode: Episode, record: StateRecord | undefined, request
   return ask(holder.holder, boundMs);
 }
 
-function startHost(request: TriggerRequest, episode: Episode, number: number): Detached {
-  const { command, args } = request.host?.(number) ?? { command: process.execPath, args: [cli, "host", String(number)] };
+function startHost(request: TriggerRequest, episode: Episode): Detached {
+  const { command, args } = request.host?.(episode.key) ?? { command: process.execPath, args: [cli, "host", episode.key] };
   try {
     makeEpisodeDirectory(episode);
   } catch (error) {

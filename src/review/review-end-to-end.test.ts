@@ -19,14 +19,16 @@ import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { renderReply } from "../findings/comment.ts";
+import { renderComment, renderReply } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
-import { episodeAt, type Episode } from "../loop/episode.ts";
+import type { Episode } from "../loop/episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Plan, PlannedStart } from "../testing/host-fixture.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { githubVenue } from "../venues/github/venue.ts";
 import { runReview } from "./review.ts";
 import { squizStatus } from "./status.ts";
 
@@ -167,7 +169,7 @@ type GhState = {
   readonly draft?: boolean;
   /** The base commit, which the change is diffed against. */
   readonly base: string;
-  threads: { id: string; isResolved: boolean; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
+  threads: { id: string; isResolved: boolean; path?: string; line?: number; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
   readonly issueComments: string[];
   /** Whether GitHub refuses every review comment the round creates. */
   readonly rejectCreate?: boolean;
@@ -231,7 +233,7 @@ async function withPullRequest(
   const plan: Plan = { charterFile, starts };
   writeFileSync(planFile, JSON.stringify(plan), "utf8");
 
-  const episode = episodeAt(worktree, NUMBER);
+  const episode = githubEpisode(worktree, NUMBER);
   process.env["PATH"] = `${bin}:${originalPath}`;
   try {
     const commit = (): string => {
@@ -262,10 +264,10 @@ async function withPullRequest(
 function review(fixture: Fixture) {
   return runReview({
     directory: fixture.worktree,
-    pullRequest: NUMBER,
+    key: String(NUMBER),
     environment: {},
     pollMs: 100,
-    host: (pullRequest) => ({ command: process.execPath, args: [hostFixture, String(pullRequest), fixture.planFile] }),
+    host: (key) => ({ command: process.execPath, args: [hostFixture, key, fixture.planFile] }),
   });
 }
 
@@ -376,11 +378,11 @@ test("a run straight after a reply and a push, which reads the head GitHub has n
 
     const second = await runReview({
       directory: fixture.worktree,
-      pullRequest: NUMBER,
+      key: String(NUMBER),
       environment: {},
       pollMs: 100,
       until: deadlineIn(20_000),
-      host: (pullRequest) => ({ command: process.execPath, args: [hostFixture, String(pullRequest), fixture.planFile] }),
+      host: (key) => ({ command: process.execPath, args: [hostFixture, key, fixture.planFile] }),
     });
 
     const log = hostLog(fixture.episode);
@@ -472,7 +474,7 @@ test("a ruling GitHub refuses and one naming a thread never handed over are name
       `squiz: ${refused}`,
       `squiz: ${unsent}`,
     ]);
-    const status = squizStatus(fixture.worktree).stdout;
+    const status = squizStatus(fixture.worktree, githubVenue).stdout;
     assert.ok(status.includes(`  ${refused}\n`), `squiz status did not name the refused ruling:\n${status}`);
     assert.ok(status.includes(`  ${unsent}\n`), `squiz status did not name the unsent ruling:\n${status}`);
   });
@@ -644,11 +646,11 @@ test("a round whose every finding failed to post is a failed round that leaves t
 
     const first = await runReview({
       directory: fixture.worktree,
-      pullRequest: NUMBER,
+      key: String(NUMBER),
       environment: {},
       pollMs: 100,
       until: deadlineIn(1_500),
-      host: (pullRequest) => ({ command: process.execPath, args: [hostFixture, String(pullRequest), fixture.planFile] }),
+      host: (key) => ({ command: process.execPath, args: [hostFixture, key, fixture.planFile] }),
     });
     assert.equal(first.exit, 4, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
     for (let waited = 0; waited < 200 && ["queued", "reviewing"].includes(stateOf_ifAny(fixture.episode) ?? "queued"); waited += 1) {
@@ -848,5 +850,83 @@ test("a close before any reviewer ran runs no reviewer for a fix after it (#587)
     assert.equal(after.exit, 3, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
     assert.equal(started(fixture), 1, "a round ran after a close before any review");
     assert.equal(fixture.gh().issueComments.length, 1);
+  });
+});
+
+/**
+ * `.squiz/` as the squiz before #792 left it after one round that opened one
+ * thread: copied from a real run, with a note waiting for its owner and the
+ * host lock of a host that has gone.
+ */
+function writeEarlierEpisode(worktree: string, head: string): void {
+  const squiz = join(worktree, ".squiz");
+  const episode = join(squiz, "41");
+  const round = join(episode, "rounds", "1");
+  mkdirSync(join(round, "gh"), { recursive: true });
+  mkdirSync(join(round, "session"), { recursive: true });
+  writeFileSync(join(squiz, ".gitignore"), "*\n", "utf8");
+  writeFileSync(join(round, "prompt.md"), "The change under review.\n", "utf8");
+  writeFileSync(join(round, "reports.jsonl"), "", "utf8");
+  writeFileSync(join(round, "resume.txt"), "pi --session-dir .squiz/41/rounds/1/session --session 0193f2c4\n", "utf8");
+  writeFileSync(join(episode, "host.log"), `2026-11-07T08:12:49.187Z round 1: reviewing ${head.slice(0, 7)}\n`, "utf8");
+  writeFileSync(join(episode, "review.txt"), "Squiz reviewed PR #41\n", "utf8");
+  writeFileSync(join(episode, "host.lock"), `${JSON.stringify({ pid: process.pid, startedAt: 1_794_039_100 })}\n`, "utf8");
+  const note = join(episode, "notes", "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb");
+  mkdirSync(note, { recursive: true });
+  writeFileSync(join(note, "1794039169-0001"), "pr=41\ntext=Squiz reviewed PR #41.\n", "utf8");
+  const state = {
+    rounds: [
+      { dollars: 0.01, tokens: 1200, messages: 1, reviewer: "pi", elapsedSeconds: 0.1, postingSeconds: 0, head, raised: 1, ruled: { fixed: 0, withdrawn: 0, open: 0 } },
+    ],
+    spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 },
+    records: [
+      {
+        head,
+        activity: null,
+        status: "reviewed",
+        result: "exited",
+        exitStatus: 2,
+        openThreads: ["PRRT_1"],
+        round: { number: 1, startedAt: 1_794_039_169, endedAt: 1_794_039_169, reviewer: { backend: "detached" } },
+        newFindings: 1,
+      },
+    ],
+  };
+  writeFileSync(join(episode, "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+test("an episode the squiz before #792 wrote is read unchanged by squiz status, squiz review and the round host (#792)", async () => {
+  await withPullRequest([{ findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] }], async (fixture) => {
+    const head = fixture.gh().head;
+    writeEarlierEpisode(fixture.worktree, head);
+    fixture.setGh({
+      ...fixture.gh(),
+      threads: [{ id: "PRRT_1", isResolved: false, path: FILE, line: 2, comments: [{ id: "PRRC_1", databaseId: 9001, body: renderComment(FINDING), createdAt: "2026-10-05T07:13:05Z" }] }],
+    });
+
+    const status = squizStatus(fixture.worktree, githubVenue);
+    assert.equal(status.stderr, "");
+    assert.match(
+      status.stdout,
+      new RegExp(`\\n#41 +${head.slice(0, 7)} +— +reviewed .* 1 thread open +detached +\\. +pi --session-dir \\.squiz/41/rounds/1/session --session 0193f2c4\\n$`, "u"),
+      `squiz status did not read the earlier episode:\n${status.stdout}`,
+    );
+
+    const again = await review(fixture);
+    assert.equal(again.exit, 2, `${again.stdout}${again.stderr}`);
+    assert.deepEqual(again.stdout.split("\n").slice(0, 2), [
+      `Full output, to read where this is cut short: ${join(fixture.worktree, ".squiz", "41", "review.txt")}`,
+      `Squiz already reviewed PR #41 at ${head.slice(0, 7)}: round 1 of 3, 1 new finding.`,
+    ]);
+    assert.equal(started(fixture), 0, "a run on a state already reviewed started a reviewer");
+
+    const pushed = fixture.push();
+    const next = await review(fixture);
+    assert.equal(next.exit, 0, `${next.stdout}${next.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(next.stdout.split("\n")[1], `Squiz reviewed PR #41 at ${pushed.slice(0, 7)}: round 2 of 3, no new findings.`);
+    assert.equal(stateOf(fixture.episode).rounds.length, 2, "the host did not count the round the earlier squiz ran");
+    assert.match(hostLog(fixture.episode), /^2026-11-07T08:12:49\.187Z round 1: reviewing [0-9a-f]{7}\n(?:.*\n)*.* round 2: reviewing /u, "the host wrote a log of its own");
+    assert.ok(existsSync(join(fixture.episode.directory, "rounds", "2", "prompt.md")), "round 2 was not kept beside round 1");
+    assert.ok(existsSync(join(fixture.episode.directory, "notes", "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb", "1794039169-0001")), "the waiting note went");
   });
 });

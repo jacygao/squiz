@@ -30,7 +30,8 @@ import { startChild } from "../sessions/child.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
-import { episodeAt, type Episode } from "../loop/episode.ts";
+import type { Episode } from "../loop/episode.ts";
+import { githubEpisode } from "../testing/episode.ts";
 import { putRecord, type Owner, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
@@ -160,7 +161,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
     git(worktree, ["commit", "--quiet", "--all", "--message", "the change under review"]);
 
     const listed = arranged.listedNumber ?? PULL_REQUEST;
-    const episode = episodeAt(worktree, PULL_REQUEST);
+    const episode = githubEpisode(worktree, PULL_REQUEST);
     const charterFile = join(root, "charter.md");
     await writeFile(charterFile, "What a good review is.\n", "utf8");
     standIn(binaries, "gh", GH_SCRIPT);
@@ -235,13 +236,13 @@ async function host(arranged: Arrangement): Promise<Hosted> {
 
     const end = await runHost({
       worktree,
-      pullRequest: PULL_REQUEST,
+      key: String(PULL_REQUEST),
       round: { config: { ...defaultConfig, timeout: 5, ...arranged.config }, adapter, charterFile, ...arranged.round, venue: arranged.round?.venue ?? githubVenue },
       ...arranged.host,
     });
 
     const read = existsSync(worktree) ? readState(episode) : ({ outcome: "absent" } as const);
-    const status = existsSync(worktree) ? squizStatus(worktree) : { stdout: "", stderr: "" };
+    const status = existsSync(worktree) ? squizStatus(worktree, githubVenue) : { stdout: "", stderr: "" };
     const logFile = join(episode.directory, "host.log");
     return {
       end,
@@ -1892,7 +1893,7 @@ function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; reado
       };
       return { outcome: "found", change };
     },
-    episodeDirectory: (change) => join(".squiz", change.key),
+    episodeDirectory: (worktree, key) => ({ outcome: "found", directory: join(worktree, ".squiz", key) }),
     provideCommits: () => ({ outcome: "ready", alternates: [] }),
     listThreads: () => ({ outcome: "listed", threads: [EARLIER_THREAD] }),
     openThread: posted,
@@ -1995,7 +1996,7 @@ test("a venue that finds no change here runs no reviewer, posts nothing, and rec
 
   assert.equal(ran.started, 0);
   assert.deepEqual(ran.kinds, []);
-  assert.deepEqual(fake.calls.map((call) => call.member), ["readChange"], "the round went on past a venue with no change");
+  assert.deepEqual(fake.calls.map((call) => call.member), ["episodeDirectory", "readChange"], "the round went on past a venue with no change");
   const [record] = recordsOf(ran.state);
   assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
   assert.equal(record.reason, "no review ran: the fake venue has nothing here");

@@ -30,6 +30,9 @@ type PullRequestChange = Change & {
 // How a pull request number is spelled as a key, and the only spelling read as one.
 const NUMBER_KEY = /^[1-9][0-9]*$/u;
 
+// Every process that names an episode keeps it here, so all of them find it.
+const EPISODES = ".squiz";
+
 // A full object name, SHA-1 or SHA-256. Anything else may name a branch that
 // moves, or reach git as an option.
 const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
@@ -50,17 +53,14 @@ export function draftLine(number: number): string {
 
 export const githubVenue: Venue = {
   readChange,
-  episodeDirectory(change) {
-    // Any other key is spelled so that it cannot climb out of `.squiz/`, and so
-    // that no episode is read back from it.
-    const name = NUMBER_KEY.test(change.key)
-      ? change.key
-      : `-${encodeURIComponent(change.key).replaceAll(".", "%2E")}`;
-    return join(worktreeOf(change), ".squiz", name);
+  episodeDirectory(worktree, key) {
+    const number = numberIn(key);
+    if (typeof number !== "number") return number;
+    return { outcome: "found", directory: join(worktree, EPISODES, key) };
   },
   provideCommits,
   listThreads(change, until) {
-    const number = numberOf(change);
+    const number = numberIn(change.key);
     if (typeof number !== "number") return number;
     const call = { directory: worktreeOf(change), until };
     let nodeId = "nodeId" in change && typeof change.nodeId === "string" ? change.nodeId : null;
@@ -74,14 +74,14 @@ export const githubVenue: Venue = {
     return listed;
   },
   openThread(change, anchor, body, until) {
-    const number = numberOf(change);
+    const number = numberIn(change.key);
     if (typeof number !== "number") return number;
     return posting(
       postThread({ pullRequest: number, headSha: change.head, body, anchor }, { directory: worktreeOf(change), until }),
     );
   },
   openFileThread(change, path, body, until) {
-    const number = numberOf(change);
+    const number = numberIn(change.key);
     if (typeof number !== "number") return number;
     return posting(
       postFileThread({ pullRequest: number, headSha: change.head, body, path }, { directory: worktreeOf(change), until }),
@@ -92,12 +92,12 @@ export const githubVenue: Venue = {
   resolve: (threadId, until) => resolveThread(threadId, { directory: process.cwd(), until }),
   reopen: (threadId, until) => reopenThread(threadId, { directory: process.cwd(), until }),
   postSummary(change, body, until) {
-    const number = numberOf(change);
+    const number = numberIn(change.key);
     if (typeof number !== "number") return number;
     return postSummary(number, body, { directory: worktreeOf(change), until });
   },
   postFailure(change, body, until) {
-    const number = numberOf(change);
+    const number = numberIn(change.key);
     if (typeof number !== "number") return number;
     return postIssueComment(number, body, { directory: worktreeOf(change), until }, "the failure");
   },
@@ -108,8 +108,9 @@ export const githubVenue: Venue = {
  * and the one `asked` names where a key was given.
  */
 function readChange(worktree: string, asked: string | null, until: Deadline): ChangeLookup {
-  if (asked !== null && !NUMBER_KEY.test(asked)) {
-    return { outcome: "none", reason: `${JSON.stringify(asked)} is not a pull request number` };
+  if (asked !== null) {
+    const number = numberIn(asked);
+    if (typeof number !== "number") return none(number.reason);
   }
   const where = JSON.stringify(worktree);
   const branch = currentBranch(worktree, until);
@@ -208,10 +209,15 @@ function worktreeOf(change: Change): string {
   return "worktree" in change && typeof change.worktree === "string" ? change.worktree : process.cwd();
 }
 
-/** The pull request number `change.key` spells, or the failure of a key that spells none. */
-function numberOf(change: Change): number | Failed {
-  if (!NUMBER_KEY.test(change.key)) return failed(`${JSON.stringify(change.key)} is not a pull request number`);
-  return Number(change.key);
+/**
+ * The pull request number `key` spells, or the failure of a key that spells
+ * none. A number too large for a JavaScript number to hold exactly would be
+ * read back as another, so it spells none.
+ */
+function numberIn(key: string): number | Failed {
+  const number = Number(key);
+  if (!NUMBER_KEY.test(key) || !Number.isSafeInteger(number)) return failed(`${JSON.stringify(key)} is not a pull request number`);
+  return number;
 }
 
 function none(reason: string): ChangeLookup {

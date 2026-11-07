@@ -1,6 +1,6 @@
 /**
  * What `squiz review` prints for a result, and the copy of it in
- * `.squiz/<number>/review.txt`.
+ * `review.txt` in the episode's directory.
  *
  * Nothing here runs a review or waits for one. The caller hands over a value
  * describing the result, and gets back the status, the stdout and the stderr to
@@ -17,7 +17,7 @@ import { resolve } from "node:path";
 
 import { threadLine } from "../findings/listing.ts";
 import { failureLine } from "../hook/report.ts";
-import { episodeAt } from "../loop/episode.ts";
+import type { Episode } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
 import type { Change, ReviewThread } from "../venues/venue.ts";
 
@@ -26,7 +26,7 @@ export type Bound = "round cap" | "token bound";
 
 /** What every result names, whatever it came to. */
 type About = {
-  readonly pullRequest: number;
+  readonly key: string;
   /**
    * Lines for what failed without changing the outcome, such as a summary that
    * could not be posted. Each goes on stderr, and the status stands.
@@ -154,27 +154,27 @@ export type Printed = {
   readonly stderr: string;
 };
 
-/** Where the output of a review of `pullRequest` is kept, as an absolute path. */
-export function reviewOutputPath(worktree: string, pullRequest: number): string {
-  return resolve(worktree, ".squiz", String(pullRequest), "review.txt");
+/** Where the output of a review of `episode` is kept, as an absolute path. */
+export function reviewOutputPath(episode: Episode): string {
+  return resolve(episode.directory, "review.txt");
 }
 
 /**
  * Compose the output for `result`, and write its stdout to the review's output
- * file in `worktree`, replacing what was there.
+ * file in `episode`'s directory, replacing what was there.
  *
  * A run that exits 1 prints nothing on stdout and writes no file, and neither
  * does a held change, whose one line is all there is to read. A write that
  * fails adds a line on stderr and changes nothing else: the outcome stands, and
  * it is printed whole on stdout either way.
  */
-export function printReview(result: ReviewResult, worktree: string): Printed {
-  const path = reviewOutputPath(worktree, result.pullRequest);
+export function printReview(result: ReviewResult, episode: Episode): Printed {
+  const path = reviewOutputPath(episode);
   const printed = composeReview(result, path);
   if (printed.exit === 1 || result.outcome === "held") return printed;
 
   try {
-    makeEpisodeDirectory(episodeAt(resolve(worktree), result.pullRequest));
+    makeEpisodeDirectory(episode);
     writeFileSync(path, printed.stdout);
   } catch (error) {
     const said = error instanceof Error ? error.message : String(error);
@@ -234,7 +234,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
   const verb = result.recorded ? "already reviewed" : "reviewed";
   const findings =
     result.newFindings === 0 ? "no new findings" : counted(result.newFindings, "new finding");
-  const heading = `Squiz ${verb} PR #${result.pullRequest} at ${result.commit}: round ${result.round} of ${result.cap}, ${findings}.`;
+  const heading = `Squiz ${verb} PR #${result.key} at ${result.commit}: round ${result.round} of ${result.cap}, ${findings}.`;
 
   switch (result.exit) {
     case 2:
@@ -252,7 +252,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         unreviewed === undefined ? undefined : { state: unreviewed, closedAt: result.closedAt };
       return [
         withNotReviewed(heading, result, notReviewed),
-        boundReached(result.closedAt, open.length, result.pullRequest),
+        boundReached(result.closedAt, open.length, result.key),
         ...open.map(printedThread),
       ];
     }
@@ -265,29 +265,29 @@ const NOTHING_OPEN = "Nothing is open. The review is closed, and its summary is 
  * What a close at a bound with threads open tells the coding agent to do.
  * `summarised` is false where the close has no summary on the pull request.
  */
-function boundReached(closedAt: Bound, open: number, pullRequest: number, summarised = true): string {
+function boundReached(closedAt: Bound, open: number, key: string, summarised = true): string {
   if (!summarised) {
     return [
       `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open. A person takes`,
-      `it from here, so do not run \`squiz review ${pullRequest}\` again.`,
+      `it from here, so do not run \`squiz review ${key}\` again.`,
     ].join("\n");
   }
   return [
     `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
     "is on the pull request. A person takes it from here, so do not run",
-    `\`squiz review ${pullRequest}\` again.`,
+    `\`squiz review ${key}\` again.`,
   ].join("\n");
 }
 
 function unreviewedBlocks(result: ClosedUnreviewed): readonly string[] {
-  const heading = `Squiz did not review PR #${result.pullRequest} at ${result.state}: ${result.reason}.`;
+  const heading = `Squiz did not review PR #${result.key} at ${result.state}: ${result.reason}.`;
   const open = result.threads.filter((thread) => !thread.isResolved);
   if (result.exit === 0) {
     return [heading, result.summarised ? NOTHING_OPEN : "Nothing is open, and the review is closed."];
   }
   return [
     heading,
-    boundReached(result.closedAt, open.length, result.pullRequest, result.summarised),
+    boundReached(result.closedAt, open.length, result.key, result.summarised),
     ...open.map(printedThread),
   ];
 }
@@ -300,12 +300,12 @@ function withNotReviewed(
 ): string {
   if (notReviewed === undefined) return heading;
   const why = `the episode closed at the ${notReviewed.closedAt}, after reviewing ${result.commit}`;
-  return `${heading}\nSquiz did not review PR #${result.pullRequest} at ${notReviewed.state}: ${why}.`;
+  return `${heading}\nSquiz did not review PR #${result.key} at ${notReviewed.state}: ${why}.`;
 }
 
 function stillReviewing(result: StillReviewing): string {
-  const again = `Run \`squiz review ${result.pullRequest}\` again to wait for it.`;
-  const pr = `PR #${result.pullRequest}`;
+  const again = `Run \`squiz review ${result.key}\` again to wait for it.`;
+  const pr = `PR #${result.key}`;
   switch (result.wait) {
     case "under review":
       return `Squiz is still reviewing ${pr} at ${result.commit}. ${again}`;
@@ -322,7 +322,7 @@ function closedBlocks(result: AlreadyClosed): readonly string[] {
   const open = result.threads.filter((thread) => !thread.isResolved);
   const left = open.length === 0 ? "nothing open" : `${counted(open.length, "thread")} open`;
   return [
-    `Squiz's review of PR #${result.pullRequest} closed after ${counted(result.rounds, "round")}, with ${left}. No round runs again in this worktree.`,
+    `Squiz's review of PR #${result.key} closed after ${counted(result.rounds, "round")}, with ${left}. No round runs again in this worktree.`,
     ...open.map(printedThread),
   ];
 }
@@ -335,15 +335,15 @@ function failedLines(result: Failed): string {
       ? []
       : [
           comment.posted
-            ? `the failure is posted on PR #${result.pullRequest}`
-            : `the failure could not be posted on PR #${result.pullRequest}: ${comment.reason}`,
+            ? `the failure is posted on PR #${result.key}`
+            : `the failure could not be posted on PR #${result.key}: ${comment.reason}`,
         ];
   return [`review failed: ${result.reason}`, ...result.items, ...went].map(failureLine).join("");
 }
 
 function unpostedLine(result: Unposted): string {
   const them = result.findings === 1 ? "it" : "them";
-  return `round ${result.round} found ${counted(result.findings, "finding")} and could not post ${them} to PR #${result.pullRequest}`;
+  return `round ${result.round} found ${counted(result.findings, "finding")} and could not post ${them} to PR #${result.key}`;
 }
 
 /**

@@ -50,7 +50,7 @@ function textOf(note: ReturnType<typeof ownerNote>): string {
 test("a note for open threads carries each one as squiz review prints it, and what to do with them", () => {
   const threads = [thread("PRRT_a", 134, "Retry backoff resets"), thread("PRRT_b", 57, "Clock skew is read as expiry")];
 
-  const text = textOf(ownerNote(41, reviewed(2, ["PRRT_a", "PRRT_b"]), "3f9c2e0", followUpFor(41), undefined, threads));
+  const text = textOf(ownerNote("41", reviewed(2, ["PRRT_a", "PRRT_b"]), "3f9c2e0", followUpFor(41), undefined, threads));
 
   assert.equal(
     text,
@@ -78,7 +78,7 @@ test("a note for open threads ends with the follow-up it was handed, which the c
   const threads = [thread("PRRT_a", 134, "Retry backoff resets")];
   const followUp = "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.";
 
-  const text = textOf(ownerNote(41, reviewed(2, ["PRRT_a"]), "3f9c2e0", followUp, undefined, threads));
+  const text = textOf(ownerNote("41", reviewed(2, ["PRRT_a"]), "3f9c2e0", followUp, undefined, threads));
 
   assert.ok(text.endsWith(`\n\n${followUp}`), `the note does not end with the change's follow-up:\n${text}`);
 });
@@ -90,7 +90,7 @@ test("a note carries only the threads the round left open that are still open, a
     thread("PRRT_since", 9, "Resolved since the round", true),
   ];
 
-  const text = textOf(ownerNote(41, reviewed(2, ["PRRT_a", "PRRT_since"]), "3f9c2e0", followUpFor(41), undefined, threads));
+  const text = textOf(ownerNote("41", reviewed(2, ["PRRT_a", "PRRT_since"]), "3f9c2e0", followUpFor(41), undefined, threads));
 
   assert.match(text, /^Squiz reviewed PR #41 at 3f9c2e0: 1 thread is open:\n\nPRRT_a /u);
   assert.doesNotMatch(text, /PRRT_person|PRRT_since/u);
@@ -100,7 +100,7 @@ test("a note for more than 10 open threads carries the first 10, and ends saying
   const ids = Array.from({ length: 12 }, (_, index) => `PRRT_${index + 1}`);
   const threads = ids.map((id, index) => thread(id, index + 1, `Finding ${index + 1}`));
 
-  const text = textOf(ownerNote(41, reviewed(2, ids), "3f9c2e0", followUpFor(41), undefined, threads));
+  const text = textOf(ownerNote("41", reviewed(2, ids), "3f9c2e0", followUpFor(41), undefined, threads));
 
   assert.match(text, /^Squiz reviewed PR #41 at 3f9c2e0: 12 threads are open:\n/u);
   assert.match(text, /PRRT_10 src/u);
@@ -114,7 +114,7 @@ test("a note for more than 10 open threads carries the first 10, and ends saying
 test("a note for a review closed with threads open says it closed, and carries the threads left for a person", () => {
   const threads = [thread("PRRT_a", 134, "Retry backoff resets")];
 
-  const text = textOf(ownerNote(41, reviewed(3, ["PRRT_a"]), "3f9c2e0", followUpFor(41), undefined, threads));
+  const text = textOf(ownerNote("41", reviewed(3, ["PRRT_a"]), "3f9c2e0", followUpFor(41), undefined, threads));
 
   assert.equal(
     text,
@@ -132,7 +132,7 @@ test("a note for a review closed with threads open says it closed, and carries t
 test("a note whose listing holds none of the threads the round left open counts them and points to squiz review", () => {
   const listed = [thread("PRRT_person", 1, "Not the reviewer's"), thread("PRRT_a", 134, "Resolved since the round", true)];
 
-  const text = textOf(ownerNote(41, reviewed(2, ["PRRT_a", "PRRT_b"]), "3f9c2e0", followUpFor(41), undefined, listed));
+  const text = textOf(ownerNote("41", reviewed(2, ["PRRT_a", "PRRT_b"]), "3f9c2e0", followUpFor(41), undefined, listed));
 
   assert.equal(text, "Squiz reviewed PR #41 at 3f9c2e0: 2 threads are open. Run `squiz review 41` to read them.");
 });

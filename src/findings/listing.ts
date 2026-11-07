@@ -8,18 +8,18 @@ import { threadLocation, type ReviewThread } from "../venues/github/threads.ts";
 import { namedFindingOn } from "./thread.ts";
 
 /**
- * What `squiz threads` prints for the threads on pull request `pullRequest`.
+ * What `squiz threads` prints for the threads on the change keyed `key`.
  *
  * Resolved threads are dropped. The listing is the coding agent's queue of what
  * is still open, and a thread the reviewer closed is not on it.
  */
-export function threadListing(pullRequest: number, threads: readonly ReviewThread[]): string {
+export function threadListing(key: string, threads: readonly ReviewThread[]): string {
   const open = threads.filter((thread) => !thread.isResolved);
   // An honest zero says so in words. A command that failed prints nothing at
   // all, and the two must not read alike.
-  if (open.length === 0) return `no open threads on #${pullRequest}\n`;
+  if (open.length === 0) return `no open threads on #${key}\n`;
 
-  const counted = `${open.length} open thread${open.length === 1 ? "" : "s"} on #${pullRequest}`;
+  const counted = `${open.length} open thread${open.length === 1 ? "" : "s"} on #${key}`;
   const lines = open.map(threadLine);
   return `${[counted, ...lines].join("\n")}\n`;
 }

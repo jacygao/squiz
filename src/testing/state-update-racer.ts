@@ -10,7 +10,7 @@
 
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf } from "../sessions/process.ts";
-import { episodeAt } from "../loop/episode.ts";
+import { githubEpisode } from "./episode.ts";
 import { putRecord, type StateRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 
@@ -18,7 +18,7 @@ import { updateState } from "../loop/state-update.ts";
 const LONG_MS = 120_000;
 
 const [worktree = "", pullRequest = "0", label = "", count = "0", status = "queued", at = "0"] = process.argv.slice(2);
-const episode = episodeAt(worktree, Number(pullRequest));
+const episode = githubEpisode(worktree, pullRequest);
 
 const read = identityOf(process.pid, 5_000);
 if (read.outcome !== "read") {

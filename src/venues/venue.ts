@@ -76,7 +76,15 @@ export interface Venue {
    * which finds the change from the worktree alone.
    */
   readChange(worktree: string, asked: string | null, until: Deadline): ChangeLookup;
-  episodeDirectory(change: Change): string;
+  /**
+   * The episode's directory for `key` in `worktree`, found from the key alone,
+   * before any change is read. Every process that names the episode calls it,
+   * so the hook, the round host and the commands reach one directory.
+   */
+  episodeDirectory(
+    worktree: string,
+    key: string,
+  ): { readonly outcome: "found"; readonly directory: string } | Failed;
   /** Extra object directories the snapshot borrows from, once base and head are readable. */
   provideCommits(
     change: Change,

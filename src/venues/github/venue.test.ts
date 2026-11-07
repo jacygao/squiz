@@ -266,17 +266,30 @@ test("readChange fails, with git's reason, where the branch could not be resolve
   }
 });
 
-test("episodeDirectory is .squiz/<number>/ in the worktree the change was read in", async () => {
-  await withRepository(async (worktree) => {
-    await withFakeGh([pullRequestRow()], () => {
-      assert.equal(githubVenue.episodeDirectory(readFound(worktree)), join(worktree, ".squiz", "142"));
+test("episodeDirectory is .squiz/<key>/ in the worktree for a pull request's number, found before any change is read, and runs no gh", async () => {
+  await withFakeGh([], (gh) => {
+    assert.deepEqual(githubVenue.episodeDirectory("/work/squiz", "142"), {
+      outcome: "found",
+      directory: "/work/squiz/.squiz/142",
     });
+    assert.equal(gh.calls(), 0, "naming the directory asked GitHub something");
   });
 });
 
-test("episodeDirectory keeps a key that is no number inside .squiz/, where no episode reads it back", () => {
-  const directory = githubVenue.episodeDirectory({ ...foreign, key: "../.." });
-  assert.equal(directory, join(process.cwd(), ".squiz", "-%2E%2E%2F%2E%2E"));
+test("episodeDirectory fails for every key that is no pull request's number, makes nothing, and runs no gh", async () => {
+  await withRepository(async (worktree) => {
+    await withFakeGh([], (gh) => {
+      for (const key of ["abc", "../x", "../..", "0", "041", "-1", "1e3", "4.2", "", " 41", "41/", "/work/squiz", "9007199254740993"]) {
+        assert.deepEqual(
+          githubVenue.episodeDirectory(worktree, key),
+          { outcome: "failed", reason: `${JSON.stringify(key)} is not a pull request number` },
+          `the key ${JSON.stringify(key)} was given a directory`,
+        );
+      }
+      assert.equal(gh.calls(), 0);
+      assert.equal(existsSync(join(worktree, ".squiz")), false, "a key that names no episode made .squiz/");
+    });
+  });
 });
 
 test("provideCommits is ready with no alternates where the repository has both commits", async () => {

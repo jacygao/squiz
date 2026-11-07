@@ -16,10 +16,11 @@ import { isAbsolute, join, relative } from "node:path";
 
 import { failureLine, oneLine } from "../hook/report.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
-import { episodeNamed, type Episode } from "../loop/episode.ts";
+import { episodeAt, type Episode } from "../loop/episode.ts";
 import { readState } from "../loop/episode-state.ts";
 import type { ReviewerPlace, StateRecord } from "../loop/state-record.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import type { Venue } from "../venues/venue.ts";
 import { runGit } from "../worktree/git.ts";
 
 // Long enough for a loaded machine, short enough that a status over many
@@ -34,6 +35,8 @@ export type StatusOptions = {
   readonly presence: (identity: ProcessIdentity) => Presence;
   /** Whole seconds since the epoch. */
   readonly now: number;
+  /** What says which of `.squiz/`'s entries is an episode, and where its state is. */
+  readonly venue: Pick<Venue, "episodeDirectory">;
 };
 
 /** One line of the table, every cell as printed. */
@@ -49,7 +52,7 @@ type EpisodeLines = {
   readonly active: boolean;
   /** The latest time any of its records carries, or `undefined` where none carries one. */
   readonly latest: number | undefined;
-  readonly pullRequest: number;
+  readonly key: string;
   readonly worktree: string;
 };
 
@@ -66,7 +69,7 @@ const NONE = "—";
  * List every review recorded in the worktrees of the repository holding
  * `directory`. Never throws.
  */
-export function squizStatus(directory: string): { readonly stdout: string; readonly stderr: string } {
+export function squizStatus(directory: string, venue: Venue): { readonly stdout: string; readonly stderr: string } {
   const listed = runGit(directory, ["worktree", "list", "--porcelain", "-z"], {
     until: deadlineIn(GIT_BOUND_MS),
   });
@@ -79,6 +82,7 @@ export function squizStatus(directory: string): { readonly stdout: string; reado
     main: worktrees[0] ?? directory,
     presence: (identity) => stillRunning(identity, PS_BOUND_MS),
     now: Math.floor(Date.now() / 1_000),
+    venue,
   });
   return composeStatus(collected);
 }
@@ -119,12 +123,15 @@ export function collectStatus(worktrees: readonly string[], options: StatusOptio
       continue;
     }
     for (const name of names) {
-      const episode = episodeNamed(worktree, name);
-      if (episode === undefined) continue;
+      // An entry the venue names no episode for is nobody's, and reading under
+      // it would read at paths no episode owns.
+      const named = episodeAt(options.venue, worktree, name);
+      if (named.outcome === "failed") continue;
+      const { episode } = named;
       const read = readState(episode);
       if (read.outcome === "absent") continue;
       if (read.outcome === "unreadable") {
-        problems.push(`the reviews of #${episode.id} in ${worktree} could not be read: ${read.reason}`);
+        problems.push(`the reviews of #${episode.key} in ${worktree} could not be read: ${read.reason}`);
         continue;
       }
       const records = read.state.records ?? [];
@@ -165,7 +172,10 @@ function newestFirst(one: EpisodeLines, other: EpisodeLines): number {
   if (one.active !== other.active) return one.active ? -1 : 1;
   const latest = (other.latest ?? -1) - (one.latest ?? -1);
   if (latest !== 0) return latest;
-  if (one.pullRequest !== other.pullRequest) return other.pullRequest - one.pullRequest;
+  // The longer key first, then the later spelling, which puts the highest pull
+  // request number first.
+  if (one.key.length !== other.key.length) return other.key.length - one.key.length;
+  if (one.key !== other.key) return one.key < other.key ? 1 : -1;
   return one.worktree < other.worktree ? -1 : one.worktree > other.worktree ? 1 : 0;
 }
 
@@ -175,7 +185,6 @@ function linesOf(
   options: StatusOptions,
   problems: string[],
 ): EpisodeLines {
-  const pullRequest = Number(episode.id);
   const place = worktreeShown(episode.worktree, options.main);
   let active = false;
   let latest: number | undefined;
@@ -185,7 +194,7 @@ function linesOf(
     if (record.status === "queued" || record.status === "reviewing") active = true;
     for (const time of line.times) latest = latest === undefined ? time : Math.max(latest, time);
     const row: Row = [
-      `#${episode.id}`,
+      `#${episode.key}`,
       record.head.slice(0, 7),
       record.activity === null ? NONE : record.activity.slice(-6),
       line.state,
@@ -198,7 +207,7 @@ function linesOf(
     ];
     rows.push({ row, problems: record.status === "reviewed" ? (record.problems ?? []) : [] });
   }
-  return { rows, active, latest, pullRequest, worktree: episode.worktree };
+  return { rows, active, latest, key: episode.key, worktree: episode.worktree };
 }
 
 type Line = {
@@ -283,7 +292,7 @@ function outcomeOf(record: StateRecord & { readonly status: "reviewed" }): strin
  */
 function sessionOf(place: ReviewerPlace, episode: Episode, round: number): string {
   if (place.backend === "detached") return place.backend;
-  return `${place.backend} squiz-${episode.id}-r${round}`;
+  return `${place.backend} squiz-${episode.key}-r${round}`;
 }
 /**
  * The command in the round's `resume.txt`, or `—` where it has none.
