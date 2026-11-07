@@ -151,6 +151,8 @@ function change(directory: string, what: string, options: RecordOptions, edit: (
       return written.outcome === "written" ? { outcome: "acted" } : written;
     },
     options,
+    // A call whose deadline has nothing left is not made, so none gets a last attempt.
+    false,
   );
   if (held.outcome === "failed") return failed(`${what}: ${held.reason}`);
   return held.value;
@@ -212,9 +214,15 @@ function readRecord(directory: string): Read {
 function recordFrom(parsed: unknown): Stored | string {
   if (!isObject(parsed) || !Array.isArray(parsed["threads"])) return "it has no list of threads";
   const threads: StoredThread[] = [];
+  // An id held twice names two entries, and a write to it would change both.
+  const seen = new Set<string>();
   for (const [index, entry] of parsed["threads"].entries()) {
     const thread = threadFrom(entry);
     if (typeof thread === "string") return `thread ${index + 1} ${thread}`;
+    for (const id of [thread.id, ...thread.comments.map((comment) => comment.id)]) {
+      if (seen.has(id)) return `it holds ${id} twice`;
+      seen.add(id);
+    }
     threads.push(thread);
   }
   return { threads };

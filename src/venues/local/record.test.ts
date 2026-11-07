@@ -323,6 +323,44 @@ test("a threads.json that cannot be read fails every call with one line naming i
   }
 });
 
+test("a threads.json holding one id twice is refused by every call, and left as it was", (t) => {
+  const thread = (id: string, comment: string) => ({
+    id,
+    path: "a.ts",
+    anchor: { at: "file" },
+    isResolved: false,
+    comments: [{ id: comment, body: "x" }],
+  });
+  for (const threads of [[thread("T1", "C1"), thread("T1", "C2")], [thread("T1", "C1"), thread("T2", "C1")]]) {
+    const directory = directoryIn(t);
+    const text = JSON.stringify({ threads });
+    writeFileSync(join(directory, "threads.json"), text);
+
+    const outcomes = [listThreads(directory), addReply(directory, "T1", agent, soon()), setResolved(directory, "T1", true, soon())];
+
+    for (const outcome of outcomes) {
+      assert.equal(outcome.outcome, "failed", `${text}: ${JSON.stringify(outcome)}`);
+      assert.match(outcome.outcome === "failed" ? outcome.reason : "", /threads\.json.*twice/u);
+    }
+    assert.equal(readFileSync(join(directory, "threads.json"), "utf8"), text);
+  }
+});
+
+test("a deadline that runs out while the record is being read is not taken for one already spent, and nothing is written", (t) => {
+  const directory = directoryIn(t);
+  openThread(directory, "a.ts", { at: "line", line: 1 }, reviewer, soon());
+  const before = readFileSync(join(directory, "threads.json"));
+  let at = 0;
+  // Each look at the clock moves it on 60ms, so the 100ms deadline is live at
+  // the call's first look and has passed by its second.
+  const ticking = (): number => (at += 60);
+
+  const replied = addReply(directory, "T1", agent, { until: deadlineIn(100, ticking) });
+
+  assert.equal(replied.outcome, "failed", JSON.stringify(replied));
+  assert.deepEqual(readFileSync(join(directory, "threads.json")), before, "the reply was written after its deadline had passed");
+});
+
 test("a directory that cannot be written fails with the reason and throws nothing", (t) => {
   const file = join(directoryIn(t), "a-file");
   writeFileSync(file, "");

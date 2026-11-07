@@ -71,6 +71,13 @@ export function updateState(
   change: (state: EpisodeState) => EpisodeState,
   options: UpdateOptions,
 ): StateUpdate {
+  // A deadline spent before the update began still gets its one attempt, and the
+  // floor lets that attempt's `ps` finish: a round records its cost after its
+  // window has run out, and a lock no one holds must not refuse it. Decided before
+  // anything runs, so time this update spends cannot turn into that allowance.
+  // Otherwise each `ps` is bounded by what is left when it runs, since one attempt
+  // can ask about several holders.
+  const lastAttemptOnly = options.until.passed();
   const notWritten = (why: string): StateUpdate => ({
     outcome: "failed",
     reason: `${episode.stateFile} could not be written: ${why}`,
@@ -80,7 +87,7 @@ export function updateState(
   } catch (error) {
     return notWritten(`${episode.directory} could not be made: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const held = holdingLock(episode.directory, LOCK_NAME, () => underLock(episode, change), options);
+  const held = holdingLock(episode.directory, LOCK_NAME, () => underLock(episode, change), options, lastAttemptOnly);
   return held.outcome === "held" ? held.value : notWritten(held.reason);
 }
 
@@ -97,19 +104,22 @@ export type Locked<T> =
  * waited on until `options.until` passes, and the call then fails naming the
  * holder. A lock naming a process that has gone is taken over.
  *
+ * `lastAttemptOnly` gives a deadline that had passed before the caller began
+ * one attempt, with `ps` given its floor. Without it, a deadline that has
+ * passed is a lock not taken.
+ *
  * Never throws, unless `act` does.
  */
-export function holdingLock<T>(directory: string, name: string, act: () => T, options: UpdateOptions): Locked<T> {
+export function holdingLock<T>(
+  directory: string,
+  name: string,
+  act: () => T,
+  options: UpdateOptions,
+  lastAttemptOnly: boolean,
+): Locked<T> {
   const { until } = options;
   const notHeld = (reason: string): Locked<T> => ({ outcome: "failed", reason });
 
-  // A deadline spent before the update began still gets its one attempt, and the
-  // floor lets that attempt's `ps` finish: a round records its cost after its
-  // window has run out, and a lock no one holds must not refuse it. Decided before
-  // anything runs, so time this update spends cannot turn into that allowance.
-  // Otherwise each `ps` is bounded by what is left when it runs, since one attempt
-  // can ask about several holders.
-  const lastAttemptOnly = until.passed();
   const boundMs = (): number => (lastAttemptOnly ? PS_FLOOR_MS : Math.max(1, until.remaining()));
   const expired = (): boolean => !lastAttemptOnly && until.passed();
 
