@@ -16,10 +16,6 @@
 
 import { renderReply } from "./findings/comment.ts";
 import { threadListing } from "./findings/listing.ts";
-import { findPullRequestForBranch } from "./venues/github/pull-request.ts";
-import { replyInThread } from "./venues/github/thread-actions.ts";
-import { listReviewThreads } from "./venues/github/threads.ts";
-import { currentBranch } from "./hook/branch.ts";
 import { runHook } from "./hook/hook.ts";
 import { reportFailure } from "./hook/report.ts";
 import { runUnderTrap, type HookExit, type Trapped } from "./hook/trap.ts";
@@ -30,6 +26,8 @@ import { thisSquiz } from "./review/path-link.ts";
 import { runReview } from "./review/review.ts";
 import { squizStatus } from "./review/status.ts";
 import { squizVersion } from "./review/version.ts";
+import { deadlineIn, type Deadline } from "./reviewers/deadline.ts";
+import { venueFor, type Change, type Venue } from "./venues/venue.ts";
 
 // A name that is not here is reported rather than stubbed, so an agent that
 // runs a command this binary does not have is told so.
@@ -40,6 +38,9 @@ const PROBE_BOUND_MS = 15_000;
 
 // Copilot's sign-in prompt took 13 seconds when it was measured.
 const SIGN_IN_BOUND_MS = 60_000;
+
+// Under the two minutes Claude Code gives a shell command by default.
+const THREAD_COMMAND_BUDGET_MS = 100_000;
 
 const numberSpelling = /^[1-9][0-9]*$/u;
 
@@ -111,66 +112,56 @@ async function review(args: readonly string[]): Promise<number> {
   return printed.exit;
 }
 
-/** The pull request a command works against, or why it has none to work against. */
+/** The change a command works against, with its venue, or the line saying why it has none. */
 type Target =
-  | { readonly outcome: "found"; readonly number: number; readonly nodeId: string }
+  | { readonly outcome: "found"; readonly venue: Venue; readonly change: Change }
   | { readonly outcome: "unavailable"; readonly reason: string };
 
 /**
- * The open pull request whose head is the branch checked out in `directory`.
- *
- * A git that could not name the branch, a detached HEAD, a lookup that failed
- * and a branch nobody opened a pull request for all come back the same way,
- * carrying the line that says which of them happened.
+ * The change the venue reads in `directory`. A venue that cannot be chosen, a
+ * change the venue holds back, none, and a lookup that failed all come back the
+ * same way, carrying the venue's line for which of them happened.
  */
-function targetOf(directory: string): Target {
-  const branch = currentBranch(directory);
-  if (branch.outcome === "failed") {
-    return unavailable(`the current branch could not be resolved: ${branch.reason}`);
+function targetOf(directory: string, until: Deadline): Target {
+  const chosen = venueFor(process.env);
+  if (chosen.outcome === "failed") return { outcome: "unavailable", reason: chosen.reason };
+  const lookup = chosen.venue.readChange(directory, null, until);
+  switch (lookup.outcome) {
+    case "found":
+      return { outcome: "found", venue: chosen.venue, change: lookup.change };
+    case "held":
+      return { outcome: "unavailable", reason: lookup.line };
+    case "none":
+    case "failed":
+      return { outcome: "unavailable", reason: lookup.reason };
   }
-  if (branch.outcome === "detached") {
-    return unavailable("HEAD is detached here, so no branch has a pull request");
-  }
-
-  const named = JSON.stringify(branch.name);
-  const found = findPullRequestForBranch(branch.name, { directory: directory });
-  if (found.outcome === "failed") {
-    return unavailable(`the pull request for ${named} could not be looked up: ${found.reason}`);
-  }
-  if (found.outcome === "none") {
-    return unavailable(`no open pull request has ${named} as its head`);
-  }
-  return { outcome: "found", number: found.number, nodeId: found.nodeId };
 }
 
-function unavailable(reason: string): Target {
-  return { outcome: "unavailable", reason };
-}
-
-/** List the open threads on the pull request for the branch the command ran on. */
+/** List the open threads on the change the venue reads where the command ran. */
 function listThreads(): HookExit {
-  const directory = process.cwd();
-  const target = targetOf(directory);
+  const until = deadlineIn(THREAD_COMMAND_BUDGET_MS);
+  const target = targetOf(process.cwd(), until);
   if (target.outcome !== "found") {
     reportFailure(`no threads listed: ${target.reason}`);
     return 0;
   }
 
-  const listing = listReviewThreads(target.nodeId, { directory });
+  const { venue, change } = target;
+  const listing = venue.listThreads(change, until);
   if (listing.outcome !== "listed") {
-    reportFailure(`the threads on #${target.number} could not be listed: ${listing.reason}`);
+    reportFailure(`the threads on #${change.key} could not be listed: ${listing.reason}`);
     return 0;
   }
 
-  process.stdout.write(threadListing(target.number, listing.threads));
+  process.stdout.write(threadListing(Number(change.key), listing.threads));
   return 0;
 }
 
 /**
  * Reply inside the thread `args` names, from the working directory.
  *
- * The pull request is looked up before the reply, so that a thread worked from
- * a branch whose pull request is gone is answered rather than replied to.
+ * The change is read before the reply, so that a thread worked from a branch
+ * whose pull request is gone is answered rather than replied to.
  *
  * What is posted carries the coding agent's marker rather than the text alone.
  * The marker is the only thing that tells the reply from a comment a person left,
@@ -189,20 +180,20 @@ function postReply(args: readonly string[]): HookExit {
     return 0;
   }
 
-  const directory = process.cwd();
-  const target = targetOf(directory);
+  const until = deadlineIn(THREAD_COMMAND_BUDGET_MS);
+  const target = targetOf(process.cwd(), until);
   if (target.outcome !== "found") {
     reportFailure(`nothing replied: ${target.reason}`);
     return 0;
   }
 
-  const action = replyInThread(id, renderReply(body), { directory });
+  const action = target.venue.reply(id, renderReply(body), until);
   if (action.outcome !== "acted") {
     reportFailure(`nothing replied in ${id}: ${action.reason}`);
     return 0;
   }
 
-  process.stdout.write(`replied in ${id} on #${target.number}\n`);
+  process.stdout.write(`replied in ${id} on #${target.change.key}\n`);
   return 0;
 }
 

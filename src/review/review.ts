@@ -27,8 +27,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { defaultsLine, findProjectConfig, type ProjectConfig } from "../config/config.ts";
 import { readComment } from "../findings/comment.ts";
-import { listReviewThreads, type ReviewThread, type ThreadListing } from "../venues/github/threads.ts";
-import type { GhCall } from "../venues/github/gh.ts";
 import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
@@ -37,6 +35,7 @@ import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type 
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { venueFor, type Change, type ReviewThread, type Venue } from "../venues/venue.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
 import { printReview, unprinted, type Printed, type ReviewResult } from "./output.ts";
 
@@ -67,8 +66,8 @@ export type ReviewRequest = {
   readonly hostStartMs?: number;
   /** `trigger` where not given. */
   readonly trigger?: (request: TriggerRequest) => Triggered;
-  /** `listReviewThreads` where not given. */
-  readonly listThreads?: (pullRequestId: string, call: GhCall) => ThreadListing;
+  /** The venue `environment` chooses where not given. */
+  readonly venue?: Venue;
   readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
   readonly host?: (pullRequest: number) => HostCommand;
 };
@@ -101,23 +100,31 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
   const { directory, pullRequest } = request;
   const notRun = (reason: string): Printed => printReview({ outcome: "not run", pullRequest, reason }, directory);
 
+  let venue = request.venue;
+  if (venue === undefined) {
+    const chosen = venueFor(request.environment);
+    if (chosen.outcome === "failed") return notRun(chosen.reason);
+    venue = chosen.venue;
+  }
+
   const triggerNow = (): Triggered =>
     (request.trigger ?? triggerReview)({
       directory,
       trigger: "review",
       pullRequest,
+      venue,
       environment: request.environment,
       until,
       ...(request.presence === undefined ? {} : { presence: request.presence }),
       ...(request.host === undefined ? {} : { host: request.host }),
     });
   const first = triggerNow();
-  if (first.outcome === "draft") return printReview({ outcome: "draft", pullRequest }, directory);
+  if (first.outcome === "held") return printReview({ outcome: "held", pullRequest, line: first.line }, directory);
   if (first.outcome !== "decided") return notRun(first.reason);
 
   const { episode } = first;
   let triggered = first;
-  let context: Context = { pullRequest, cap, own: first.state };
+  let context: Context = { pullRequest, cap, own: first.state, followUp: first.change.followUp };
   const print = (result: ReviewResult): Printed => printReview(result, episode.worktree);
   const read = (): EpisodeState | string => {
     const found = readState(episode);
@@ -185,8 +192,7 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
     const settled = settle({ ...context, recorded: false }, state);
     if (settled !== undefined) {
       if (settled.kind === "result") return print(settled.result);
-      const call = { directory, until: until.remaining() < READ_BACK_FLOOR_MS ? deadlineIn(READ_BACK_FLOOR_MS) : until };
-      const listed = (request.listThreads ?? listReviewThreads)(triggered.pullRequest.nodeId, call);
+      const listed = venue.listThreads(triggered.change, until.remaining() < READ_BACK_FLOOR_MS ? deadlineIn(READ_BACK_FLOOR_MS) : until);
       if (listed.outcome !== "listed") {
         const reason = `the threads on PR #${pullRequest} could not all be listed to print the review of ${context.own.head.slice(0, 7)}: ${listed.reason}`;
         return unprinted(reason);
@@ -196,12 +202,13 @@ async function reviewUnder(request: ReviewRequest, until: Deadline, cap: number)
     const unqueued = unqueuedSuccessor(state, context.own);
     if (unqueued !== undefined && !until.passed()) {
       const again = triggerNow();
-      if (again.outcome === "draft") return printReview({ outcome: "draft", pullRequest }, directory);
+      if (again.outcome === "held") return printReview({ outcome: "held", pullRequest, line: again.line }, directory);
       if (again.outcome !== "decided") {
         // A trigger the run's own deadline cut off is the deadline arriving, not a review that could not run.
         return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
       }
       triggered = again;
+      context = { ...context, followUp: again.change.followUp };
       // A trigger that read a state other than the one the record names waits on what it read.
       if (!sameState(again.state, unqueued)) context = { ...context, own: again.state };
       const acted = decided();
@@ -259,7 +266,12 @@ function hostRunning(
   return holder.outcome === "named" && presence(holder.holder, Math.max(1, boundMs)).outcome === "running";
 }
 
-type Context = { readonly pullRequest: number; readonly cap: number; readonly own: StateKey };
+type Context = {
+  readonly pullRequest: number;
+  readonly cap: number;
+  readonly own: StateKey;
+  readonly followUp: Change["followUp"];
+};
 
 /** Whether the run was handed a result already recorded, rather than one it waited for. */
 type Waiting = Context & { readonly recorded: boolean };
@@ -448,7 +460,7 @@ function roundResult(
   };
   switch (record.exitStatus) {
     case 2:
-      return { ...base, exit: 2 };
+      return { ...base, exit: 2, followUp: waiting.followUp };
     case 0:
       return { ...base, exit: 0, notReviewed: left };
     case 3:

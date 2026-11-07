@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { renderComment } from "../findings/comment.ts";
-import type { ReviewThread } from "../venues/github/threads.ts";
+import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
 import { writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
@@ -67,6 +67,21 @@ const OPEN_THREAD: ReviewThread = {
 };
 
 type Fixture = { readonly worktree: string; readonly episode: Episode };
+
+/** PR #41 as the GitHub venue reads it, at the run's own head. */
+const CHANGE: Change = {
+  key: String(NUMBER),
+  name: `PR #${NUMBER}`,
+  rerun: `squiz review ${NUMBER}`,
+  followUp: [
+    "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
+    "what you changed or why you disagree. Commit and push what you changed, then run",
+    `\`squiz review ${NUMBER}\` again.`,
+  ].join("\n"),
+  base: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
+  head: OWN.head,
+  description: "",
+};
 
 /** A repository with a `.squiz.json` of its own, so that no run adds the line saying the defaults are in use. */
 async function withWorktree(body: (fixture: Fixture) => Promise<void>): Promise<void> {
@@ -126,15 +141,7 @@ function decided(
 ): Triggered {
   return {
     outcome: "decided",
-    pullRequest: {
-      number: NUMBER,
-      nodeId: "PR_kwDOUEd2qM8AAAABDNPXSA",
-      baseRef: "main",
-      headRef: "feature-a",
-      headSha: OWN.head,
-      baseSha: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
-      description: "",
-    },
+    change: CHANGE,
     episode: fixture.episode,
     state: OWN,
     threads,
@@ -161,7 +168,30 @@ function request(fixture: Fixture, run: Run, handed: TriggerRequest[] = []): Rev
       handed.push(asked);
       return run.triggered;
     },
-    listThreads: () => ({ outcome: "listed", threads: run.threads ?? [] }),
+    venue: venueListing(() => ({ outcome: "listed", threads: run.threads ?? [] })),
+  };
+}
+
+/**
+ * A venue whose `listThreads` is `listThreads`. The trigger is a stand-in, so
+ * listing is the one member a run reaches, and every other member throws.
+ */
+function venueListing(listThreads: Venue["listThreads"]): Venue {
+  const unreached = (): never => {
+    throw new Error("the run reached a venue member other than listThreads");
+  };
+  return {
+    readChange: unreached,
+    episodeDirectory: unreached,
+    provideCommits: unreached,
+    listThreads,
+    openThread: unreached,
+    openFileThread: unreached,
+    reply: unreached,
+    resolve: unreached,
+    reopen: unreached,
+    postSummary: unreached,
+    postFailure: unreached,
   };
 }
 
@@ -190,6 +220,22 @@ test("a round that ends after a few polls is the run's result, with its threads 
     assert.equal(lines[1], "Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, 1 new finding.");
     assert.match(printed.stdout, /^PRRT_kwDOL7tYbc5abcd1 packages\/sync\/src\/queue.ts:134 high — Retry backoff resets on every enqueue$/mu);
     assert.equal(printed.stderr, "");
+  });
+});
+
+test("open threads end with the follow-up the venue's change carries", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(1) },
+    ], { rounds: [ROUND] });
+    const followUp = "Fix what applies in /work/squiz-a, then run `cd '/work/squiz-a' && squiz review` again.";
+    const triggered = decided(fixture, { outcome: "in-hand" });
+    const withFollowUp = { ...triggered, change: { ...CHANGE, followUp } };
+
+    const printed = await runReview(request(fixture, { triggered: withFollowUp, threads: [OPEN_THREAD] }));
+
+    assert.equal(printed.exit, 2, printed.stderr);
+    assert.ok(printed.stdout.endsWith(`\n\n${followUp}\n`), `the output does not end with the change's follow-up:\n${printed.stdout}`);
   });
 });
 
@@ -254,6 +300,22 @@ test("#745: a run whose main worktree has no .squiz.json says on stderr that the
     assert.equal(printed.exit, 2);
     assert.equal(printed.stdout.split("\n")[1], "Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 1 new finding.");
     assert.equal(printed.stderr, `squiz: no .squiz.json was found in the main worktree, ${fixture.main}, so the defaults are in use\n`);
+  });
+});
+
+test("a run where no venue can be chosen still leads with the line saying the defaults are in use", async () => {
+  await withLinkedWorktree(null, "{}", async (fixture) => {
+    const { venue: _, ...chosenFromEnvironment } = request(fixture, { triggered: decided(fixture, { outcome: "result" }) });
+
+    const printed = await runReview({ ...chosenFromEnvironment, environment: { SQUIZ_LOCAL: "/work/squiz-review" } });
+
+    assert.equal(printed.exit, 1);
+    assert.equal(
+      printed.stderr,
+      `squiz: no .squiz.json was found in the main worktree, ${fixture.main}, so the defaults are in use\n` +
+        `squiz: no review ran: SQUIZ_LOCAL is "/work/squiz-review", and this squiz has no local venue\n` +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
   });
 });
 
@@ -364,7 +426,7 @@ test("threads that cannot be listed after the round exit 1 with the reason, and 
 
     const printed = await runReview({
       ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }),
-      listThreads: () => ({ outcome: "unreadable", reason: "GitHub answered 502" }),
+      venue: venueListing(() => ({ outcome: "failed", reason: "GitHub answered 502" })),
     });
 
     assert.equal(printed.exit, 1);
@@ -741,7 +803,7 @@ const DRAFT_LINE = "PR #41 is a draft. Squiz reviews it once it is marked ready 
 
 test("a draft exits 0 with one line on stdout saying so, nothing on stderr, and no output file (#720)", async () => {
   await withWorktree(async (fixture) => {
-    const printed = await runReview(request(fixture, { triggered: { outcome: "draft", pullRequest: NUMBER } }));
+    const printed = await runReview(request(fixture, { triggered: { outcome: "held", line: DRAFT_LINE.trimEnd() } }));
 
     assert.deepEqual(printed, { exit: 0, stdout: DRAFT_LINE, stderr: "" });
     assert.equal(existsSync(join(fixture.worktree, ".squiz")), false, "a run on a draft wrote into .squiz");
@@ -757,7 +819,7 @@ test("a pull request made a draft while the run waits ends the wait with the dra
       trigger: (asked) => {
         handed.push(asked);
         if (handed.length === 1) return decided(fixture, { outcome: "result" });
-        return { outcome: "draft", pullRequest: NUMBER };
+        return { outcome: "held", line: DRAFT_LINE.trimEnd() };
       },
     };
 

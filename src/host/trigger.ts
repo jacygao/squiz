@@ -1,6 +1,6 @@
 /**
- * The one trigger `squiz review` and the hooks both call: read the pull
- * request's state, decide from its record, queue it, and start a round host.
+ * The one trigger `squiz review` and the hooks both call: read the change's
+ * state from the venue, decide from its record, queue it, and start a round host.
  *
  * Three things here fail silently when wrong:
  *
@@ -11,18 +11,16 @@
  *   is still what the decision was made from.
  * - A host started as the trigger's child dies with it. It is started detached.
  *
- * Nothing is written before the gate passes, so a trigger on a branch with no
- * pull request, or on a draft, leaves no `.squiz` behind. This neither waits for the round nor
- * recovers one: it returns what it did, and the caller prints or waits.
+ * Nothing is written before the venue finds the change, so a trigger with no
+ * change to review, or one the venue holds back, leaves no `.squiz` behind. This
+ * neither waits for the round nor recovers one: it returns what it did, and the
+ * caller prints or waits.
  */
 
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { latestActivity } from "../findings/activity.ts";
-import { findPullRequestForBranch, type PullRequest } from "../venues/github/pull-request.ts";
-import { listReviewThreads, type ReviewThread } from "../venues/github/threads.ts";
-import { currentBranch } from "../hook/branch.ts";
 import { episodeOver, readState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
@@ -34,6 +32,7 @@ import { startDetached, type Detached } from "../sessions/detach.ts";
 import { isHerdrWorkspace } from "../sessions/herdr.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
+import { venueFor, type Change, type ReviewThread, type Venue } from "../venues/venue.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
 
 const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
@@ -50,6 +49,8 @@ export type TriggerRequest = {
   readonly trigger: TriggerKind;
   /** The number `squiz review` was given. A hook gives none, and reviews the branch's pull request. */
   readonly pullRequest?: number;
+  /** The venue `environment` chooses where not given. */
+  readonly venue?: Venue;
   /** The session that owns the work, where the caller knows it. */
   readonly owner?: Owner;
   /** Read for `HERDR_WORKSPACE_ID`. */
@@ -64,22 +65,22 @@ export type TriggerRequest = {
 export type HostStart = { readonly outcome: "not started" } | Detached;
 
 export type Triggered =
-  /** The gate stopped it: no open pull request, another branch, or a detached HEAD. Nothing was written. */
+  /** The venue has no change to review here, or none could be chosen. Nothing was written. */
   | { readonly outcome: "no review"; readonly reason: string }
   /**
-   * The pull request is a draft, and is reviewed from the first trigger after it
+   * The venue holds the change back, as the GitHub venue holds a draft until it
    * is marked ready. Nothing was written. Not a failure, so a caller says nothing
    * of one where it says nothing of a state it chose not to queue.
    */
-  | { readonly outcome: "draft"; readonly pullRequest: number }
+  | { readonly outcome: "held"; readonly line: string }
   /** What the decision needs could not be read, or the queue could not be written. Nothing was queued. */
   | { readonly outcome: "failed"; readonly reason: string }
   | {
       readonly outcome: "decided";
-      readonly pullRequest: PullRequest;
+      readonly change: Change;
       readonly episode: Episode;
       readonly state: StateKey;
-      /** Every thread on the pull request as it stands now. */
+      /** Every thread on the change as it stands now. */
       readonly threads: readonly ReviewThread[];
       /** A `recover` decision is returned as it is, with nothing recovered. */
       readonly decision: TriggerDecision;
@@ -95,18 +96,35 @@ export function trigger(request: TriggerRequest): Triggered {
   const toplevel = worktreeToplevel(directory, until);
   if (toplevel.outcome === "failed") return failed(`the worktree could not be resolved: ${toplevel.reason}`);
 
-  const gate = gatePullRequest(request);
-  if (gate.outcome !== "found") return gate;
-  const pullRequest = gate.pullRequest;
-  const call = { directory, until };
-
-  const listed = listReviewThreads(pullRequest.nodeId, call);
-  if (listed.outcome !== "listed") {
-    return failed(`the threads on PR #${pullRequest.number} could not all be listed: ${listed.reason}`);
+  let venue = request.venue;
+  if (venue === undefined) {
+    const chosen = venueFor(request.environment);
+    if (chosen.outcome === "failed") return noReview(chosen.reason);
+    venue = chosen.venue;
   }
-  const state: StateKey = { head: pullRequest.headSha, activity: latestActivity(listed.threads) };
+  const asked = request.pullRequest === undefined ? null : String(request.pullRequest);
+  const lookup = venue.readChange(directory, asked, until);
+  switch (lookup.outcome) {
+    case "found":
+      break;
+    case "held":
+      return lookup;
+    case "none":
+      return noReview(lookup.reason);
+    case "failed":
+      return failed(lookup.reason);
+  }
+  const { change } = lookup;
 
-  const episode = episodeAt(toplevel.path, pullRequest.number);
+  const listed = venue.listThreads(change, until);
+  if (listed.outcome !== "listed") {
+    return failed(`the threads on ${change.name} could not all be listed: ${listed.reason}`);
+  }
+  const state: StateKey = { head: change.head, activity: latestActivity(listed.threads) };
+
+  // The episode and the host are named by the pull request's number, which is the GitHub venue's key.
+  const number = Number(change.key);
+  const episode = episodeAt(toplevel.path, number);
   const read = readState(episode);
   if (read.outcome === "unreadable") return failed(read.reason);
   const found = read.outcome === "read" ? read.state : undefined;
@@ -153,34 +171,8 @@ export function trigger(request: TriggerRequest): Triggered {
   const needsHost =
     decision.outcome === "start-host" ||
     (decision.outcome === "queue" && (decision.startHost || hostPresence(episode, undefined, request).outcome !== "running"));
-  const host = needsHost ? startHost(request, episode, pullRequest.number) : ({ outcome: "not started" } as const);
-  return { outcome: "decided", pullRequest, episode, state, threads: listed.threads, decision, queued, host };
-}
-
-type Gate = { readonly outcome: "found"; readonly pullRequest: PullRequest } | Failed | NoReview | Draft;
-
-/** The open pull request whose head is the branch checked out, and the one asked for where a number was given. */
-function gatePullRequest(request: TriggerRequest): Gate {
-  const { directory, until } = request;
-  const where = JSON.stringify(directory);
-  const branch = currentBranch(directory, until);
-  if (branch.outcome === "failed") return failed(`the current branch could not be resolved: ${branch.reason}`);
-  if (branch.outcome === "detached") {
-    return noReview(`HEAD is detached in ${where}, so no pull request has it as its head`);
-  }
-
-  const named = JSON.stringify(branch.name);
-  const found = findPullRequestForBranch(branch.name, { directory, until });
-  if (found.outcome === "failed") return failed(`the pull request for ${named} could not be looked up: ${found.reason}`);
-  if (found.outcome === "none") return noReview(`no open pull request has ${named} as its head, in ${where}`);
-  if (request.pullRequest !== undefined && found.number !== request.pullRequest) {
-    return noReview(
-      `PR #${request.pullRequest} is not the open pull request whose head is ${named}, which ${where} has checked out: that is PR #${found.number}`,
-    );
-  }
-  if (found.draft) return { outcome: "draft", pullRequest: found.number };
-  const { outcome: _, draft: __, ...pullRequest } = found;
-  return { outcome: "found", pullRequest };
+  const host = needsHost ? startHost(request, episode, number) : ({ outcome: "not started" } as const);
+  return { outcome: "decided", change, episode, state, threads: listed.threads, decision, queued, host };
 }
 
 /**
@@ -212,7 +204,6 @@ function startHost(request: TriggerRequest, episode: Episode, number: number): D
 
 type Failed = Extract<Triggered, { readonly outcome: "failed" }>;
 type NoReview = Extract<Triggered, { readonly outcome: "no review" }>;
-type Draft = Extract<Triggered, { readonly outcome: "draft" }>;
 
 function failed(reason: string): Failed {
   return { outcome: "failed", reason };

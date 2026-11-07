@@ -69,8 +69,12 @@ after(async () => {
 
 /** The one line a firing in `elsewhere` writes, which says the entry point ran. */
 function detachedHere(): string {
-  const directory = realpathSync(elsewhere);
-  return `squiz: no review ran: HEAD is detached in ${JSON.stringify(directory)}, so no pull request has it as its head\n`;
+  return `squiz: no review ran: ${detachedLine()}\n`;
+}
+
+/** The venue's reason for having no change in `elsewhere`. */
+function detachedLine(): string {
+  return `HEAD is detached in ${JSON.stringify(realpathSync(elsewhere))}, so no pull request has it as its head`;
 }
 
 function git(args: readonly string[]): void {
@@ -98,7 +102,7 @@ type Run = {
 async function run(
   command: string,
   args: readonly string[],
-  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string },
+  options: { cwd: string; path?: string; home?: string; claudeConfig?: string; input?: string; local?: string },
 ): Promise<Run> {
   return await new Promise<Run>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -108,6 +112,7 @@ async function run(
         ...(options.path === undefined ? {} : { PATH: options.path }),
         ...(options.home === undefined ? {} : { HOME: options.home }),
         ...(options.claudeConfig === undefined ? {} : { CLAUDE_CONFIG_DIR: options.claudeConfig }),
+        SQUIZ_LOCAL: options.local ?? "",
       },
     });
     // A child that reads no stdin can exit before the write lands, and the
@@ -305,10 +310,7 @@ test("squiz threads with no pull request for the branch says so and lists nothin
     "",
     "a listing GitHub never served must not be printed, empty or otherwise",
   );
-  assert.equal(
-    result.stderr,
-    "squiz: no threads listed: HEAD is detached here, so no branch has a pull request\n",
-  );
+  assert.equal(result.stderr, `squiz: no threads listed: ${detachedLine()}\n`);
 });
 
 test("squiz reply with no pull request for the branch says so and posts nothing", async () => {
@@ -316,10 +318,7 @@ test("squiz reply with no pull request for the branch says so and posts nothing"
 
   assert.equal(result.code, 0);
   assert.equal(result.stdout, "");
-  assert.equal(
-    result.stderr,
-    "squiz: nothing replied: HEAD is detached here, so no branch has a pull request\n",
-  );
+  assert.equal(result.stderr, `squiz: nothing replied: ${detachedLine()}\n`);
 });
 
 test("squiz reply with no text to post reports how it is called", () => {
@@ -385,10 +384,12 @@ type FakeRun = Run & { readonly sent: string };
  * What the fake was sent on stdin is kept, so that a test can assert the body a
  * command composed rather than only what it printed about it.
  */
-async function withFakeGh(args: readonly string[], api: ApiAnswer): Promise<FakeRun> {
+async function withFakeGh(args: readonly string[], api: ApiAnswer, list: ApiAnswer = { stdout: pullRequestRow }): Promise<FakeRun> {
   const directory = await mkdtemp(join(tmpdir(), "squiz-gh-"));
   try {
-    await writeFile(join(directory, "list.out"), pullRequestRow, "utf8");
+    await writeFile(join(directory, "list.out"), list.stdout ?? "", "utf8");
+    await writeFile(join(directory, "list.err"), list.stderr ?? "", "utf8");
+    await writeFile(join(directory, "list.status"), String(list.status ?? 0), "utf8");
     // Written empty first, so that a command that asked gh for nothing at all is
     // read back as a command that sent nothing rather than as a missing fixture.
     await writeFile(join(directory, "api.in"), "", "utf8");
@@ -427,6 +428,8 @@ function fakeGh(directory: string): string {
     "  fi",
     "done",
     `cat ${at}/list.out`,
+    `cat ${at}/list.err >&2`,
+    `exit "$(cat ${at}/list.status)"`,
     "",
   ].join("\n");
 }
@@ -490,6 +493,57 @@ test("a reply that landed names the thread that took it", async () => {
   assert.equal(result.stdout, "replied in PRRT_somewhere on #80\n");
   assert.equal(result.stderr, "");
   assert.equal(result.code, 0);
+});
+
+const draftRow = JSON.stringify([{ ...(JSON.parse(pullRequestRow) as Record<string, unknown>[])[0], isDraft: true }]);
+
+const DRAFT_LINE = "PR #80 is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.";
+
+test("squiz threads on a draft lists nothing and says why in the venue's line", async () => {
+  const result = await withFakeGh(["threads"], emptyListing, { stdout: draftRow });
+
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, `squiz: no threads listed: ${DRAFT_LINE}\n`);
+  assert.equal(result.code, 0);
+});
+
+test("squiz reply on a draft posts nothing and says why in the venue's line", async () => {
+  const posted = answered({ data: { addPullRequestReviewThreadReply: { comment: {} } } });
+  const result = await withFakeGh(["reply", "PRRT_somewhere", "a reply"], posted, { stdout: draftRow });
+
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, `squiz: nothing replied: ${DRAFT_LINE}\n`);
+  assert.equal(result.code, 0);
+  assert.equal(result.sent, "", "a reply went to GitHub for a change the venue held");
+});
+
+const NO_LOCAL_VENUE = 'SQUIZ_LOCAL is "/work/squiz-review", and this squiz has no local venue';
+
+test("squiz threads where no venue can be chosen lists nothing and names the variable", async () => {
+  const result = await run(shim, ["threads"], { cwd: elsewhere, local: "/work/squiz-review" });
+
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, `squiz: no threads listed: ${NO_LOCAL_VENUE}\n`);
+  assert.equal(result.code, 0);
+});
+
+test("squiz reply where no venue can be chosen posts nothing and names the variable", async () => {
+  const result = await run(shim, ["reply", "PRRT_somewhere", "a reply"], { cwd: elsewhere, local: "/work/squiz-review" });
+
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, `squiz: nothing replied: ${NO_LOCAL_VENUE}\n`);
+  assert.equal(result.code, 0);
+});
+
+test("squiz review where no venue can be chosen exits 1 naming the variable", async () => {
+  const result = await run(shim, ["review", "41"], { cwd: elsewhere, local: "/work/squiz-review" });
+
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    `squiz: no review ran: ${NO_LOCAL_VENUE}\nsquiz: put these lines in your report rather than running squiz review again\n`,
+  );
+  assert.equal(result.code, 1);
 });
 
 /** The comment body inside the reply mutation the fake `gh` was sent. */

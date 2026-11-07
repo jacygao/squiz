@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { renderComment, renderReply } from "../findings/comment.ts";
 import type { LineFinding } from "../findings/finding.ts";
 import type { ReviewThread, ThreadComment } from "../venues/github/threads.ts";
+import { followUpFor } from "../venues/github/venue.ts";
 import { composeReview, printReview, reviewOutputPath, type ReviewResult } from "./output.ts";
 
 // Every expected output below is written out whole, so any change of wording
@@ -84,6 +85,7 @@ function reviewed(overrides: Partial<ReviewResult> & { exit: 0 | 2 | 3 }): Revie
     newFindings: 0,
     threads: [],
     recorded: false,
+    ...(overrides.exit === 2 ? { followUp: followUpFor(41) } : {}),
     ...(overrides.exit === 3 ? { closedAt: "round cap" } : {}),
     ...overrides,
   } as ReviewResult;

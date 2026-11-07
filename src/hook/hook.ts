@@ -80,17 +80,17 @@ function lineFor(triggered: Triggered): string | null {
   switch (triggered.outcome) {
     case "no review":
       return `no review ran: ${triggered.reason}`;
-    case "draft":
+    case "held":
       return null;
     case "failed":
       return `nothing was queued: ${triggered.reason}`;
     case "decided": {
-      const { host, pullRequest } = triggered;
+      const { host, change } = triggered;
       if (host.outcome === "failed") {
-        return `the round host for PR #${pullRequest.number} could not be started: ${host.reason}`;
+        return `the round host for ${change.name} could not be started: ${host.reason}`;
       }
       if (host.outcome === "unknown") {
-        return `the round host for PR #${pullRequest.number} may not have started: ${host.reason}`;
+        return `the round host for ${change.name} may not have started: ${host.reason}`;
       }
       return null;
     }
