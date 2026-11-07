@@ -12,7 +12,7 @@ import { githubVenue } from "./github/venue.ts";
 import type { Anchor } from "./github/post-thread.ts";
 import type { CommentPosting } from "./github/summary.ts";
 import type { ThreadAction } from "./github/thread-actions.ts";
-import type { ReviewThread } from "./github/threads.ts";
+import type { ReviewThread, ThreadAnchor, ThreadComment } from "./github/threads.ts";
 
 /** The change under review. */
 export type Change = {
@@ -43,7 +43,7 @@ export type ChangeLookup =
   | { readonly outcome: "none"; readonly reason: string }
   | Failed;
 
-export type { Anchor, ReviewThread, ThreadAction };
+export type { Anchor, ReviewThread, ThreadAction, ThreadAnchor, ThreadComment };
 
 /**
  * What became of a new thread. `anchor-refused` is a line the venue cannot

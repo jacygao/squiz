@@ -29,13 +29,15 @@ import type { Config } from "../config/config.ts";
 import { latestActivity } from "../findings/activity.ts";
 import type { RuledAt } from "../findings/comment.ts";
 import { readThread } from "../findings/thread.ts";
-import type { GhCall } from "../venues/github/gh.ts";
-import type { ClosedBy } from "../venues/github/failure-body.ts";
-import type { CommentPosting } from "../venues/github/summary.ts";
-import { unappliedNotes, unpostedReplyNotes } from "../venues/github/summary-body.ts";
-import { findPullRequestForBranch, type PullRequest } from "../venues/github/pull-request.ts";
-import { listReviewThreads, type ReviewThread, type ThreadAnchor } from "../venues/github/threads.ts";
-import { currentBranch } from "../hook/branch.ts";
+import type { ClosedBy } from "./failure-body.ts";
+import { unappliedNotes, unpostedReplyNotes } from "./summary-body.ts";
+import type {
+  Change,
+  Posting as CommentPosting,
+  ReviewThread,
+  ThreadAnchor,
+  Venue,
+} from "../venues/venue.ts";
 import {
   unspent,
   type Adapter,
@@ -105,11 +107,13 @@ const POSTING_RESERVE_MS = 60_000;
 /** What one round needs to run. */
 export type RoundSetup = {
   /**
-   * The coding agent's git work tree: where git and `gh` are asked from, and where
-   * the episode of the pull request it finds keeps the round's state, its
+   * The coding agent's git work tree: where git and the venue are asked from,
+   * and where the episode of the change it finds keeps the round's state, its
    * snapshot and the reviewer's session.
    */
   readonly worktree: string;
+  /** Where the change is read from, and where the review is posted. */
+  readonly venue: Venue;
   readonly config: Config;
   /** The reviewer CLI this project runs. */
   readonly adapter: Adapter;
@@ -236,14 +240,11 @@ export type RoundAccount = {
 
 /** What one round concluded. */
 export type RoundConclusion =
-  /** No open pull request has this branch as its head: nothing ran, nothing posted. */
-  | {
-      readonly outcome: "no-pull-request";
-      /** The branch the gate asked about, or `null` where HEAD was detached. */
-      readonly branch: string | null;
-      /** The worktree git was asked in. */
-      readonly directory: string;
-    }
+  /**
+   * The venue has no change to review in the worktree, or holds the one it has:
+   * nothing ran, nothing posted. `reason` is the venue's own line.
+   */
+  | { readonly outcome: "no-pull-request"; readonly reason: string }
   /**
    * The episode had already reported its close, so this firing ran nothing and
    * posted nothing. Its comment is on the pull request, or the firing that could
@@ -344,14 +345,14 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
 
 /**
  * Run one round, hand what it concluded to `record`, and return what `record`
- * returns.
+ * returns. `record` is also handed the change the round read, where it read one.
  *
  * The round's snapshot is removed only once `record` has settled, whether it
  * returned or threw. A throw from `record` reaches the caller.
  */
 export async function runRoundThen<T>(
   setup: RoundSetup,
-  record: (conclusion: RoundConclusion) => T | Promise<T>,
+  record: (conclusion: RoundConclusion, change: Change | undefined) => T | Promise<T>,
 ): Promise<T> {
   const opened: Opened = {};
   try {
@@ -362,7 +363,7 @@ export async function runRoundThen<T>(
       // A throw here is this harness's own defect. The round is still a value.
       conclusion = failed("harness", `the round could not be run: ${reasonFor(cause)}`);
     }
-    return await record(conclusion);
+    return await record(conclusion, opened.change);
   } finally {
     // Removal grows with what the reviewer left in the snapshot, so anything
     // waiting on the recorded result would wait it out too. It runs under the
@@ -387,6 +388,8 @@ type Opened = {
   held?: { readonly lock: HostLock; readonly owned: boolean };
   /** Whatever this round made at its snapshot path, added or left by a failed add. */
   snapshot?: string;
+  /** The change the gate read. Nothing to undo, and kept for the caller. */
+  change?: Change;
 };
 
 /** A step's answer, or the conclusion the round ended on instead of one. */
@@ -404,29 +407,31 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
     until: deadlineIn(lowered(setup.preReviewMs, BEFORE_REVIEW_MS), now),
   };
 
-  // The pull request comes first, because its number is the episode's key. A
-  // branch with no pull request ends here, with no episode opened.
-  const gated = gate(preReview);
+  // The change comes first, because its key is the episode's. A worktree with
+  // no change to review ends here, with no episode opened.
+  const gated = gate(setup.venue, preReview);
   if ("ended" in gated) return gated.ended;
-  const pullRequest = gated.step;
+  const change = gated.step;
+  opened.change = change;
   // A lock taken for one pull request says nothing about another's rounds.
-  if (setup.held !== undefined && setup.held.pullRequest !== pullRequest.number) {
+  if (setup.held !== undefined && String(setup.held.pullRequest) !== change.key) {
     return failed(
       "harness",
-      `no review ran: PR #${setup.held.pullRequest}'s head is not the branch checked out in ${directory}, whose pull request is #${pullRequest.number}`,
+      `no review ran: PR #${setup.held.pullRequest}'s head is not the branch checked out in ${directory}, whose change is ${change.name}`,
     );
   }
 
-  const keyed = keyedBy(directory, pullRequest);
+  const keyed = keyedBy(directory, change);
   if ("ended" in keyed) return keyed.ended;
   const episode = keyed.step;
+  const number = Number(episode.id);
 
   // Two subagents that stop at once in one worktree fire on one pull request.
   // Everything from the state read to the last post is one round's, because two
   // rounds that each read the state before the other wrote would both pass the
   // cap, both review, and keep only one of their costs.
   const locked: Step<HostLock> =
-    setup.held === undefined ? lockOf(episode, pullRequest.number) : { step: setup.held.lock };
+    setup.held === undefined ? lockOf(episode, number) : { step: setup.held.lock };
   if ("ended" in locked) return locked.ended;
   opened.held = { lock: locked.step, owned: setup.held === undefined };
 
@@ -449,10 +454,11 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
     (reserve ??= reserveAfter(postingMs, reviewOverAt, now));
   const stopwatch: Stopwatch = { now };
 
-  const concluded = await reviewOn(pullRequest, onFile, {
+  const concluded = await reviewOn(change, onFile, {
     setup,
     opened,
     episode,
+    number,
     preReview,
     posting,
     stopwatch,
@@ -463,10 +469,8 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
       : {
           ...concluded,
           failureComment: {
-            pullRequest: pullRequest.number,
-            posting: timed(stopwatch, posting(), () =>
-              postFailure(pullRequest.number, concluded, { directory, until: posting() }),
-            ),
+            pullRequest: number,
+            posting: timed(stopwatch, posting(), () => postFailure(setup.venue, change, concluded, posting())),
           },
         };
   keepPostingTime(episode, stopwatch, setup.postingTimeUnwritten);
@@ -534,7 +538,7 @@ function keepPostingTime(episode: Episode, stopwatch: Stopwatch, unwritten?: (re
 }
 
 /** The calls before the review, under the one deadline the snapshot's add runs under too. */
-type PreReview = GhCall & { readonly until: Deadline };
+type PreReview = { readonly directory: string; readonly until: Deadline };
 
 /** What the part of a round after the gate runs with. */
 type AfterTheGate = {
@@ -542,6 +546,8 @@ type AfterTheGate = {
   /** Where the round notes the snapshot it made, for removal once it ends. */
   readonly opened: Opened;
   readonly episode: Episode;
+  /** The pull request's number, which keys the episode and names the snapshot and the session. */
+  readonly number: number;
   readonly preReview: PreReview;
   /**
    * The posting reserve, the same deadline every time it is asked for. The first
@@ -559,7 +565,7 @@ type AfterTheGate = {
  *
  * Both run under the part of the round before the review, and neither throws.
  */
-async function readChange(
+async function readDiff(
   tree: string,
   until: Deadline,
 ): Promise<
@@ -576,11 +582,11 @@ async function readChange(
   return { diff: diff.text, listing: listing.text, files };
 }
 
-/** Everything a round does once the gate has found its pull request. */
+/** Everything a round does once the gate has found its change. */
 async function reviewOn(
-  pullRequest: PullRequest,
+  change: Change,
   onFile: EpisodeState | null,
-  { setup, opened, episode, preReview, posting: startPosting, stopwatch }: AfterTheGate,
+  { setup, opened, episode, number, preReview, posting: startPosting, stopwatch }: AfterTheGate,
 ): Promise<RoundConclusion> {
   const { config } = setup;
   const directory = episode.worktree;
@@ -589,17 +595,17 @@ async function reviewOn(
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return closeBeforeReview(over, pullRequest, { setup, episode, preReview, posting: startPosting, stopwatch });
+    return closeBeforeReview(over, change, { setup, episode, number, preReview, posting: startPosting, stopwatch });
   }
 
-  const listing = handOver(pullRequest, preReview);
+  const listing = handOver(setup.venue, change, preReview);
   if ("ended" in listing) return listing.ended;
   const handedOver = listing.step.threads;
   // The state the round would review is the pull request as it stands, and a
   // result recorded against any other state would claim a review it never had.
-  const now: StateKey = { head: pullRequest.headSha, activity: listing.step.activity };
+  const now: StateKey = { head: change.head, activity: listing.step.activity };
   if (setup.state !== undefined && !sameState(now, setup.state)) {
-    return supersededBy(now, pullRequest, handedOver, { episode, posting: startPosting, stopwatch });
+    return supersededBy(now, change, handedOver, { setup, episode, number, posting: startPosting, stopwatch });
   }
 
   const ordinal = state.rounds.length + 1;
@@ -613,10 +619,10 @@ async function reviewOn(
   const snapshot = addSnapshot(
     directory,
     {
-      pullRequest: pullRequest.number,
+      pullRequest: number,
       round: ordinal,
-      commit: setup.state?.head ?? pullRequest.headSha,
-      base: pullRequest.baseSha,
+      commit: setup.state?.head ?? change.head,
+      base: change.base,
     },
     preReview.until,
   );
@@ -628,10 +634,10 @@ async function reviewOn(
   const tree = snapshot.path;
 
   // Read from the snapshot rather than downloaded, so no size of change is one
-  // GitHub refuses, and the diff is of the commit the reviewer reads.
-  const change = await readChange(tree, preReview.until);
-  if ("unread" in change) {
-    return failed("harness", `no review ran: the diff of ${named(pullRequest)} could not be read: ${change.unread}`);
+  // a venue refuses, and the diff is of the commit the reviewer reads.
+  const read = await readDiff(tree, preReview.until);
+  if ("unread" in read) {
+    return failed("harness", `no review ran: the diff of ${change.name} could not be read: ${read.unread}`);
   }
 
   const clock = stopwatch.now;
@@ -642,11 +648,7 @@ async function reviewOn(
     {
       directory: tree,
       charterFile: setup.charterFile,
-      prompt: composePrompt({
-        change: { name: named(pullRequest), base: pullRequest.baseSha, description: pullRequest.description },
-        changes: change.listing,
-        threads: handedOver,
-      }),
+      prompt: composePrompt({ change, changes: read.listing, threads: handedOver }),
       sessionDirectory,
       promptFile: join(ownDirectory, "prompt.md"),
       reportsFile: join(ownDirectory, "reports.jsonl"),
@@ -662,7 +664,7 @@ async function reviewOn(
       ...(setup.sessionEnvironment === undefined ? {} : { environment: setup.sessionEnvironment }),
       ...(setup.sessionBackends === undefined ? {} : { backends: setup.sessionBackends }),
       ...(setup.workspace === undefined ? {} : { workspace: setup.workspace }),
-      name: `squiz-${pullRequest.number}-r${ordinal}`,
+      name: `squiz-${number}-r${ordinal}`,
       started: (place, boundEndsAt) =>
         setup.reviewerStarted?.({ ...placeOf(place), process: place.identity, boundEndsAt, snapshot: tree }),
       ...(setup.paneLeftOpen === undefined ? {} : { paneLeftOpen: setup.paneLeftOpen }),
@@ -682,7 +684,7 @@ async function reviewOn(
   );
   const ruledAt: RuledAt = {
     round: isRound(review) ? ordinal : null,
-    commit: setup.state?.head ?? pullRequest.headSha,
+    commit: setup.state?.head ?? change.head,
   };
   const recording = keepCost(
     episode,
@@ -694,7 +696,7 @@ async function reviewOn(
       handedOver,
       // Only a finished review is held to having read everything. A cut one is
       // named as cut, and a reviewer that cannot say what it read is not guessed at.
-      unread: review.outcome === "reviewed" && review.read !== undefined ? change.files.filter((file) => !review.read?.includes(file)) : [],
+      unread: review.outcome === "reviewed" && review.read !== undefined ? read.files.filter((file) => !review.read?.includes(file)) : [],
     },
     rulings,
   );
@@ -703,9 +705,10 @@ async function reviewOn(
   if (isRound(review)) stopwatch.round = recorded.rounds.length;
 
   const posting: Posting = {
-    pullRequest,
-    diff: change.diff,
-    directory,
+    venue: setup.venue,
+    change,
+    number,
+    diff: read.diff,
     reserve,
     stopwatch,
     ruledAt,
@@ -730,7 +733,7 @@ async function reviewOn(
     return {
       outcome: "failed",
       failure: "harness",
-      reason: `round ${recorded.rounds.length} found ${them} to PR #${pullRequest.number}`,
+      reason: `round ${recorded.rounds.length} found ${them} to ${change.name}`,
       salvaged: account,
       ...leftClosed,
     };
@@ -777,45 +780,26 @@ async function reviewOn(
 }
 
 /**
- * The pull request this round reviews, or the conclusion the gate reached.
+ * The change this round reviews, or the conclusion the gate reached.
  *
- * A branch with no pull request is no failure: no review runs and nothing is
- * posted. A git or a `gh` that could not answer is a failure and is named,
- * because an install that failed and read as a branch with no pull request looks
- * exactly like the harness working normally, every round and forever. The time
- * for GitHub running out is one of those, and never an answer of none.
+ * A worktree with no change to review is no failure, and neither is one the
+ * venue holds: no review runs and nothing is posted. A venue that could not
+ * answer is a failure and is named, because an install that failed and read as
+ * a branch with no pull request looks exactly like the harness working
+ * normally, every round and forever.
  */
-function gate(call: PreReview): Step<PullRequest> {
-  const branch = currentBranch(call.directory, call.until);
-  if (branch.outcome === "failed") {
-    return {
-      ended: failed(
-        "harness",
-        `no review ran: the current branch could not be resolved: ${branch.reason}`,
-      ),
-    };
+function gate(venue: Venue, call: PreReview): Step<Change> {
+  const lookup = venue.readChange(call.directory, null, call.until);
+  switch (lookup.outcome) {
+    case "found":
+      return { step: lookup.change };
+    case "held":
+      return { ended: { outcome: "no-pull-request", reason: lookup.line } };
+    case "none":
+      return { ended: { outcome: "no-pull-request", reason: lookup.reason } };
+    case "failed":
+      return { ended: failed("harness", `no review ran: ${lookup.reason}`) };
   }
-  const directory = call.directory;
-  // A detached HEAD is no branch, so no pull request can have it as a head. An
-  // answer of none rather than a failure.
-  if (branch.outcome === "detached") {
-    return { ended: { outcome: "no-pull-request", branch: null, directory } };
-  }
-
-  const lookup = findPullRequestForBranch(branch.name, call);
-  if (lookup.outcome === "failed") {
-    const asked = JSON.stringify(branch.name);
-    return {
-      ended: failed(
-        "harness",
-        `no review ran: the pull request for ${asked} could not be looked up: ${lookup.reason}`,
-      ),
-    };
-  }
-  if (lookup.outcome === "none") {
-    return { ended: { outcome: "no-pull-request", branch: branch.name, directory } };
-  }
-  return { step: lookup };
 }
 
 /**
@@ -843,15 +827,15 @@ function lockOf(episode: Episode, pullRequest: number): Step<HostLock> {
 }
 
 /**
- * The episode `pullRequest` keys in `worktree`, or the conclusion the round ended
- * on where its number is no key.
+ * The episode `change` keys in `worktree`, or the conclusion the round ended on
+ * where its key is no pull request's number.
  *
- * The gate reads any positive whole number as a pull request's number, and the
- * episode refuses one too large to be spelled exactly. Nothing is opened then.
+ * The venue spells any positive whole number as a key, and the episode refuses
+ * one too large to be spelled exactly. Nothing is opened then.
  */
-function keyedBy(worktree: string, pullRequest: PullRequest): Step<Episode> {
+function keyedBy(worktree: string, change: Change): Step<Episode> {
   try {
-    return { step: episodeAt(worktree, pullRequest.number) };
+    return { step: episodeAt(worktree, Number(change.key)) };
   } catch (cause) {
     return { ended: failed("harness", `no review ran: ${reasonFor(cause)}`) };
   }
@@ -955,15 +939,16 @@ function nothingDone(pullRequest: number): RoundAccount {
  * one is a verdict and a verdict only reaches a thread that was handed over.
  */
 function handOver(
-  pullRequest: PullRequest,
-  call: GhCall,
+  venue: Venue,
+  change: Change,
+  call: PreReview,
 ): Step<{ readonly threads: readonly ReviewThread[]; readonly activity: string | null }> {
-  const listed = listReviewThreads(pullRequest.nodeId, call);
+  const listed = venue.listThreads(change, call.until);
   if (listed.outcome !== "listed") {
     return {
       ended: failed(
         "harness",
-        `no review ran: the threads on ${named(pullRequest)} could not be listed: ${listed.reason}`,
+        `no review ran: the threads on ${change.name} could not be listed: ${listed.reason}`,
       ),
     };
   }
@@ -1177,10 +1162,11 @@ function isRound(review: Review): boolean {
 
 /** Where a round's review goes, and the deadline every call putting it there runs under. */
 type Posting = {
-  readonly pullRequest: PullRequest;
-  /** The pull request's diff, which decides where each finding's comment can hang. */
+  readonly venue: Venue;
+  readonly change: Change;
+  readonly number: number;
+  /** The change's diff, which decides where each finding's comment can hang. */
   readonly diff: string;
-  readonly directory: string;
   /**
    * The posting reserve. One deadline over the whole part, and a call with
    * nothing left on it is not made at all.
@@ -1205,8 +1191,9 @@ type Posting = {
  * whether the reviewer's silence about a thread counts as a ruling on it.
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
-  const call = { directory: on.directory, until: on.reserve };
-  // A thread takes a second call where the round replies on it.
+  const call = { venue: on.venue, until: on.reserve };
+  // A thread takes a second call where the round replies on it, and a finding
+  // takes two, the thread and the read-back of its id.
   const replies = rulingsReplied(ruleOn, output.verdicts).length;
   const calls = ruleOn.length + replies + 2 * output.findings.length;
   // Nothing to put up makes no call, and a round that made none posted nothing.
@@ -1214,23 +1201,19 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
     calls === 0 ? posting() : timed(on.stopwatch, on.reserve, posting);
 
   const verdicts = post(() =>
-    applyVerdicts(ruleOn, output.verdicts, on.ruledAt, { ...call, boundMs: share(on.reserve, calls) }),
+    applyVerdicts(ruleOn, output.verdicts, on.ruledAt, { ...call, callMs: share(on.reserve, calls) }),
   );
 
+  // One venue call opens a thread and reads back its id, so it takes both shares.
   const findings = post(() =>
     postFindings(
-      {
-        findings: output.findings,
-        diff: on.diff,
-        pullRequest: on.pullRequest.number,
-        headSha: on.pullRequest.headSha,
-      },
-      { ...call, boundMs: share(on.reserve, 2 * output.findings.length) },
+      { findings: output.findings, diff: on.diff, change: on.change },
+      { ...call, callMs: share(on.reserve, output.findings.length) },
     ),
   );
 
   return {
-    pullRequest: on.pullRequest.number,
+    pullRequest: on.number,
     posted: threadsOpened(findings).map((thread) => thread.id),
     findings,
     verdicts,
@@ -1301,7 +1284,7 @@ function closeAfterReview(
 ): RoundConclusion {
   const summary = timed(on.stopwatch, on.reserve, () => postEpisodeSummary(
     {
-      pullRequest: account.pullRequest,
+      change: on.change,
       rounds: state.rounds,
       handedOver,
       verdicts: account.verdicts,
@@ -1312,7 +1295,8 @@ function closeAfterReview(
       because,
       leftNotReviewed,
     },
-    { directory: on.directory, until: on.reserve },
+    on.venue,
+    on.reserve,
   ));
   return { outcome: "close", because, summary, ...account };
 }
@@ -1334,10 +1318,10 @@ function closeAfterReview(
  */
 function closeBeforeReview(
   bound: StoppingBound,
-  pullRequest: PullRequest,
-  { setup, episode, preReview, posting, stopwatch }: Omit<AfterTheGate, "opened">,
+  change: Change,
+  { setup, episode, number, preReview, posting, stopwatch }: Omit<AfterTheGate, "opened">,
 ): RoundConclusion {
-  const listing = handOver(pullRequest, preReview);
+  const listing = handOver(setup.venue, change, preReview);
   if ("ended" in listing) return listing.ended;
   const threads = listing.step.threads;
   const openThreads = threads.filter((thread) => !thread.isResolved).map((thread) => thread.id);
@@ -1357,14 +1341,14 @@ function closeBeforeReview(
   }
 
   const state = written.state;
-  const account = nothingDone(pullRequest.number);
+  const account = nothingDone(number);
   const summary =
     state.rounds.length === 0 && threads.length === 0
       ? closedBeforeAnyRound
       : timed(stopwatch, reserve, () =>
           postEpisodeSummary(
             {
-              pullRequest: pullRequest.number,
+              change,
               rounds: state.rounds,
               handedOver: threads,
               verdicts: standing(threads, state.rulings),
@@ -1377,7 +1361,8 @@ function closeBeforeReview(
               because: openThreads.length === 0 ? "nothing-open" : bound,
               leftNotReviewed: left ?? null,
             },
-            { directory: episode.worktree, until: reserve },
+            setup.venue,
+            reserve,
           ),
         );
   return { outcome: "close", because: bound, summary, beforeReview: { openThreads }, ...account };
@@ -1395,11 +1380,11 @@ function closeBeforeReview(
  */
 function supersededBy(
   now: StateKey,
-  pullRequest: PullRequest,
+  change: Change,
   threads: readonly ReviewThread[],
-  { episode, posting, stopwatch }: Pick<AfterTheGate, "episode" | "posting" | "stopwatch">,
+  { setup, episode, number, posting, stopwatch }: Pick<AfterTheGate, "setup" | "episode" | "number" | "posting" | "stopwatch">,
 ): RoundConclusion {
-  const moved = { outcome: "superseded", pullRequest: pullRequest.number, by: now } as const;
+  const moved = { outcome: "superseded", pullRequest: number, by: now } as const;
   const reserve = posting();
   let clean: Extract<StateRecord, { readonly result: "clean, episode open" }> | undefined;
   const written = updateState(
@@ -1429,17 +1414,18 @@ function supersededBy(
   const summary = timed(stopwatch, reserve, () =>
     postEpisodeSummary(
       {
-        pullRequest: pullRequest.number,
+        change,
         rounds: state.rounds,
         handedOver: threads,
         verdicts: standing(threads, state.rulings),
-        findings: nothingDone(pullRequest.number).findings,
+        findings: nothingDone(number).findings,
         // No reviewer ran after the clean round, so nothing settled what it left on no thread.
         earlier: closing.unthreaded ?? [],
         because: "nothing-open",
         leftNotReviewed: null,
       },
-      { directory: episode.worktree, until: reserve },
+      setup.venue,
+      reserve,
     ),
   );
   return { ...moved, closing: { summary } };
@@ -1698,10 +1684,6 @@ function share(reserve: Deadline, calls: number): number {
 function lowered(asked: number | undefined, whole: number): number {
   if (asked === undefined || !Number.isFinite(asked) || asked <= 0) return whole;
   return Math.min(asked, whole);
-}
-
-function named(pullRequest: PullRequest): string {
-  return `PR #${pullRequest.number}`;
 }
 
 function failed(failure: RoundFailure, reason: string): RoundConclusion {

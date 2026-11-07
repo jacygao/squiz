@@ -14,6 +14,7 @@ import { defaultConfig, type Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import { runHost } from "../host/host.ts";
 import type { Adapter, ParsedRun, ThreadVerdict } from "../reviewers/adapter.ts";
+import { githubVenue } from "../venues/github/venue.ts";
 
 /** What one reviewer start reports, and how long it runs before it does. */
 export type PlannedStart = {
@@ -64,5 +65,5 @@ const adapter: Adapter = {
 await runHost({
   worktree: process.cwd(),
   pullRequest: Number(number),
-  round: { config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
+  round: { venue: githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
 });

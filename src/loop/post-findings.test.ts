@@ -18,7 +18,9 @@ import type {
   LineFinding,
   Severity,
 } from "../findings/finding.ts";
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { standIn } from "../testing/stand-in.ts";
+import { githubVenue } from "../venues/github/venue.ts";
 import {
   type FindingOutcome,
   type NewFindings,
@@ -249,10 +251,17 @@ function post(findings: readonly Finding[], against = diff): PostedFindings {
   const round: NewFindings = {
     findings,
     diff: against,
-    pullRequest: PULL_REQUEST,
-    headSha: HEAD_SHA,
+    change: {
+      key: String(PULL_REQUEST),
+      name: `PR #${PULL_REQUEST}`,
+      rerun: `squiz review ${PULL_REQUEST}`,
+      followUp: "",
+      base: HEAD_SHA,
+      head: HEAD_SHA,
+      description: "",
+    },
   };
-  return postFindings(round, { directory: tmpdir() });
+  return postFindings(round, { venue: githubVenue, until: deadlineIn(600_000) });
 }
 
 /** A create response, which carries no `in_reply_to_id` at all when it opened a thread. */

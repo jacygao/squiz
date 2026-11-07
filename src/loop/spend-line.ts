@@ -12,7 +12,7 @@
  * round, and it must not appear in the line as one.
  */
 
-import type { RoundCost, Spend } from "../../reviewers/adapter.ts";
+import type { RoundCost, Spend } from "../reviewers/adapter.ts";
 
 /**
  * Dollars print to four places, so the total is carried as whole

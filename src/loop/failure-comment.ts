@@ -11,10 +11,10 @@
  * about what the round concluded.
  */
 
-import { renderFailure, type ClosedBy, type FailureReport } from "../venues/github/failure-body.ts";
-import type { GhCall } from "../venues/github/gh.ts";
-import { postIssueComment, type CommentPosting } from "../venues/github/summary.ts";
-import { unthreadedNotes } from "../venues/github/summary-body.ts";
+import { renderFailure, type ClosedBy, type FailureReport } from "./failure-body.ts";
+import type { Deadline } from "../reviewers/deadline.ts";
+import type { Change, Posting, Venue } from "../venues/venue.ts";
+import { unthreadedNotes } from "./summary-body.ts";
 import type { PostedFindings } from "./post-findings.ts";
 
 /** What a failed round holds that its report is composed from. */
@@ -52,7 +52,7 @@ function failureReport(round: FailedRound): FailureReport {
           unthreaded: unthreadedNotes(salvaged),
           salvaged: {
             // What landed, read from what the posting returned. A finding the
-            // reviewer reported and GitHub refused is not on the pull request.
+            // reviewer reported and the venue refused is not on the pull request.
             threaded: outcomes.filter((outcome) => outcome.outcome === "threaded").length,
             reported: outcomes.length,
           },
@@ -61,11 +61,11 @@ function failureReport(round: FailedRound): FailureReport {
 }
 
 /**
- * Post the failure comment for `round` on `pullRequest`, once.
+ * Post the failure comment for `round` on `change`, once.
  *
- * `call.until` is the round's posting reserve, the one its salvaged findings were
+ * `until` is the round's posting reserve, the one its salvaged findings were
  * posted under, and nothing is attempted where nothing is left of it.
  */
-export function postFailure(pullRequest: number, round: FailedRound, call: GhCall): CommentPosting {
-  return postIssueComment(pullRequest, renderFailure(failureReport(round)), call, "the failure");
+export function postFailure(venue: Venue, change: Change, round: FailedRound, until: Deadline): Posting {
+  return venue.postFailure(change, renderFailure(failureReport(round)), until);
 }
