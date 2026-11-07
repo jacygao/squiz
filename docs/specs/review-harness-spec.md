@@ -689,7 +689,14 @@ interface Venue {
    * which finds the change from the worktree alone.
    */
   readChange(worktree: string, asked: string | null, until: Deadline): ChangeLookup;
-  episodeDirectory(change: Change): string;
+  /**
+   * The episode's directory for `key` in `worktree`, found from the key alone,
+   * before any change is read. Every process that names the episode calls it,
+   * so the hook, the round host and the commands reach one directory.
+   */
+  episodeDirectory(worktree: string, key: string):
+    | { readonly outcome: "found"; readonly directory: string }
+    | Failed;
   /** Extra object directories the snapshot borrows from, once base and head are readable. */
   provideCommits(change: Change, until: Deadline):
     | { readonly outcome: "ready"; readonly alternates: readonly string[] }
@@ -743,7 +750,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | `key`, `name`, `rerun` | The pull request's number, `PR #41`, `squiz review 41` |
 | `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
-| `episodeDirectory` | `.squiz/<number>/` in the worktree, which keeps itself out of git (§ 3 The state file) |
+| `episodeDirectory` | `.squiz/<key>/` in the worktree, which keeps itself out of git (§ 3 The state file), for a key that is a pull request's number. Any other key is a failure. It runs no `gh`. |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
 | Threads, replies, resolve and re-open | Review threads on the pull request, through `gh api` and GraphQL. Ids are `PRRT_` node ids, and `isOutdated` and `author` are what GitHub reports. |
 | `postSummary`, `postFailure` | An issue-level comment on the pull request |
@@ -760,7 +767,7 @@ worktree, so nothing it writes becomes part of the change.
 | The pull request | The working tree's change against `SQUIZ_BASE` |
 | Its head commit | The commit built from the working tree, under The change below |
 | Its description | `description.md` in the worktree's directory, else `description.md` in `SQUIZ_LOCAL`, else none |
-| `.squiz/<number>/` | The worktree's directory in `SQUIZ_LOCAL`, under The record below. `Change.key` is its path. |
+| `.squiz/<number>/` | The worktree's directory in `SQUIZ_LOCAL`, under The record below. `Change.key` is its path. `episodeDirectory` returns the key where it is the directory The record names for the worktree. Any other key is a failure, and so is a directory that holds another worktree's review. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md` |
 | A failure comment | `failure-<k>.md`, numbered from 1 in the order they were written |
