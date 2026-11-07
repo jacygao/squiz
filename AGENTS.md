@@ -19,12 +19,11 @@ that two of them never conflict on the version line.
 
 ## Configuration
 
-**A user's choice is a setting in `.squiz.json`, not an environment variable.**
-Every squiz process reads `.squiz.json` from the repository's main worktree, so
-the hook, the round host and the commands agree without the choice having to be
-passed down to each of them. A variable is set per run, is easy to forget, and
-does not reach a process its run did not start. § 10 Configuration of the
-specification lists the settings and how each is checked.
+**When adding a setting, put it in `.squiz.json`, not in an environment
+variable.** Every squiz process reads `.squiz.json`, so the hook, the round host
+and the commands all see the same value. A variable is easy to forget, and
+reaches only the processes its run started. § 10 Configuration of the
+specification lists the settings.
 
 ## Notes
 
