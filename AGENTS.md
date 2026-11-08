@@ -25,6 +25,15 @@ and the commands all see the same value. A variable is easy to forget, and
 reaches only the processes its run started. § 10 Configuration of the
 specification lists the settings.
 
+## Human intervention
+
+**Design for the unattended path, and record a person's intervention instead of
+building for it.** A finding or a bug that needs a person to reset, force-push,
+edit the pull request or touch squiz's files mid-review goes on #819's list, not
+into the code. The one exception is squiz reporting a review of a commit it did
+not review, which is fixed. § 11 Human intervention of the specification states
+the rule and what squiz already handles.
+
 ## Notes
 
 **Load the `skills:writing-notes` skill before writing or editing anything under

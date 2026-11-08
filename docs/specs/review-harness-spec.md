@@ -3393,3 +3393,46 @@ expected. A key the table does not name is rejected the same way, with an error
 saying it is not a setting and listing the settings there are. A `.squiz.json`
 that cannot be read or parsed is a failure the harness controls, so the command
 exits 1 and its stderr names it.
+
+## 11. Human intervention
+
+**Squiz is built for the unattended path.** The coding agent and the reviewer
+settle a review between them. A person reads the result, on the pull request or
+in `.squiz/local/`, and steps in where squiz asks for one: a disputed thread, a
+review closed at the round cap, or a failure only a person can fix. A person who
+changes the pull request, the branch, the working tree or squiz's own files while
+a review runs is outside that path.
+
+### What squiz handles
+
+| A person | What squiz does | Where |
+|---|---|---|
+| Replies on one of the reviewer's threads | The reply is activity: a new state, which the next round reviews. | § 3 The state file |
+| Opens a thread of their own | Nothing reads or answers it, and it never keeps the loop going. | § 5 Findings |
+| Resolves one of the reviewer's threads | The summary counts it as neither `fixed` nor `withdrawn`. | § 6 |
+| Marks the pull request a draft | `squiz review` exits 0 with one line saying so, and the hooks say nothing. Once it is ready for review, the next trigger queues its state. | § 3 A round, step by step |
+| Closes the pull request | `squiz review` says no review ran, and why. | § 7 `squiz review` |
+| Checks out another branch in the worktree | `squiz review` says no review ran, naming the branch checked out. | § 3 A round, step by step |
+| Stops `squiz review` while it waits | The round goes on in the round host, and the next run returns its result. | § 8 |
+| Moves the branch back to a commit that an episode closed clean had recorded | `squiz review` returns that commit's record, which names the commit, and nothing is reviewed again. | § 3 The state file |
+
+### Everything else
+
+**Any other change a person makes mid-review has no specified behaviour.** Squiz
+does whatever its code does with it. It may review a state the person did not
+mean, fail a round, or leave a state file for a person to clear. #819 keeps the
+list of cases known so far, with the ones this section handles.
+
+**A finding or a bug that turns on a person's intervention is recorded, not
+built for.** It goes on #819's list instead of into the code. The exception is a
+case where squiz reports a review of a commit it did not review, such as
+`squiz review` exiting 0 about a head no round reviewed. That is a defect, and
+is fixed. A change that has to pick a behaviour for such a case picks the
+simplest one that keeps to that rule, as the last row of the table does.
+
+### Decision
+
+These cases wait until the loop is finished on the unattended path. A person who
+keeps stepping into the loop is not leaving the review to squiz, and a person can
+change a pull request, a branch or a working tree in too many ways to design for
+one at a time. They come back as one design, over the whole list.
