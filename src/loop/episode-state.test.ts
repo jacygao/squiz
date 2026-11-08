@@ -10,6 +10,8 @@ import {
   type RoundRecord,
   type RoundWork,
   type Timings,
+  episodeOver,
+  reopensFor,
   readState,
   recordRound,
   recordRulings,
@@ -18,6 +20,7 @@ import {
   writeState,
 } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
+import type { StateRecord } from "./state-record.ts";
 import { githubEpisode } from "../testing/episode.ts";
 
 const pullRequest = 41;
@@ -400,6 +403,57 @@ test("a reported close is written and comes back, and one never written is absen
   writeFileSync(episode.stateFile, `{"rounds": [], ${NONE_OUTSIDE}}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
+});
+
+test("#832: a clean close is written with the state it reviewed and comes back, and one that names no state is refused", (t) => {
+  const episode = episodeIn(t);
+  const closed: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+    cleanClose: { head: "3f9c2e0aa", activity: "PRRC_kwDOL7tYbc6OmQx7a", records: 2 },
+  };
+
+  assert.deepEqual(writeState(episode, closed), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state: closed });
+
+  assert.match(refusalOf(t, `{"rounds": [], "cleanClose": {"head": "3f9c2e0aa"}, ${NONE_OUTSIDE}}`), /"cleanClose"/u);
+  assert.match(
+    refusalOf(t, `{"rounds": [], "cleanClose": {"head": "3f9c2e0aa", "activity": null}, ${NONE_OUTSIDE}}`),
+    /"cleanClose"/u,
+    "a clean close that does not say which records are the closed episode's cannot tell them from the next episode's",
+  );
+});
+
+test("#832: after a clean close the episode is over for the head the close reviewed and every state it recorded, and for no other head", () => {
+  const reviewedEarlier: StateRecord = {
+    head: "8d21a4f00",
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["PRRT_old"],
+    round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+    newFindings: 1,
+  };
+  const closing: StateRecord = { ...reviewedEarlier, head: "3f9c2e0aa", exitStatus: 0, openThreads: [], round: { ...reviewedEarlier.round, number: 2 } };
+  const blocked: StateRecord = { head: "1b86987bb", activity: null, status: "failed", reason: "no review ran", ownerNoted: true };
+  const clean: EpisodeState = {
+    rounds: [firstRound, firstRound],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+    cleanClose: { head: "3f9c2e0aa", activity: null, records: 2 },
+    records: [reviewedEarlier, closing, blocked],
+  };
+  assert.equal(episodeOver(clean, { head: "3f9c2e0aa", activity: null }), true);
+  assert.equal(episodeOver(clean, { head: "3f9c2e0aa", activity: "PRRC_new" }), true, "new replies alone, on the head the close reviewed, must start nothing");
+  assert.equal(episodeOver(clean, { head: "9e01b2c00", activity: null }), false, "a head the clean close never reviewed must start a new episode");
+  assert.equal(episodeOver(clean, { head: "1b86987bb", activity: null }), false, "a state that failed after the close belongs to the next episode, and its record decides");
+  assert.equal(reopensFor(clean, { head: "8d21a4f00", activity: null }), false, "a state the closed episode recorded must be reported from its record, not reviewed again");
+
+  // A close at the round cap or the token bound records no clean close.
+  const bound: EpisodeState = { rounds: [firstRound], spentOutsideRounds: unspent, closeReported: true };
+  assert.equal(episodeOver(bound, { head: "1b86987bb", activity: null }), true, "a close at a bound must stay closed for a new head");
 });
 
 test("the reviewer's last ruling on each thread is written and comes back, and a file with none reads with none", (t) => {

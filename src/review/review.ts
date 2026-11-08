@@ -31,7 +31,8 @@ import { readComment } from "../findings/comment.ts";
 import { failureLine } from "../hook/report.ts";
 import { trigger as triggerReview, type HostCommand, type Triggered, type TriggerRequest } from "../host/trigger.ts";
 import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
-import { episodeAt } from "../loop/episode.ts";
+import { archivedEpisodes } from "../loop/archive.ts";
+import { episodeAt, type Episode } from "../loop/episode.ts";
 import { lastReviewed, namedStates } from "../loop/round-end.ts";
 import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
@@ -146,7 +147,9 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     const { decision, threads, host } = triggered;
     switch (decision.outcome) {
       case "closed": {
-        const state = read();
+        // The close the trigger decided from, which a new head may have archived
+        // and a later episode replaced since.
+        const state = triggered.read ?? read();
         if (typeof state === "string") return notRun(state);
         return print(closedResult(context, state, threads));
       }
@@ -163,7 +166,9 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
           items: [],
         });
       case "result": {
-        const state = read();
+        const live = read();
+        if (typeof live === "string") return notRun(live);
+        const state = holding(episode, live, context.own);
         if (typeof state === "string") return notRun(state);
         const settled = settle({ ...context, recorded: true }, state);
         return settled === undefined ? undefined : finish(settled, threads);
@@ -190,7 +195,9 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
   let startUnknown = triggered.host.outcome === "unknown" ? triggered.host.reason : undefined;
   let startBy = deadlineIn(request.hostStartMs ?? HOST_START_MS);
   for (;;) {
-    const state = read();
+    const live = read();
+    if (typeof live === "string") return notRun(live);
+    const state = holding(episode, live, context.own);
     if (typeof state === "string") return notRun(state);
     const settled = settle({ ...context, recorded: false }, state);
     if (settled !== undefined) {
@@ -240,6 +247,24 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     const pause = Math.min(pollMs, startUnknown === undefined ? until.remaining() : Math.min(startBy.remaining(), until.remaining()));
     await sleep(Math.max(1, pause));
   }
+}
+
+/**
+ * The state file holding `own`'s record: `live` where it does, and otherwise
+ * the newest closed episode archived beside it that does. A round can close the
+ * episode clean, and a new head start the next one, between two readings.
+ */
+function holding(episode: Episode, live: EpisodeState, own: StateKey): EpisodeState | string {
+  if (recordFor(live.records ?? [], own) !== undefined) return live;
+  const archives = archivedEpisodes(episode);
+  if (archives.outcome === "failed") return archives.reason;
+  for (const archive of [...archives.episodes].reverse()) {
+    const read = readState(archive);
+    // An archive that does not read may be the one holding the record.
+    if (read.outcome === "unreadable") return read.reason;
+    if (read.outcome === "read" && recordFor(read.state.records ?? [], own) !== undefined) return read.state;
+  }
+  return live;
 }
 
 /**
@@ -493,11 +518,15 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
       ? threads.filter((thread) => readComment(thread.comments[0]?.body ?? "").by === "reviewer")
       : threads.filter((thread) => closing.openThreads.includes(thread.id));
   const open = left.filter((thread) => !thread.isResolved);
+  // Named, because the close can be about a head other than the one the run read.
+  const head = state.cleanClose?.head ?? closing?.head ?? first?.head;
   return {
     outcome: "closed",
     key: context.key,
     name: context.name, rerun: context.rerun, summaryAt: context.summaryAt,
     exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
+    ...(head === undefined ? {} : { commit: head.slice(0, 7) }),
+    reopens: state.cleanClose !== undefined,
     rounds: state.rounds.length,
     threads: left,
     problems: (closing === undefined ? first?.closed.problems : closing.problems) ?? [],

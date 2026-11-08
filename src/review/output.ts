@@ -99,6 +99,10 @@ type AlreadyClosed = Named & {
   readonly exit: 0 | 3;
   readonly rounds: number;
   readonly threads: readonly ReviewThread[];
+  /** The short head of the state the close was reached on, where a record names it. */
+  readonly commit?: string;
+  /** Whether a new head starts a new episode: true for a clean close, false for one at a bound. */
+  readonly reopens: boolean;
 };
 
 /**
@@ -329,8 +333,10 @@ function stillReviewing(result: StillReviewing): string {
 function closedBlocks(result: AlreadyClosed): readonly string[] {
   const open = result.threads.filter((thread) => !thread.isResolved);
   const left = open.length === 0 ? "nothing open" : `${counted(open.length, "thread")} open`;
+  const at = result.commit === undefined ? "" : ` at ${result.commit}`;
+  const next = result.reopens ? "Only a new head commit starts another review in this worktree." : "No round runs again in this worktree.";
   return [
-    `Squiz's review of ${result.name} closed after ${counted(result.rounds, "round")}, with ${left}. No round runs again in this worktree.`,
+    `Squiz's review of ${result.name} closed${at} after ${counted(result.rounds, "round")}, with ${left}. ${next}`,
     ...open.map(printedThread),
   ];
 }

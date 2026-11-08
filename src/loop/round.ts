@@ -1229,9 +1229,9 @@ function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Postin
  * Decide the round's end from the queue as it stands, and write the close where
  * that is the end, in one update under the state lock.
  *
- * A trigger queues nothing once the close is written, so a state is either in
- * the queue this reads, and is ruled on here, or refused because the episode
- * has closed. Fails where the update does.
+ * A state is either in the queue this reads, and is ruled on here, or queued
+ * after the close is written. That one is refused, or after a clean close is
+ * the first round of a new episode. Fails where the update does.
  *
  * The same update puts the round's refused closing replies on its entry, so the
  * summary that closes the episode, in this round or a later one, names them.
@@ -1252,7 +1252,12 @@ function endUnderLock(
       );
       ends = endsOn(tally, queued);
       const kept = recordUnpostedReplies(current, unposted.round, unposted.lines);
-      return ends.outcome === "closed" ? { ...kept, closeReported: true } : kept;
+      if (ends.outcome !== "closed") return kept;
+      // Only a close that left nothing open and nothing unreviewed reopens on a
+      // new head. One at the cap or the token bound stays closed.
+      const { record } = ends;
+      const clean = record.result === "exited" && record.exitStatus === 0 && ends.leftNotReviewed === null;
+      return { ...kept, closeReported: true, ...(clean ? { cleanClose: { head: record.head, activity: record.activity, records: (kept.records ?? []).length } } : {}) };
     },
     { until: lockWait(until) },
   );
@@ -1402,7 +1407,7 @@ function supersededBy(
       if (current.rounds.length > record.round.number) return current;
       if (threads.some((thread) => !thread.isResolved)) return current;
       clean = record;
-      return { ...current, closeReported: true };
+      return { ...current, closeReported: true, cleanClose: { head: record.head, activity: record.activity, records: records.length } };
     },
     { until: lockWait(reserve) },
   );

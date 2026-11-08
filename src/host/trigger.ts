@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { latestActivity } from "../findings/activity.ts";
-import { episodeOver, readState } from "../loop/episode-state.ts";
+import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
 import { recordFor, sameState, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
@@ -84,6 +84,12 @@ export type Triggered =
       readonly threads: readonly ReviewThread[];
       /** A `recover` decision is returned as it is, with nothing recovered. */
       readonly decision: TriggerDecision;
+      /**
+       * The state file the decision was made from, where there was one. A
+       * close is printed from it, because a new head can archive that episode
+       * before the caller reads the file again.
+       */
+      readonly read?: EpisodeState;
       /** False where another trigger queued the state first. */
       readonly queued: boolean;
       /** A host that exited at once found another holding the lock, which is no failure. */
@@ -156,6 +162,8 @@ export function trigger(request: TriggerRequest): Triggered {
         queued = true;
         // A failed state queued again goes on the end, as any state queued now
         // does, because the records' order is the order the rounds take them in.
+        // After a clean close this is never one of the closed episode's records,
+        // which no trigger queues, so they keep their places.
         const others = (current.records ?? []).filter((held) => !sameState(held, state));
         return { ...current, records: [...others, fresh] };
       },
@@ -171,7 +179,7 @@ export function trigger(request: TriggerRequest): Triggered {
     decision.outcome === "start-host" ||
     (decision.outcome === "queue" && (decision.startHost || hostPresence(episode, undefined, request).outcome !== "running"));
   const host = needsHost ? startHost(request, episode) : ({ outcome: "not started" } as const);
-  return { outcome: "decided", change, episode, state, threads: listed.threads, decision, queued, host };
+  return { outcome: "decided", change, episode, state, threads: listed.threads, decision, ...(found === undefined ? {} : { read: found }), queued, host };
 }
 
 /**

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { renderComment, renderReply } from "../findings/comment.ts";
 import type { Episode } from "../loop/episode.ts";
-import { githubEpisode } from "../testing/episode.ts";
+import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -480,6 +480,111 @@ test("a closed episode queues nothing, even for a state it never saw", async () 
     assert.deepEqual(result.decision, { outcome: "closed" });
     assert.deepEqual(records(fixture.episode), []);
     assert.deepEqual(hostLines(fixture), []);
+  });
+});
+
+/** The episode closed clean on `head`: its round left nothing open and nothing unreviewed. */
+function closedCleanOn(head: string): Partial<EpisodeState> {
+  return {
+    closeReported: true,
+    cleanClose: { head, activity: null, records: 1 },
+    rounds: [{ ...ROUND_AT_CAP, head }],
+    records: [{
+      head,
+      activity: null,
+      status: "reviewed",
+      result: "exited",
+      exitStatus: 0,
+      openThreads: [],
+      round: { number: 1, startedAt: 1_790_999_000, endedAt: 1_790_999_400, reviewer: { backend: "detached" } },
+      newFindings: 0,
+    }],
+  };
+}
+
+const EARLIER_HEAD = "8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258";
+
+test("#832: a hook after a clean close queues a head the close never reviewed in the state file, and starts a host", async () => {
+  await withFixture(async (fixture) => {
+    seed(fixture.episode, closedCleanOn(EARLIER_HEAD));
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.deepEqual(result.decision, { outcome: "queue", startHost: true });
+    assert.equal(result.queued, true);
+    assert.deepEqual(records(fixture.episode).at(-1), { ...state, status: "queued" }, "the hook exited 0 and queued nothing for the new head");
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+  });
+});
+
+test("#832: a state the closed episode recorded before its clean close, on another head, is reported from its record and queues nothing", async () => {
+  await withFixture(async (fixture) => {
+    const earlier: StateRecord = {
+      ...state,
+      status: "reviewed",
+      result: "exited",
+      exitStatus: 2,
+      openThreads: ["PRRT_old"],
+      round: { number: 1, startedAt: 1_790_998_000, endedAt: 1_790_998_400, reviewer: { backend: "detached" } },
+      newFindings: 1,
+    };
+    const closed = closedCleanOn(EARLIER_HEAD);
+    const held = [earlier, ...(closed.records ?? [])];
+    seed(fixture.episode, { ...closed, cleanClose: { head: EARLIER_HEAD, activity: null, records: 2 }, records: held });
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.deepEqual(result.decision, { outcome: "result" }, "a force-push back to a head the closed episode reviewed must be reported from that head's record");
+    assert.deepEqual(records(fixture.episode), held);
+    assert.deepEqual(archivesIn(fixture.episode), []);
+  });
+});
+
+test("#832: a hook after a blocked new episode leaves the new head failed, and only squiz review queues it again", async () => {
+  await withFixture(async (fixture) => {
+    const blocked: StateRecord = { ...state, status: "failed", reason: "no review ran: round 1 of the closed episode is still recorded under review by round host 4242", ownerNoted: true };
+    const closed = closedCleanOn(EARLIER_HEAD);
+    seed(fixture.episode, { ...closed, records: [...(closed.records ?? []), blocked] });
+
+    const hooked = decided(trigger(request(fixture)));
+
+    assert.deepEqual(hooked.decision, { outcome: "left-failed" }, "a hook retried a failure only squiz review may retry");
+    assert.equal(records(fixture.episode).at(-1)?.status, "failed");
+
+    const retried = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
+
+    assert.equal(retried.queued, true);
+    assert.deepEqual(records(fixture.episode).at(-1), { ...state, status: "queued" });
+    assert.equal(records(fixture.episode).length, 2, "the retry moved the closed episode's own record");
+  });
+});
+
+test("#832: a new head after a clean close, with another new head already queued in the closed episode, is queued beside it for the round host", async () => {
+  await withFixture(async (fixture) => {
+    const waiting: StateRecord = { head: "9e01b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4", activity: null, status: "queued" };
+    const closed = closedCleanOn(EARLIER_HEAD);
+    seed(fixture.episode, { ...closed, records: [...(closed.records ?? []), waiting] });
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.equal(result.queued, true);
+    assert.deepEqual(records(fixture.episode).slice(1), [waiting, { ...state, status: "queued" }], "a state already queued for the new episode was archived where no host takes it");
+    assert.deepEqual(archivesIn(fixture.episode), []);
+  });
+});
+
+test("#832: two triggers racing on a new head after a clean close queue it once", async () => {
+  await withFixture(async (fixture) => {
+    seed(fixture.episode, closedCleanOn(EARLIER_HEAD));
+    const at = Date.now() + 1_500;
+    const results = await Promise.all([startRacer(fixture, at, false).printed, startRacer(fixture, at, false).printed]);
+
+    const queued = results.filter((result) => result.outcome === "decided" && result.queued);
+    assert.equal(queued.length, 1, `triggers: ${JSON.stringify(results.map((result) => result.outcome === "decided" ? result.decision : result))}`);
+    assert.equal(records(fixture.episode).filter((record) => record.head === HEAD).length, 1);
+    const started = results.filter((result) => result.outcome === "decided" && result.host.outcome !== "not started");
+    await eventually(() => hostLines(fixture).length === started.length, "every started host reporting");
+    assert.equal(hostsThatTook(fixture).length, 1, `hosts: ${hostLines(fixture).join(", ")}`);
   });
 });
 

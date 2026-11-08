@@ -1,5 +1,6 @@
 /** The episode the GitHub venue names for a pull request, for a test that needs its paths. */
 
+import { archivedEpisodes } from "../loop/archive.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { githubVenue } from "../venues/github/venue.ts";
 
@@ -8,4 +9,11 @@ export function githubEpisode(worktree: string, pullRequest: number | string): E
   const found = episodeAt(githubVenue, worktree, String(pullRequest));
   if (found.outcome !== "found") throw new Error(found.reason);
   return found.episode;
+}
+
+/** The closed episodes archived under `episode`, oldest first. Throws where they cannot be listed. */
+export function archivesIn(episode: Episode): readonly Episode[] {
+  const listed = archivedEpisodes(episode);
+  if (listed.outcome === "failed") throw new Error(listed.reason);
+  return listed.episodes;
 }

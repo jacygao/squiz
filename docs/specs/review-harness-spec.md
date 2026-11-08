@@ -82,7 +82,7 @@ open or the round cap is reached.
 
 | Term | What it is |
 |---|---|
-| **Episode** | The whole review of one pull request in one worktree, from its first round to its close. |
+| **Episode** | One review of one pull request in one worktree, from its first round to its close. A worktree holds one live episode at a time, and keeps the episodes before it. |
 | **Round** | One turn of an episode: one review of the pull request as it stands. |
 
 An episode is **live** until its close is recorded. Nothing else makes it live
@@ -91,6 +91,12 @@ happened. It closes for one of three reasons: nothing is left open for another
 round to work, the round cap is spent, or a round reached the token bound. A
 round that failed closes nothing. It posts a failure comment under § 8, and the
 episode stays live.
+
+A close is **clean** where the round that closed it left nothing open and no
+state behind it not reviewed. A state the clean-closed episode never recorded,
+on a head other than the one the close reviewed, starts a new episode in the
+same worktree, as The state file sets out. Every other close is at the round cap
+or the token bound, and stays closed.
 
 ### The state file
 
@@ -106,6 +112,10 @@ the rest of this section describes, and:
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
+- `episodes/<n>/`, for each closed episode a later one replaced, numbered from 1
+  in the order they closed: its state file, its `rounds/`, and the local venue's
+  `summary.md` (§ 4 The record), moved there when a new head starts a new
+  episode, as set out below.
 
 **`.squiz/` keeps itself out of git.** Wherever squiz makes an episode's
 directory and `.squiz/.gitignore` is missing, it writes one holding `*`. One that
@@ -254,11 +264,13 @@ run of `squiz review` waiting on A or on B returns A's close.
 
 **A round decides its close and records it in one step.** It reads the queue
 under `state.lock`, decides from it as the table above sets out, and writes the
-close in that same update, before it posts the summary. A trigger that comes
-after the close finds it and queues nothing, so no state queued while the
-summary is posted is stopped by a close it arrived before. A round that finds
-the round cap or the token bound already spent, and closes the episode without
-starting a reviewer (§ 6), also writes the close before it posts the summary.
+close in that same update, before it posts the summary. A clean close also
+records, in that update, the state its round reviewed. A trigger that comes
+after the close reads it before it queues anything, so no state queued while
+the summary is posted is stopped by a close it arrived before. A round that
+finds the round cap or the token bound already spent, and closes the episode
+without starting a reviewer (§ 6), also writes the close before it posts the
+summary, and that close is never clean.
 
 **A state left not reviewed is named by its short head commit, followed by "with
 different replies" where an earlier state has the same commit.** The earlier
@@ -278,9 +290,69 @@ round with nothing posted. A thread a finished review gave no verdict is kept as
 `open`. A failed round writes the rulings it salvaged, and leaves every other
 thread's alone. A ruling is kept whether or not GitHub then takes it.
 
-**A closed episode stays closed in its worktree.** A second episode on the same
-pull request starts in another worktree on the same branch, which holds no state
-for it.
+**A close at the round cap or the token bound stays closed in its worktree.** A
+new commit or reply queues nothing, and `squiz review` prints the close (§ 7).
+A second episode on the same pull request starts in another worktree on the same
+branch, which holds no state for it.
+
+**A clean close stays closed for the head it reviewed, and for every state it
+recorded.** The clean close records how many of the state file's records are the
+closed episode's. A trigger acts on any other state as follows:
+
+- **No record, on a head other than the one the close reviewed:** the trigger
+  queues the state after the closed episode's records, for a new episode, and
+  starts a round host where none is running. A run of `squiz review` waits on it,
+  as on any other state.
+- **A record the closed episode wrote, on another head**, as a force-push back to
+  a head it reviewed leaves the pull request: the trigger queues nothing, and
+  `squiz review` returns that record's result, which names its own head.
+- **A record queued after the close:** the trigger acts on it as on any record. A
+  hook leaves a failed one failed, and `squiz review` queues it again.
+- **New replies on the head the close reviewed**, and a failed record the closed
+  episode wrote: the trigger queues nothing, and `squiz review` prints the close.
+
+No trigger queues a state the closed episode recorded, so its records keep their
+places, and every record after them is the next episode's.
+
+**The round host starts the new episode in the update that takes its first
+state.** Under `state.lock`, it finds the close clean and a state queued after
+the closed episode's records. In that one update it:
+
+1. Writes the closed episode's state file, holding the closed episode's records
+   in their order, to the next `episodes/<n>/state.json`.
+2. Moves `rounds/` to `episodes/<n>/rounds/`, and rewrites each round's
+   `resume.txt` to name the session where it now is. It moves the local venue's
+   `summary.md` to `episodes/<n>/summary.md`.
+3. Writes a fresh state file in its place: no rounds, nothing spent outside them,
+   the reviewer's rulings carried over, and every record after the closed
+   episode's, in their order. It takes the oldest queued one as round 1.
+
+A round host that finds a round of the closed episode still recorded under
+review starts no new episode, because that round's reviewer may still run and
+its snapshot stands at the path the new round of that number takes. It records
+each state queued after the close failed, and `squiz review` retries it as any
+failed state:
+
+```
+no review ran: round 1 of the closed episode is still recorded under review by round host 4242
+```
+
+The new episode has its own round cap and token bound, and posts its own summary
+when it closes. It reads the reviewer's threads from the change as any episode
+does, so the closed episode's threads, and the rulings on them, are part of it.
+Everything else in the directory belongs to the worktree and stays where it is:
+`notes/`, `host.log`, the locks, and the local venue's files other than
+`summary.md`. Where the archive cannot be written, the closed episode is left as
+it was, and the round host records the state it took failed with the reason.
+
+`host.log` says where the closed episode went:
+
+```
+2026-11-08T09:14:02.511Z a new episode starts on a state the clean close never recorded: the closed one is in /work/squiz/.squiz/41/episodes/1
+```
+
+A run of `squiz review` whose state's record, or whose close, moved into an
+archive before it read it reads it there.
 
 ### A round, step by step
 
@@ -302,9 +374,11 @@ for it.
    saying so (§ 7 `squiz review`), and the hooks say nothing. Once it is marked
    ready for review, the next trigger queues its state as it would any other.
 2. **Gate on the episode.** An episode that has reported its close is over:
-   `squiz review` prints the close and exits as the close did, whatever the round
-   cap or the token bound would now allow. Otherwise the record for the pull request's
-   state decides whether it is queued (The state file).
+   `squiz review` prints the close, naming the head it was about, and exits as
+   the close did, whatever the round cap or the token bound would now allow.
+   After a clean close, a state on another head is the exception, and is
+   queued or reported from its record as The state file sets out. Otherwise the
+   record for the pull request's state decides whether it is queued.
 3. **Run the reviewer.** The round host starts the reviewer in a session of its
    own (§ 5). It hands the reviewer the pull request and the threads the reviewer
    opened on it, in a snapshot of the state's head commit.
@@ -348,9 +422,10 @@ result is no round and spends nothing.
 
 **Round R is the closing round.** It reviews as any round does, then closes the
 episode whatever is still open: it posts the summary and hands nothing back to
-the coding agent. With a cap of 1, the first round is the closing round. After
-it, a new commit or reply queues nothing, and whatever is left open is a
-person's.
+the coding agent. With a cap of 1, the first round is the closing round. Where
+it leaves threads open, a new commit or reply after it queues nothing, and
+whatever is left open is a person's. Where it leaves nothing open and nothing
+behind it not reviewed, its close is clean, and a new head starts a new episode.
 
 ### What starts a round
 
@@ -610,7 +685,7 @@ in any case.
 **Each worktree is reviewed on its own.** `squiz review` resolves the worktree
 with `git rev-parse --show-toplevel` from the directory it is run in, and the
 hook from the payload's `cwd`, which for a subagent is fixed when it is
-dispatched. One worktree, one branch, one pull request, one episode.
+dispatched. One worktree, one branch, one pull request, one live episode.
 
 **The harness does not remove a worktree.** The coding agent is still in it when
 the command returns. Whatever created the worktree removes it. The episode's
@@ -938,9 +1013,9 @@ like any other, with nothing in the list of files it changes.
 
 #### The record
 
-**`.squiz/local/` is the worktree's one episode.** It holds the state file and
-the rounds that § 3 The state file puts in an episode's directory, beside the
-venue's own files:
+**`.squiz/local/` holds the worktree's episodes: the live one, and each closed
+one before it.** It holds the state file and the rounds that § 3 The state file
+puts in an episode's directory, beside the venue's own files:
 
 ```
 .squiz/local/
@@ -950,7 +1025,16 @@ venue's own files:
   threads.json   threads.lock
   summary.md     failure-1.md …
   description.md
+  episodes/1/  state.json  rounds/  summary.md                     a closed episode, as under § 3
 ```
+
+An interactive session stays in one worktree, so each piece of work after a
+clean close is a new head there, and a new episode. `summary.md` is the live
+episode's, and moves with its episode into `episodes/<n>/` when the next one
+starts. Everything else belongs to the worktree and stays: `base.json` and
+`objects/`, which every head is built from, `threads.json`, whose threads and
+ids carry on counting across episodes, and the failure files, numbered on from
+the highest there.
 
 `description.md` is written by whoever starts the run. Squiz reads it and never
 writes it.
@@ -2487,19 +2571,24 @@ Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.
 ```
 
-A run on an episode that has already closed, exit 0 or 3 as the close was:
+A run on an episode that has already closed, exit 0 or 3 as the close was. The
+line names the head of the state the close was reached on, because it can be
+another head than the one the run read. A clean close is printed this way only
+for its own head and for a failed state it recorded, since any other state starts
+a new episode or is reported from its record (§ 3 The state file):
 
 ```
 Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
+Squiz's review of PR #41 closed at 3f9c2e0 after 2 rounds, with nothing open. Only a new head commit starts another review in this worktree.
 ```
 
-Where it closed with threads open, exit 3, the line counts them and the threads
-follow, each as exit 3 prints it:
+Where the round cap or the token bound closed it, the line ends "No round runs
+again in this worktree." Where it closed with threads open, exit 3, the line
+counts them and the threads follow, each as exit 3 prints it:
 
 ```
 Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz's review of PR #41 closed after 3 rounds, with 2 threads open. No round runs again in this worktree.
+Squiz's review of PR #41 closed at 77e0f19 after 3 rounds, with 2 threads open. No round runs again in this worktree.
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
   …
@@ -2615,7 +2704,10 @@ The order is newest first by what the records carry:
 3. Then by the higher pull request number.
 
 Within an episode, the newest state comes first, in the reverse of the order the
-state file keeps them.
+state file keeps them. A closed episode a later one replaced, in
+`episodes/<n>/` (§ 3 The state file), is listed as an episode of its own, in the
+same order, under the same PR column and worktree. Its Resume is read from
+`episodes/<n>/rounds/<k>/resume.txt`.
 
 Every cell is one line. A line break in a reason, with the whitespace around it,
 is printed as one space, so each state keeps its one line.
@@ -2637,7 +2729,7 @@ Where the round left threads open and the episode with them, nothing lists them.
 
 A state file that cannot be read gets a line of its own on stderr, naming the
 pull request, the worktree and what was wrong, and every other worktree is still
-listed. A worktree git lists that is gone from disk holds no records and prints
+listed. So does an `episodes/` directory that is there and cannot be listed. A worktree git lists that is gone from disk holds no records and prints
 nothing. Where nothing is recorded anywhere, stdout says so:
 
 ```

@@ -16,6 +16,7 @@ import { isAbsolute, join, relative } from "node:path";
 
 import { failureLine, oneLine } from "../hook/report.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { archivedEpisodes } from "../loop/archive.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { readState } from "../loop/episode-state.ts";
 import type { ReviewerPlace, StateRecord } from "../loop/state-record.ts";
@@ -127,16 +128,22 @@ export function collectStatus(worktrees: readonly string[], options: StatusOptio
       // it would read at paths no episode owns.
       const named = episodeAt(options.venue, worktree, name);
       if (named.outcome === "failed") continue;
-      const { episode } = named;
-      const read = readState(episode);
-      if (read.outcome === "absent") continue;
-      if (read.outcome === "unreadable") {
-        problems.push(`the reviews of ${keyColumn(episode.key)} in ${worktree} could not be read: ${read.reason}`);
-        continue;
+      // A closed episode a new one replaced is listed beside it, as an episode of its own.
+      const archives = archivedEpisodes(named.episode);
+      if (archives.outcome === "failed") {
+        problems.push(`the closed reviews of ${keyColumn(named.episode.key)} in ${worktree} could not be read: ${archives.reason}`);
       }
-      const records = read.state.records ?? [];
-      if (records.length === 0) continue;
-      episodes.push(linesOf(episode, records, options, problems));
+      for (const episode of [named.episode, ...(archives.outcome === "listed" ? archives.episodes : [])]) {
+        const read = readState(episode);
+        if (read.outcome === "absent") continue;
+        if (read.outcome === "unreadable") {
+          problems.push(`the reviews of ${keyColumn(episode.key)} in ${worktree} could not be read: ${read.reason}`);
+          continue;
+        }
+        const records = read.state.records ?? [];
+        if (records.length === 0) continue;
+        episodes.push(linesOf(episode, records, options, problems));
+      }
     }
   }
   return { episodes, problems };

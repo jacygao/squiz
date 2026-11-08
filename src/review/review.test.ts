@@ -15,7 +15,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { renderComment } from "../findings/comment.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import type { HostStart, Triggered, TriggerRequest } from "../host/trigger.ts";
-import { writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
+import { archiveEpisode } from "../loop/archive.ts";
+import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { githubEpisode } from "../testing/episode.ts";
 import type { StateKey, StateRecord } from "../loop/state-record.ts";
@@ -376,6 +377,57 @@ test("a state reviewed clean with the episode open waits for the state queued be
   });
 });
 
+test("#832: a run whose state's round closed the episode clean, archived by a new head before the run read it, returns that round", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [reviewing(OWN)]);
+    const archived = (async () => {
+      await sleep(POLL_MS * 4);
+      // The round closes clean, a hook queues a new head, and the host starts a
+      // new episode, all between two of the run's readings.
+      records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(1) }], {
+        closeReported: true,
+        cleanClose: { ...OWN, records: 1 },
+        rounds: [ROUND],
+      });
+      const read = readState(fixture.episode);
+      assert.equal(archiveEpisode(fixture.episode, read.outcome === "read" ? read.state : assert.fail("no state")).outcome, "archived");
+      records(fixture, [reviewing(LATER)]);
+    })();
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 40) }));
+    await archived;
+
+    assert.equal(printed.exit, 0, printed.stdout + printed.stderr);
+    assert.equal(printed.stdout.split("\n")[1], "Squiz reviewed PR #41 at 3f9c2e0: round 1 of 3, no new findings.");
+  });
+});
+
+test("#832: a run its trigger found closed clean, whose episode a new head archived before the run read it, prints that close and not the new episode", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(1) }], {
+      closeReported: true,
+      cleanClose: { ...OWN, records: 1 },
+      rounds: [ROUND],
+    });
+    const read = readState(fixture.episode);
+    const closed = read.outcome === "read" ? read.state : assert.fail("no state");
+    assert.equal(archiveEpisode(fixture.episode, closed).outcome, "archived");
+    // The episode that replaced it has closed too, at the cap.
+    records(fixture, [{ ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "round cap", newFindings: 0, round: ran(1) }], {
+      closeReported: true,
+      rounds: [ROUND],
+    });
+
+    const printed = await runReview(request(fixture, { triggered: { ...decided(fixture, { outcome: "closed" }), read: closed } as Triggered }));
+
+    assert.equal(printed.exit, 0, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz's review of PR #41 closed at 3f9c2e0 after 1 round, with nothing open. Only a new head commit starts another review in this worktree.",
+    );
+  });
+});
+
 test("a state reviewed clean with the episode open returns the close the queue ends on", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [
@@ -732,7 +784,7 @@ test("a run on a closed episode prints the close, exiting as it did", async () =
     assert.equal(printed.exit, 3);
     assert.equal(
       printed.stdout.split("\n")[1],
-      "Squiz's review of PR #41 closed after 3 rounds, with 1 thread open. No round runs again in this worktree.",
+      "Squiz's review of PR #41 closed at 8d21a4f after 3 rounds, with 1 thread open. No round runs again in this worktree.",
     );
     assert.match(printed.stdout, /^PRRT_kwDOL7tYbc5abcd1 /mu);
   });
@@ -1042,7 +1094,7 @@ test("#820: a closed episode under the local venue names the working tree", asyn
   );
 
   assert.equal(printed.exit, 0, printed.stderr);
-  callsItTheWorkingTree(printed, "Squiz's review of the working tree closed after 3 rounds, with nothing open.");
+  callsItTheWorkingTree(printed, "Squiz's review of the working tree closed at 8d21a4f after 3 rounds, with nothing open.");
 });
 
 test("#820: a round host under the local venue that cannot be told running, or that stopped, is named for the working tree", async () => {

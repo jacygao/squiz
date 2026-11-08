@@ -18,7 +18,10 @@ import type { StateRecord } from "./state-record.ts";
 export type TriggerKind = "hook" | "review";
 
 export type TriggerSituation = {
-  /** Whether the episode has reported its close. */
+  /**
+   * Whether the episode is over for this state: its close is reported, and the
+   * close was not a clean one on another head, which a new episode reviews.
+   */
   readonly closed: boolean;
   /** The record for the pull request's state as it stands now, or none. */
   readonly record: StateRecord | undefined;
@@ -56,9 +59,9 @@ export type TriggerDecision =
 /**
  * Decide what the trigger does.
  *
- * The close is read before the record, because an episode that is over stays
- * over whatever its records say, and queues nothing even for a state it never
- * saw.
+ * The close is read before the record, because an episode that is over for
+ * this state stays over whatever its records say, and queues nothing even for a
+ * state it never saw.
  */
 export function decideTrigger(situation: TriggerSituation): TriggerDecision {
   if (situation.closed) return { outcome: "closed" };

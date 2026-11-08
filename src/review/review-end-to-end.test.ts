@@ -23,7 +23,7 @@ import { renderComment, renderReply } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
-import { githubEpisode } from "../testing/episode.ts";
+import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Plan, PlannedStart } from "../testing/host-fixture.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
@@ -572,7 +572,10 @@ test("a run after a round closed without its summary prints the failure the clos
     const later = await review(fixture);
 
     assert.equal(later.exit, 0, `${later.stdout}${later.stderr}\n${hostLog(fixture.episode)}`);
-    assert.equal(later.stdout.split("\n")[1], "Squiz's review of PR #41 closed after 1 round, with nothing open. No round runs again in this worktree.");
+    assert.equal(
+      later.stdout.split("\n")[1],
+      `Squiz's review of PR #41 closed at ${fixture.gh().head.slice(0, 7)} after 1 round, with nothing open. Only a new head commit starts another review in this worktree.`,
+    );
     assert.equal(later.stderr, closing.stderr);
   });
 });
@@ -600,7 +603,10 @@ test("a run after a close before any review, without its summary, prints the fai
     const later = await review(fixture);
 
     assert.equal(later.exit, 3, `${later.stdout}${later.stderr}\n${hostLog(fixture.episode)}`);
-    assert.equal(later.stdout.split("\n")[1], "Squiz's review of PR #41 closed after 1 round, with 1 thread open. No round runs again in this worktree.");
+    assert.equal(
+      later.stdout.split("\n")[1],
+      `Squiz's review of PR #41 closed at ${fixture.gh().head.slice(0, 7)} after 1 round, with 1 thread open. No round runs again in this worktree.`,
+    );
     assert.equal(later.stderr, closing.stderr);
   });
 });
@@ -791,17 +797,20 @@ test("the round at the cap is the closing round: it opens threads for new findin
       "the round at the cap did not open a thread for its new finding",
     );
 
-    fixture.push();
+    const pushed = fixture.push();
     const after = await review(fixture);
 
     assert.equal(after.exit, 3, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
     assert.equal(
       after.stdout.split("\n")[1],
-      "Squiz's review of PR #41 closed after 2 rounds, with 2 threads open. No round runs again in this worktree.",
+      `Squiz's review of PR #41 closed at ${atCap} after 2 rounds, with 2 threads open. No round runs again in this worktree.`,
+      "#832: a run reporting an old close must name the head the close was about",
     );
     assert.equal(started(fixture), 2, "a round ran after the round at the cap");
     assert.equal(fixture.gh().issueComments.length, 1, "a second summary was posted");
     assert.equal(stateOf(fixture.episode).rounds.length, 2);
+    assert.equal(stateOf(fixture.episode).records?.find((record) => record.head === pushed), undefined, "#832: a close at the cap queued the head pushed after it");
+    assert.deepEqual(archivesIn(fixture.episode), [], "#832: a close at the cap started a new episode");
   });
 });
 
@@ -928,5 +937,86 @@ test("an episode the squiz before #792 wrote is read unchanged by squiz status, 
     assert.match(hostLog(fixture.episode), /^2026-11-07T08:12:49\.187Z round 1: reviewing [0-9a-f]{7}\n(?:.*\n)*.* round 2: reviewing /u, "the host wrote a log of its own");
     assert.ok(existsSync(join(fixture.episode.directory, "rounds", "2", "prompt.md")), "round 2 was not kept beside round 1");
     assert.ok(existsSync(join(fixture.episode.directory, "notes", "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb", "1794039169-0001")), "the waiting note went");
+  });
+});
+
+test("#832: a push after a clean close starts a new episode in the same worktree, whose round 1 reviews the new head and posts its own summary", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [], verdicts: [] },
+    { findings: [FINDING], verdicts: [] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const first = await review(fixture);
+    const closedAt = fixture.gh().head;
+    assert.equal(first.exit, 0, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+
+    const pushed = fixture.push();
+    const second = await review(fixture);
+
+    assert.equal(second.exit, 2, `${second.stdout}${second.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(
+      second.stdout.split("\n")[1],
+      `Squiz reviewed PR #41 at ${pushed.slice(0, 7)}: round 1 of 3, 1 new finding.`,
+      "the run must report a round on the new head, never the close of the old one",
+    );
+    assert.equal(started(fixture), 2, "no round ran on the head pushed after the clean close");
+    const live = stateOf(fixture.episode);
+    assert.deepEqual(live.records?.map((record) => [record.head, record.status]), [[pushed, "reviewed"]]);
+    assert.equal(live.rounds.length, 1, "the new episode must have a round cap of its own");
+
+    const [found, ...more] = archivesIn(fixture.episode);
+    assert.deepEqual(more, []);
+    const archive = found ?? assert.fail("the closed episode was not archived");
+    const closed = stateOf(archive);
+    assert.deepEqual(closed.records?.map((record) => [record.head, record.status]), [[closedAt, "reviewed"]]);
+    assert.ok(existsSync(join(archive.directory, "rounds", "1", "prompt.md")), "the closed episode's round went with it");
+
+    const status = squizStatus(fixture.worktree, githubVenue);
+    assert.match(status.stdout, new RegExp(`#41 +${pushed.slice(0, 7)} .* 1 thread open `, "u"));
+    assert.match(status.stdout, new RegExp(`#41 +${closedAt.slice(0, 7)} .* nothing open, review closed `, "u"));
+  });
+});
+
+test("#832: a new episode after a clean close posts its own summary when it closes", async () => {
+  await withPullRequest([{ findings: [], verdicts: [] }, { findings: [], verdicts: [] }], async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 0, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const pushed = fixture.push();
+
+    const second = await review(fixture);
+
+    assert.equal(second.exit, 0, `${second.stdout}${second.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(second.stdout.split("\n")[1], `Squiz reviewed PR #41 at ${pushed.slice(0, 7)}: round 1 of 3, no new findings.`);
+    assert.equal(fixture.gh().issueComments.length, 2, "the new episode posted no summary of its own");
+  });
+});
+
+test("#832: new replies after a clean close, with the same head, start nothing, and the run names the head the close was about", async () => {
+  const starts: PlannedStart[] = [
+    { findings: [FINDING], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "withdrawn", reason: "The header already says it." }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const reply = (id: string, databaseId: number): void => {
+      const gh = fixture.gh();
+      gh.threads[0]?.comments.push({ id, databaseId, body: renderReply("The line is a fixture."), createdAt: "2026-10-05T07:20:00Z" });
+      fixture.setGh(gh);
+    };
+    assert.equal((await review(fixture)).exit, 2);
+    reply("PRRC_reply", 9500);
+    const closing = await review(fixture);
+    assert.equal(closing.exit, 0, `${closing.stdout}${closing.stderr}\n${hostLog(fixture.episode)}`);
+    const head = fixture.gh().head.slice(0, 7);
+
+    reply("PRRC_again", 9501);
+    const after = await review(fixture);
+
+    assert.equal(after.exit, 0, `${after.stdout}${after.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(
+      after.stdout.split("\n")[1],
+      `Squiz's review of PR #41 closed at ${head} after 2 rounds, with nothing open. Only a new head commit starts another review in this worktree.`,
+    );
+    assert.equal(started(fixture), 2, "a reply alone after a clean close started a round");
+    assert.deepEqual(archivesIn(fixture.episode), []);
   });
 });

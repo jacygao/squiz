@@ -318,9 +318,9 @@ Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before i
   );
 });
 
-test("an episode already closed prints its close, exiting as the close did", () => {
+test("an episode already closed clean prints its close and the head it was about, exiting as the close did (#832)", () => {
   const printed = composeReview(
-    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 0, rounds: 2, threads: [] },
+    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 0, rounds: 2, threads: [], commit: "3f9c2e0", reopens: true },
     PATH,
   );
 
@@ -328,25 +328,25 @@ test("an episode already closed prints its close, exiting as the close did", () 
   assert.equal(
     printed.stdout,
     `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz's review of PR #41 closed after 2 rounds, with nothing open. No round runs again in this worktree.
+Squiz's review of PR #41 closed at 3f9c2e0 after 2 rounds, with nothing open. Only a new head commit starts another review in this worktree.
 `,
   );
 });
 
 test("an episode closed after one round, with threads open, counts both in the words they need", () => {
   const one = composeReview(
-    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 3, rounds: 1, threads: [skewThread] },
+    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 3, rounds: 1, threads: [skewThread], commit: "77e0f19", reopens: false },
     PATH,
   );
   const two = composeReview(
-    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 3, rounds: 3, threads: [backoffThread, skewThread] },
+    { outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request", exit: 3, rounds: 3, threads: [backoffThread, skewThread], reopens: false },
     PATH,
   );
 
   assert.equal(one.exit, 3);
   assert.ok(
     one.stdout.startsWith(`Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz's review of PR #41 closed after 1 round, with 1 thread open. No round runs again in this worktree.
+Squiz's review of PR #41 closed at 77e0f19 after 1 round, with 1 thread open. No round runs again in this worktree.
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
 `),
@@ -675,7 +675,7 @@ test("#820: every result that names the change calls it by its name, so the work
     { ...named, outcome: "reviewing", wait: "queued", commit: "8d21a4f", reviewing: "3f9c2e0" },
     { ...named, outcome: "reviewing", wait: "clean", commit: "3f9c2e0", reviewing: "8d21a4f" },
     { ...named, outcome: "reviewing", wait: "superseded", commit: "3f9c2e0", reviewing: "8d21a4f" },
-    { ...named, outcome: "closed", exit: 3, rounds: 1, threads: [skewThread] },
+    { ...named, outcome: "closed", exit: 3, rounds: 1, threads: [skewThread], reopens: false },
     { ...named, outcome: "closed unreviewed", exit: 3, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [skewThread], summarised: true },
     { ...named, outcome: "failed", reason: "the reviewer's output could not be read", items: [], comment: { posted: true } },
     { ...named, outcome: "failed", reason: "the reviewer's output could not be read", items: [], comment: { posted: false, reason: "the record could not be written" } },
