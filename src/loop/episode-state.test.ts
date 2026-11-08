@@ -10,6 +10,7 @@ import {
   type RoundRecord,
   type RoundWork,
   type Timings,
+  episodeOver,
   readState,
   recordRound,
   recordRulings,
@@ -400,6 +401,37 @@ test("a reported close is written and comes back, and one never written is absen
   writeFileSync(episode.stateFile, `{"rounds": [], ${NONE_OUTSIDE}}`);
   const read = readState(episode);
   assert.equal(read.outcome === "read" ? read.state.closeReported : "unread", undefined);
+});
+
+test("#832: a clean close is written with the state it reviewed and comes back, and one that names no state is refused", (t) => {
+  const episode = episodeIn(t);
+  const closed: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+    cleanClose: { head: "3f9c2e0aa", activity: "PRRC_kwDOL7tYbc6OmQx7a" },
+  };
+
+  assert.deepEqual(writeState(episode, closed), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state: closed });
+
+  assert.match(refusalOf(t, `{"rounds": [], "cleanClose": {"head": "3f9c2e0aa"}, ${NONE_OUTSIDE}}`), /"cleanClose"/u);
+});
+
+test("#832: after a clean close the episode is over for the head the close reviewed, and for no other head", () => {
+  const clean: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    closeReported: true,
+    cleanClose: { head: "3f9c2e0aa", activity: null },
+  };
+  assert.equal(episodeOver(clean, { head: "3f9c2e0aa", activity: null }), true);
+  assert.equal(episodeOver(clean, { head: "3f9c2e0aa", activity: "PRRC_new" }), true, "new replies alone, on the head the close reviewed, must start nothing");
+  assert.equal(episodeOver(clean, { head: "1b86987bb", activity: null }), false, "a head the clean close never reviewed must start a new episode");
+
+  // A close at the round cap or the token bound records no clean close.
+  const bound: EpisodeState = { rounds: [firstRound], spentOutsideRounds: unspent, closeReported: true };
+  assert.equal(episodeOver(bound, { head: "1b86987bb", activity: null }), true, "a close at a bound must stay closed for a new head");
 });
 
 test("the reviewer's last ruling on each thread is written and comes back, and a file with none reads with none", (t) => {

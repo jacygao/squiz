@@ -27,7 +27,9 @@ import { join } from "node:path";
 import { unthreadedNotes } from "../loop/summary-body.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
-import { readState, type EpisodeState } from "../loop/episode-state.ts";
+import { archiveEpisode, type Archived } from "../loop/archive.ts";
+import { readState, reopensFor, type EpisodeState } from "../loop/episode-state.ts";
+import { unspent } from "../reviewers/adapter.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
 import type { ClosedBy } from "../loop/failure-body.ts";
@@ -172,29 +174,57 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     const startedAt = nowSeconds();
     let taken: { readonly record: QueuedRecord; readonly number: number } | undefined;
     let closed: readonly Recorded[] = [];
+    let archived: Archived | undefined;
     const took = write((state) => {
       taken = undefined;
       closed = [];
+      archived = undefined;
+      let current = state;
       // The close is checked again here, under the state lock, so a round that
       // closed the episode after this host read the file runs nothing more.
       if (state.closeReported === true) {
-        closed = inOrder(queuedIn(state).map((record) => notReviewed(keyOf(record), ALREADY_CLOSED)));
-        return withRecords(state, closed.map(({ record }) => record));
+        // A round still under review belongs to the closed episode, and archiving
+        // it would hide it from whatever recovers it.
+        const settled = !(state.records ?? []).some((record) => record.status === "reviewing");
+        const reopening = settled ? queuedIn(state).filter((record) => reopensFor(state, record)) : [];
+        const carried = new Set<StateRecord>(reopening);
+        closed = inOrder(
+          queuedIn(state)
+            .filter((record) => !carried.has(record))
+            .map((record) => notReviewed(keyOf(record), ALREADY_CLOSED)),
+        );
+        const ended = withRecords(state, closed.map(({ record }) => record));
+        if (reopening.length === 0) return ended;
+        // A head the clean close never reviewed starts a new episode, under its
+        // own round cap and token bound. The rulings carry over, because the
+        // threads they rule on stay on the change.
+        archived = archiveEpisode(episode, { ...ended, records: (ended.records ?? []).filter((record) => !carried.has(record)) });
+        if (archived.outcome === "failed") {
+          closed = [];
+          return state;
+        }
+        current = { rounds: [], spentOutsideRounds: unspent, ...(state.rulings === undefined ? {} : { rulings: state.rulings }), records: reopening };
       }
-      const record = queuedIn(state)[0];
-      if (record === undefined) return state;
-      taken = { record, number: state.rounds.length + 1 };
+      const record = queuedIn(current)[0];
+      if (record === undefined) return current;
+      taken = { record, number: current.rounds.length + 1 };
       const reviewing: StateRecord = {
         ...keyOf(record),
         status: "reviewing",
         host: lock.holder,
         round: { number: taken.number },
       };
-      return withRecords(state, [reviewing]);
+      return withRecords(current, [reviewing]);
     });
 
-    if (took.outcome === "failed") {
-      const reason = `no review ran: the reviewing record could not be written: ${took.reason}`;
+    const failure =
+      took.outcome === "failed"
+        ? `the reviewing record could not be written: ${took.reason}`
+        : archived?.outcome === "failed"
+          ? archived.reason
+          : undefined;
+    if (failure !== undefined) {
+      const reason = `no review ran: ${failure}`;
       log(`${named(oldest)}: ${reason}`);
       let failed: readonly Recorded[] = [];
       const recorded = write((state) => {
@@ -212,6 +242,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       await noteOwners(episode, failed, log);
       continue;
     }
+    if (archived?.outcome === "archived") log(`a new episode starts on a head the clean close never reviewed: the closed one is in ${archived.directory}`);
     if (closed.length > 0) {
       log(`${closed.length === 1 ? "1 queued state" : `${closed.length} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
       await noteOwners(episode, closed, log);

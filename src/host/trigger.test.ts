@@ -483,6 +483,55 @@ test("a closed episode queues nothing, even for a state it never saw", async () 
   });
 });
 
+/** The episode closed clean on `head`: its round left nothing open and nothing unreviewed. */
+function closedCleanOn(head: string): Partial<EpisodeState> {
+  return {
+    closeReported: true,
+    cleanClose: { head, activity: null },
+    rounds: [{ ...ROUND_AT_CAP, head }],
+    records: [{
+      head,
+      activity: null,
+      status: "reviewed",
+      result: "exited",
+      exitStatus: 0,
+      openThreads: [],
+      round: { number: 1, startedAt: 1_790_999_000, endedAt: 1_790_999_400, reviewer: { backend: "detached" } },
+      newFindings: 0,
+    }],
+  };
+}
+
+const EARLIER_HEAD = "8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258";
+
+test("#832: a hook after a clean close queues a head the close never reviewed in the state file, and starts a host", async () => {
+  await withFixture(async (fixture) => {
+    seed(fixture.episode, closedCleanOn(EARLIER_HEAD));
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.deepEqual(result.decision, { outcome: "queue", startHost: true });
+    assert.equal(result.queued, true);
+    assert.deepEqual(records(fixture.episode).at(-1), { ...state, status: "queued" }, "the hook exited 0 and queued nothing for the new head");
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+  });
+});
+
+test("#832: two triggers racing on a new head after a clean close queue it once", async () => {
+  await withFixture(async (fixture) => {
+    seed(fixture.episode, closedCleanOn(EARLIER_HEAD));
+    const at = Date.now() + 1_500;
+    const results = await Promise.all([startRacer(fixture, at, false).printed, startRacer(fixture, at, false).printed]);
+
+    const queued = results.filter((result) => result.outcome === "decided" && result.queued);
+    assert.equal(queued.length, 1, `triggers: ${JSON.stringify(results.map((result) => result.outcome === "decided" ? result.decision : result))}`);
+    assert.equal(records(fixture.episode).filter((record) => record.head === HEAD).length, 1);
+    const started = results.filter((result) => result.outcome === "decided" && result.host.outcome !== "not started");
+    await eventually(() => hostLines(fixture).length === started.length, "every started host reporting");
+    assert.equal(hostsThatTook(fixture).length, 1, `hosts: ${hostLines(fixture).join(", ")}`);
+  });
+});
+
 test("a host that took the state between the trigger's read and its queue keeps its reviewing record", async () => {
   await withFixture((fixture) => {
     const self = ownIdentity();

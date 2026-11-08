@@ -1,0 +1,103 @@
+/**
+ * The closed episodes of one episode's directory, each kept under
+ * `episodes/<n>/` once a new episode starts in its place.
+ *
+ * An archive holds what belonged to the closed episode alone: its state file,
+ * its rounds and its summary file. Everything else in the directory belongs to
+ * the worktree, and stays where it is: the local venue's base and objects, which
+ * the next head is built from, its threads, whose ids keep counting, its failure
+ * files, the notes and `host.log`. Moving any of those would make the next
+ * episode's diff, thread ids or wake wrong with nothing saying so.
+ *
+ * Nothing here takes `state.lock`. The caller archives inside the update that
+ * starts the new episode, so the archive and the new state file are one change.
+ */
+
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
+
+import type { EpisodeState } from "./episode-state.ts";
+import type { Episode } from "./episode.ts";
+
+const ARCHIVES = "episodes";
+const ROUNDS = "rounds";
+const STATE_FILE = "state.json";
+// The local venue's summary. A venue that posts its summary elsewhere has none.
+const SUMMARY_FILE = "summary.md";
+
+export type Archived =
+  | { readonly outcome: "archived"; readonly directory: string }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * Write `closed` as the state file of the next archive under `episode`, and move
+ * the episode's rounds and summary file into it.
+ *
+ * The state file `episode` names is left for the caller to replace. Each
+ * round's `resume.txt` is rewritten to name its session where it now is.
+ * Never throws. A failure part way leaves what had moved in the archive.
+ */
+export function archiveEpisode(episode: Episode, closed: EpisodeState): Archived {
+  try {
+    const archives = join(episode.directory, ARCHIVES);
+    mkdirSync(archives, { recursive: true });
+    const directory = join(archives, String(highestIn(archives) + 1));
+    // Not recursive: an archive already there is one this would overwrite.
+    mkdirSync(directory);
+    writeFileSync(join(directory, STATE_FILE), `${JSON.stringify(closed, null, 2)}\n`, "utf8");
+
+    const rounds = join(episode.directory, ROUNDS);
+    if (existsSync(rounds)) {
+      const moved = join(directory, ROUNDS);
+      renameSync(rounds, moved);
+      respell(moved, `${relative(episode.worktree, rounds)}/`, `${relative(episode.worktree, moved)}/`);
+    }
+    const summary = join(episode.directory, SUMMARY_FILE);
+    if (existsSync(summary)) renameSync(summary, join(directory, SUMMARY_FILE));
+    return { outcome: "archived", directory };
+  } catch (cause) {
+    return { outcome: "failed", reason: `the closed episode could not be archived: ${cause instanceof Error ? cause.message : String(cause)}` };
+  }
+}
+
+/**
+ * Each closed episode archived under `episode`, oldest first, as an episode of
+ * its own whose state file and rounds are read as a live one's are.
+ *
+ * None where nothing was archived or the archives cannot be listed.
+ */
+export function archivedEpisodes(episode: Episode): readonly Episode[] {
+  const archives = join(episode.directory, ARCHIVES);
+  return numbersIn(archives)
+    .sort((one, other) => one - other)
+    .map((number) => {
+      const directory = join(archives, String(number));
+      return { worktree: episode.worktree, key: episode.key, directory, stateFile: join(directory, STATE_FILE) };
+    });
+}
+
+function highestIn(archives: string): number {
+  return Math.max(0, ...numbersIn(archives));
+}
+
+function numbersIn(archives: string): number[] {
+  let names: string[];
+  try {
+    names = readdirSync(archives);
+  } catch {
+    return [];
+  }
+  return names.filter((name) => /^[1-9][0-9]*$/u.test(name)).map(Number);
+}
+
+/**
+ * Rewrite each round's `resume.txt` under `rounds` to name `now` where it named
+ * `was`. Both are relative to the worktree, as the round wrote them.
+ */
+function respell(rounds: string, was: string, now: string): void {
+  for (const round of readdirSync(rounds)) {
+    const file = join(rounds, round, "resume.txt");
+    if (!existsSync(file)) continue;
+    writeFileSync(file, readFileSync(file, "utf8").replaceAll(was, now), "utf8");
+  }
+}

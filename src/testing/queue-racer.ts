@@ -4,12 +4,13 @@
  *
  * Its arguments are a worktree, a pull request number and a head commit. It
  * queues that state, with no activity, under the state lock, and refuses where
- * the episode's close is recorded, as a trigger does. It prints `queued` or
+ * the episode is over for it, as a trigger does. It prints `queued` or
  * `closed`.
  */
 
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { githubEpisode } from "./episode.ts";
+import { episodeOver } from "../loop/episode-state.ts";
 import { putRecord } from "../loop/state-record.ts";
 import { updateState } from "../loop/state-update.ts";
 
@@ -19,7 +20,7 @@ let queued = false;
 const updated = updateState(
   githubEpisode(worktree, pullRequest),
   (state) => {
-    if (state.closeReported === true) return state;
+    if (episodeOver(state, { head, activity: null })) return state;
     queued = true;
     return { ...state, records: putRecord(state.records ?? [], { head, activity: null, status: "queued" }) };
   },

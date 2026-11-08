@@ -146,6 +146,15 @@ export type EpisodeState = {
    */
   readonly closeReported?: boolean;
   /**
+   * The state whose round closed the episode with nothing open and nothing
+   * left not reviewed, written in the update that writes the close.
+   *
+   * Absent on a close at the round cap or the token bound, which stays closed.
+   * A clean close stays closed only for its own head: a head it never reviewed
+   * starts a new episode in the same worktree.
+   */
+  readonly cleanClose?: StateKey;
+  /**
    * One record for each state of the pull request a trigger has queued, oldest
    * first. No two are for the same state. Absent is none.
    */
@@ -181,8 +190,9 @@ export type StateWrite =
   | { readonly outcome: "failed"; readonly reason: string };
 
 /**
- * Whether the episode is over for `key`: its close is reported, and `key` is
- * not a state the episode accepted and has yet to give a result.
+ * Whether the episode is over for `key`: its close is reported, `key` is not a
+ * state the episode accepted and has yet to give a result, and `key` is not a
+ * head a clean close never reviewed.
  *
  * The close is written before the summary is posted, and the records of the
  * round that wrote it, and of the states queued behind it, only after. A state
@@ -192,7 +202,17 @@ export type StateWrite =
 export function episodeOver(state: EpisodeState, key: StateKey): boolean {
   if (state.closeReported !== true) return false;
   const status = recordFor(state.records ?? [], key)?.status;
-  return status !== "queued" && status !== "reviewing";
+  if (status === "queued" || status === "reviewing") return false;
+  return !reopensFor(state, key);
+}
+
+/**
+ * Whether `key` starts a new episode in place of this closed one: the close was
+ * clean, and `key`'s head is not the head it reviewed. New replies on that head
+ * start nothing.
+ */
+export function reopensFor(state: EpisodeState, key: StateKey): boolean {
+  return state.closeReported === true && state.cleanClose !== undefined && state.cleanClose.head !== key.head;
 }
 
 /**
@@ -369,6 +389,13 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     return unreadable(`${path}: "closeReported" is ${render(reported)} rather than true or false`);
   }
 
+  const clean = parsed["cleanClose"];
+  // Read wrongly, a close at a bound would reopen on the next push, or a clean
+  // one would never review the next head.
+  if (clean !== undefined && !isStateKey(clean)) {
+    return unreadable(`${path}: "cleanClose" is ${render(clean)} rather than a state's head and activity`);
+  }
+
   const kept = recordsIn(parsed);
   if ("problem" in kept) return unreadable(`${path}: ${kept.problem}`);
 
@@ -385,10 +412,17 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       rounds,
       spentOutsideRounds: outside.cost,
       ...(reported === undefined ? {} : { closeReported: reported }),
+      ...(clean === undefined ? {} : { cleanClose: { head: clean["head"], activity: clean["activity"] } }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
       ...(rulings === undefined ? {} : { rulings }),
     },
   };
+}
+
+function isStateKey(value: unknown): value is { readonly head: string; readonly activity: string | null } {
+  if (!isRecord(value)) return false;
+  const { head, activity } = value;
+  return typeof head === "string" && head !== "" && (activity === null || (typeof activity === "string" && activity !== ""));
 }
 
 function isRulings(value: unknown): value is Rulings {
