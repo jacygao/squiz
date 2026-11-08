@@ -175,7 +175,10 @@ export function trigger(request: TriggerRequest): Triggered {
         // A failed state queued again goes on the end, as any state queued now
         // does, because the records' order is the order the rounds take them in.
         const others = (current.records ?? []).filter((held) => !sameState(held, state));
-        return { ...current, records: [...others, fresh] };
+        // The closed episode's own result for this state is kept for its archive.
+        const replaced = recordFor(current.records ?? [], state);
+        const displaced = reopensFor(current, state) && replaced !== undefined ? { displaced: [...(current.displaced ?? []), replaced] } : {};
+        return { ...current, ...displaced, records: [...others, fresh] };
       },
       { until },
     );

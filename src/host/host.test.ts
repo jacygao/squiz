@@ -114,6 +114,8 @@ type Arrangement = {
   readonly closeReported?: boolean;
   /** The clean close on file, read once the records are made. */
   readonly cleanClose?: () => StateKey;
+  /** The closed episode's records a returning head displaced, read once the records are made. */
+  readonly displaced?: () => readonly StateRecord[];
   readonly rulings?: Rulings;
   /** What each reviewer start reports, in order. An empty review where there is none. */
   readonly findings?: readonly (readonly Finding[])[];
@@ -198,6 +200,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         ...(arranged.closeReported === undefined ? {} : { closeReported: arranged.closeReported }),
         records: arranged.records?.(fixture) ?? [],
         ...(arranged.cleanClose === undefined ? {} : { cleanClose: arranged.cleanClose() }),
+        ...(arranged.displaced === undefined ? {} : { displaced: arranged.displaced() }),
         ...(arranged.rulings === undefined ? {} : { rulings: arranged.rulings }),
       });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
@@ -984,6 +987,30 @@ test("#832: a head queued after a clean close starts a new episode, archiving th
   assert.deepEqual(ran.archives[0]?.rounds, [EARLIER_ROUND]);
   assert.match(ran.status.stdout, new RegExp(`#${PULL_REQUEST} +${newHead.slice(0, 7)} .* reviewed `, "u"));
   assert.match(ran.status.stdout, new RegExp(`#${PULL_REQUEST} +${closedHead.slice(0, 7)} .* reviewed `, "u"), "squiz status must still list the closed episode");
+});
+
+test("#832: a record a returning head displaced from the closed episode goes into its archive, and not into the new episode", async () => {
+  let closedHead = "";
+  let returning = "";
+  const ran = await host({
+    records: (fixture) => {
+      returning = fixture.head();
+      closedHead = fixture.push();
+      // The pull request went back to the head the closed episode reviewed first.
+      execFileSync("git", ["reset", "--quiet", "--hard", returning], { cwd: fixture.episode.worktree });
+      writeFileSync(join(fixture.binaries, "answer-prlist"), readFileSync(join(fixture.binaries, "answer-prlist"), "utf8").replace(closedHead, returning), "utf8");
+      return [closedCleanOn(closedHead), queued(returning)];
+    },
+    rounds: [EARLIER_ROUND, EARLIER_ROUND],
+    closeReported: true,
+    cleanClose: () => ({ head: closedHead, activity: null }),
+    displaced: () => [{ ...closedCleanOn(returning), exitStatus: 2, openThreads: ["PRRT_old"] }],
+  });
+
+  assert.deepEqual(ran.reviewedCommits, [returning], `the log says:\n${ran.log}`);
+  assert.equal(ran.state?.displaced, undefined, "the new episode must not keep the closed one's record");
+  assert.deepEqual(ran.archives[0]?.records?.map((record) => record.head), [closedHead, returning]);
+  assert.equal(ran.archives[0]?.displaced, undefined);
 });
 
 test("#832: a new head after a clean close whose round is still recorded under review is recorded failed, naming that round, so squiz review can retry it", async () => {

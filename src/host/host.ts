@@ -200,7 +200,10 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         if (reopening.length === 0 || blocked !== undefined) return ended;
         // A head the clean close never reviewed starts a new episode, under its
         // own round cap and token bound.
-        archived = archiveEpisode(episode, { ...ended, records: (ended.records ?? []).filter((record) => !carried.has(record)) });
+        // The records a returning head displaced go back into the archive, in place
+        // of the queued records that displaced them.
+        const { displaced = [], ...closedState } = ended;
+        archived = archiveEpisode(episode, { ...closedState, records: [...(ended.records ?? []).filter((record) => !carried.has(record)), ...displaced] });
         if (archived.outcome === "failed") {
           closed = [];
           return state;

@@ -155,6 +155,12 @@ export type EpisodeState = {
    */
   readonly cleanClose?: StateKey;
   /**
+   * The finished records of a clean-closed episode that a head queued for the
+   * next episode replaced, where that head's state was one this episode had
+   * already given a result. The archive keeps them. Absent is none.
+   */
+  readonly displaced?: readonly StateRecord[];
+  /**
    * One record for each state of the pull request a trigger has queued, oldest
    * first. No two are for the same state. Absent is none.
    */
@@ -399,6 +405,17 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   const kept = recordsIn(parsed);
   if ("problem" in kept) return unreadable(`${path}: ${kept.problem}`);
 
+  const found = parsed["displaced"];
+  const displaced: StateRecord[] = [];
+  if (found !== undefined && !Array.isArray(found)) {
+    return unreadable(`${path}: "displaced" is ${render(found)} rather than an array`);
+  }
+  for (const [index, entry] of (found ?? []).entries()) {
+    const read = recordFrom(entry);
+    if ("problem" in read) return unreadable(`${path}: displaced record ${index + 1} ${read.problem}`);
+    displaced.push(read.record);
+  }
+
   const rulings = parsed["rulings"];
   // A ruling guessed or dropped here miscounts the thread at a close that runs
   // no reviewer.
@@ -414,6 +431,7 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       ...(reported === undefined ? {} : { closeReported: reported }),
       ...(clean === undefined ? {} : { cleanClose: { head: clean["head"], activity: clean["activity"] } }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
+      ...(found === undefined ? {} : { displaced }),
       ...(rulings === undefined ? {} : { rulings }),
     },
   };

@@ -541,6 +541,30 @@ test("#832: a head the closed episode reviewed before its clean close, on anothe
   });
 });
 
+test("#832: a head the closed episode reviewed, queued again while its clean close is still posting, keeps its earlier record for the archive", async () => {
+  await withFixture(async (fixture) => {
+    const earlier: StateRecord = {
+      ...state,
+      status: "reviewed",
+      result: "exited",
+      exitStatus: 2,
+      openThreads: ["PRRT_old"],
+      round: { number: 1, startedAt: 1_790_998_000, endedAt: 1_790_998_400, reviewer: { backend: "detached" } },
+      newFindings: 1,
+    };
+    const closing: StateRecord = { head: EARLIER_HEAD, activity: null, status: "reviewing", host: ownIdentity(), round: { number: 2 } };
+    seed(fixture.episode, { ...closedCleanOn(EARLIER_HEAD), records: [earlier, closing] });
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.equal(result.queued, true);
+    const read = readState(fixture.episode);
+    const held = read.outcome === "read" ? read.state : assert.fail(JSON.stringify(read));
+    assert.deepEqual(held.records, [closing, { ...state, status: "queued" }]);
+    assert.deepEqual(held.displaced, [earlier], "the closed episode's record of the head was overwritten with nowhere to go");
+  });
+});
+
 test("#832: a new head after a clean close, with another new head already queued in the closed episode, is queued beside it for the round host", async () => {
   await withFixture(async (fixture) => {
     const waiting: StateRecord = { head: "9e01b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4", activity: null, status: "queued" };

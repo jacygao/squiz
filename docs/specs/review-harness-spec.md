@@ -297,7 +297,10 @@ branch, which holds no state for it.
 **A clean close stays closed only for the head it reviewed.** A trigger whose
 state has another head treats the closed episode as holding no finished record
 for it, even one an earlier round of that episode wrote, and queues the state
-for a new episode. It starts a round host where none is running. New replies on
+for a new episode. Where the queued record replaces such a record in the closed
+episode's state file, the file keeps the one it replaced under `displaced`, and
+the archive holds it among the closed episode's records. The trigger starts a
+round host where none is running. New replies on
 the head the close reviewed are no new head, and queue nothing. A run of `squiz
 review` waits on the state it queued, as on any other.
 
