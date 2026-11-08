@@ -554,6 +554,45 @@ test("#844: a new commit after a close at the cap with nothing open exits 3, nam
   });
 });
 
+test("#844: a state superseded by the round that closed at the cap with nothing open is answered by that round, at exit 0, for the run waiting and for a later one", async () => {
+  await withWorktree(async (fixture) => {
+    const left: StateKey = { head: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f", activity: null };
+    records(fixture, [
+      { ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER },
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(3) },
+      { ...left, status: "not reviewed", reason: "the episode closed at the round cap, after reviewing 8d21a4f" },
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
+
+    const waited = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
+    const later = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }) }));
+
+    assert.equal(waited.exit, 0, waited.stdout + waited.stderr);
+    assert.equal(later.exit, 0, later.stdout + later.stderr);
+    assert.equal(
+      later.stdout.split("\n")[1],
+      "Squiz's review of PR #41 closed at 8d21a4f after 3 rounds, with nothing open. No round runs again in this worktree.",
+    );
+  });
+});
+
+test("#844: a new commit after a close that reached the token bound at the last round names the token bound, as the states it left do", async () => {
+  await withWorktree(async (fixture) => {
+    const left: StateKey = { head: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f", activity: null };
+    records(fixture, [
+      { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(3) },
+      { ...left, status: "not reviewed", reason: "the episode closed at the token bound, after reviewing 8d21a4f" },
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }) }));
+
+    assert.equal(printed.exit, 3, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz did not review PR #41 at 3f9c2e0: the episode closed at the token bound, after reviewing 8d21a4f.",
+    );
+  });
+});
+
 test("#844: a later run on the state whose round closed the episode at the cap with nothing open still exits 0", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

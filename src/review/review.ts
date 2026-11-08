@@ -391,7 +391,7 @@ function notReviewed(
     return compose((threads) => closedUnreviewed(waiting, records, before, record, threads));
   }
   const closing = closingRecord(records);
-  const stopped = /^the episode closed at the (round cap|token bound), after reviewing /u.exec(record.reason);
+  const stopped = STOPPED_BY_THE_CLOSE.exec(record.reason);
   if (state.closeReported === true && closing !== undefined && stopped !== null) {
     const closedAt = stopped[1] as ClosingBound;
     const left = records.filter((held) => held.status === "not reviewed" && held.reason === record.reason);
@@ -405,6 +405,9 @@ function notReviewed(
 }
 
 type NotReviewed = Extract<StateRecord, { readonly status: "not reviewed" }>;
+
+/** The reason of a state a round's close at a bound left queued behind it, capturing the bound. */
+const STOPPED_BY_THE_CLOSE = /^the episode closed at the (round cap|token bound), after reviewing /u;
 
 /** The state a close before the review was reached on, which carries the close. */
 type ClosedFirst = NotReviewed & { readonly closed: ClosedBeforeReview };
@@ -540,7 +543,8 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
 /**
  * The run's own state as a close at a bound left it, and why, or `undefined`
  * where a round reviewed it. A state the close recorded is named and given its
- * reason as the run that waited on it was. Any other arrived after the close.
+ * reason as the run that waited on it was, and a superseded one as the state it
+ * was followed to. Any other arrived after the close.
  */
 function unreviewedBy(
   context: Context,
@@ -549,15 +553,26 @@ function unreviewedBy(
   first: ClosedFirst | undefined,
 ): { readonly state: string; readonly reason: string } | undefined {
   const records = state.records ?? [];
-  const own = recordFor(records, context.own);
+  let own = recordFor(records, context.own);
+  // The count of records ends a loop of states superseding each other.
+  for (let hops = 0; hops < records.length && own?.status === "not reviewed" && own.supersededBy !== undefined; hops += 1) {
+    const newer = recordFor(records, own.supersededBy);
+    if (newer === undefined) break;
+    own = newer;
+  }
   if (own?.status === "reviewed") return undefined;
   if (own?.status === "not reviewed" && supersededName(own) === undefined) {
-    const left = records.filter((held) => held.status === "not reviewed" && held.reason === own.reason);
-    const name = namedStates(lastReviewed(records), left)[left.findIndex((held) => sameState(held, own))];
-    return { state: name ?? own.head.slice(0, 7), reason: own.reason };
+    const { reason } = own;
+    const left = records.filter((held) => held.status === "not reviewed" && held.reason === reason);
+    const name = namedStates(lastReviewed(records), left)[left.findIndex((held) => own !== undefined && sameState(held, own))];
+    return { state: name ?? own.head.slice(0, 7), reason };
   }
   const name = namedStates(null, [...records, context.own]).at(-1) ?? context.own.head.slice(0, 7);
-  const bound = closing?.closedAt ?? first?.closed.closedAt ?? (state.rounds.length >= context.cap ? "round cap" : "token bound");
+  // A closing round that left nothing open keeps no bound, and the states it left name it.
+  const stopped = records
+    .map((held) => (held.status === "not reviewed" ? STOPPED_BY_THE_CLOSE.exec(held.reason)?.[1] : undefined))
+    .find((found) => found !== undefined) as ClosingBound | undefined;
+  const bound = closing?.closedAt ?? first?.closed.closedAt ?? stopped ?? (state.rounds.length >= context.cap ? "round cap" : "token bound");
   const reason =
     closing === undefined
       ? `the episode closed at the ${bound} before a round took this state`
