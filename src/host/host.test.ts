@@ -1032,6 +1032,12 @@ test("#832: a new head after a clean close whose round is still recorded under r
   const left = recordsOf(ran.state)[1];
   assert.ok(left?.status === "failed", `the new head was left ${JSON.stringify(left)}, which no retry takes`);
   assert.equal(left.reason, `no review ran: round 1 of the closed episode is still recorded under review by round host ${process.pid}`);
+  assert.match(
+    ran.log,
+    new RegExp(` ${newHead.slice(0, 7)}: recorded failed: no review ran: round 1 of the closed episode is still recorded under review by round host ${process.pid}\\n`, "u"),
+    "host.log must say the state failed and why",
+  );
+  assert.doesNotMatch(ran.log, /recorded not reviewed/u, "host.log called a failed state not reviewed");
 });
 
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {

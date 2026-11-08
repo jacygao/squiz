@@ -245,7 +245,10 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     }
     if (started?.outcome === "started") log(`a new episode starts on a state the clean close never recorded: the closed one is in ${started.directory}`);
     if (closed.length > 0) {
-      log(`${closed.length === 1 ? "1 queued state" : `${closed.length} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
+      const unreviewed = closed.filter(({ record }) => record.status === "not reviewed").length;
+      if (unreviewed > 0) log(`${unreviewed === 1 ? "1 queued state" : `${unreviewed} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
+      // A state queued for the next episode that a closed round still blocks failed, and says why.
+      for (const { record } of closed) if (record.status === "failed") log(`${named(record)}: recorded failed: ${record.reason}`);
       await noteOwners(episode, closed, log);
     }
     const round = taken;
