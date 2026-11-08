@@ -9,6 +9,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { renderComment, renderReply } from "../findings/comment.ts";
+import { archivedEpisodes } from "../loop/archive.ts";
 import type { Episode } from "../loop/episode.ts";
 import { githubEpisode } from "../testing/episode.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
@@ -514,6 +515,30 @@ test("#832: a hook after a clean close queues a head the close never reviewed in
     assert.equal(result.queued, true);
     assert.deepEqual(records(fixture.episode).at(-1), { ...state, status: "queued" }, "the hook exited 0 and queued nothing for the new head");
     await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+  });
+});
+
+test("#832: a head the closed episode reviewed before its clean close, on another head, is queued for a new episode, and its old record is archived", async () => {
+  await withFixture(async (fixture) => {
+    const earlier: StateRecord = {
+      ...state,
+      status: "reviewed",
+      result: "exited",
+      exitStatus: 2,
+      openThreads: ["PRRT_old"],
+      round: { number: 1, startedAt: 1_790_998_000, endedAt: 1_790_998_400, reviewer: { backend: "detached" } },
+      newFindings: 1,
+    };
+    const closed = closedCleanOn(EARLIER_HEAD);
+    seed(fixture.episode, { ...closed, records: [earlier, ...(closed.records ?? [])] });
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.deepEqual(result.decision, { outcome: "queue", startHost: true }, "the head's old record was taken for the new episode's result");
+    assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }]);
+    const [archive] = archivedEpisodes(fixture.episode);
+    const read = archive === undefined ? undefined : readState(archive);
+    assert.deepEqual(read?.outcome === "read" ? read.state.records?.[0] : read, earlier, "the closed episode's record of the head was lost");
   });
 });
 

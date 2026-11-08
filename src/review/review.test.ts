@@ -402,6 +402,27 @@ test("#832: a run whose state's round closed the episode clean, archived by a ne
   });
 });
 
+test("#832: a run its trigger found closed clean, whose episode a new head archived before the run read it, prints that close and not the new episode", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(1) }], {
+      closeReported: true,
+      cleanClose: OWN,
+      rounds: [ROUND],
+    });
+    const read = readState(fixture.episode);
+    assert.equal(archiveEpisode(fixture.episode, read.outcome === "read" ? read.state : assert.fail("no state")).outcome, "archived");
+    records(fixture, [reviewing(LATER)]);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }) }));
+
+    assert.equal(printed.exit, 0, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz's review of PR #41 closed at 3f9c2e0 after 1 round, with nothing open. Only a new head commit starts another review in this worktree.",
+    );
+  });
+});
+
 test("a state reviewed clean with the episode open returns the close the queue ends on", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [

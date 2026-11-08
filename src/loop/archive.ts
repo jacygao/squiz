@@ -16,8 +16,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
+import { unspent } from "../reviewers/adapter.ts";
 import type { EpisodeState } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
+import type { StateRecord } from "./state-record.ts";
 
 const ARCHIVES = "episodes";
 const ROUNDS = "rounds";
@@ -58,6 +60,23 @@ export function archiveEpisode(episode: Episode, closed: EpisodeState): Archived
   } catch (cause) {
     return { outcome: "failed", reason: `the closed episode could not be archived: ${cause instanceof Error ? cause.message : String(cause)}` };
   }
+}
+
+/**
+ * The state file of the episode that follows `closed`, holding `records`: no
+ * rounds and nothing spent, so it has its own round cap and token bound. The
+ * rulings carry over, because the threads they rule on stay on the change.
+ */
+export function nextEpisode(closed: EpisodeState, records: readonly StateRecord[]): EpisodeState {
+  return { rounds: [], spentOutsideRounds: unspent, ...(closed.rulings === undefined ? {} : { rulings: closed.rulings }), records };
+}
+
+/**
+ * Whether no round of `state` is recorded under review, so that archiving it
+ * hides no round from whatever recovers it.
+ */
+export function settled(state: EpisodeState): boolean {
+  return !(state.records ?? []).some((record) => record.status === "reviewing");
 }
 
 /**

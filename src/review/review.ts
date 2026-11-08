@@ -149,7 +149,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       case "closed": {
         const state = read();
         if (typeof state === "string") return notRun(state);
-        return print(closedResult(context, state, threads));
+        return print(closedResult(context, closedOf(episode, state), threads));
       }
       case "host-unknown":
         return notRun(`whether ${hostNamed()} for ${context.name} is still running could not be told: ${decision.reason}`);
@@ -256,6 +256,18 @@ function holding(episode: Episode, live: EpisodeState, own: StateKey): EpisodeSt
     if (read.outcome === "read" && recordFor(read.state.records ?? [], own) !== undefined) return read.state;
   }
   return live;
+}
+
+/**
+ * The state file of the close a trigger found: `live` where its close is
+ * recorded, and otherwise the newest archive, since a new head can start the next
+ * episode between the trigger's reading and this one.
+ */
+function closedOf(episode: Episode, live: EpisodeState): EpisodeState {
+  if (live.closeReported === true) return live;
+  const newest = archivedEpisodes(episode).at(-1);
+  const read = newest === undefined ? undefined : readState(newest);
+  return read?.outcome === "read" ? read.state : live;
 }
 
 /**

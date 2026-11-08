@@ -987,6 +987,27 @@ test("#832: a head queued after a clean close starts a new episode, archiving th
   assert.match(ran.status.stdout, new RegExp(`#${PULL_REQUEST} +${closedHead.slice(0, 7)} .* reviewed `, "u"), "squiz status must still list the closed episode");
 });
 
+test("#832: a clean close whose round's host died before recording it still starts a new episode for a new head", async () => {
+  let closedHead = "";
+  let newHead = "";
+  // A host that has gone: a pid with a start time no process has.
+  const gone = { pid: process.pid, startedAt: 1 };
+  const ran = await host({
+    records: (fixture) => {
+      closedHead = fixture.head();
+      newHead = fixture.push();
+      return [{ head: closedHead, activity: null, status: "reviewing", host: gone, round: { number: 1 } }, queued(newHead)];
+    },
+    rounds: [EARLIER_ROUND],
+    closeReported: true,
+    cleanClose: () => ({ head: closedHead, activity: null }),
+  });
+
+  assert.deepEqual(ran.reviewedCommits, [newHead], `the new head was not reviewed; the log says:\n${ran.log}`);
+  assert.equal(recordsOf(ran.state)[0]?.status, "reviewed");
+  assert.equal(ran.archives[0]?.records?.[0]?.status, "reviewing", "the dead host's record must stay readable in the archive");
+});
+
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {
   const ran = await host({ records: atHead, rounds: [EARLIER_ROUND], closeReported: true });
 

@@ -295,25 +295,32 @@ A second episode on the same pull request starts in another worktree on the same
 branch, which holds no state for it.
 
 **A clean close stays closed only for the head it reviewed.** A trigger whose
-state has another head treats the closed episode as having no record for it: it
-queues the state in the closed episode's state file, and starts a round host
-where none is running. New replies on the head the close reviewed are no new
-head, and queue nothing. A run of `squiz review` waits on the state it queued,
-as on any other.
+state has another head treats the closed episode as holding no finished record
+for it, even one an earlier round of that episode wrote, and queues the state
+for a new episode. It starts a round host where none is running. New replies on
+the head the close reviewed are no new head, and queue nothing. A run of `squiz
+review` waits on the state it queued, as on any other.
 
-**The round host starts the new episode in the update that takes the state.**
-Under `state.lock`, it finds the close clean, no round of the closed episode
-still under review, and a state queued whose head the close did not review. In
-that one update it:
+**The new episode starts in the update that queues or takes its first state.**
+Under `state.lock`, the trigger that queues the state starts it where no round of
+the closed episode is recorded under review. Otherwise the trigger queues the
+state in the closed episode's state file, and the round host starts the episode
+in the update that takes it, once the closed episode's round is recorded or its
+host has gone. Either way, that one update:
 
 1. Writes the closed episode's state file, less the states it carries over, to
-   the next `episodes/<n>/state.json`.
+   the next `episodes/<n>/state.json`. A round whose host has gone stays in it
+   as it was recorded.
 2. Moves `rounds/` to `episodes/<n>/rounds/`, and rewrites each round's
    `resume.txt` to name the session where it now is. It moves the local venue's
    `summary.md` to `episodes/<n>/summary.md`.
 3. Writes a fresh state file in its place: no rounds, nothing spent outside them,
    the reviewer's rulings carried over, and the queued states with a new head as
-   its records. It takes the oldest of them as round 1.
+   its records. The round host takes the oldest of them as round 1.
+
+A round host that finds the closed episode's round still under review by a host
+it cannot tell gone records each such state failed, naming that round and its
+host, and `squiz review` retries it as any failed state.
 
 The new episode has its own round cap and token bound, and posts its own summary
 when it closes. It reads the reviewer's threads from the change as any episode
@@ -322,17 +329,18 @@ Everything else in the directory belongs to the worktree and stays where it is:
 `notes/`, `host.log`, the locks, and the local venue's files other than
 `summary.md`. A queued state on the head the close reviewed is recorded not
 reviewed, as for any closed episode. Where the archive cannot be written, the
-state the host took is recorded failed with the reason, and the closed episode
-is left as it was.
+closed episode is left as it was: the trigger fails with the reason, and the
+round host records the state it took failed with it.
 
-`host.log` says where the closed episode went:
+Where the round host starts the episode, `host.log` says where the closed one
+went:
 
 ```
 2026-11-08T09:14:02.511Z a new episode starts on a head the clean close never reviewed: the closed one is in /work/squiz/.squiz/41/episodes/1
 ```
 
-A run of `squiz review` waiting on a state whose record moved into an archive
-before it read it reads the record there.
+A run of `squiz review` whose state's record, or whose close, moved into an
+archive before it read it reads it there.
 
 ### A round, step by step
 
