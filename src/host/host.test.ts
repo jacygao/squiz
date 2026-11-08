@@ -33,7 +33,7 @@ import { readState, writeState, type EpisodeState, type RoundRecord } from "../l
 import type { Episode } from "../loop/episode.ts";
 import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { putRecord, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
-import type { Rulings } from "../loop/episode-state.ts";
+import type { CleanClose, Rulings } from "../loop/episode-state.ts";
 import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { squizStatus } from "../review/status.ts";
@@ -113,9 +113,7 @@ type Arrangement = {
   readonly rounds?: readonly RoundRecord[];
   readonly closeReported?: boolean;
   /** The clean close on file, read once the records are made. */
-  readonly cleanClose?: () => StateKey;
-  /** The closed episode's records a returning head displaced, read once the records are made. */
-  readonly displaced?: () => readonly StateRecord[];
+  readonly cleanClose?: () => CleanClose;
   readonly rulings?: Rulings;
   /** What each reviewer start reports, in order. An empty review where there is none. */
   readonly findings?: readonly (readonly Finding[])[];
@@ -200,7 +198,6 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         ...(arranged.closeReported === undefined ? {} : { closeReported: arranged.closeReported }),
         records: arranged.records?.(fixture) ?? [],
         ...(arranged.cleanClose === undefined ? {} : { cleanClose: arranged.cleanClose() }),
-        ...(arranged.displaced === undefined ? {} : { displaced: arranged.displaced() }),
         ...(arranged.rulings === undefined ? {} : { rulings: arranged.rulings }),
       });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
@@ -759,7 +756,7 @@ test("#416: a reply-state queued behind a clean round and superseded by it, once
     supersededBy: { head, activity: null },
   });
   assert.equal(ran.state?.closeReported, true, "the episode was left open with nothing queued to close it");
-  assert.deepEqual(ran.state?.cleanClose, { head, activity: null }, "#832: a close on the clean round must record it as a clean close, or the next head is never reviewed");
+  assert.deepEqual(ran.state?.cleanClose, { head, activity: null, records: 2 }, "#832: a close on the clean round must record it as a clean close, or the next head is never reviewed");
   assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 1, `gh was asked for ${ran.kinds.join(", ")}`);
 });
 
@@ -966,7 +963,7 @@ test("#832: a head queued after a clean close starts a new episode, archiving th
     },
     rounds: [EARLIER_ROUND],
     closeReported: true,
-    cleanClose: () => ({ head: closedHead, activity: null }),
+    cleanClose: () => ({ head: closedHead, activity: null, records: 1 }),
     rulings: { PRRT_old: "fixed" },
   });
 
@@ -978,7 +975,7 @@ test("#832: a head queued after a clean close starts a new episode, archiving th
   assert.ok(record?.status === "reviewed" && record.result === "exited", `the new head is left as ${JSON.stringify(record)}`);
   assert.equal(record.head, newHead);
   assert.equal(record.round.number, 1);
-  assert.deepEqual(ran.state?.cleanClose, { head: newHead, activity: null }, "the new episode's own clean close");
+  assert.deepEqual(ran.state?.cleanClose, { head: newHead, activity: null, records: 1 }, "the new episode's own clean close");
   assert.deepEqual(ran.state?.rulings, { PRRT_old: "fixed" }, "the rulings on the threads the pull request still holds must carry over");
   assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 1, "the new episode posts its own summary when it closes");
 
@@ -989,28 +986,29 @@ test("#832: a head queued after a clean close starts a new episode, archiving th
   assert.match(ran.status.stdout, new RegExp(`#${PULL_REQUEST} +${closedHead.slice(0, 7)} .* reviewed `, "u"), "squiz status must still list the closed episode");
 });
 
-test("#832: a record a returning head displaced from the closed episode goes into its archive, and not into the new episode", async () => {
+test("#832: the archive keeps the closed episode's records in their order, and the new episode takes every state queued after the close in theirs", async () => {
+  let first = "";
   let closedHead = "";
-  let returning = "";
+  let newHead = "";
+  const blockedHead = "1b86987bb0c4d5e6f708192a3b4c5d6e7f8091a2";
   const ran = await host({
     records: (fixture) => {
-      returning = fixture.head();
+      first = fixture.head();
       closedHead = fixture.push();
-      // The pull request went back to the head the closed episode reviewed first.
-      execFileSync("git", ["reset", "--quiet", "--hard", returning], { cwd: fixture.episode.worktree });
-      writeFileSync(join(fixture.binaries, "answer-prlist"), readFileSync(join(fixture.binaries, "answer-prlist"), "utf8").replace(closedHead, returning), "utf8");
-      return [closedCleanOn(closedHead), queued(returning)];
+      newHead = fixture.push();
+      const earlier: StateRecord = { ...closedCleanOn(first), exitStatus: 2, openThreads: ["PRRT_old"] } as StateRecord;
+      const closing: StateRecord = { ...closedCleanOn(closedHead), round: { number: 2, startedAt: 1_790_999_500, endedAt: 1_790_999_600, reviewer: { backend: "detached" } } } as StateRecord;
+      const blocked: StateRecord = { head: blockedHead, activity: null, status: "failed", reason: "no review ran: blocked", ownerNoted: false };
+      return [earlier, closing, blocked, queued(newHead)];
     },
     rounds: [EARLIER_ROUND, EARLIER_ROUND],
     closeReported: true,
-    cleanClose: () => ({ head: closedHead, activity: null }),
-    displaced: () => [{ ...closedCleanOn(returning), exitStatus: 2, openThreads: ["PRRT_old"] }],
+    cleanClose: () => ({ head: closedHead, activity: null, records: 2 }),
   });
 
-  assert.deepEqual(ran.reviewedCommits, [returning], `the log says:\n${ran.log}`);
-  assert.equal(ran.state?.displaced, undefined, "the new episode must not keep the closed one's record");
-  assert.deepEqual(ran.archives[0]?.records?.map((record) => record.head), [closedHead, returning]);
-  assert.equal(ran.archives[0]?.displaced, undefined);
+  assert.deepEqual(ran.reviewedCommits, [newHead], `the log says:\n${ran.log}`);
+  assert.deepEqual(ran.archives[0]?.records?.map((record) => record.head), [first, closedHead], "the archive must hold the closed episode's records, oldest first");
+  assert.deepEqual(recordsOf(ran.state).map((record) => [record.head, record.status]), [[blockedHead, "failed"], [newHead, "reviewed"]]);
 });
 
 test("#832: a new head after a clean close whose round is still recorded under review is recorded failed, naming that round, so squiz review can retry it", async () => {
@@ -1026,7 +1024,7 @@ test("#832: a new head after a clean close whose round is still recorded under r
     },
     rounds: [EARLIER_ROUND],
     closeReported: true,
-    cleanClose: () => ({ head: closedHead, activity: null }),
+    cleanClose: () => ({ head: closedHead, activity: null, records: 1 }),
   });
 
   assert.equal(ran.started, 0, "a round ran over the closed episode's round, whose snapshot and reviewer may still stand");

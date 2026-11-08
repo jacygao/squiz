@@ -21,8 +21,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { latestActivity } from "../findings/activity.ts";
-import { archiveEpisode, nextEpisode, settled, type Archived } from "../loop/archive.ts";
-import { episodeOver, readState, reopensFor, type EpisodeState } from "../loop/episode-state.ts";
+import { episodeOver, readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { makeEpisodeDirectory } from "../loop/state-directory.ts";
 import { recordFor, sameState, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
@@ -134,7 +133,7 @@ export function trigger(request: TriggerRequest): Triggered {
   const read = readState(episode);
   if (read.outcome === "unreadable") return failed(read.reason);
   const found = read.outcome === "read" ? read.state : undefined;
-  const record = found === undefined ? undefined : standing(found, state);
+  const record = recordFor(found?.records ?? [], state);
 
   const decision = decideTrigger({
     closed: found !== undefined && episodeOver(found, state),
@@ -144,7 +143,6 @@ export function trigger(request: TriggerRequest): Triggered {
   });
 
   let queued = false;
-  let archived: Archived | undefined;
   if (decision.outcome === "queue") {
     const workspace = request.environment["HERDR_WORKSPACE_ID"];
     const fresh: StateRecord = {
@@ -157,33 +155,21 @@ export function trigger(request: TriggerRequest): Triggered {
     const updated = updateState(
       episode,
       (current) => {
-        archived = undefined;
-        const now = standing(current, state);
+        const now = recordFor(current.records ?? [], state);
         // A record or a close written since the read came from another trigger or
         // a host, and the decision no longer applies.
         if (episodeOver(current, state) || now?.status !== record?.status) return current;
-        // A head the clean close never reviewed starts a new episode here, where
-        // nothing of the closed one is queued or under review. Otherwise the round
-        // host starts it, with every state queued for it, when it takes the state.
-        if (reopensFor(current, state) && settled(current)) {
-          archived = archiveEpisode(episode, current);
-          if (archived.outcome === "failed") return current;
-          queued = true;
-          return nextEpisode(current, [fresh]);
-        }
         queued = true;
         // A failed state queued again goes on the end, as any state queued now
         // does, because the records' order is the order the rounds take them in.
+        // After a clean close this is never one of the closed episode's records,
+        // which no trigger queues, so they keep their places.
         const others = (current.records ?? []).filter((held) => !sameState(held, state));
-        // The closed episode's own result for this state is kept for its archive.
-        const replaced = recordFor(current.records ?? [], state);
-        const displaced = reopensFor(current, state) && replaced !== undefined ? { displaced: [...(current.displaced ?? []), replaced] } : {};
-        return { ...current, ...displaced, records: [...others, fresh] };
+        return { ...current, records: [...others, fresh] };
       },
       { until },
     );
     if (updated.outcome === "failed") return failed(updated.reason);
-    if (archived?.outcome === "failed") return failed(archived.reason);
   }
 
   // A host seen running before the queue was written can have found its queue
@@ -194,17 +180,6 @@ export function trigger(request: TriggerRequest): Triggered {
     (decision.outcome === "queue" && (decision.startHost || hostPresence(episode, undefined, request).outcome !== "running"));
   const host = needsHost ? startHost(request, episode) : ({ outcome: "not started" } as const);
   return { outcome: "decided", change, episode, state, threads: listed.threads, decision, ...(found === undefined ? {} : { read: found }), queued, host };
-}
-
-/**
- * The record that decides what the trigger does with `key`. A finished record of
- * a clean-closed episode on a head it did not close on belongs to that episode,
- * and the new one `key` starts holds none.
- */
-function standing(state: EpisodeState, key: StateKey): StateRecord | undefined {
-  const record = recordFor(state.records ?? [], key);
-  if (record === undefined || record.status === "queued" || record.status === "reviewing") return record;
-  return reopensFor(state, key) ? undefined : record;
 }
 
 /**

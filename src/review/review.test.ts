@@ -386,7 +386,7 @@ test("#832: a run whose state's round closed the episode clean, archived by a ne
       // new episode, all between two of the run's readings.
       records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(1) }], {
         closeReported: true,
-        cleanClose: OWN,
+        cleanClose: { ...OWN, records: 1 },
         rounds: [ROUND],
       });
       const read = readState(fixture.episode);
@@ -406,7 +406,7 @@ test("#832: a run its trigger found closed clean, whose episode a new head archi
   await withWorktree(async (fixture) => {
     records(fixture, [{ ...OWN, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(1) }], {
       closeReported: true,
-      cleanClose: OWN,
+      cleanClose: { ...OWN, records: 1 },
       rounds: [ROUND],
     });
     const read = readState(fixture.episode);

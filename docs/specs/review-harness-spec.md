@@ -93,9 +93,10 @@ round that failed closes nothing. It posts a failure comment under § 8, and the
 episode stays live.
 
 A close is **clean** where the round that closed it left nothing open and no
-state behind it not reviewed. A head the clean close never reviewed starts a
-new episode in the same worktree, as The state file sets out. Every other close
-is at the round cap or the token bound, and stays closed.
+state behind it not reviewed. A state the clean-closed episode never recorded,
+on a head other than the one the close reviewed, starts a new episode in the
+same worktree, as The state file sets out. Every other close is at the round cap
+or the token bound, and stays closed.
 
 ### The state file
 
@@ -294,37 +295,43 @@ new commit or reply queues nothing, and `squiz review` prints the close (§ 7).
 A second episode on the same pull request starts in another worktree on the same
 branch, which holds no state for it.
 
-**A clean close stays closed only for the head it reviewed.** A trigger whose
-state has another head treats the closed episode as holding no finished record
-for it, even one an earlier round of that episode wrote, and queues the state
-for a new episode. Where the queued record replaces such a record in the closed
-episode's state file, the file keeps the one it replaced under `displaced`, and
-the archive holds it among the closed episode's records. The trigger starts a
-round host where none is running. New replies on
-the head the close reviewed are no new head, and queue nothing. A run of `squiz
-review` waits on the state it queued, as on any other.
+**A clean close stays closed for the head it reviewed, and for every state it
+recorded.** The clean close records how many of the state file's records are the
+closed episode's. A trigger acts on any other state as follows:
 
-**The new episode starts in the update that queues or takes its first state.**
-Under `state.lock`, the trigger that queues the state starts it where nothing of
-the closed episode is queued or under review. Otherwise the trigger queues the
-state in the closed episode's state file, and the round host starts the episode
-in the update that takes it, carrying every state queued with a new head. Either
-way, that one update:
+- **No record, on a head other than the one the close reviewed:** the trigger
+  queues the state after the closed episode's records, for a new episode, and
+  starts a round host where none is running. A run of `squiz review` waits on it,
+  as on any other state.
+- **A record the closed episode wrote, on another head**, as a force-push back to
+  a head it reviewed leaves the pull request: the trigger queues nothing, and
+  `squiz review` returns that record's result, which names its own head.
+- **A record queued after the close:** the trigger acts on it as on any record. A
+  hook leaves a failed one failed, and `squiz review` queues it again.
+- **New replies on the head the close reviewed**, and a failed record the closed
+  episode wrote: the trigger queues nothing, and `squiz review` prints the close.
 
-1. Writes the closed episode's state file, less the states it carries over, to
-   the next `episodes/<n>/state.json`.
+No trigger queues a state the closed episode recorded, so its records keep their
+places, and every record after them is the next episode's.
+
+**The round host starts the new episode in the update that takes its first
+state.** Under `state.lock`, it finds the close clean and a state queued after
+the closed episode's records. In that one update it:
+
+1. Writes the closed episode's state file, holding the closed episode's records
+   in their order, to the next `episodes/<n>/state.json`.
 2. Moves `rounds/` to `episodes/<n>/rounds/`, and rewrites each round's
    `resume.txt` to name the session where it now is. It moves the local venue's
    `summary.md` to `episodes/<n>/summary.md`.
 3. Writes a fresh state file in its place: no rounds, nothing spent outside them,
-   the reviewer's rulings carried over, and the queued states with a new head as
-   its records. The round host takes the oldest of them as round 1.
+   the reviewer's rulings carried over, and every record after the closed
+   episode's, in their order. It takes the oldest queued one as round 1.
 
 A round host that finds a round of the closed episode still recorded under
 review starts no new episode, because that round's reviewer may still run and
 its snapshot stands at the path the new round of that number takes. It records
-each state with a new head failed, and `squiz review` retries it as any failed
-state:
+each state queued after the close failed, and `squiz review` retries it as any
+failed state:
 
 ```
 no review ran: round 1 of the closed episode is still recorded under review by round host 4242
@@ -335,16 +342,13 @@ when it closes. It reads the reviewer's threads from the change as any episode
 does, so the closed episode's threads, and the rulings on them, are part of it.
 Everything else in the directory belongs to the worktree and stays where it is:
 `notes/`, `host.log`, the locks, and the local venue's files other than
-`summary.md`. A queued state on the head the close reviewed is recorded not
-reviewed, as for any closed episode. Where the archive cannot be written, the
-closed episode is left as it was: the trigger fails with the reason, and the
-round host records the state it took failed with it.
+`summary.md`. Where the archive cannot be written, the closed episode is left as
+it was, and the round host records the state it took failed with the reason.
 
-Where the round host starts the episode, `host.log` says where the closed one
-went:
+`host.log` says where the closed episode went:
 
 ```
-2026-11-08T09:14:02.511Z a new episode starts on a head the clean close never reviewed: the closed one is in /work/squiz/.squiz/41/episodes/1
+2026-11-08T09:14:02.511Z a new episode starts on a state the clean close never recorded: the closed one is in /work/squiz/.squiz/41/episodes/1
 ```
 
 A run of `squiz review` whose state's record, or whose close, moved into an
@@ -369,13 +373,12 @@ archive before it read it reads it there.
    Where it is a draft, `squiz review` exits 0 and prints one line on stdout
    saying so (§ 7 `squiz review`), and the hooks say nothing. Once it is marked
    ready for review, the next trigger queues its state as it would any other.
-2. **Gate on the episode.** An episode that has reported its close is over for
-   every state, except one whose head a clean close never reviewed: `squiz
-   review` prints the close, naming the head it was about, and exits as the close
-   did, whatever the round cap or the token bound would now allow. A head a
-   clean close never reviewed is queued, and starts a new episode (The state
-   file). Otherwise the record for the pull request's state decides whether it
-   is queued.
+2. **Gate on the episode.** An episode that has reported its close is over:
+   `squiz review` prints the close, naming the head it was about, and exits as
+   the close did, whatever the round cap or the token bound would now allow.
+   After a clean close, a state on another head is the exception, and is
+   queued or reported from its record as The state file sets out. Otherwise the
+   record for the pull request's state decides whether it is queued.
 3. **Run the reviewer.** The round host starts the reviewer in a session of its
    own (§ 5). It hands the reviewer the pull request and the threads the reviewer
    opened on it, in a snapshot of the state's head commit.
@@ -2571,8 +2574,8 @@ Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` a
 A run on an episode that has already closed, exit 0 or 3 as the close was. The
 line names the head of the state the close was reached on, because it can be
 another head than the one the run read. A clean close is printed this way only
-for its own head, since any other head starts a new episode (§ 3 The state
-file):
+for its own head and for a failed state it recorded, since any other state starts
+a new episode or is reported from its record (§ 3 The state file):
 
 ```
 Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt

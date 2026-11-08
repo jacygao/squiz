@@ -17,9 +17,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join, relative } from "node:path";
 
 import { unspent } from "../reviewers/adapter.ts";
-import type { EpisodeState } from "./episode-state.ts";
+import { closedRecords, type EpisodeState } from "./episode-state.ts";
 import type { Episode } from "./episode.ts";
-import type { StateRecord } from "./state-record.ts";
 
 const ARCHIVES = "episodes";
 const ROUNDS = "rounds";
@@ -62,21 +61,26 @@ export function archiveEpisode(episode: Episode, closed: EpisodeState): Archived
   }
 }
 
-/**
- * The state file of the episode that follows `closed`, holding `records`: no
- * rounds and nothing spent, so it has its own round cap and token bound. The
- * rulings carry over, because the threads they rule on stay on the change.
- */
-export function nextEpisode(closed: EpisodeState, records: readonly StateRecord[]): EpisodeState {
-  return { rounds: [], spentOutsideRounds: unspent, ...(closed.rulings === undefined ? {} : { rulings: closed.rulings }), records };
-}
+export type NextEpisode =
+  | { readonly outcome: "started"; readonly state: EpisodeState; readonly directory: string }
+  | { readonly outcome: "failed"; readonly reason: string };
 
 /**
- * Whether no state of `state` is queued or under review, so that archiving it
- * hides nothing a round host has still to take or finish.
+ * Archive the clean-closed episode `state` holds, and give the state file of the
+ * episode that follows it.
+ *
+ * The archive holds the closed episode's own records, in their order. The next
+ * episode holds every record queued after the close, in theirs, with no rounds
+ * and nothing spent, so it has its own round cap and token bound. The rulings
+ * carry over, because the threads they rule on stay on the change.
  */
-export function settled(state: EpisodeState): boolean {
-  return !(state.records ?? []).some((record) => record.status === "reviewing" || record.status === "queued");
+export function startNextEpisode(episode: Episode, state: EpisodeState): NextEpisode {
+  const closed = closedRecords(state);
+  const archived = archiveEpisode(episode, { ...state, records: closed });
+  if (archived.outcome === "failed") return archived;
+  const records = (state.records ?? []).slice(closed.length);
+  const next: EpisodeState = { rounds: [], spentOutsideRounds: unspent, ...(state.rulings === undefined ? {} : { rulings: state.rulings }), records };
+  return { outcome: "started", state: next, directory: archived.directory };
 }
 
 /**

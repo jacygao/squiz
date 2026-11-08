@@ -14,7 +14,7 @@ const CLOSED: EpisodeState = {
   rounds: [{ reviewer: "pi", elapsedSeconds: 3, head: "3f9c2e0aa", raised: 0, ruled: { fixed: 0, withdrawn: 0, open: 0 } }],
   spentOutsideRounds: unspent,
   closeReported: true,
-  cleanClose: { head: "3f9c2e0aa", activity: null },
+  cleanClose: { head: "3f9c2e0aa", activity: null, records: 1 },
   records: [
     {
       head: "3f9c2e0aa",
@@ -85,7 +85,7 @@ test("#832: each closed episode is archived under the next number, and the archi
   const episode = closedLocalEpisode(t);
   assert.equal(archiveEpisode(episode, CLOSED).outcome, "archived");
   mkdirSync(join(episode.directory, "rounds", "1"), { recursive: true });
-  const second: EpisodeState = { ...CLOSED, cleanClose: { head: "1b86987bb", activity: null } };
+  const second: EpisodeState = { ...CLOSED, cleanClose: { head: "1b86987bb", activity: null, records: 1 } };
 
   assert.deepEqual(archiveEpisode(episode, second), { outcome: "archived", directory: join(episode.directory, "episodes", "2") });
 

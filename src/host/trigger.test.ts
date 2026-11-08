@@ -487,7 +487,7 @@ test("a closed episode queues nothing, even for a state it never saw", async () 
 function closedCleanOn(head: string): Partial<EpisodeState> {
   return {
     closeReported: true,
-    cleanClose: { head, activity: null },
+    cleanClose: { head, activity: null, records: 1 },
     rounds: [{ ...ROUND_AT_CAP, head }],
     records: [{
       head,
@@ -517,7 +517,7 @@ test("#832: a hook after a clean close queues a head the close never reviewed in
   });
 });
 
-test("#832: a head the closed episode reviewed before its clean close, on another head, is queued for a new episode, and its old record is archived", async () => {
+test("#832: a state the closed episode recorded before its clean close, on another head, is reported from its record and queues nothing", async () => {
   await withFixture(async (fixture) => {
     const earlier: StateRecord = {
       ...state,
@@ -529,39 +529,33 @@ test("#832: a head the closed episode reviewed before its clean close, on anothe
       newFindings: 1,
     };
     const closed = closedCleanOn(EARLIER_HEAD);
-    seed(fixture.episode, { ...closed, records: [earlier, ...(closed.records ?? [])] });
+    const held = [earlier, ...(closed.records ?? [])];
+    seed(fixture.episode, { ...closed, cleanClose: { head: EARLIER_HEAD, activity: null, records: 2 }, records: held });
 
     const result = decided(trigger(request(fixture)));
 
-    assert.deepEqual(result.decision, { outcome: "queue", startHost: true }, "the head's old record was taken for the new episode's result");
-    assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }]);
-    const [archive] = archivesIn(fixture.episode);
-    const read = archive === undefined ? undefined : readState(archive);
-    assert.deepEqual(read?.outcome === "read" ? read.state.records?.[0] : read, earlier, "the closed episode's record of the head was lost");
+    assert.deepEqual(result.decision, { outcome: "result" }, "a force-push back to a head the closed episode reviewed must be reported from that head's record");
+    assert.deepEqual(records(fixture.episode), held);
+    assert.deepEqual(archivesIn(fixture.episode), []);
   });
 });
 
-test("#832: a head the closed episode reviewed, queued again while its clean close is still posting, keeps its earlier record for the archive", async () => {
+test("#832: a hook after a blocked new episode leaves the new head failed, and only squiz review queues it again", async () => {
   await withFixture(async (fixture) => {
-    const earlier: StateRecord = {
-      ...state,
-      status: "reviewed",
-      result: "exited",
-      exitStatus: 2,
-      openThreads: ["PRRT_old"],
-      round: { number: 1, startedAt: 1_790_998_000, endedAt: 1_790_998_400, reviewer: { backend: "detached" } },
-      newFindings: 1,
-    };
-    const closing: StateRecord = { head: EARLIER_HEAD, activity: null, status: "reviewing", host: ownIdentity(), round: { number: 2 } };
-    seed(fixture.episode, { ...closedCleanOn(EARLIER_HEAD), records: [earlier, closing] });
+    const blocked: StateRecord = { ...state, status: "failed", reason: "no review ran: round 1 of the closed episode is still recorded under review by round host 4242", ownerNoted: true };
+    const closed = closedCleanOn(EARLIER_HEAD);
+    seed(fixture.episode, { ...closed, records: [...(closed.records ?? []), blocked] });
 
-    const result = decided(trigger(request(fixture)));
+    const hooked = decided(trigger(request(fixture)));
 
-    assert.equal(result.queued, true);
-    const read = readState(fixture.episode);
-    const held = read.outcome === "read" ? read.state : assert.fail(JSON.stringify(read));
-    assert.deepEqual(held.records, [closing, { ...state, status: "queued" }]);
-    assert.deepEqual(held.displaced, [earlier], "the closed episode's record of the head was overwritten with nowhere to go");
+    assert.deepEqual(hooked.decision, { outcome: "left-failed" }, "a hook retried a failure only squiz review may retry");
+    assert.equal(records(fixture.episode).at(-1)?.status, "failed");
+
+    const retried = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
+
+    assert.equal(retried.queued, true);
+    assert.deepEqual(records(fixture.episode).at(-1), { ...state, status: "queued" });
+    assert.equal(records(fixture.episode).length, 2, "the retry moved the closed episode's own record");
   });
 });
 

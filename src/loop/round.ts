@@ -1257,7 +1257,7 @@ function endUnderLock(
       // new head. One at the cap or the token bound stays closed.
       const { record } = ends;
       const clean = record.result === "exited" && record.exitStatus === 0 && ends.leftNotReviewed === null;
-      return { ...kept, closeReported: true, ...(clean ? { cleanClose: { head: record.head, activity: record.activity } } : {}) };
+      return { ...kept, closeReported: true, ...(clean ? { cleanClose: { head: record.head, activity: record.activity, records: (kept.records ?? []).length } } : {}) };
     },
     { until: lockWait(until) },
   );
@@ -1407,7 +1407,7 @@ function supersededBy(
       if (current.rounds.length > record.round.number) return current;
       if (threads.some((thread) => !thread.isResolved)) return current;
       clean = record;
-      return { ...current, closeReported: true, cleanClose: { head: record.head, activity: record.activity } };
+      return { ...current, closeReported: true, cleanClose: { head: record.head, activity: record.activity, records: records.length } };
     },
     { until: lockWait(reserve) },
   );
