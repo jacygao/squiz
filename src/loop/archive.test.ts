@@ -89,7 +89,8 @@ test("#832: each closed episode is archived under the next number, and the archi
 
   assert.deepEqual(archiveEpisode(episode, second), { outcome: "archived", directory: join(episode.directory, "episodes", "2") });
 
-  const listed = archivedEpisodes(episode);
+  const found = archivedEpisodes(episode);
+  const listed = found.outcome === "listed" ? found.episodes : assert.fail(found.reason);
   assert.deepEqual(listed.map((archive) => archive.directory), [join(episode.directory, "episodes", "1"), join(episode.directory, "episodes", "2")]);
   assert.deepEqual(listed.map((archive) => archive.key), [LOCAL_KEY, LOCAL_KEY]);
   assert.deepEqual(readState(listed[1] ?? assert.fail("no second archive")), { outcome: "read", state: second });
@@ -97,5 +98,15 @@ test("#832: each closed episode is archived under the next number, and the archi
 
 test("#832: an episode never archived lists no archives", (t) => {
   const episode = closedLocalEpisode(t);
-  assert.deepEqual(archivedEpisodes(episode), []);
+  assert.deepEqual(archivedEpisodes(episode), { outcome: "listed", episodes: [] });
+});
+
+test("#832: archives that cannot be listed are a failure, never no archives", (t) => {
+  const episode = closedLocalEpisode(t);
+  writeFileSync(join(episode.directory, "episodes"), "not a directory");
+
+  const listed = archivedEpisodes(episode);
+
+  assert.equal(listed.outcome, "failed", "an unreadable archive directory read as none would hide every closed episode");
+  assert.match(listed.outcome === "failed" ? listed.reason : "", /episodes could not be listed: ENOTDIR/u);
 });

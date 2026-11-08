@@ -410,10 +410,15 @@ test("#832: a run its trigger found closed clean, whose episode a new head archi
       rounds: [ROUND],
     });
     const read = readState(fixture.episode);
-    assert.equal(archiveEpisode(fixture.episode, read.outcome === "read" ? read.state : assert.fail("no state")).outcome, "archived");
-    records(fixture, [reviewing(LATER)]);
+    const closed = read.outcome === "read" ? read.state : assert.fail("no state");
+    assert.equal(archiveEpisode(fixture.episode, closed).outcome, "archived");
+    // The episode that replaced it has closed too, at the cap.
+    records(fixture, [{ ...LATER, status: "reviewed", result: "exited", exitStatus: 3, openThreads: [], closedAt: "round cap", newFindings: 0, round: ran(1) }], {
+      closeReported: true,
+      rounds: [ROUND],
+    });
 
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }) }));
+    const printed = await runReview(request(fixture, { triggered: { ...decided(fixture, { outcome: "closed" }), read: closed } as Triggered }));
 
     assert.equal(printed.exit, 0, printed.stdout + printed.stderr);
     assert.equal(

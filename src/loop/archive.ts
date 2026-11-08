@@ -72,39 +72,53 @@ export function nextEpisode(closed: EpisodeState, records: readonly StateRecord[
 }
 
 /**
- * Whether no round of `state` is recorded under review, so that archiving it
- * hides no round from whatever recovers it.
+ * Whether no state of `state` is queued or under review, so that archiving it
+ * hides nothing a round host has still to take or finish.
  */
 export function settled(state: EpisodeState): boolean {
-  return !(state.records ?? []).some((record) => record.status === "reviewing");
+  return !(state.records ?? []).some((record) => record.status === "reviewing" || record.status === "queued");
 }
 
 /**
  * Each closed episode archived under `episode`, oldest first, as an episode of
  * its own whose state file and rounds are read as a live one's are.
  *
- * None where nothing was archived or the archives cannot be listed.
+ * None where nothing was archived. Archives that are there and cannot be
+ * listed are a failure, because reading them as none hides every closed episode.
  */
-export function archivedEpisodes(episode: Episode): readonly Episode[] {
+export function archivedEpisodes(episode: Episode): ArchivesListing {
   const archives = join(episode.directory, ARCHIVES);
-  return numbersIn(archives)
+  let numbers: number[];
+  try {
+    numbers = numbersIn(archives);
+  } catch (cause) {
+    return { outcome: "failed", reason: `${archives} could not be listed: ${cause instanceof Error ? cause.message : String(cause)}` };
+  }
+  const episodes = numbers
     .sort((one, other) => one - other)
     .map((number) => {
       const directory = join(archives, String(number));
       return { worktree: episode.worktree, key: episode.key, directory, stateFile: join(directory, STATE_FILE) };
     });
+  return { outcome: "listed", episodes };
 }
+
+export type ArchivesListing =
+  | { readonly outcome: "listed"; readonly episodes: readonly Episode[] }
+  | { readonly outcome: "failed"; readonly reason: string };
 
 function highestIn(archives: string): number {
   return Math.max(0, ...numbersIn(archives));
 }
 
+/** The archives' numbers, none where there is no archive directory. Throws what any other failure to list it throws. */
 function numbersIn(archives: string): number[] {
   let names: string[];
   try {
     names = readdirSync(archives);
-  } catch {
-    return [];
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return [];
+    throw cause;
   }
   return names.filter((name) => /^[1-9][0-9]*$/u.test(name)).map(Number);
 }

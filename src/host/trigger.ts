@@ -85,6 +85,12 @@ export type Triggered =
       readonly threads: readonly ReviewThread[];
       /** A `recover` decision is returned as it is, with nothing recovered. */
       readonly decision: TriggerDecision;
+      /**
+       * The state file the decision was made from, where there was one. A
+       * close is printed from it, because a new head can archive that episode
+       * before the caller reads the file again.
+       */
+      readonly read?: EpisodeState;
       /** False where another trigger queued the state first. */
       readonly queued: boolean;
       /** A host that exited at once found another holding the lock, which is no failure. */
@@ -157,8 +163,8 @@ export function trigger(request: TriggerRequest): Triggered {
         // a host, and the decision no longer applies.
         if (episodeOver(current, state) || now?.status !== record?.status) return current;
         // A head the clean close never reviewed starts a new episode here, where
-        // no round of the closed one is still under review. Otherwise the round
-        // host starts it when it takes the state.
+        // nothing of the closed one is queued or under review. Otherwise the round
+        // host starts it, with every state queued for it, when it takes the state.
         if (reopensFor(current, state) && settled(current)) {
           archived = archiveEpisode(episode, current);
           if (archived.outcome === "failed") return current;
@@ -184,7 +190,7 @@ export function trigger(request: TriggerRequest): Triggered {
     decision.outcome === "start-host" ||
     (decision.outcome === "queue" && (decision.startHost || hostPresence(episode, undefined, request).outcome !== "running"));
   const host = needsHost ? startHost(request, episode) : ({ outcome: "not started" } as const);
-  return { outcome: "decided", change, episode, state, threads: listed.threads, decision, queued, host };
+  return { outcome: "decided", change, episode, state, threads: listed.threads, decision, ...(found === undefined ? {} : { read: found }), queued, host };
 }
 
 /**

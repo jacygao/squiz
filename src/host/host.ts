@@ -57,7 +57,7 @@ import {
 import { updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
-import { stillRunning, type ProcessIdentity } from "../sessions/process.ts";
+import type { ProcessIdentity } from "../sessions/process.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote, threadsToPrint } from "./owner-note.ts";
 import { wakeOwner } from "./wake.ts";
@@ -184,13 +184,12 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       if (state.closeReported === true) {
         const reopening = queuedIn(state).filter((record) => reopensFor(state, record));
         const carried = new Set<StateRecord>(reopening);
-        // A round of the closed episode whose host may still run it would lose
-        // its record to the archive. One whose host has gone is archived as it is.
-        const underway = (state.records ?? []).find(
-          (record) => record.status === "reviewing" && stillRunning(record.host, LOCK_BOUND_MS).outcome !== "gone",
-        );
+        // A round of the closed episode still recorded under review keeps its
+        // snapshot at the path the new episode's round of that number would use,
+        // and its reviewer may still run, so no new episode starts over it.
+        const underway = (state.records ?? []).find((record) => record.status === "reviewing");
         const blocked = underway?.status === "reviewing" && reopening.length > 0
-          ? `no review ran: round ${underway.round.number} of the closed episode is still under review by round host ${underway.host.pid}`
+          ? `no review ran: round ${underway.round.number} of the closed episode is still recorded under review by round host ${underway.host.pid}`
           : undefined;
         closed = inOrder(
           queuedIn(state)

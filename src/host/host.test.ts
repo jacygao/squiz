@@ -31,9 +31,8 @@ import { lockHolder } from "../sessions/lock-file.ts";
 import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
-import { githubEpisode } from "../testing/episode.ts";
+import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { putRecord, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
-import { archivedEpisodes } from "../loop/archive.ts";
 import type { Rulings } from "../loop/episode-state.ts";
 import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
@@ -267,7 +266,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       notes: notesIn(episode),
       delivered: deliveredIn(episode),
       resumes: resumesIn(episode),
-      archives: archivedEpisodes(episode).map((archive) => {
+      archives: archivesIn(episode).map((archive) => {
         const archived = readState(archive);
         return archived.outcome === "read" ? archived.state : null;
       }),
@@ -987,7 +986,7 @@ test("#832: a head queued after a clean close starts a new episode, archiving th
   assert.match(ran.status.stdout, new RegExp(`#${PULL_REQUEST} +${closedHead.slice(0, 7)} .* reviewed `, "u"), "squiz status must still list the closed episode");
 });
 
-test("#832: a clean close whose round's host died before recording it still starts a new episode for a new head", async () => {
+test("#832: a new head after a clean close whose round is still recorded under review is recorded failed, naming that round, so squiz review can retry it", async () => {
   let closedHead = "";
   let newHead = "";
   // A host that has gone: a pid with a start time no process has.
@@ -1003,9 +1002,11 @@ test("#832: a clean close whose round's host died before recording it still star
     cleanClose: () => ({ head: closedHead, activity: null }),
   });
 
-  assert.deepEqual(ran.reviewedCommits, [newHead], `the new head was not reviewed; the log says:\n${ran.log}`);
-  assert.equal(recordsOf(ran.state)[0]?.status, "reviewed");
-  assert.equal(ran.archives[0]?.records?.[0]?.status, "reviewing", "the dead host's record must stay readable in the archive");
+  assert.equal(ran.started, 0, "a round ran over the closed episode's round, whose snapshot and reviewer may still stand");
+  assert.deepEqual(ran.archives, []);
+  const left = recordsOf(ran.state)[1];
+  assert.ok(left?.status === "failed", `the new head was left ${JSON.stringify(left)}, which no retry takes`);
+  assert.equal(left.reason, `no review ran: round 1 of the closed episode is still recorded under review by round host ${process.pid}`);
 });
 
 test("the host runs no round for an episode whose close is recorded, and records its queued states not reviewed", async () => {

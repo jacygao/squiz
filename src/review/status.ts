@@ -129,7 +129,11 @@ export function collectStatus(worktrees: readonly string[], options: StatusOptio
       const named = episodeAt(options.venue, worktree, name);
       if (named.outcome === "failed") continue;
       // A closed episode a new one replaced is listed beside it, as an episode of its own.
-      for (const episode of [named.episode, ...archivedEpisodes(named.episode)]) {
+      const archives = archivedEpisodes(named.episode);
+      if (archives.outcome === "failed") {
+        problems.push(`the closed reviews of ${keyColumn(named.episode.key)} in ${worktree} could not be read: ${archives.reason}`);
+      }
+      for (const episode of [named.episode, ...(archives.outcome === "listed" ? archives.episodes : [])]) {
         const read = readState(episode);
         if (read.outcome === "absent") continue;
         if (read.outcome === "unreadable") {

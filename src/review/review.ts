@@ -147,9 +147,11 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     const { decision, threads, host } = triggered;
     switch (decision.outcome) {
       case "closed": {
-        const state = read();
+        // The close the trigger decided from, which a new head may have archived
+        // and a later episode replaced since.
+        const state = triggered.read ?? read();
         if (typeof state === "string") return notRun(state);
-        return print(closedResult(context, closedOf(episode, state), threads));
+        return print(closedResult(context, state, threads));
       }
       case "host-unknown":
         return notRun(`whether ${hostNamed()} for ${context.name} is still running could not be told: ${decision.reason}`);
@@ -164,7 +166,9 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
           items: [],
         });
       case "result": {
-        const state = read();
+        const live = read();
+        if (typeof live === "string") return notRun(live);
+        const state = holding(episode, live, context.own);
         if (typeof state === "string") return notRun(state);
         const settled = settle({ ...context, recorded: true }, state);
         return settled === undefined ? undefined : finish(settled, threads);
@@ -194,6 +198,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     const live = read();
     if (typeof live === "string") return notRun(live);
     const state = holding(episode, live, context.own);
+    if (typeof state === "string") return notRun(state);
     const settled = settle({ ...context, recorded: false }, state);
     if (settled !== undefined) {
       if (settled.kind === "result") return print(settled.result);
@@ -249,25 +254,17 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
  * the newest closed episode archived beside it that does. A round can close the
  * episode clean, and a new head start the next one, between two readings.
  */
-function holding(episode: Episode, live: EpisodeState, own: StateKey): EpisodeState {
+function holding(episode: Episode, live: EpisodeState, own: StateKey): EpisodeState | string {
   if (recordFor(live.records ?? [], own) !== undefined) return live;
-  for (const archive of [...archivedEpisodes(episode)].reverse()) {
+  const archives = archivedEpisodes(episode);
+  if (archives.outcome === "failed") return archives.reason;
+  for (const archive of [...archives.episodes].reverse()) {
     const read = readState(archive);
+    // An archive that does not read may be the one holding the record.
+    if (read.outcome === "unreadable") return read.reason;
     if (read.outcome === "read" && recordFor(read.state.records ?? [], own) !== undefined) return read.state;
   }
   return live;
-}
-
-/**
- * The state file of the close a trigger found: `live` where its close is
- * recorded, and otherwise the newest archive, since a new head can start the next
- * episode between the trigger's reading and this one.
- */
-function closedOf(episode: Episode, live: EpisodeState): EpisodeState {
-  if (live.closeReported === true) return live;
-  const newest = archivedEpisodes(episode).at(-1);
-  const read = newest === undefined ? undefined : readState(newest);
-  return read?.outcome === "read" ? read.state : live;
 }
 
 /**

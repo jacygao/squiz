@@ -302,15 +302,14 @@ the head the close reviewed are no new head, and queue nothing. A run of `squiz
 review` waits on the state it queued, as on any other.
 
 **The new episode starts in the update that queues or takes its first state.**
-Under `state.lock`, the trigger that queues the state starts it where no round of
-the closed episode is recorded under review. Otherwise the trigger queues the
+Under `state.lock`, the trigger that queues the state starts it where nothing of
+the closed episode is queued or under review. Otherwise the trigger queues the
 state in the closed episode's state file, and the round host starts the episode
-in the update that takes it, once the closed episode's round is recorded or its
-host has gone. Either way, that one update:
+in the update that takes it, carrying every state queued with a new head. Either
+way, that one update:
 
 1. Writes the closed episode's state file, less the states it carries over, to
-   the next `episodes/<n>/state.json`. A round whose host has gone stays in it
-   as it was recorded.
+   the next `episodes/<n>/state.json`.
 2. Moves `rounds/` to `episodes/<n>/rounds/`, and rewrites each round's
    `resume.txt` to name the session where it now is. It moves the local venue's
    `summary.md` to `episodes/<n>/summary.md`.
@@ -318,9 +317,15 @@ host has gone. Either way, that one update:
    the reviewer's rulings carried over, and the queued states with a new head as
    its records. The round host takes the oldest of them as round 1.
 
-A round host that finds the closed episode's round still under review by a host
-it cannot tell gone records each such state failed, naming that round and its
-host, and `squiz review` retries it as any failed state.
+A round host that finds a round of the closed episode still recorded under
+review starts no new episode, because that round's reviewer may still run and
+its snapshot stands at the path the new round of that number takes. It records
+each state with a new head failed, and `squiz review` retries it as any failed
+state:
+
+```
+no review ran: round 1 of the closed episode is still recorded under review by round host 4242
+```
 
 The new episode has its own round cap and token bound, and posts its own summary
 when it closes. It reads the reviewer's threads from the change as any episode
@@ -2718,7 +2723,7 @@ Where the round left threads open and the episode with them, nothing lists them.
 
 A state file that cannot be read gets a line of its own on stderr, naming the
 pull request, the worktree and what was wrong, and every other worktree is still
-listed. A worktree git lists that is gone from disk holds no records and prints
+listed. So does an `episodes/` directory that is there and cannot be listed. A worktree git lists that is gone from disk holds no records and prints
 nothing. Where nothing is recorded anywhere, stdout says so:
 
 ```

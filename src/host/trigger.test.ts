@@ -9,9 +9,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { renderComment, renderReply } from "../findings/comment.ts";
-import { archivedEpisodes } from "../loop/archive.ts";
 import type { Episode } from "../loop/episode.ts";
-import { githubEpisode } from "../testing/episode.ts";
+import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -536,9 +535,23 @@ test("#832: a head the closed episode reviewed before its clean close, on anothe
 
     assert.deepEqual(result.decision, { outcome: "queue", startHost: true }, "the head's old record was taken for the new episode's result");
     assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }]);
-    const [archive] = archivedEpisodes(fixture.episode);
+    const [archive] = archivesIn(fixture.episode);
     const read = archive === undefined ? undefined : readState(archive);
     assert.deepEqual(read?.outcome === "read" ? read.state.records?.[0] : read, earlier, "the closed episode's record of the head was lost");
+  });
+});
+
+test("#832: a new head after a clean close, with another new head already queued in the closed episode, is queued beside it for the round host", async () => {
+  await withFixture(async (fixture) => {
+    const waiting: StateRecord = { head: "9e01b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4", activity: null, status: "queued" };
+    const closed = closedCleanOn(EARLIER_HEAD);
+    seed(fixture.episode, { ...closed, records: [...(closed.records ?? []), waiting] });
+
+    const result = decided(trigger(request(fixture)));
+
+    assert.equal(result.queued, true);
+    assert.deepEqual(records(fixture.episode).slice(1), [waiting, { ...state, status: "queued" }], "a state already queued for the new episode was archived where no host takes it");
+    assert.deepEqual(archivesIn(fixture.episode), []);
   });
 });
 

@@ -21,10 +21,9 @@ import { fileURLToPath } from "node:url";
 
 import { renderComment, renderReply } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
-import { archivedEpisodes } from "../loop/archive.ts";
 import { readState, writeState, type EpisodeState } from "../loop/episode-state.ts";
 import type { Episode } from "../loop/episode.ts";
-import { githubEpisode } from "../testing/episode.ts";
+import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { standIn } from "../testing/stand-in.ts";
 import type { Plan, PlannedStart } from "../testing/host-fixture.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
@@ -811,7 +810,7 @@ test("the round at the cap is the closing round: it opens threads for new findin
     assert.equal(fixture.gh().issueComments.length, 1, "a second summary was posted");
     assert.equal(stateOf(fixture.episode).rounds.length, 2);
     assert.equal(stateOf(fixture.episode).records?.find((record) => record.head === pushed), undefined, "#832: a close at the cap queued the head pushed after it");
-    assert.deepEqual(archivedEpisodes(fixture.episode), [], "#832: a close at the cap started a new episode");
+    assert.deepEqual(archivesIn(fixture.episode), [], "#832: a close at the cap started a new episode");
   });
 });
 
@@ -965,7 +964,7 @@ test("#832: a push after a clean close starts a new episode in the same worktree
     assert.deepEqual(live.records?.map((record) => [record.head, record.status]), [[pushed, "reviewed"]]);
     assert.equal(live.rounds.length, 1, "the new episode must have a round cap of its own");
 
-    const [found, ...more] = archivedEpisodes(fixture.episode);
+    const [found, ...more] = archivesIn(fixture.episode);
     assert.deepEqual(more, []);
     const archive = found ?? assert.fail("the closed episode was not archived");
     const closed = stateOf(archive);
@@ -1018,6 +1017,6 @@ test("#832: new replies after a clean close, with the same head, start nothing, 
       `Squiz's review of PR #41 closed at ${head} after 2 rounds, with nothing open. Only a new head commit starts another review in this worktree.`,
     );
     assert.equal(started(fixture), 2, "a reply alone after a clean close started a round");
-    assert.deepEqual(archivedEpisodes(fixture.episode), []);
+    assert.deepEqual(archivesIn(fixture.episode), []);
   });
 });
