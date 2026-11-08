@@ -290,9 +290,11 @@ const malformed: readonly [string, unknown][] = [
   ["a not reviewed record with no reason", { head, activity: null, status: "not reviewed" }],
   // A close before the review leaves nothing for another round, so it never exits 2.
   ["a close before the review exiting 2", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 2, openThreads: [], closedAt: "round cap" } }],
-  ["a close before the review naming no bound", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, openThreads: [] } }],
-  ["a close before the review with no open threads listed", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, closedAt: "round cap" } }],
-  ["a close before the review whose problems are not strings", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, openThreads: [], closedAt: "round cap", problems: [1] } }],
+  // No round reviewed the state, so a close before the review never exits 0.
+  ["#844: a close before the review exiting 0", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 0, openThreads: [], closedAt: "round cap" } }],
+  ["a close before the review naming no bound", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 3, openThreads: [] } }],
+  ["a close before the review with no open threads listed", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 3, closedAt: "round cap" } }],
+  ["a close before the review whose problems are not strings", { head, activity: null, status: "not reviewed", reason: "r", closed: { exitStatus: 3, openThreads: [], closedAt: "round cap", problems: [1] } }],
 ];
 
 for (const [what, entry] of malformed) {

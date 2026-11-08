@@ -411,12 +411,12 @@ test("a close before a round took the run's state, with a thread open and its su
   assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: GitHub answered 502\n");
 });
 
-test("a close before a round took the run's state, with nothing open, exits 0", () => {
+test("#844: a close before a round took the run's state, with nothing open, exits 3 and says a person takes it from here", () => {
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
       key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
-      exit: 0,
+      exit: 3,
       state: "8d21a4f",
       reason: "the episode closed at the round cap before a round took this state",
       closedAt: "round cap",
@@ -426,23 +426,25 @@ test("a close before a round took the run's state, with nothing open, exits 0", 
     PATH,
   );
 
-  assert.equal(printed.exit, 0);
+  assert.equal(printed.exit, 3);
   assert.equal(
     printed.stdout,
     `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap before a round took this state.
 
-Nothing is open. The review is closed, and its summary is on the pull request.
+The round cap is reached. The review is closed with nothing open, and its summary
+is on the pull request. A person takes it from here, so do not run
+\`squiz review 41\` again.
 `,
   );
 });
 
-test("a close before any round ran, with no summary, says so on stderr and claims no summary on stdout", () => {
+test("#844: a close before any round ran, with no summary, says so on stderr and claims no summary on stdout, exit 3", () => {
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
       key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
-      exit: 0,
+      exit: 3,
       state: "3f9c2e0",
       reason: "the episode closed at the token bound before a round took this state",
       closedAt: "token bound",
@@ -453,13 +455,14 @@ test("a close before any round ran, with no summary, says so on stderr and claim
     PATH,
   );
 
-  assert.equal(printed.exit, 0);
+  assert.equal(printed.exit, 3);
   assert.equal(
     printed.stdout,
     `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz did not review PR #41 at 3f9c2e0: the episode closed at the token bound before a round took this state.
 
-Nothing is open, and the review is closed.
+The token bound is reached. The review is closed with nothing open. A person takes
+it from here, so do not run \`squiz review 41\` again.
 `,
   );
   assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: the episode closed before any round ran\n");
@@ -470,30 +473,53 @@ test("a state the close left unreviewed adds the line saying why", () => {
     reviewed({ exit: 3, commit: "3f9c2e0", round: 3, threads: [skewThread], notReviewed: { state: "8d21a4f" } }),
     PATH,
   );
-  const clean = composeReview(
-    reviewed({
-      exit: 0,
-      commit: "3f9c2e0",
-      round: 3,
-      notReviewed: { state: "8d21a4f", closedAt: "round cap" },
-    }),
+  const nothingOpen = composeReview(
+    reviewed({ exit: 3, commit: "3f9c2e0", round: 3, notReviewed: { state: "8d21a4f" } }),
     PATH,
   );
 
   const line =
     "Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.";
-  for (const printed of [atCap, clean]) {
+  for (const printed of [atCap, nothingOpen]) {
     assert.equal(printed.stdout.split("\n")[2], line, printed.stdout);
   }
+  assert.equal(nothingOpen.exit, 3);
+  assert.deepEqual(nothingOpen.stdout.split("\n").slice(3), [
+    "",
+    "The round cap is reached. The review is closed with nothing open, and its summary",
+    "is on the pull request. A person takes it from here, so do not run",
+    "`squiz review 41` again.",
+    "",
+  ]);
+});
+
+test("#844: a run on a close at a limit that never reviewed its state says so first, then the close", () => {
+  const printed = composeReview(
+    {
+      outcome: "closed", key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
+      exit: 3, rounds: 3, threads: [], commit: "8d21a4f", reopens: false,
+      unreviewed: { state: "3f9c2e0", reason: "the episode closed at the round cap, after reviewing 8d21a4f" },
+    },
+    PATH,
+  );
+
+  assert.equal(printed.exit, 3);
+  assert.equal(
+    printed.stdout,
+    `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz did not review PR #41 at 3f9c2e0: the episode closed at the round cap, after reviewing 8d21a4f.
+Squiz's review of PR #41 closed at 8d21a4f after 3 rounds, with nothing open. No round runs again in this worktree.
+`,
+  );
 });
 
 test("a state the close left unreviewed is printed as it was named, its different replies included", () => {
   const printed = composeReview(
     reviewed({
-      exit: 0,
+      exit: 3,
       commit: "3f9c2e0",
       round: 3,
-      notReviewed: { state: "3f9c2e0 with different replies", closedAt: "round cap" },
+      notReviewed: { state: "3f9c2e0 with different replies" },
     }),
     PATH,
   );
@@ -670,12 +696,13 @@ test("#820: every result that names the change calls it by its name, so the work
     summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
   } as const;
   const results: readonly ReviewResult[] = [
-    { ...named, outcome: "reviewed", exit: 0, commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads: [], recorded: false, notReviewed: { state: "3f9c2e0", closedAt: "round cap" } },
+    { ...named, outcome: "reviewed", exit: 3, closedAt: "round cap", commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads: [], recorded: false, notReviewed: { state: "3f9c2e0" } },
     { ...named, outcome: "reviewing", wait: "under review", commit: "3f9c2e0" },
     { ...named, outcome: "reviewing", wait: "queued", commit: "8d21a4f", reviewing: "3f9c2e0" },
     { ...named, outcome: "reviewing", wait: "clean", commit: "3f9c2e0", reviewing: "8d21a4f" },
     { ...named, outcome: "reviewing", wait: "superseded", commit: "3f9c2e0", reviewing: "8d21a4f" },
     { ...named, outcome: "closed", exit: 3, rounds: 1, threads: [skewThread], reopens: false },
+    { ...named, outcome: "closed", exit: 3, rounds: 3, threads: [], commit: "8d21a4f", reopens: false, unreviewed: { state: "3f9c2e0", reason: "the episode closed at the round cap, after reviewing 8d21a4f" } },
     { ...named, outcome: "closed unreviewed", exit: 3, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [skewThread], summarised: true },
     { ...named, outcome: "failed", reason: "the reviewer's output could not be read", items: [], comment: { posted: true } },
     { ...named, outcome: "failed", reason: "the reviewer's output could not be read", items: [], comment: { posted: false, reason: "the record could not be written" } },
@@ -721,7 +748,7 @@ test("#820: every result that says where the summary is gives the venue's place 
   const results: readonly ReviewResult[] = [
     { ...named, outcome: "reviewed", exit: 0, commit: "8d21a4f", round: 2, cap: 3, newFindings: 0, threads: [], recorded: false },
     { ...named, outcome: "reviewed", exit: 3, closedAt: "round cap", commit: "8d21a4f", round: 3, cap: 3, newFindings: 0, threads: [skewThread], recorded: false },
-    { ...named, outcome: "closed unreviewed", exit: 0, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [], summarised: true },
+    { ...named, outcome: "closed unreviewed", exit: 3, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [], summarised: true },
     { ...named, outcome: "closed unreviewed", exit: 3, state: "3f9c2e0", reason: "the episode closed at the round cap before a round took this state", closedAt: "round cap", threads: [skewThread], summarised: true },
   ];
 
