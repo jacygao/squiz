@@ -3409,7 +3409,7 @@ a review runs is outside that path.
 |---|---|---|
 | Replies on one of the reviewer's threads | The reply is activity: a new state, which the next round reviews. | § 3 The state file |
 | Opens a thread of their own | Nothing reads or answers it, and it never keeps the loop going. | § 5 Findings |
-| Resolves one of the reviewer's threads | Resolving it rules nothing. The summary counts the thread by the reviewer's last ruling on it, and as resolved, ruling unknown, where there is none. | § 6 |
+| Resolves one of the reviewer's threads | Resolving it rules nothing: it makes no finding `fixed` or `withdrawn`. § 6 says how the summary counts the thread. | § 6 |
 | Marks the pull request a draft | `squiz review` exits 0 with one line saying so, and the hooks say nothing. Once it is ready for review, the next trigger queues its state. | § 3 A round, step by step |
 | Closes the pull request | `squiz review` says no review ran, and why. | § 7 `squiz review` |
 | Checks out another branch in the worktree | `squiz review` says no review ran, naming the branch checked out. | § 3 A round, step by step |
