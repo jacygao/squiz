@@ -152,8 +152,8 @@ export type StateRecord = Shared &
  * round took the state, as `squiz review` prints it.
  */
 export type ClosedBeforeReview = {
-  /** No round remains after it, so it is never 2. */
-  readonly exitStatus: 0 | 3;
+  /** No round reviewed the state, so it is 3 whatever is open. */
+  readonly exitStatus: 3;
   /** The node ids of the reviewer's threads open as the close listed them. */
   readonly openThreads: readonly string[];
   readonly closedAt: ClosingBound;
@@ -396,8 +396,8 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
 function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {
   if (!isObject(found)) return { problem: `has "closed" as ${render(found)}` };
   const exitStatus = found["exitStatus"];
-  if (exitStatus !== 0 && exitStatus !== 3) {
-    return { problem: `has "closed.exitStatus" as ${render(exitStatus)} rather than 0 or 3` };
+  if (exitStatus !== 3) {
+    return { problem: `has "closed.exitStatus" as ${render(exitStatus)} rather than 3` };
   }
   const openThreads = found["openThreads"];
   if (!Array.isArray(openThreads) || !openThreads.every(isText)) {

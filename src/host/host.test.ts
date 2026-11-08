@@ -1145,14 +1145,14 @@ test("a host that finds the cap spent posts the summary, and records the close o
   );
 });
 
-test("a host that finds the bound spent before any round ran, with no thread of the reviewer's, records the close's missing summary", async () => {
+test("#844: a host that finds the bound spent before any round ran, with no thread of the reviewer's, records the close at exit 3 with its missing summary", async () => {
   const ran = await host({ records: atHead, config: { tokens: 1000 }, before: (fixture) => spendOutsideRounds(fixture.episode, 1000) });
 
   assert.deepEqual(ran.kinds, ["prlist", "threads"]);
   const [taken] = recordsOf(ran.state);
   assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
   assert.deepEqual(taken.closed, {
-    exitStatus: 0,
+    exitStatus: 3,
     openThreads: [],
     closedAt: "token bound",
     problems: [`the review of PR #${PULL_REQUEST} closed without its summary: the episode closed before any round ran`],

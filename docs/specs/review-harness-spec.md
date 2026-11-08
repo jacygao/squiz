@@ -211,7 +211,7 @@ commit, is queued behind it:
 |---|---|
 | Threads open, rounds remaining | B is reviewed next, as usual. |
 | Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. Where B is superseded by A, A is that round, as below. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
-| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. Its Notes name the cap or the bound and each state left not reviewed, whether A left threads open or nothing. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close, exit 0 or 3, with a line saying why B was not reviewed, and B's owner gets a note saying the same. |
+| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. Its Notes name the cap or the bound and each state left not reviewed, whether A left threads open or nothing. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close with a line saying why B was not reviewed, and exits 3, whether A left threads open or nothing. B's owner gets a note saying the same. |
 
 The line comes right after the heading of the close the run is handed:
 
@@ -374,11 +374,13 @@ archive before it read it reads it there.
    saying so (§ 7 `squiz review`), and the hooks say nothing. Once it is marked
    ready for review, the next trigger queues its state as it would any other.
 2. **Gate on the episode.** An episode that has reported its close is over:
-   `squiz review` prints the close, naming the head it was about, and exits as
-   the close did, whatever the round cap or the token bound would now allow.
-   After a clean close, a state on another head is the exception, and is
-   queued or reported from its record as The state file sets out. Otherwise the
-   record for the pull request's state decides whether it is queued.
+   `squiz review` prints the close, naming the head it was about, whatever the
+   round cap or the token bound would now allow. It exits as the close did for
+   the state a round reviewed, and 3 for a state no round reviewed, as § 7
+   `squiz review` sets out. After a clean close, a state on another head is the
+   exception, and is queued or reported from its record as The state file sets
+   out. Otherwise the record for the pull request's state decides whether it is
+   queued.
 3. **Run the reviewer.** The round host starts the reviewer in a session of its
    own (§ 5). It hands the reviewer the pull request and the threads the reviewer
    opened on it, in a snapshot of the state's head commit.
@@ -395,8 +397,10 @@ archive before it read it reads it there.
 6. **Close the episode.** Otherwise the round closes the episode, unless nothing
    is open and a later state is queued behind it, as The state file sets out. It
    records the close in the same update that read the queue, then posts one
-   summary comment. `squiz review` exits 0 where nothing is open, and 3 where the
-   cap or the token bound closed the episode with threads open.
+   summary comment. `squiz review` exits 0 for the state the round reviewed
+   where nothing is open. It exits 3 where the cap or the token bound closed the
+   episode with threads open, and for a state the close left not reviewed,
+   whatever is open.
 
 The coding agent replies on a thread to say what it changed, to disagree, or to
 ask a question, and never closes one. Only the reviewer's verdict closes a
@@ -2115,11 +2119,11 @@ under § 8 instead.
 **A run that finds the round cap or the token bound already spent closes the
 episode without running a reviewer**, as it does where a bound was lowered since
 the last round. It lists the episode's threads, posts the summary from them and
-from what the episode recorded, prints the open ones, and exits 3 where any are
-open and 0 where none are. Where the episode ran no round, because its failed
-attempts spent the token bound, and none of the reviewer's threads is on the
-pull request, it posts no summary, exits 0, and says on stderr that the episode
-closed before any round ran.
+from what the episode recorded, prints the open ones, and exits 3, whether any
+are open or none, because no round reviewed the state it took. Where the episode
+ran no round, because its failed attempts spent the token bound, and none of the
+reviewer's threads is on the pull request, it posts no summary, exits 3, and
+says on stderr that the episode closed before any round ran.
 
 **A state reviewed clean that closes the episode once the state behind it is
 superseded closes it without running a reviewer** (§ 3 The state file). The
@@ -2435,11 +2439,19 @@ invocation (§ 8). The exit status says what the coding agent does next:
 
 | Exit | What it means | What the coding agent does |
 |---|---|---|
-| 0 | Nothing of this review is open. The episode is closed, and its summary is on the pull request. Or the pull request is a draft, and no review runs until it is marked ready for review. | Finishes. |
+| 0 | A round reviewed this state, and nothing of this review is open. The episode is closed, and its summary is on the pull request. Or the pull request is a draft, and no review runs until it is marked ready for review. | Finishes. |
 | 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
-| 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. | Finishes, and says what is open. A person takes it from here. |
+| 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. Or it closed the episode before a round reviewed this state, and the output says so. | Finishes, and says what is open, or that the state was not reviewed. A person takes it from here. |
 | 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
 | Anything else | The review could not run. | Reports the lines on stderr. |
+
+**Exit 0 is given only for a state a round reviewed.** A close at the round cap
+or the token bound that answers for a state no round reviewed exits 3, whatever
+is open: the state the close was reached on before a round took it, a state
+queued behind the closing round, and a new commit or reply after the close. The
+run waiting on such a state and every later run on it exit 3 alike. A state
+superseded by one a round reviewed is answered by that state's result (§ 3 The
+state file).
 
 Exit 4 is neither an outcome nor a failure. Every status outside the table reads
 as 1 does, so a command that could not be started, or crashed past the
@@ -2538,6 +2550,32 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 Where the token bound closed the episode, the second paragraph begins "The token
 bound is reached" instead.
 
+Closed before a round reviewed the run's state, exit 3. The line saying why the
+state was not reviewed comes after the heading of the close, as § 3 The state
+file shows, and the second paragraph says "with nothing open" where nothing is:
+
+```
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz reviewed PR #41 at 3f9c2e0: round 3 of 3, no new findings.
+Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.
+
+The round cap is reached. The review is closed with nothing open, and its summary
+is on the pull request. A person takes it from here, so do not run
+`squiz review 41` again.
+```
+
+A close reached before any round took the run's state has no round to head it,
+so the line saying why is the heading. Where the close has no summary on the pull
+request, the paragraph does not claim one:
+
+```
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz did not review PR #41 at 3f9c2e0: the episode closed at the token bound before a round took this state.
+
+The token bound is reached. The review is closed with nothing open. A person takes
+it from here, so do not run `squiz review 41` again.
+```
+
 Still reviewing, exit 4. A run whose deadline arrived while its state's round
 ran:
 
@@ -2571,9 +2609,9 @@ Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
 Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.
 ```
 
-A run on an episode that has already closed, exit 0 or 3 as the close was. The
-line names the head of the state the close was reached on, because it can be
-another head than the one the run read. A clean close is printed this way only
+A run on an episode that has already closed prints the close. The line names
+the head of the state the close was reached on, because it can be another head
+than the one the run read. A clean close exits 0, and is printed this way only
 for its own head and for a failed state it recorded, since any other state starts
 a new episode or is reported from its record (§ 3 The state file):
 
@@ -2592,6 +2630,20 @@ Squiz's review of PR #41 closed at 77e0f19 after 3 rounds, with 2 threads open. 
 
 PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
   …
+```
+
+Such a close exits 0 for a state a round reviewed where nothing is open, and 3
+otherwise. Where no round reviewed the run's state, a line saying why comes
+first. It names the state as the run that waited on it was told. A state that
+arrived after the close is given the reason "the episode closed at the round
+cap, after reviewing" the head the closing round reviewed, or "the episode
+closed at the round cap before a round took this state" where no round closed
+it, with "the token bound" in place of "the round cap" where that closed it:
+
+```
+Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
+Squiz did not review PR #41 at 9a4b1c7: the episode closed at the round cap, after reviewing 3f9c2e0.
+Squiz's review of PR #41 closed at 3f9c2e0 after 3 rounds, with nothing open. No round runs again in this worktree.
 ```
 
 The review could not run, exit 1, on stderr. Every exit-1 output ends with the
@@ -3052,11 +3104,11 @@ The last column names the surfaces each path reaches.
 | The round's result cannot be recorded | The round host could not write what the round reached, after the round posted it. The host names the result and the reason, and exits. What the round posted stands. The reviewing record still names the host, so once the host has exited `squiz status` shows the round killed. A `squiz review` already waiting on the round sees no result and exits 4 at its deadline. A later run exits 1 saying the host stopped before its round ended, unless the round had closed the episode, which it then prints as closed. | `host.log`, `squiz status` |
 | A round's posting time or resume command cannot be written | The round's result stands. A round with no resume command shows `—` under Resume in `squiz status`. | `host.log` |
 | The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub answered or that the reserve was spent. Nothing is retried, because a second attempt would be a second comment. `squiz review` prints the line for the run that waited on the close, and for every later run on the closed episode, whether the close came after a review or before one. `squiz status` prints it under the line of a round that reviewed. `host.log` holds it after the close's own line, for a close before the review as well as after one. | `squiz review` stderr, `squiz status`, `host.log` |
-| The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 6 says: with the summary, the open threads and exit 3 or 0 where those attempts left any of the reviewer's threads, and with exit 0 and a line on stderr where they left none. | Summary's Notes, `squiz review` stderr |
+| The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 6 says, and exits 3 because no round reviewed the state: with the summary and the open threads where those attempts left any of the reviewer's threads, and with a line on stderr where they left none. | Summary's Notes, `squiz review` stderr |
 | The harness itself throws | A throw in a command is trapped at its top level, which writes one line on stderr. A throw inside a round fails the round: it is recorded failed with the throw as its reason, and posts no failure comment. `squiz review` exits 1. The hook exits 0, as it does on every path. A throw in the round host outside a round ends the host, and the round it held reads as killed. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | No wake reaches the owner of the work | The note stays in `.squiz/<number>/notes/`. The owner learns the result from `squiz review` or `squiz status`, and the pull request holds it. A note that cannot be written is reported the same way. | `host.log` |
-| The round cap is reached | Exit 3, or 0 where nothing is open. Findings still unresolved stay open, and the summary comment reports them. | Summary's Notes, `squiz status` |
-| The token bound is reached | Exit 3, or 0 where nothing is open. The episode closes without starting another round, and the summary comment reports that the bound was reached rather than reporting the round as one the reviewer failed. | Summary's Notes, `squiz status` |
+| The round cap is reached | Exit 3, or 0 for the state the closing round reviewed where nothing is open. Findings still unresolved stay open, and the summary comment reports them. | Summary's Notes, `squiz status` |
+| The token bound is reached | Exit 3, or 0 for the state the closing round reviewed where nothing is open. The episode closes without starting another round, and the summary comment reports that the bound was reached rather than reporting the round as one the reviewer failed. | Summary's Notes, `squiz status` |
 
 ### The failure comment
 

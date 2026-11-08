@@ -429,7 +429,7 @@ function closedUnreviewed(
     outcome: "closed unreviewed",
     key: waiting.key,
     name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt,
-    exit: closed.exitStatus,
+    exit: 3,
     state: names[left.findIndex((held) => sameState(held, record))] ?? record.head.slice(0, 7),
     reason: record.reason,
     closedAt: closed.closedAt,
@@ -495,7 +495,9 @@ function roundResult(
     case 2:
       return { ...base, exit: 2, followUp: waiting.followUp };
     case 0:
-      return { ...base, exit: 0, notReviewed: left };
+      // A close that left the run's own state unreviewed exits 3, though nothing is open.
+      if (left !== undefined) return { ...base, exit: 3, closedAt: left.closedAt, notReviewed: { state: left.state } };
+      return { ...base, exit: 0 };
     case 3:
       return {
         ...base,
@@ -520,17 +522,47 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
   const open = left.filter((thread) => !thread.isResolved);
   // Named, because the close can be about a head other than the one the run read.
   const head = state.cleanClose?.head ?? closing?.head ?? first?.head;
+  const unreviewed = state.cleanClose === undefined ? unreviewedBy(context, state, closing, first) : undefined;
   return {
     outcome: "closed",
     key: context.key,
     name: context.name, rerun: context.rerun, summaryAt: context.summaryAt,
-    exit: (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) === 0 ? 0 : 3,
+    exit: unreviewed !== undefined || (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) !== 0 ? 3 : 0,
     ...(head === undefined ? {} : { commit: head.slice(0, 7) }),
+    ...(unreviewed === undefined ? {} : { unreviewed }),
     reopens: state.cleanClose !== undefined,
     rounds: state.rounds.length,
     threads: left,
     problems: (closing === undefined ? first?.closed.problems : closing.problems) ?? [],
   };
+}
+
+/**
+ * The run's own state as a close at a bound left it, and why, or `undefined`
+ * where a round reviewed it. A state the close recorded is named and given its
+ * reason as the run that waited on it was. Any other arrived after the close.
+ */
+function unreviewedBy(
+  context: Context,
+  state: EpisodeState,
+  closing: Reviewed | undefined,
+  first: ClosedFirst | undefined,
+): { readonly state: string; readonly reason: string } | undefined {
+  const records = state.records ?? [];
+  const own = recordFor(records, context.own);
+  if (own?.status === "reviewed") return undefined;
+  if (own?.status === "not reviewed" && supersededName(own) === undefined) {
+    const left = records.filter((held) => held.status === "not reviewed" && held.reason === own.reason);
+    const name = namedStates(lastReviewed(records), left)[left.findIndex((held) => sameState(held, own))];
+    return { state: name ?? own.head.slice(0, 7), reason: own.reason };
+  }
+  const name = namedStates(null, [...records, context.own]).at(-1) ?? context.own.head.slice(0, 7);
+  const bound = closing?.closedAt ?? first?.closed.closedAt ?? (state.rounds.length >= context.cap ? "round cap" : "token bound");
+  const reason =
+    closing === undefined
+      ? `the episode closed at the ${bound} before a round took this state`
+      : `the episode closed at the ${bound}, after reviewing ${closing.head.slice(0, 7)}`;
+  return { state: name, reason };
 }
 
 /** Exit 4, saying what the run's state is waiting on. */

@@ -58,11 +58,7 @@ type RoundResult = Named & {
 
 type Open = RoundResult & { readonly exit: 2; readonly followUp: Change["followUp"] };
 
-type Clean = RoundResult & {
-  readonly exit: 0;
-  /** The run's own state, which the close left unreviewed, and what closed the episode. */
-  readonly notReviewed?: NotReviewed | undefined;
-};
+type Clean = RoundResult & { readonly exit: 0 };
 
 /**
  * A state the close left unreviewed. `state` is how it is printed: its short
@@ -71,6 +67,7 @@ type Clean = RoundResult & {
  */
 type NotReviewed = { readonly state: string; readonly closedAt: Bound };
 
+/** A close at a bound that left threads open, or that left the run's own state unreviewed. */
 type ClosedOpen = RoundResult & {
     readonly exit: 3;
     readonly closedAt: Bound;
@@ -103,15 +100,18 @@ type AlreadyClosed = Named & {
   readonly commit?: string;
   /** Whether a new head starts a new episode: true for a clean close, false for one at a bound. */
   readonly reopens: boolean;
+  /** The run's own state, where a close at a bound left it unreviewed, and why, as its record or the close says. */
+  readonly unreviewed?: { readonly state: string; readonly reason: string };
 };
 
 /**
  * A run whose own state the episode's spent cap or token bound stopped before a
- * round took it, handed the close, exiting as the close did.
+ * round took it, handed the close. No round reviewed the state, so it exits 3
+ * whatever is open.
  */
 type ClosedUnreviewed = Named & {
   readonly outcome: "closed unreviewed";
-  readonly exit: 0 | 3;
+  readonly exit: 3;
   /** The run's own state, as `namedStates` names it. */
   readonly state: string;
   /** Why the state was not reviewed, as its record says. */
@@ -256,7 +256,7 @@ function roundBlocks(result: Open | Clean | ClosedOpen): readonly string[] {
         result.followUp,
       ];
     case 0:
-      return [withNotReviewed(heading, result, result.notReviewed), nothingOpen(result.summaryAt)];
+      return [heading, nothingOpen(result.summaryAt)];
     case 3: {
       const unreviewed = result.notReviewed?.state;
       const notReviewed =
@@ -275,18 +275,20 @@ function nothingOpen(summaryAt: string): string {
 }
 
 /**
- * What a close at a bound with threads open tells the coding agent to do.
- * `summaryAt` is undefined where the close has no summary.
+ * What a close at a bound tells the coding agent to do, whether it left threads
+ * open or left the run's state unreviewed. `summaryAt` is undefined where the
+ * close has no summary.
  */
 function boundReached(closedAt: Bound, open: number, rerun: string, summaryAt: string | undefined): string {
+  const left = open === 0 ? "nothing" : counted(open, "thread");
   if (summaryAt === undefined) {
     return [
-      `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open. A person takes`,
+      `The ${closedAt} is reached. The review is closed with ${left} open. A person takes`,
       `it from here, so do not run \`${rerun}\` again.`,
     ].join("\n");
   }
   return [
-    `The ${closedAt} is reached. The review is closed with ${counted(open, "thread")} open, and its summary`,
+    `The ${closedAt} is reached. The review is closed with ${left} open, and its summary`,
     `is ${summaryAt}. A person takes it from here, so do not run`,
     `\`${rerun}\` again.`,
   ].join("\n");
@@ -295,9 +297,6 @@ function boundReached(closedAt: Bound, open: number, rerun: string, summaryAt: s
 function unreviewedBlocks(result: ClosedUnreviewed): readonly string[] {
   const heading = `Squiz did not review ${result.name} at ${result.state}: ${result.reason}.`;
   const open = result.threads.filter((thread) => !thread.isResolved);
-  if (result.exit === 0) {
-    return [heading, result.summarised ? nothingOpen(result.summaryAt) : "Nothing is open, and the review is closed."];
-  }
   return [
     heading,
     boundReached(result.closedAt, open.length, result.rerun, result.summarised ? result.summaryAt : undefined),
@@ -335,10 +334,11 @@ function closedBlocks(result: AlreadyClosed): readonly string[] {
   const left = open.length === 0 ? "nothing open" : `${counted(open.length, "thread")} open`;
   const at = result.commit === undefined ? "" : ` at ${result.commit}`;
   const next = result.reopens ? "Only a new head commit starts another review in this worktree." : "No round runs again in this worktree.";
-  return [
-    `Squiz's review of ${result.name} closed${at} after ${counted(result.rounds, "round")}, with ${left}. ${next}`,
-    ...open.map(printedThread),
-  ];
+  const close = `Squiz's review of ${result.name} closed${at} after ${counted(result.rounds, "round")}, with ${left}. ${next}`;
+  const { unreviewed } = result;
+  const heading =
+    unreviewed === undefined ? close : `Squiz did not review ${result.name} at ${unreviewed.state}: ${unreviewed.reason}.\n${close}`;
+  return [heading, ...open.map(printedThread)];
 }
 
 /** The reason the failure comment gives, each item it lists, then where it went. */

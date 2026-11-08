@@ -111,8 +111,7 @@ export function postEpisodeSummary(closing: EpisodeClose, venue: Venue, until: D
  * with none of the reviewer's threads on the pull request.
  *
  * There is nothing for a comment to report, so none is composed. The close still
- * says why there is none: it exits 0, where silence reads as a review that went
- * fine.
+ * says why there is none, where silence reads as a summary that was posted.
  */
 export const closedBeforeAnyRound: EpisodeSummary = {
   outcome: "never-composed",

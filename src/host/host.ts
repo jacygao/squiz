@@ -544,7 +544,7 @@ function closedUnreviewed(
   const reason = closedBeforeReview(bound);
   const problems = summaryProblems(change, conclusion.summary);
   const closed: ClosedBeforeReview = {
-    exitStatus: openThreads.length === 0 ? 0 : 3,
+    exitStatus: 3,
     openThreads,
     closedAt: bound === "token-bound" ? "token bound" : "round cap",
     ...(problems.length === 0 ? {} : { problems }),
