@@ -16,8 +16,9 @@ plugin for Claude Code and for the GitHub Copilot CLI.
 
 ## Prerequisites
 
-- `git`, and a repository with a GitHub remote.
-- `gh`, signed in (`gh auth login`).
+- `git`, and a repository with a GitHub remote. With the `local` venue, a
+  repository with no remote is enough.
+- `gh`, signed in (`gh auth login`). The `local` venue does not need it.
 - Node 24 or later.
 - Claude Code or the Copilot CLI, to run the coding agent.
 - [`pi`](https://github.com/earendil-works/pi#readme) or the Copilot CLI, to run
@@ -144,7 +145,8 @@ CLI is installed, a line after Claude Code's says whether its experimental
 features are on, and warns where they are off.
 
 `squiz status` lists the reviews running and finished in every worktree of the
-repository.
+repository. `squiz version` prints the version of the squiz that answers, and
+where it is.
 
 ## Contributing
 
