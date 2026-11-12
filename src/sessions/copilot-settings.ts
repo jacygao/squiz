@@ -5,7 +5,7 @@
  * Nothing here throws. Every outcome is a value the caller reads.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -39,6 +39,26 @@ export function userLogins(environment: NodeJS.ProcessEnv): UserSettings {
   if (read.outcome !== "read") return read;
   const logins = Object.fromEntries(LOGIN_FIELDS.filter((field) => field in read.settings).map((field) => [field, read.settings[field]]));
   return { ...read, settings: logins };
+}
+
+/**
+ * Write who the user is signed in to Copilot as into `home`'s `config.json`, so
+ * that Copilot under `home` finds their login in the system's credential store.
+ * Writes nothing where the user's own configuration names no login. Returns why
+ * it failed, or `undefined`.
+ */
+export function carryLogins(home: string, environment: NodeJS.ProcessEnv): string | undefined {
+  const read = userLogins(environment);
+  if (read.outcome === "absent") return undefined;
+  if (read.outcome === "unreadable") return read.problem;
+  if (Object.keys(read.settings).length === 0) return undefined;
+  const file = join(home, "config.json");
+  try {
+    writeFileSync(file, `${JSON.stringify(read.settings)}\n`, { encoding: "utf8", mode: 0o600 });
+  } catch (cause) {
+    return `who the user is signed in to Copilot as could not be written to ${file}: ${reasonFor(cause)}`;
+  }
+  return undefined;
 }
 
 function objectIn(file: string, what: string, are: "are" | "is"): UserSettings {

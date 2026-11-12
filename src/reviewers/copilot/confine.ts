@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { Confinement, Invocation } from "../adapter.ts";
-import { userLogins, userSettings } from "../../sessions/copilot-settings.ts";
+import { carryLogins, userSettings } from "../../sessions/copilot-settings.ts";
 import { AGENT_NAME } from "./argv.ts";
 
 /**
@@ -64,26 +64,6 @@ export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv =
       ...(invocation.model === null ? { COPILOT_MODEL: model ?? "" } : {}),
     },
   };
-}
-
-/**
- * Write who the user is signed in to Copilot as into `home`'s `config.json`, so
- * that Copilot under `home` finds their login in the system's credential store.
- * Writes nothing where the user's own configuration names no login. Returns why
- * it failed, or `undefined`.
- */
-export function carryLogins(home: string, environment: NodeJS.ProcessEnv): string | undefined {
-  const read = userLogins(environment);
-  if (read.outcome === "absent") return undefined;
-  if (read.outcome === "unreadable") return read.problem;
-  if (Object.keys(read.settings).length === 0) return undefined;
-  const file = join(home, "config.json");
-  try {
-    writeFileSync(file, `${JSON.stringify(read.settings)}\n`, { encoding: "utf8", mode: 0o600 });
-  } catch (cause) {
-    return `who the user is signed in to Copilot as could not be written to ${file}: ${reasonFor(cause)}`;
-  }
-  return undefined;
 }
 
 /** The agent Copilot loads from `<COPILOT_HOME>/agents/`, its body the charter. */

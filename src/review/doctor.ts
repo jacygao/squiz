@@ -23,9 +23,8 @@ import { delimiter, dirname, join, resolve } from "node:path";
 
 import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
-import { carryLogins } from "../reviewers/copilot/confine.ts";
 import { variablesOf } from "../reviewers/round.ts";
-import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
+import { carryLogins, copilotHome, userSettings } from "../sessions/copilot-settings.ts";
 import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
