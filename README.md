@@ -143,6 +143,10 @@ prompt to that model, which spends one request at that model's rate. Where the C
 CLI is installed, a line after Claude Code's says whether its experimental
 features are on, and warns where they are off.
 
+`squiz version` prints the version of the squiz that answers, and the path of its
+`bin/squiz`. Run `squiz doctor` first when a different squiz than the one you
+loaded may be the one on your `PATH`.
+
 `squiz status` lists the reviews running and finished in every worktree of the
 repository.
 
