@@ -7,9 +7,10 @@
  * folders.** Copilot runs a project's hooks and MCP servers only in a folder it
  * trusts, and a user who trusted any folder above the snapshots would have
  * trusted every one of them. Under a home of the round's own Copilot trusts nothing. The
- * credential is in the system's credential store, so the reviewer still signs
- * in. Nothing else of the user's configuration reaches the reviewer except its
- * default model, and that only where the project configured none.
+ * credential is in the system's credential store, and the home is given who the
+ * user is signed in as, which is how Copilot finds it there. Nothing else of the
+ * user's configuration reaches the reviewer except its default model, and that
+ * only where the project configured none.
  *
  * Nothing here throws. Every outcome is a value the caller reads.
  */
@@ -18,7 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { Confinement, Invocation } from "../adapter.ts";
-import { userSettings } from "../../sessions/copilot-settings.ts";
+import { carryLogins, userSettings } from "../../sessions/copilot-settings.ts";
 import { AGENT_NAME } from "./argv.ts";
 
 /**
@@ -46,6 +47,8 @@ export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv =
   } catch (cause) {
     return { outcome: "failed", reason: `the reviewer's agent could not be written to ${agents}: ${reasonFor(cause)}` };
   }
+  const logins = carryLogins(home, environment);
+  if (logins !== undefined) return { outcome: "failed", reason: logins };
 
   return {
     outcome: "prepared",
