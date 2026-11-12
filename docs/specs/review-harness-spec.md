@@ -1514,13 +1514,19 @@ shell has (The reviewer session). A `gh` that the reviewer's CLI or a tool
 starts finds no login.
 
 The credential each CLI needs for its model is left alone: `pi`'s provider key,
-such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot signs in from
-`COPILOT_GITHUB_TOKEN`, which is left set where the round host has it, from a
-login of its own, or from `gh`'s login, which it reads by running
-`gh auth token`. Whether a login from Copilot's own `/login` reaches a reviewer
-under the adapter's `COPILOT_HOME` is untested (#695). A user who signs Copilot in through `GH_TOKEN` or
-`GITHUB_TOKEN` alone has no model credential in the round, and nothing here
-handles that.
+such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot signs in from one of
+three places:
+
+- `COPILOT_GITHUB_TOKEN`, which is left set where the round host has it.
+- A login of its own, from `copilot login` or `/login`. Its token is in the
+  system's credential store. Copilot finds it through `loggedInUsers` and
+  `lastLoggedInUser` in `<COPILOT_HOME>/config.json`, so the adapter copies
+  those two fields of the user's own `config.json` into the round's
+  `COPILOT_HOME` (The Copilot adapter). Tested on Copilot 1.0.109.
+- `gh`'s login, which Copilot reads by running `gh auth token`.
+
+A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
+model credential in the round, and nothing here handles that.
 
 **The system's credential store stays readable.** `gh auth token` prints `gh`'s
 login from the keychain whatever `GH_CONFIG_DIR` names, and Copilot signs in
@@ -1742,7 +1748,8 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
   temporary directory taken out of it (Confinement).
 - **Keep the tree's and the user's configuration out:**
   - its own `COPILOT_HOME`, holding the agent file and no trusted folders, so
-    that none of the tree's hooks or MCP servers runs;
+    that none of the tree's hooks or MCP servers runs, and a `config.json`
+    holding only who the user is signed in as;
   - `COPILOT_ALLOW_ALL` set empty, since `true` would trust the working directory;
   - the tree's custom instruction files left out of the system prompt;
   - the built-in GitHub MCP server off;
@@ -1750,9 +1757,12 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
     as trusted.
 
   None of the user's own Copilot configuration reaches the reviewer except its
-  default model, where the project configures none. The reviewer still signs in
-  through `gh`'s login (Tools), and reads the tree's `AGENTS.md` with `view`, as
-  the charter tells it to.
+  default model, where the project configures none, and the `loggedInUsers` and
+  `lastLoggedInUser` of its `config.json`, which are how it signs in (Tools).
+  Every other field, the tokens and the trusted folders among them, is left
+  out. A `config.json` that is there and cannot be read, or does not hold a
+  JSON object, fails `confine`. The reviewer reads the tree's `AGENTS.md` with
+  `view`, as the charter tells it to.
 - **Reach no host but Copilot's own and its model's**: `--no-auto-update` and
   `--disable-client-telemetry` on every run. Measured on Copilot 1.0.107, a
   review then reached `api.github.com` and the plan's model host, which on the
@@ -3006,8 +3016,9 @@ copilot -p "Reply with the single word OK." --model gpt-6-astra --no-ask-user
 
 Where the model is unknown, the prompt carries no `--model` and runs on whatever
 Copilot falls back to, as the round does. It runs with the variables a round
-gives a Copilot reviewer, and `COPILOT_MODEL` set empty, so it passes wherever a
-round could start, and is bounded at 60 seconds. A model the account cannot use
+gives a Copilot reviewer, under a `COPILOT_HOME` given who the user is signed in
+as, as a round's is, and with `COPILOT_MODEL` set empty, so it passes wherever a
+round could start. It is bounded at 60 seconds. A model the account cannot use
 fails it, with the reason Copilot prints:
 
 ```

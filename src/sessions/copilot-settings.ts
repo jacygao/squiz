@@ -22,23 +22,42 @@ export type UserSettings =
 
 /** The user's own `<COPILOT_HOME>/settings.json`. A project's settings are never read. */
 export function userSettings(environment: NodeJS.ProcessEnv): UserSettings {
-  const file = join(copilotHome(environment), "settings.json");
+  return objectIn(join(copilotHome(environment), "settings.json"), "settings", "are");
+}
+
+/** The fields of the user's `config.json` that say who is signed in, and nothing that holds a token. */
+const LOGIN_FIELDS = ["loggedInUsers", "lastLoggedInUser"] as const;
+
+/**
+ * Who the user is signed in to Copilot as: the `LOGIN_FIELDS` of their own
+ * `<COPILOT_HOME>/config.json`, where Copilot's `login` records them. Copilot
+ * finds a login in the system's credential store only through them. Every other
+ * field is left out, the tokens and the trusted folders among them.
+ */
+export function userLogins(environment: NodeJS.ProcessEnv): UserSettings {
+  const read = objectIn(join(copilotHome(environment), "config.json"), "configuration", "is");
+  if (read.outcome !== "read") return read;
+  const logins = Object.fromEntries(LOGIN_FIELDS.filter((field) => field in read.settings).map((field) => [field, read.settings[field]]));
+  return { ...read, settings: logins };
+}
+
+function objectIn(file: string, what: string, are: "are" | "is"): UserSettings {
   let text: string;
   try {
     text = readFileSync(file, "utf8");
   } catch (cause) {
     if (codeOf(cause) === "ENOENT") return { outcome: "absent", file };
-    return { outcome: "unreadable", file, problem: `the user's Copilot settings ${file} could not be read: ${reasonFor(cause)}` };
+    return { outcome: "unreadable", file, problem: `the user's Copilot ${what} ${file} could not be read: ${reasonFor(cause)}` };
   }
   let settings: unknown;
   try {
     // Copilot heads the files it manages with `//` lines, which JSON does not allow.
     settings = JSON.parse(text.replace(/^\s*\/\/.*$/gmu, ""));
   } catch (cause) {
-    return { outcome: "unreadable", file, problem: `the user's Copilot settings ${file} are not JSON: ${reasonFor(cause)}` };
+    return { outcome: "unreadable", file, problem: `the user's Copilot ${what} ${file} ${are} not JSON: ${reasonFor(cause)}` };
   }
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    return { outcome: "unreadable", file, problem: `the user's Copilot settings ${file} are not an object` };
+    return { outcome: "unreadable", file, problem: `the user's Copilot ${what} ${file} ${are} not an object` };
   }
   return { outcome: "read", file, settings: settings as Record<string, unknown> };
 }

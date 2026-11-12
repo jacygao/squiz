@@ -23,6 +23,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 
 import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
+import { carryLogins } from "../reviewers/copilot/confine.ts";
 import { variablesOf } from "../reviewers/round.ts";
 import { copilotHome, userSettings } from "../sessions/copilot-settings.ts";
 import { mainWorktreeIn } from "../worktree/toplevel.ts";
@@ -562,8 +563,9 @@ function withThinking(line: string, config: Config, context: DoctorContext): Row
  * the model shows it, because no Copilot command reports its login without one.
  *
  * The prompt runs as a round runs the reviewer: on the round's `model`, under a
- * `COPILOT_HOME` and a `gh` configuration of its own, with the token variables
- * empty, so it passes wherever a round could start. With no `model` it names
+ * `COPILOT_HOME` of its own that is given who the user is signed in as, and a
+ * `gh` configuration of its own, with the token variables empty, so it passes
+ * wherever a round could start. With no `model` it names
  * none, and runs on whatever Copilot falls back to, as the round would. It runs
  * in that temporary directory rather than the repository, so no project file
  * reaches Copilot, and the directory is removed afterwards.
@@ -580,6 +582,8 @@ function copilotSignIn(line: string, model: string | undefined, context: DoctorC
     const github = join(scratch, "github");
     mkdirSync(home);
     mkdirSync(github);
+    const logins = carryLogins(home, context.environment);
+    if (logins !== undefined) return { level: "failed", line: `${line}. Its sign-in could not be checked: ${logins}` };
     const environment = {
       ...context.environment,
       ...absolutePath(context),

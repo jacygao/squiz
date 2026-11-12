@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -143,3 +143,45 @@ test("a session directory that cannot be made fails the confinement", (t) => {
   assert.equal(confinement.outcome, "failed", JSON.stringify(confinement));
 });
 
+
+/** A user's `config.json` as `copilot login` leaves it, with a token, a trusted folder, and who is signed in. */
+const SIGNED_IN = `// User configuration.
+{
+  "authTokens": { "https://github.com:octocat": "gho_users_own" },
+  "trustedFolders": ["/home/octocat"],
+  "loggedInUsers": [{ "host": "https://github.com", "kind": "oauth", "login": "octocat" }],
+  "lastLoggedInUser": { "host": "https://github.com", "login": "octocat" }
+}
+`;
+
+test("who the user is signed in as reaches COPILOT_HOME's config.json, and their tokens and trusted folders do not (#850)", (t) => {
+  const { invocation, home, session } = fixture(t);
+  mkdirSync(join(home, ".copilot"));
+  writeFileSync(join(home, ".copilot", "config.json"), SIGNED_IN);
+
+  environmentOf(confine(invocation, { HOME: home }));
+
+  const carried = readFileSync(join(session, "config.json"), "utf8");
+  assert.deepEqual(JSON.parse(carried), {
+    loggedInUsers: [{ host: "https://github.com", kind: "oauth", login: "octocat" }],
+    lastLoggedInUser: { host: "https://github.com", login: "octocat" },
+  });
+  assert.equal(statSync(join(session, "config.json")).mode & 0o777, 0o600);
+});
+
+test("a user's configuration that cannot be read as JSON fails the confinement (#850)", (t) => {
+  const { invocation, home } = fixture(t);
+  mkdirSync(join(home, ".copilot"));
+  writeFileSync(join(home, ".copilot", "config.json"), '{ "loggedInUsers": ');
+  const confinement = confine(invocation, { HOME: home });
+  assert.equal(confinement.outcome, "failed");
+  assert.match(confinement.outcome === "failed" ? confinement.reason : "", /config\.json is not JSON/u);
+});
+
+test("a user's configuration naming no login leaves COPILOT_HOME with no config.json (#850)", (t) => {
+  const { invocation, home, session } = fixture(t);
+  mkdirSync(join(home, ".copilot"));
+  writeFileSync(join(home, ".copilot", "config.json"), '{ "trustedFolders": ["/home/octocat"] }');
+  environmentOf(confine(invocation, { HOME: home }));
+  assert.deepEqual(readdirSync(session), ["agents"]);
+});

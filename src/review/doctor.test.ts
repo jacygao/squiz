@@ -617,6 +617,7 @@ function copilotSigningIn(record: string, answer: string): string {
     ...ROUND_VARIABLES.map((name) => `  if [ -n "\${${name}+set}" ]; then echo "${name}=\${${name}}"; else echo "${name} unset"; fi`),
     '  if [ -d "$COPILOT_HOME" ]; then echo "home exists"; fi',
     '  if [ -d "$GH_CONFIG_DIR" ]; then echo "github exists"; fi',
+    '  if [ -f "$COPILOT_HOME/config.json" ]; then echo "config=$(/bin/cat "$COPILOT_HOME/config.json")"; fi',
     `} >> '${record}'`,
     answer,
   ].join("\n");
@@ -630,11 +631,18 @@ type SignIn = { readonly line: string; readonly exit: number; readonly started: 
  * own environment carries a token and a `gh` configuration, which the check
  * must not pass on.
  */
-function signInRow(answer: string, overrides: Partial<DoctorContext> = {}, squizJson = '{"reviewer":"copilot","model":"gpt-6-astra"}', copilotSettings?: string): SignIn {
+function signInRow(
+  answer: string,
+  overrides: Partial<DoctorContext> = {},
+  squizJson = '{"reviewer":"copilot","model":"gpt-6-astra"}',
+  copilotSettings?: string,
+  copilotConfig?: string,
+): SignIn {
   made += 1;
   const record = join(scratch, `copilot-record-${made}`);
   const base = context({ ...EVERY_FAKE, copilot: copilotSigningIn(record, answer) }, overrides);
   if (copilotSettings !== undefined) settingsAt(String(base.environment.HOME), ".copilot/settings.json", copilotSettings);
+  if (copilotConfig !== undefined) settingsAt(String(base.environment.HOME), ".copilot/config.json", copilotConfig);
   const directory = repository(squizJson);
   const environment = { ...base.environment, GH_TOKEN: "gho_users_own", GH_CONFIG_DIR: join(scratch, "users-gh") };
   const printed = squizDoctor({ ...base, directory, environment });
@@ -733,6 +741,18 @@ test("the sign-in check runs under a COPILOT_HOME and gh configuration of its ow
   for (const name of ["COPILOT_ALLOW_ALL", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
     assert.equal(valueOf(row.started, name), "", `${name} was not set empty`);
   }
+});
+
+test("the sign-in check's COPILOT_HOME is given who the user is signed in as, and none of their tokens, as a round's is (#850)", () => {
+  const row = signInRow(
+    "echo OK",
+    {},
+    undefined,
+    undefined,
+    '{"authTokens":{"https://github.com:octocat":"gho_users_own"},"loggedInUsers":[{"host":"https://github.com","login":"octocat"}]}',
+  );
+
+  assert.equal(valueOf(row.started, "config"), '{"loggedInUsers":[{"host":"https://github.com","login":"octocat"}]}', row.started.join("\n"));
 });
 
 test("the sign-in prompt runs outside the repository, so none of its files reach Copilot", () => {
