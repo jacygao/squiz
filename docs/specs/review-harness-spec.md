@@ -939,8 +939,7 @@ session** in three cases:
 - The state it hands back was queued by a stop carrying another session's id.
   Both CLIs hand the hook the session's id on every stop, so a resume that had
   started a new session would read that way.
-- No update could be written: the threads could not be listed, or the file
-  could not be written.
+- `update.md` could not be written.
 
 `host.log` says why:
 
