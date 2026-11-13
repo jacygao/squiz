@@ -356,7 +356,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         const handoffs = read === undefined ? new Map<StateRecord, string>() : handOff(thisRound, written, records, read, diff);
         if (agent !== null) {
           const environment = setup.environment ?? process.env;
-          startFixers(episode, thisRound, written, records, handoffs, { agent, environment }, write);
+          startFixers(episode, thisRound, written, records, handoffs, { agent, commands: setup.round.config.fixerCommands, environment }, write);
           const close = written.map(({ record }) => closeOf(record)).find((each) => each !== undefined);
           if (close !== undefined) writeClose(episode, close, thisRound);
         }
@@ -510,7 +510,7 @@ function startFixers(
   recorded: readonly Recorded[],
   records: readonly StateRecord[],
   handoffs: ReadonlyMap<StateRecord, string>,
-  { agent, environment }: { readonly agent: FixerAgent; readonly environment: NodeJS.ProcessEnv },
+  { agent, commands, environment }: { readonly agent: FixerAgent; readonly commands: readonly string[]; readonly environment: NodeJS.ProcessEnv },
   write: (change: (state: EpisodeState) => EpisodeState) => StateUpdate,
 ): void {
   const logPath = join(directory, "fixer.log");
@@ -537,7 +537,7 @@ function startFixers(
       log(`${label}: no fixer started: its start could not be reserved: ${reserved.reason}`);
       continue;
     }
-    const fixer = fixerStarted(agent, startFixer({ agent, handoff: handoff ?? "", worktree: episode.worktree, logPath, environment }, FIXER_START_MS));
+    const fixer = fixerStarted(agent, startFixer({ agent, commands, handoff: handoff ?? "", worktree: episode.worktree, logPath, environment }, FIXER_START_MS));
     log(`${label}: ${fixerLine(fixer, logPath)}`);
     const noted = put(record, fixer);
     if (noted.outcome === "failed") log(`${label}: the fixer's start could not be recorded: ${noted.reason}`);

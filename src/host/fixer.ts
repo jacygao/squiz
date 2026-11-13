@@ -24,6 +24,8 @@ const PLUGIN_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 export type FixerSpec = {
   readonly agent: FixerAgent;
+  /** The commands it may run beyond `squiz` and `git`: `.squiz.json`'s `fixerCommands`. */
+  readonly commands: readonly string[];
   /** The absolute path of the round's `handoff.md`. */
   readonly handoff: string;
   readonly worktree: string;
@@ -51,21 +53,28 @@ export function fixerPrompt(handoff: string): string {
  * The command line that starts `agent` headless on `prompt`, loading squiz from
  * `root`.
  *
- * It may edit files and run `squiz` and `git`, and nothing asks it anything,
- * because nobody is there to answer.
+ * It may edit files and run `squiz`, `git` and each of `commands`, and nothing
+ * asks it anything, because nobody is there to answer. Each command is granted
+ * by its name alone, so it runs with any arguments.
  */
-export function fixerCommand(agent: FixerAgent, prompt: string, root: string): { readonly command: string; readonly args: readonly string[] } {
+export function fixerCommand(
+  agent: FixerAgent,
+  prompt: string,
+  root: string,
+  commands: readonly string[],
+): { readonly command: string; readonly args: readonly string[] } {
+  const granted = ["squiz", "git", ...commands];
   switch (agent) {
     case "claude":
       // The prompt follows -p at once: `--allowedTools` takes every argument after it.
       return {
         command: "claude",
-        args: ["-p", prompt, "--plugin-dir", root, "--permission-mode", "acceptEdits", "--allowedTools", "Bash(squiz:*)", "Bash(git:*)"],
+        args: ["-p", prompt, "--plugin-dir", root, "--permission-mode", "acceptEdits", "--allowedTools", ...granted.map((name) => `Bash(${name}:*)`)],
       };
     case "copilot":
       return {
         command: "copilot",
-        args: ["-p", prompt, "--plugin-dir", root, "--no-ask-user", "--allow-tool=write", "--allow-tool=shell(squiz)", "--allow-tool=shell(git)", ...COPILOT_QUIET_FLAGS],
+        args: ["-p", prompt, "--plugin-dir", root, "--no-ask-user", "--allow-tool=write", ...granted.map((name) => `--allow-tool=shell(${name})`), ...COPILOT_QUIET_FLAGS],
       };
   }
 }
@@ -90,6 +99,6 @@ export function fixerEnvironment(environment: NodeJS.ProcessEnv): NodeJS.Process
 
 /** Start the fixer `spec` describes, detached, and say what started. `boundMs` bounds the start. */
 export function startFixer(spec: FixerSpec, boundMs: number): Detached {
-  const { command, args } = fixerCommand(spec.agent, fixerPrompt(spec.handoff), PLUGIN_ROOT);
+  const { command, args } = fixerCommand(spec.agent, fixerPrompt(spec.handoff), PLUGIN_ROOT, spec.commands);
   return startDetached({ command, args, cwd: spec.worktree, logPath: spec.logPath, env: fixerEnvironment(spec.environment) }, boundMs);
 }

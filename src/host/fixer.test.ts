@@ -25,7 +25,7 @@ const CHECKOUT = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
 
 test("#803: a Claude Code fixer runs claude -p on the prompt, loading squiz from the plugin directory, with edits and squiz's and git's commands allowed", () => {
   const prompt = fixerPrompt(HANDOFF);
-  assert.deepEqual(fixerCommand("claude", prompt, ROOT), {
+  assert.deepEqual(fixerCommand("claude", prompt, ROOT, []), {
     command: "claude",
     // The prompt comes straight after -p, before any option that takes a list and would swallow it.
     args: ["-p", prompt, "--plugin-dir", ROOT, "--permission-mode", "acceptEdits", "--allowedTools", "Bash(squiz:*)", "Bash(git:*)"],
@@ -34,7 +34,7 @@ test("#803: a Claude Code fixer runs claude -p on the prompt, loading squiz from
 
 test("#803, #863: a Copilot fixer runs copilot -p on the prompt, loading squiz from the plugin directory, asking nothing, with writes and squiz's and git's commands allowed, and without the built-in MCP servers, auto-update or client telemetry, as the reviewer runs", () => {
   const prompt = fixerPrompt(HANDOFF);
-  assert.deepEqual(fixerCommand("copilot", prompt, ROOT), {
+  assert.deepEqual(fixerCommand("copilot", prompt, ROOT, []), {
     command: "copilot",
     args: [
       "-p",
@@ -45,6 +45,36 @@ test("#803, #863: a Copilot fixer runs copilot -p on the prompt, loading squiz f
       "--allow-tool=write",
       "--allow-tool=shell(squiz)",
       "--allow-tool=shell(git)",
+      "--disable-builtin-mcps",
+      "--no-auto-update",
+      "--disable-client-telemetry",
+    ],
+  });
+});
+
+test("#864: a Claude Code fixer is also allowed each command fixerCommands names, by its name alone", () => {
+  const prompt = fixerPrompt(HANDOFF);
+  assert.deepEqual(fixerCommand("claude", prompt, ROOT, ["node", "npm"]), {
+    command: "claude",
+    args: ["-p", prompt, "--plugin-dir", ROOT, "--permission-mode", "acceptEdits", "--allowedTools", "Bash(squiz:*)", "Bash(git:*)", "Bash(node:*)", "Bash(npm:*)"],
+  });
+});
+
+test("#864: a Copilot fixer is also allowed each command fixerCommands names, by its name alone, and keeps its quiet flags", () => {
+  const prompt = fixerPrompt(HANDOFF);
+  assert.deepEqual(fixerCommand("copilot", prompt, ROOT, ["node", "npm"]), {
+    command: "copilot",
+    args: [
+      "-p",
+      prompt,
+      "--plugin-dir",
+      ROOT,
+      "--no-ask-user",
+      "--allow-tool=write",
+      "--allow-tool=shell(squiz)",
+      "--allow-tool=shell(git)",
+      "--allow-tool=shell(node)",
+      "--allow-tool=shell(npm)",
       "--disable-builtin-mcps",
       "--no-auto-update",
       "--disable-client-telemetry",
@@ -66,7 +96,7 @@ test("#803: the fixer's environment drops the dispatching session's messaging so
 test("#803: a fixer started where its CLI is not on PATH fails, saying so, rather than reading as started", () => {
   const root = mkdtempSync(join(tmpdir(), "squiz-fixer-"));
   try {
-    const started = startFixer({ agent: "claude", handoff: HANDOFF, worktree: root, logPath: join(root, "fixer.log"), environment: { PATH: join(root, "empty") } }, 5_000);
+    const started = startFixer({ agent: "claude", commands: [], handoff: HANDOFF, worktree: root, logPath: join(root, "fixer.log"), environment: { PATH: join(root, "empty") } }, 5_000);
     assert.equal(started.outcome, "failed", `started as ${JSON.stringify(started)}`);
     assert.match(started.outcome === "failed" ? started.reason : "", /ENOENT/u);
   } finally {
@@ -82,7 +112,7 @@ test("#803: a fixer starts detached in the worktree, with the plugin directory o
     for (const directory of [binaries, worktree]) mkdirSync(directory);
     standIn(binaries, "copilot", 'pwd > "$(dirname "$0")/ran-in"; printf "%s\\n" "$@" > "$(dirname "$0")/argv"; echo the fixer ran');
     const log = join(root, "fixer.log");
-    const started = startFixer({ agent: "copilot", handoff: HANDOFF, worktree, logPath: log, environment: { PATH: `${binaries}:/usr/bin:/bin` } }, 5_000);
+    const started = startFixer({ agent: "copilot", commands: [], handoff: HANDOFF, worktree, logPath: log, environment: { PATH: `${binaries}:/usr/bin:/bin` } }, 5_000);
     assert.ok(started.outcome === "started" || started.outcome === "exited", `started as ${JSON.stringify(started)}`);
     const argv = join(binaries, "argv");
     for (let waited = 0; !existsSync(argv) && waited < 5_000; waited += 50) await sleep(50);

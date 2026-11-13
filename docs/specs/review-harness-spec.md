@@ -783,6 +783,22 @@ telemetry. Without them, on Copilot 1.0.110, a fixer also reached
 `cafe.github.com` and `telemetry.enterprise.githubcopilot.com`. The hosts a
 fixer reaches with them have not been measured.
 
+**The fixer edits files and runs `squiz` and `git`, and each command
+`fixerCommands` names (§ 10 Configuration).** The CLI refuses any other
+command, since nobody is there to approve it, except the file and read-only
+commands, such as `touch` and `ls`, that Claude Code's `acceptEdits` allows on
+its own. Each named command is granted by its name alone, with any arguments,
+after `git`. A repository whose tests run as `node --test` names `node`:
+
+```
+claude -p <prompt> … --allowedTools 'Bash(squiz:*)' 'Bash(git:*)' 'Bash(node:*)'
+copilot -p <prompt> … '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' '--allow-tool=shell(node)' --disable-builtin-mcps …
+```
+
+A granted command runs whatever it is given, and the fixer writes the files it
+runs, so naming `node` lets the fixer run any program `node` can. Without
+`fixerCommands` the fixer cannot run the project's tests.
+
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
 names the session whose hook started the host, and with `SQUIZ_FIXER=1`, which
 keeps the fixer's prompt from being recorded as the run's (The hooks). The
@@ -3879,10 +3895,17 @@ worktree is a configuration that cannot be read.
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 5 Adapters) |
 | `fixer` | none | The coding-agent CLI squiz starts, headless, to work the threads a round leaves open, `claude` or `copilot`. Naming one declares every run in the repository headless (§ 3 Headless runs). None wakes the session that owns the work instead (§ 3 The report) |
+| `fixerCommands` | none | The commands the fixer may run beyond `squiz` and `git`, such as `["node"]`, each by its name and with any arguments (§ 3 Headless runs) |
 
 `fixer` is per repository, as every setting is, so a repository whose runs are
 headless names it, and one worked in interactive sessions leaves it out. A
 `null` or empty `fixer` is refused rather than read as none.
+
+`fixerCommands` is a list of 1 to 16 different command names, each up to 64
+letters, digits and `.` `_` `+` `-`, starting with a letter or a digit. A path,
+a space, a wildcard or a CLI's own grant, such as `node *` or `shell(node)`, is
+refused, so each entry grants one command and nothing wider. An empty list is
+refused rather than read as none, and so is `fixerCommands` without `fixer`.
 
 `model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
 with a letter, a digit or `@`. An empty string is refused rather than read as

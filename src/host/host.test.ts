@@ -2610,6 +2610,21 @@ test("#803: with a fixer named, a round that leaves threads open starts it on th
   assert.ok(argv.includes("--plugin-dir"), `the fixer was run with ${JSON.stringify(argv)}`);
 });
 
+test("#864: the fixer the round host starts is granted the commands .squiz.json's fixerCommands names", async () => {
+  const fixer = standInFixer("copilot");
+  let argv: readonly string[] = [];
+  await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "copilot", fixerCommands: ["node"] },
+    ...fixer,
+    after: () => {
+      if (awaitFile(fixer.argv(), 5_000)) argv = readFileSync(fixer.argv(), "utf8").split("\n");
+    },
+  });
+  assert.ok(argv.includes("--allow-tool=shell(node)"), `the fixer was run with ${JSON.stringify(argv)}`);
+});
+
 test("#803: with a fixer named whose CLI is not on PATH, the round records the fixer failed and host.log says why, which a round that needed no fixer never does", async () => {
   const nowhere = { environment: { PATH: "/usr/bin:/bin" } };
   const ran = await host({
