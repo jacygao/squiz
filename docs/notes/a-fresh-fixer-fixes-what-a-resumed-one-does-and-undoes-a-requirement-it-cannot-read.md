@@ -1,6 +1,6 @@
 ---
-settles: "§ 3 — that a headless round's fixer is a fresh run and never a resume, and what a fresh fixer must be handed to keep the task's requirements"
-issue: [804, 870]
+settles: "§ 3 — what a fresh fixer must be handed to keep the task's requirements, and that a resumed fixer fixes no worse than a fresh one"
+issue: [804, 870, 876]
 recorded: 2026-11-14
 versions: { claude: 2.1.321, claude-model: claude-opus-5-5, copilot: 1.0.110, copilot-model: gpt-6.1-sol, node: 24.15.0 }
 recheck-when: squiz hands the fixer the run's prompt or transcript (#859, #870), either CLI changes what `--resume` restores or how its prompt cache survives a resume, the fixer is given a grant to run tests (#864), or a task set where the real defects are harder to fix exists
@@ -17,22 +17,27 @@ recheck-when: squiz hands the fixer the run's prompt or transcript (#859, #870),
 
 ## Decisions
 
-- **Keep the fresh fixer, and do not add a resume.** Fresh fixers fixed all 30
-  real defects they were handed and resumed ones 29: one resumed Copilot fixer
-  declined a defect as older than its change. Every fixer left the project's
-  own suite passing. One miss in 30 is within run-to-run variation, so no
-  difference in fixing was measured, and nothing shows a resume fixing better.
+- **Count a fresh fixer and a resumed one as fixing alike.** Fresh fixers
+  fixed all 30 real defects they were handed and resumed ones 29: one resumed
+  Copilot fixer declined a defect as older than its change. Every fixer left the
+  project's own suite passing. One miss in 30 is within run-to-run variation, so
+  no difference in fixing was measured, either way. This note recommended
+  keeping the fresh fixer and adding no resume. The owner chose otherwise, in
+  #876: an episode starts one fixer and resumes it for every later round, so
+  the fixer keeps its own context across rounds, while every round's reviewer
+  still starts fresh. `a-headless-run-hands-its-findings-to-one-resumed-fixer-and-an-interactive-one-keeps-its-wake.md`
+  records that design.
 - **Hand the fresh fixer the task, not the session.** The one difference
   larger than that variation was a finding that contradicts a requirement stated only in the task prompt. A
   fresh Copilot fixer with no description applied it in 10 of 15 trials. With
   the prompt as `.squiz/local/description.md`, it applied it in none, as the
   resumed session did. A headless run writes no description today, so this is
   #870.
-- **Do not resume to save money.** A warm Claude resume cost 58% of a fresh
-  fixer, about $0.11 less a round on these tasks. A Copilot resume saved
-  nothing measurable. Copilot has no fork, and the earlier measurement found
-  that a cold resume costs about what the original run did. A saving that small
-  and that conditional does not pay for a second route.
+- **Expect no saving from a resume worth choosing it for.** A warm Claude
+  resume cost 58% of a fresh fixer, about $0.11 less a round on these tasks. A
+  Copilot resume saved nothing measurable. Copilot has no fork, and the earlier
+  measurement found that a cold resume costs about what the original run did.
+  The resumed fixer rests on keeping its context, not on cost.
 
 ## Needs your input
 

@@ -109,12 +109,9 @@ the rest of this section describes, and:
   `resume.txt`, the command that resumes that session, and `gh/`, the empty `gh`
   configuration the reviewer runs with (§ 5 Tools). The snapshot the reviewer
   reads is in the temporary directory instead (§ 5 The snapshot). A round that
-  leaves threads open with a round remaining also writes `handoff.md` there:
-  each open thread with every reply on it, the description, each agent's final
-  message and transcript path as its stop recorded them (The hooks), and the
-  diff the reviewer read. Where the threads cannot be listed, the round writes
-  none, and `host.log` says why. In a headless run, `fixer.log` beside it holds
-  the output of the fixer started on it, and a round that resumes the fixer's
+  leaves threads open with a round remaining also writes `handoff.md` there,
+  what a fixer works from. In a headless run, `fixer.log` beside it holds the
+  output of the fixer started on it, and a round that resumes the fixer's
   session also writes `update.md`, what changed since its last handoff, and
   `fixer.exit`, the resumed CLI's exit status (Headless runs below).
 - `notes/`, the notes for the sessions that own the work, under The report.
@@ -758,30 +755,82 @@ round host and the commands alike, because each reads `.squiz.json`.
 
 **A headless run is woken by nothing.** Its hooks return at once, as every hook
 does, and its run has ended by the time its review does. The round host still
-writes each note in `notes/`, and in place of the wake writes a line in
-`host.log`:
+writes each note in `notes/`, as The report sets out. Where the stop that queued the state recorded a socket, the host posts
+nothing to it, and writes a line in `host.log` instead:
 
 ```
 3f9c2e0: no wake: .squiz.json names a fixer, so the run is headless
 ```
 
-**A round that leaves threads open with a round remaining starts a fixer on its
-handoff.** Once the round has written `rounds/<k>/handoff.md`, the round host
-runs the CLI `fixer` names. The fixer runs in the change's worktree, detached
-as the round host is, with its output in `rounds/<k>/fixer.log`. It runs on the
-CLI's own default model.
+A stop that recorded no socket, such as a `copilot -p` run's with Copilot's
+experimental features off, had nothing to wake, and gets no line.
 
-**An episode has one fixer session.** The first round that starts a fixer
-starts it in a new session, under a UUID squiz chooses. Every later round of
-the episode resumes that session instead of starting another. The reviewer is
-never resumed: each round's review runs in a session of its own, so no reviewer
-judges fixes to its own findings. A new episode starts a new fixer session.
+#### The handoff
 
-Both CLIs take the session's id on the command line. Its command line loads
-squiz from the plugin directory of the squiz that starts it, and carries the
-same grants and flags whether it starts the session or resumes it, because a
-run, resumed or not, inherits no plugin directory, permission mode, settings or
-MCP configuration from the run before it:
+**A round that leaves threads open with a round remaining writes
+`rounds/<k>/handoff.md`**, in any run, and a headless run's fixer starts on it.
+After a heading, a line counting the open threads and the venue's `followUp`,
+it holds:
+
+- the change's description;
+- each open thread, with every reply on it;
+- each agent's final report, as its stop recorded it (The hooks);
+- the diff the reviewer read.
+
+Where the threads cannot be listed, or the round kept no diff, the round writes
+no handoff, and `host.log` says why.
+
+**The description is the run's prompt where nobody wrote one.** Under the local
+venue the description is `description.md`, else the first prompt the
+worktree's sessions were given (§ 4 The record). Where it is the prompt, a line
+under `## The description` says so before it:
+
+```
+## The description
+
+Nobody wrote a description of this change, so this is the prompt the run was started with:
+
+Add backoff. Requirement: the first retry is immediate.
+```
+
+Where there is neither, the section reads `The change has no description.`
+
+**Each agent's report is its transcript path, and its final message where its
+stop carried one.** A run with no subagent hands the fixer its session's
+transcript path, and under Claude Code its final message too. Copilot's `Stop`
+carries no final message, so under Copilot the fixer reads the session's report
+from its `events.jsonl`. A Copilot subagent's report names its parent's
+`events.jsonl`:
+
+```
+### Subagent dcc0b994-3d65-4ad3-92f3-ccf70b8232d5, dispatched by session af7a1b25-6bdc-459f-99e1-5c3ab2513f83
+
+Transcript: none of its own. Its events are in its parent's transcript, /Users/someone/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl
+
+PONG
+```
+
+**Where a subagent and its parent end on one state, the handoff shows the
+subagent's report.** The subagent's `SubagentStop` fires before the parent's
+`Stop`, and the first stop to queue a state is its owner. The parent's `Stop`
+finds the state queued and records nothing.
+
+#### The fixer
+
+**An episode has one fixer session.** The first round that hands threads back
+starts the fixer on its handoff, in a new session, under a UUID squiz chooses.
+Every later round of the episode resumes that session instead of starting
+another. The reviewer is never resumed: each round's review runs in a session of
+its own, so no reviewer judges fixes to its own findings. The coding agent's own
+session is never resumed either. A new episode starts a new fixer session.
+
+The fixer runs the CLI `fixer` names, in the change's worktree, on the CLI's
+own default model. It is detached as the round host is, with its output in
+`rounds/<k>/fixer.log`. Both CLIs take the session's id on the command line.
+The command line loads squiz from the plugin directory of the squiz that starts
+it, and carries the same grants and flags whether it starts the session or
+resumes it. A run, resumed or not, inherits no plugin directory, permission
+mode, settings or MCP configuration from the run before it:
 
 ```
 claude -p <prompt> --session-id <id> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
@@ -879,15 +928,20 @@ round 2: resuming the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3, whic
 **The episode records its fixer session as `fixerSession` in the state file**:
 the CLI, the session id, the round whose fixer started it, the node ids of the
 comments it has been shown, and those of the threads open at its last handoff.
-It never holds a prompt or a transcript. A
-fixer that started records the session in the same update that records its
-start. One that did not start leaves the session as it was.
+It never holds a prompt or a transcript. A fixer that started records the
+session in the same update that records its start. One that did not start
+leaves the session as it was.
 
-**A round starts a fresh fixer rather than resuming** where `.squiz.json` now
-names another CLI than the session's, or where the state it hands back was
-queued by a stop carrying another session's id. Both CLIs hand the hook the
-session's id on every stop, so a resume that had started a new session would
-read that way. `host.log` says why:
+**A round starts a fresh fixer on its whole handoff rather than resuming the
+session** in three cases:
+
+- `.squiz.json` now names another CLI than the session's.
+- The state it hands back was queued by a stop carrying another session's id.
+  Both CLIs hand the hook the session's id on every stop, so a resume that had
+  started a new session would read that way.
+- `update.md` could not be written.
+
+`host.log` says why:
 
 ```
 round 2: starting a fresh fixer: the state it hands back was queued by session 0b7e…, not by the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3
@@ -915,11 +969,14 @@ on every look.
 **The fixer's own stop starts the next round**, as any stop does (The hooks).
 Its edits, its commit or its replies are a new state, which the hook queues.
 
-**The round cap bounds the fixers.** Only a round that leaves threads open with
-a round remaining hands anything back, so the closing round starts no fixer,
-whether it closes with threads open or with none. A cap of R runs the fixer at
-most R−1 times in an episode, each run a start or a resume of its session, and
-a resume that failed is run again fresh within its own round.
+#### The bound
+
+**The round cap bounds the fixer's runs.** Only a round that leaves threads
+open with a round remaining hands anything back, so the closing round starts no
+fixer, whether it closes with threads open or with none. A cap of R runs the
+fixer at most R−1 times in an episode, each run a start or a resume of its
+session. A resume that failed is run again fresh within its own round, and that
+is the one run a round can add.
 
 **No fixer starts beside one still running.** Where a fixer an earlier round of
 the episode started is running, or cannot be told running or gone, by its pid
@@ -945,6 +1002,27 @@ went. A state file that refuses the reservation starts no fixer. One that takes
 the reservation and refuses the result keeps the reservation, which holds back
 every later fixer of the episode, as any `unknown` does.
 
+**A round host in a headless run outlives every fixer of its open episode.**
+Once nothing is queued, it looks every second at the queue and at each fixer
+the records name as started, by its pid and start time. A state queued meanwhile
+is taken as any other. A close ends the wait: whatever a fixer still running
+then queues starts a host of its own. `host.log` names the fixer it waits on:
+
+```
+waiting for the fixer round 1 started, process 4200, to exit, for at most 2700 seconds
+```
+
+**The wait on one fixer is bounded by the reviewer's time bound for each round
+the cap allows**, `timeout` × `rounds` seconds, 2,700 by default, counted from
+when the host first waits on it. A round that runs while the host waits does
+not start the count again. A fixer that cannot be told running or gone is
+waited on as one running is, and the time counts toward the bound. A host that
+waited without one would hold `host.lock` for good, and every later trigger
+would read the episode as in hand. Once the bound passes, the host stops
+waiting, marks the episode stopped as The markers below sets out, and exits.
+
+#### The markers
+
 **The round that closes a headless episode writes `closed.json`** in the
 episode's directory, once the close is recorded and its summary posted. It
 holds the close's head, its exit status, the threads it left open and, where a
@@ -960,33 +1038,15 @@ bound closed it with threads open, which bound:
 ```
 
 The file appears whole: it is written beside its path and renamed into place. A
-caller that sees it reads the outcome from the episode's directory. It moves into `episodes/<n>/` with the rest of its episode (The state file).
-
-**A round host in a headless run outlives every fixer of its open episode.**
-Once nothing is queued, it looks every second at the queue and at each fixer
-the records name as started, by its pid and start time. A state queued meanwhile
-is taken as any other. A close ends the wait: whatever a fixer still running
-then queues starts a host of its own. `host.log` names the fixer it waits on:
-
-```
-waiting for the fixer round 1 started, process 4200, to exit, for at most 2700 seconds
-```
-
-**The wait on one fixer is bounded by the reviewer's time bound for each round
-the cap allows**, `timeout` × `rounds` seconds, 2,700 by default, counted from
-when the host first waits on it. A round that runs while the host waits does
-not start the count again. A fixer that cannot be told running or gone
-is waited on as one running is, and the time counts toward the bound. A host
-that waited without one would hold `host.lock` for good, and every later
-trigger would read the episode as in hand. Once the bound passes, the host
-writes `stopped.json` naming it and exits. A fixer that then stops and queues a
-state starts a host of its own, and its trigger removes the file.
+caller that sees it reads the outcome from the episode's directory. It moves
+into `episodes/<n>/` with the rest of its episode (The state file).
 
 **An episode that stops short of its close writes `stopped.json`** in the
 episode's directory, beside where `closed.json` would be. The host writes it as
 it exits, once no fixer is running or the bound on its wait has passed, and only
-where the episode has not closed and no state is queued or under review. It holds the head of the last state
-recorded, which case stopped the episode, and why:
+where the episode has not closed and no state is queued or under review. It
+holds the head of the last state recorded, which case stopped the episode, and
+why:
 
 ```json
 {
@@ -1017,10 +1077,11 @@ caller's wait runs to its own bound.
 **A caller waits for `closed.json` or `stopped.json`, whichever appears.** The
 two are never there together. The trigger that next queues a state removes
 `stopped.json` in the same update, under `state.lock`, so a retry by
-`squiz review`, or a new commit, never runs beside it. A trigger that cannot
-remove it queues nothing, and fails naming the file. A hook on a failed state
-queues nothing, and leaves it. A stopped episode is still live, so
-`stopped.json` never moves into `episodes/<n>/`.
+`squiz review`, a new commit, or a fixer that outlived the bound and then
+stopped never runs beside it. A trigger that cannot remove it queues nothing,
+and fails naming the file. A hook on a failed state queues nothing, and leaves
+it. A stopped episode is still live, so `stopped.json` never moves into
+`episodes/<n>/`.
 
 **Three things leave a headless episode open with neither file:**
 
@@ -1033,40 +1094,6 @@ queues nothing, and leaves it. A stopped episode is still live, so
 
 A caller bounds its wait, and reads `host.log` and `squiz status` to tell which
 it was.
-
-**A headless run's handoff gives the run's prompt where nobody wrote a
-description.** Under the local venue the description is `description.md`, else
-the first prompt the worktree's sessions were given (§ 4 The record). Where it
-is the prompt, a line under `## The description` says so before it:
-
-```
-## The description
-
-Nobody wrote a description of this change, so this is the prompt the run was started with:
-
-Add backoff. Requirement: the first retry is immediate.
-```
-
-Where there is neither, the section reads `The change has no description.`
-
-**A headless run's handoff holds the reports its stops carried** (The hooks).
-A run with no subagent hands the fixer its session's transcript path, and under
-Claude Code its final message too. Copilot's `Stop` carries no final message,
-so under Copilot the fixer reads the session's report from its `events.jsonl`.
-A Copilot subagent's report names its parent's `events.jsonl`:
-
-```
-### Subagent dcc0b994-3d65-4ad3-92f3-ccf70b8232d5, dispatched by session af7a1b25-6bdc-459f-99e1-5c3ab2513f83
-
-Transcript: none of its own. Its events are in its parent's transcript, /Users/someone/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl
-
-PONG
-```
-
-**Where a subagent and its parent end on one state, the handoff shows the
-subagent's report.** The subagent's `SubagentStop` fires before the parent's
-`Stop`, and the first stop to queue a state is its owner. The parent's `Stop`
-finds the state queued and records nothing.
 
 ### Parallel coding agents
 
@@ -1515,9 +1542,10 @@ result wakes the session that dispatched it, as in the GitHub venue.
 `copilot -p` the review still runs, its threads and summary are written, and its
 note waits in `.squiz/local/notes/`, as § 3 says of a note no wake reached.
 Where `.squiz.json` names a `fixer`, the episode's fixer works the threads in the
-worktree, and `.squiz/local/closed.json` marks the close, as § 3 Headless runs
-sets out. Where it names none, nothing hands the findings to a coding agent
-once the run has exited.
+worktree, and `.squiz/local/closed.json` marks the close, or
+`.squiz/local/stopped.json` a stop short of it, as § 3 Headless runs sets out.
+Where it names none, nothing hands the findings to a coding agent once the run
+has exited.
 
 #### The commands
 
