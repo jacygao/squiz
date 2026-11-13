@@ -101,6 +101,8 @@ type Hosted = {
   readonly delivered: Readonly<Record<string, number>>;
   /** Each round's resume.txt, by its round's number, where it wrote one. */
   readonly resumes: Readonly<Record<string, string>>;
+  /** Each round's handoff.md, by its round's number, where it wrote one. */
+  readonly handoffs: Readonly<Record<string, string>>;
   /** The state of each closed episode archived under the episode's directory, oldest first. */
   readonly archives: readonly (EpisodeState | null)[];
   /** What `squiz status` printed once the host had exited. */
@@ -266,6 +268,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       notes: notesIn(episode),
       delivered: deliveredIn(episode),
       resumes: resumesIn(episode),
+      handoffs: filesIn(episode, "handoff.md"),
       archives: archivesIn(episode).map((archive) => {
         const archived = readState(archive);
         return archived.outcome === "read" ? archived.state : null;
@@ -338,14 +341,19 @@ function privateTmux(t: TestContext): Record<string, string | undefined> {
 }
 
 function resumesIn(episode: Episode): Record<string, string> {
+  return filesIn(episode, "resume.txt");
+}
+
+/** The file `name` in each round's directory that has one, by the round's number. */
+function filesIn(episode: Episode, name: string): Record<string, string> {
   const directory = join(episode.directory, "rounds");
-  const resumes: Record<string, string> = {};
-  if (!existsSync(directory)) return resumes;
+  const files: Record<string, string> = {};
+  if (!existsSync(directory)) return files;
   for (const round of readdirSync(directory)) {
-    const file = join(directory, round, "resume.txt");
-    if (existsSync(file) && statSync(file).isFile()) resumes[round] = readFileSync(file, "utf8");
+    const file = join(directory, round, name);
+    if (existsSync(file) && statSync(file).isFile()) files[round] = readFileSync(file, "utf8");
   }
-  return resumes;
+  return files;
 }
 
 function git(directory: string, args: readonly string[]): void {
@@ -1496,6 +1504,81 @@ test("a round that leaves threads open writes its owner a note naming the pull r
       WORK_THE_THREADS,
     ].join("\n\n"),
   });
+});
+
+/** A subagent whose stop recorded its last message and its transcript. */
+const REPORTING: Owner = {
+  ...PARENT,
+  lastMessage: "Renamed the flag, and the tests pass.",
+  transcript: "/Users/someone/.claude/projects/-work-tree/7a2c9e41/subagents/agent-a402ef8f56c1b2ed1.jsonl",
+};
+
+const REPLY_BODY = "**Squiz coding agent**\n\nWon't fix, because the old name is read only by the migration.";
+
+/** Have the listing after the round's thread is opened show it with the coding agent's reply on it. */
+function listOpenedThreadWithReply(fixture: Fixture): void {
+  const plain = threadsAnswer("PRRT_new");
+  const reply = { id: "PRRC_reply", databaseId: 52, author: { login: "someone" }, body: REPLY_BODY, createdAt: "2026-10-05T07:20:00Z" };
+  const answer = plain.replace('"createdAt":"2026-10-05T07:13:05Z"}', `"createdAt":"2026-10-05T07:13:05Z"},${JSON.stringify(reply)}`);
+  assert.notEqual(answer, plain, "the fixture's reply was not added to the listing");
+  writeFileSync(join(fixture.binaries, "threads-after-create"), answer, "utf8");
+  writeFileSync(join(fixture.binaries, "on-create.sh"), `cp '${join(fixture.binaries, "threads-after-create")}' '${join(fixture.binaries, "answer-threads")}'\n`, "utf8");
+}
+
+test("#802: a round that leaves threads open writes a handoff in its round's directory, holding the thread with its reply, the description, the agent's report and transcript, and the diff", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    before: listOpenedThreadWithReply,
+  });
+
+  assert.deepEqual(Object.keys(ran.handoffs), ["1"], `rounds/ holds handoffs ${JSON.stringify(Object.keys(ran.handoffs))}`);
+  const handoff = ran.handoffs["1"] ?? "";
+  const short = ran.firstHead.slice(0, 7);
+  for (const part of [
+    `# Handoff for PR #${PULL_REQUEST} at ${short}, round 1`,
+    WORK_THE_THREADS,
+    "## The description\n\nWhat this changes.",
+    `PRRT_new ${TRACKED}:88 high — The name says nothing.`,
+    "Won't fix, because the old name is read only by the migration.",
+    `### Subagent ${PARENT.subagent ?? ""}, dispatched by session ${PARENT.sessionId}`,
+    `Transcript: ${REPORTING.transcript ?? ""}`,
+    REPORTING.lastMessage ?? "",
+    "-// line 88\n+// line 88 CHANGED",
+  ]) {
+    assert.ok(handoff.includes(part), `the handoff lacks ${JSON.stringify(part)}:\n${handoff}`);
+  }
+  assert.match(ran.log, /round 1: wrote the handoff to .*rounds\/1\/handoff\.md/u);
+});
+
+test("#802: a round that closes the episode, with nothing open or with threads open, writes no handoff", async () => {
+  const clean = await host({ records: (fixture) => [queued(fixture.head(), null, REPORTING)] });
+  const capped = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    config: { rounds: 1 },
+    findings: [[finding("The name says nothing.")]],
+    before: listOpenedThreadWithReply,
+  });
+
+  assert.deepEqual(clean.handoffs, {});
+  assert.deepEqual(capped.handoffs, {});
+});
+
+test("#802: a round whose threads cannot be listed writes no handoff, rather than one without them, and host.log says why", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    onStart: (_, fixture) => rmSync(join(fixture.binaries, "answer-threads")),
+  });
+
+  assert.deepEqual(ran.handoffs, {});
+  assert.match(ran.log, /round 1: wrote no handoff: the threads could not be listed: .*no answer fixtured for threads/u);
+});
+
+test("#802: a round that leaves threads open with no owner recorded still writes its handoff", async () => {
+  const ran = await host({ records: atHead, findings: [[finding("The name says nothing.")]], before: listOpenedThreadWithReply });
+
+  assert.match(ran.handoffs["1"] ?? "", /## The agents' final reports\n\nNo agent's stop was recorded for this episode\./u);
 });
 
 test("a round whose threads cannot be listed for the note writes one that points to squiz review, and host.log says why", async () => {

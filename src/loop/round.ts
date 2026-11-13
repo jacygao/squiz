@@ -345,14 +345,15 @@ export async function runRound(setup: RoundSetup): Promise<RoundConclusion> {
 
 /**
  * Run one round, hand what it concluded to `record`, and return what `record`
- * returns. `record` is also handed the change the round read, where it read one.
+ * returns. `record` is also handed the change the round read, where it read one,
+ * and the diff the reviewer read, where the round got that far.
  *
  * The round's snapshot is removed only once `record` has settled, whether it
  * returned or threw. A throw from `record` reaches the caller.
  */
 export async function runRoundThen<T>(
   setup: RoundSetup,
-  record: (conclusion: RoundConclusion, change: Change | undefined) => T | Promise<T>,
+  record: (conclusion: RoundConclusion, change: Change | undefined, diff: string | undefined) => T | Promise<T>,
 ): Promise<T> {
   const opened: Opened = {};
   try {
@@ -363,7 +364,7 @@ export async function runRoundThen<T>(
       // A throw here is this harness's own defect. The round is still a value.
       conclusion = failed("harness", `the round could not be run: ${reasonFor(cause)}`);
     }
-    return await record(conclusion, opened.change);
+    return await record(conclusion, opened.change, opened.diff);
   } finally {
     // Removal grows with what the reviewer left in the snapshot, so anything
     // waiting on the recorded result would wait it out too. It runs under the
@@ -390,6 +391,8 @@ type Opened = {
   snapshot?: string;
   /** The change the gate read. Nothing to undo, and kept for the caller. */
   change?: Change;
+  /** The change's diff, read in the snapshot. Nothing to undo, and kept for the caller. */
+  diff?: string;
 };
 
 /** A step's answer, or the conclusion the round ended on instead of one. */
@@ -647,6 +650,7 @@ async function reviewOn(
   if ("unread" in read) {
     return failed("harness", `no review ran: the diff of ${change.name} could not be read: ${read.unread}`);
   }
+  opened.diff = read.diff;
 
   const clock = stopwatch.now;
   const seconds = config.timeout;
