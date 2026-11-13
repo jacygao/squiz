@@ -33,7 +33,7 @@ export type Handoff =
  * report.
  */
 export function handoffFor(
-  change: Pick<Change, "name" | "head" | "description" | "followUp">,
+  change: Pick<Change, "name" | "head" | "description" | "descriptionFrom" | "followUp">,
   record: StateRecord,
   listed: readonly ReviewThread[],
   diff: string,
@@ -51,6 +51,9 @@ export function handoffFor(
     `Squiz reviewed ${at} in round ${round}: ${open.length === 1 ? "1 thread is" : `${open.length} threads are`} open.`,
     change.followUp,
     "## The description",
+    ...(change.descriptionFrom === "prompt" && change.description.trim() !== ""
+      ? ["Nobody wrote a description of this change, so this is the prompt the run was started with:"]
+      : []),
     description,
     "## The open threads",
     ...open.map(printedThread),

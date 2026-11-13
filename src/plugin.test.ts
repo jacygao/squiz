@@ -80,7 +80,12 @@ test("SubagentStop runs the binary through the plugin root, under the runtime's 
 test("SessionStart and SubagentStart run the same command as the stop hooks, so the venue records where work starts", () => {
   assert.deepEqual(commandsOn("SessionStart"), [{ type: "command", command }]);
   assert.deepEqual(commandsOn("SubagentStart"), [{ type: "command", command }]);
-  assert.deepEqual(Object.keys(registration.hooks ?? {}).sort(), ["SessionStart", "Stop", "SubagentStart", "SubagentStop"]);
+});
+
+// Claude Code 2.1.321 fires only this name, and Copilot 1.0.110 fires it from a plugin's hooks.json as well as its own userPromptSubmitted.
+test("#870: UserPromptSubmit runs the same command, so the venue records the run's prompt", () => {
+  assert.deepEqual(commandsOn("UserPromptSubmit"), [{ type: "command", command }]);
+  assert.deepEqual(Object.keys(registration.hooks ?? {}).sort(), ["SessionStart", "Stop", "SubagentStart", "SubagentStop", "UserPromptSubmit"]);
 });
 
 test("each registered command runs bin/squiz hook from a plugin root with a space in its path (#662)", () => {
@@ -94,7 +99,7 @@ test("each registered command runs bin/squiz hook from a plugin root with a spac
     let ran = 0;
     // Claude Code runs a shell-form command under /bin/sh and Copilot under /bin/bash.
     for (const shell of ["/bin/sh", "/bin/bash"]) {
-      for (const event of ["Stop", "SubagentStop", "SessionStart", "SubagentStart"]) {
+      for (const event of ["Stop", "SubagentStop", "SessionStart", "SubagentStart", "UserPromptSubmit"]) {
         for (const hook of commandsOn(event) as { command?: string }[]) {
           rmSync(argvFile, { force: true });
           const run = spawnSync(shell, ["-c", hook.command ?? ""], {
@@ -107,7 +112,7 @@ test("each registered command runs bin/squiz hook from a plugin root with a spac
         }
       }
     }
-    assert.equal(ran, 8, "a registration this test never ran would pass it");
+    assert.equal(ran, 10, "a registration this test never ran would pass it");
   } finally {
     rmSync(join(root, ".."), { recursive: true, force: true });
   }

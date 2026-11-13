@@ -4,6 +4,7 @@ import { createServer, type Server } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
+import { CLAUDE_CODE_PROMPT, COPILOT_PROMPT, COPILOT_SUBAGENT_PROMPT } from "./prompt-payloads.ts";
 import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP } from "./stop-payloads.ts";
 import { readFiring, readFiringWithSocket, type Firing, type FiringRead, type HookEnvironment, type Owner } from "./firing.ts";
 
@@ -625,4 +626,37 @@ test("#859: Copilot 1.0.110's SubagentStop names the parent's events.jsonl as wh
 // A guard for existing behaviour: Claude Code's transcript_path is the parent's, and its subagent has a transcript of its own.
 test("a Claude Code SubagentStop names no parent's transcript", () => {
   assert.equal("parentTranscript" in firingIn(readFiring(subagentStopText(), WITH_SOCKET)), false);
+});
+
+const PROMPT_REPO = "/private/tmp/claude-501/-Users-jacy-Documents-Dev-squiz/b40470cd-5c98-41d6-a7ef-16382cebe8d8/scratchpad/issue-870/repo";
+
+test("#870: Claude Code 2.1.321's UserPromptSubmit is read with the run's prompt and its directory", () => {
+  assert.deepEqual(firingIn(readFiring(CLAUDE_CODE_PROMPT, WITH_SOCKET)), {
+    event: "UserPromptSubmit",
+    directory: PROMPT_REPO,
+    prompt: "Reply with the single word PONG. Requirement: keys are lowercased.",
+  });
+});
+
+test("#870: Copilot 1.0.110's UserPromptSubmit is read with the run's prompt and its directory", () => {
+  assert.deepEqual(firingIn(readFiring(COPILOT_PROMPT, UNDER_COPILOT)), {
+    event: "UserPromptSubmit",
+    directory: PROMPT_REPO,
+    prompt: "Reply with the single word PONG. Requirement: keys are lowercased.",
+  });
+});
+
+test("#870: Copilot 1.0.110's UserPromptSubmit for a subagent's prompt is no run's prompt", () => {
+  assert.deepEqual(readFiring(COPILOT_SUBAGENT_PROMPT, UNDER_COPILOT), { outcome: "a subagent's prompt" });
+});
+
+test("#870: a UserPromptSubmit with no prompt, or no absolute cwd, is unreadable, and its reason carries no prompt", () => {
+  const prompt = (over: Readonly<Record<string, unknown>>): string =>
+    JSON.stringify({ ...(JSON.parse(CLAUDE_CODE_PROMPT) as Record<string, unknown>), ...over });
+  for (const value of [undefined, "", "   ", 42, null, { text: SECRET }]) {
+    assert.match(reasonFrom(readFiring(prompt({ prompt: value }), WITH_SOCKET)), /"prompt"/u, `for ${JSON.stringify(value)}`);
+  }
+  for (const cwd of [undefined, "", "work/session-directory"]) {
+    assert.match(reasonFrom(readFiring(prompt({ cwd, prompt: SECRET }), WITH_SOCKET)), /cwd/u, `for ${JSON.stringify(cwd)}`);
+  }
 });

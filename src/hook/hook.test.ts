@@ -24,6 +24,8 @@ import { githubEpisode } from "../testing/episode.ts";
 import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP, withCwd } from "../sessions/stop-payloads.ts";
+import { CLAUDE_CODE_PROMPT, COPILOT_PROMPT, COPILOT_SUBAGENT_PROMPT } from "../sessions/prompt-payloads.ts";
+import { fixerEnvironment } from "../host/fixer.ts";
 
 const hookModule = new URL("./hook.ts", import.meta.url).href;
 const triggerModule = new URL("../host/trigger.ts", import.meta.url).href;
@@ -158,7 +160,8 @@ type HookFiring = {
   readonly trigger?: TriggerAs;
 };
 
-type Fired = { readonly code: number | null; readonly stderr: string; readonly elapsedMs: number };
+/** `stdout` matters for a prompt: Claude Code adds what a `UserPromptSubmit` hook prints there to the session's context. */
+type Fired = { readonly code: number | null; readonly stderr: string; readonly stdout: string; readonly elapsedMs: number };
 
 function triggerSource(place: Place, trigger: TriggerAs): string {
   const log = JSON.stringify(place.log);
@@ -216,10 +219,14 @@ async function fire(place: Place, firing: HookFiring): Promise<Fired> {
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
-    child.stdout.resume();
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
     child.on("error", reject);
     child.on("close", (code) => {
-      resolve({ code, stderr, elapsedMs: Date.now() - started });
+      resolve({ code, stderr, stdout, elapsedMs: Date.now() - started });
     });
   });
 }
@@ -254,7 +261,7 @@ test("a Stop firing queues the state, owned by the session and its socket, and s
       environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, HERDR_WORKSPACE_ID: "w2" },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
@@ -274,7 +281,7 @@ test("a SubagentStop firing queues the state, owned by the parent session, its s
       environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
@@ -301,7 +308,7 @@ test("#802: a SubagentStop with no last_assistant_message queues the state with 
     delete payload["last_assistant_message"];
     const fired = await fire(place, { payload: JSON.stringify(payload), environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
@@ -351,7 +358,7 @@ test("a hook run in another repository queues for the payload's worktree, and wr
 
       const fired = await fire(place, { payload: stopPayload(place.worktree), from: plugin });
 
-      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
       assert.equal(recordsIn(place).length, 1, "nothing was queued for the payload's worktree");
       assert.equal(existsSync(join(plugin, ".squiz")), false, "state was written in the directory the hook ran in");
     } finally {
@@ -377,7 +384,7 @@ test("Copilot's recorded SubagentStop, fired from outside any worktree, queues f
 
     const fired = await fire(place, { payload, environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       // Copilot's payload carries no agent_transcript_path, and the subagent's events are in its parent's.
       {
@@ -397,7 +404,7 @@ test("a payload's cwd in a subdirectory of the worktree queues at the worktree's
 
     const fired = await fire(place, { payload: stopPayload(inside) });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(recordsIn(place).length, 1);
   });
 });
@@ -441,7 +448,7 @@ test("a SubagentStop with an empty agent_type asks the trigger nothing and says 
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: subagentStopPayload(place.worktree, { agent_type: "" }), trigger: { as: "recording" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(reported(place), "", "the trigger was asked");
   });
 });
@@ -469,7 +476,7 @@ test("a Copilot Stop queues the state owned by the session, and records no socke
       environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
@@ -496,7 +503,7 @@ test("a Copilot Stop records the socket squiz's extension listens on beside the 
 
       const fired = await fire(place, { payload, environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
 
-      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
       assert.deepEqual(recordsIn(place), [
         { head: HEAD, activity: null, owner: { sessionId: COPILOT_PARENT, messagingSocket: socket, transcript: join(directory, "events.jsonl") }, status: "queued" },
       ]);
@@ -515,7 +522,7 @@ test("a Copilot Stop for a subagent's turn asks the trigger nothing and says not
       trigger: { as: "recording" },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(reported(place), "", "the trigger was asked");
   });
 });
@@ -554,7 +561,7 @@ test("a draft exits 0 and says nothing, having asked GitHub, queued nothing and 
 
     const fired = await fire(place, { payload: stopPayload(place.worktree) });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     // A lookup that failed says so on stderr, and one never made leaves no call
     // here: only the draft read and acted on gets this far in silence.
     const calls = readFileSync(join(place.bin, "calls.log"), "utf8").trim().split("\n");
@@ -615,7 +622,7 @@ test("a place's clean-up leaves no host the firing started running, one that has
   await withPlace(async (place) => {
     directories = [place.worktree, place.bin];
     const fired = await fire(place, { payload: stopPayload(place.worktree) });
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
   });
 
   for (const directory of directories) {
@@ -664,7 +671,7 @@ test("#838: a SessionStart where .squiz.json says local records the base at the 
     // Fired from outside the worktree, as Copilot runs a plugin's hook.
     const fired = await fire(place, { payload: sessionStartPayload(join(place.worktree, "sub")), environment: {}, trigger: { as: "recording" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(existsSync(baseFileIn(place)), true, "the start recorded no base, and said nothing");
     assert.deepEqual(JSON.parse(readFileSync(baseFileIn(place), "utf8")), { commit: headOf(place.worktree), branches: [`refs/heads/${BRANCH}`] });
     assert.equal(reported(place), "", "the start asked the trigger to queue a review");
@@ -681,7 +688,7 @@ test("Copilot's SubagentStart, which carries no hook_event_name and no session_i
       trigger: { as: "recording" },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(existsSync(baseFileIn(place)), true, "the start recorded no base, and said nothing");
   });
 });
@@ -699,7 +706,7 @@ test("a resumed session's SessionStart, after commits, leaves the base the first
       trigger: { as: "recording" },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal((JSON.parse(readFileSync(baseFileIn(place), "utf8")) as { commit: string }).commit, start, "the resume overwrote the base");
   });
 });
@@ -708,7 +715,7 @@ test("a start under the GitHub venue writes nothing, runs no gh, queues nothing 
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: sessionStartPayload(place.worktree), trigger: { as: "recording" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(existsSync(join(place.worktree, ".squiz")), false);
     assert.equal(existsSync(join(place.bin, "calls.log")), false, "the start ran gh");
     assert.equal(reported(place), "", "the start asked the trigger to queue a review");
@@ -719,7 +726,7 @@ test("#838: a start with SQUIZ_VENUE=local and no .squiz.json is under the GitHu
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: sessionStartPayload(place.worktree), environment: { SQUIZ_VENUE: "local" }, trigger: { as: "recording" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(existsSync(join(place.worktree, ".squiz")), false, "SQUIZ_VENUE chose the local venue");
   });
 });
@@ -758,7 +765,7 @@ test("#838: a start in a linked worktree takes the venue from the main worktree'
 
     const fired = await fire(place, { payload: sessionStartPayload(linked), trigger: { as: "recording" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.equal(existsSync(join(realpathSync(linked), ".squiz", "local", "base.json")), true, "the linked worktree's own github was read");
   });
 });
@@ -769,7 +776,7 @@ test("#838: a start outside any git repository records nothing and says nothing"
     for (const payload of [sessionStartPayload(place.bin), copilotSubagentStartPayload(place.bin)]) {
       const fired = await fire(place, { payload, trigger: { as: "recording" } });
 
-      assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+      assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
       assert.equal(existsSync(join(place.bin, ".squiz")), false);
     }
   });
@@ -786,7 +793,7 @@ test("a Stop under the local venue queues the working tree's state in .squiz/loc
       trigger: { as: "real", hostCommand: "/usr/bin/true" },
     });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     const state = JSON.parse(readFileSync(join(place.worktree, ".squiz", "local", "state.json"), "utf8")) as {
       records: readonly { head: string; status: string; owner: unknown }[];
     };
@@ -812,7 +819,7 @@ test("#859: Claude Code 2.1.321's Stop queues the state with the session's final
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: withCwd(CLAUDE_CODE_STOP, place.worktree), environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
@@ -833,7 +840,7 @@ test("#859: Copilot 1.0.110's Stop queues the state with the session's transcrip
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: withCwd(COPILOT_STOP, place.worktree), environment: { COPILOT_CLI: "1" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       { head: HEAD, activity: null, owner: { sessionId: CAPTURED_COPILOT_SESSION, transcript: CAPTURED_COPILOT_TRANSCRIPT }, status: "queued" },
     ]);
@@ -844,7 +851,7 @@ test("#859: Copilot 1.0.110's SubagentStop queues the state naming the parent's 
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: withCwd(COPILOT_SUBAGENT_STOP, place.worktree), environment: { COPILOT_CLI: "1" } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
@@ -867,7 +874,7 @@ test("#859: a Stop with a malformed final message queues the state with its tran
     const payload = stopPayload(place.worktree, { last_assistant_message: { text: "done" }, transcript_path: transcript });
     const fired = await fire(place, { payload, environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
 
-    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
       { head: HEAD, activity: null, owner: { sessionId: SESSION_ID, messagingSocket: SOCKET, transcript }, status: "queued" },
     ]);
@@ -892,5 +899,112 @@ test("#859: a Stop after a SubagentStop for the same state leaves the subagent's
         status: "queued",
       },
     ]);
+  });
+});
+
+const CAPTURED_PROMPT = "Reply with the single word PONG. Requirement: keys are lowercased.";
+
+function promptFileIn(place: Place): string {
+  return join(place.worktree, ".squiz", "local", "prompt.md");
+}
+
+// A hook that threw on the event, or read no prompt from it, would also exit 0
+// with nothing on stderr. Only the file tells a recorded prompt apart.
+test("#870: Claude Code 2.1.321's UserPromptSubmit under the local venue records the prompt, queues nothing and prints nothing", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+
+    const fired = await fire(place, { payload: withCwd(CLAUDE_CODE_PROMPT, place.worktree), trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(promptFileIn(place)) && readFileSync(promptFileIn(place), "utf8"), CAPTURED_PROMPT);
+    assert.equal(reported(place), "", "the prompt asked the trigger to queue a review");
+  });
+});
+
+test("#870: Copilot 1.0.110's UserPromptSubmit, fired from outside the worktree, records the prompt and prints nothing", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+
+    const fired = await fire(place, { payload: withCwd(COPILOT_PROMPT, place.worktree), environment: { COPILOT_CLI: "1" }, trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(promptFileIn(place)) && readFileSync(promptFileIn(place), "utf8"), CAPTURED_PROMPT);
+  });
+});
+
+test("#870: a later prompt, in the same session or another, leaves the first one recorded", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+    await fire(place, { payload: withCwd(CLAUDE_CODE_PROMPT, place.worktree), trigger: { as: "recording" } });
+
+    for (const payload of [CLAUDE_CODE_PROMPT, COPILOT_PROMPT]) {
+      const later = JSON.stringify({ ...(JSON.parse(withCwd(payload, place.worktree)) as Record<string, unknown>), prompt: "Now rename it." });
+      const fired = await fire(place, { payload: later, trigger: { as: "recording" } });
+
+      assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    }
+    assert.equal(readFileSync(promptFileIn(place), "utf8"), CAPTURED_PROMPT, "a later prompt replaced the first");
+  });
+});
+
+// The fixer is a session too, started on squiz's own prompt, in the worktree whose run it works for.
+test("#870: a session squiz started as the fixer records nothing, under either CLI", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+    for (const [payload, cli] of [[CLAUDE_CODE_PROMPT, {}], [COPILOT_PROMPT, { COPILOT_CLI: "1" }]] as const) {
+      const environment = fixerEnvironment({ ...cli, PATH: "/usr/bin" }) as Record<string, string>;
+      const fired = await fire(place, { payload: withCwd(payload, place.worktree), environment, trigger: { as: "recording" } });
+
+      assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+      assert.equal(existsSync(promptFileIn(place)), false, "the fixer's prompt was recorded as the run's");
+    }
+  });
+});
+
+test("#870: Copilot 1.0.110's UserPromptSubmit for a subagent's brief records nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+
+    const fired = await fire(place, { payload: withCwd(COPILOT_SUBAGENT_PROMPT, place.worktree), environment: { COPILOT_CLI: "1" }, trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(promptFileIn(place)), false, "the subagent's brief was recorded as the run's prompt");
+  });
+});
+
+test("#870: a prompt under the GitHub venue writes nothing, runs no gh, queues nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: withCwd(CLAUDE_CODE_PROMPT, place.worktree), trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(join(place.worktree, ".squiz")), false);
+    assert.equal(existsSync(join(place.bin, "calls.log")), false, "the prompt ran gh");
+    assert.equal(reported(place), "", "the prompt asked the trigger to queue a review");
+  });
+});
+
+test("#870: a prompt that cannot be recorded exits 0 and says why in one line", async () => {
+  await withPlace(async (place) => {
+    squizJsonIn(place.worktree, LOCAL);
+    // A file where the directory goes, so the record cannot be made.
+    writeFileSync(join(place.worktree, ".squiz"), "");
+
+    const fired = await fire(place, { payload: withCwd(CLAUDE_CODE_PROMPT, place.worktree), trigger: { as: "recording" } });
+
+    assert.equal(fired.code, 0);
+    assert.equal(fired.stdout, "");
+    assert.match(fired.stderr, new RegExp(`^squiz: no prompt was recorded: ${escaped(join(place.worktree, ".squiz", "local"))} could not be made: [^\n]*\n$`, "u"));
+    assert.equal(fired.stderr.includes(CAPTURED_PROMPT), false, "the line carries the prompt");
+  });
+});
+
+// A prompt fires for every session opened anywhere, as a start does.
+test("#870: a prompt outside any git repository records nothing and says nothing", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, { payload: withCwd(CLAUDE_CODE_PROMPT, place.bin), trigger: { as: "recording" } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    assert.equal(existsSync(join(place.bin, ".squiz")), false);
   });
 });

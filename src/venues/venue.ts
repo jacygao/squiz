@@ -36,6 +36,11 @@ export type Change = {
   readonly head: string;
   readonly description: string;
   /**
+   * `prompt` where nobody wrote a description, and the description is the
+   * prompt the run was started with. Absent where someone wrote it.
+   */
+  readonly descriptionFrom?: "prompt";
+  /**
    * The commit this worktree pushed to the change that the venue does not yet
    * report as its head, as GitHub does for a few seconds after a push. Absent
    * where the venue reports what was pushed, or cannot be compared with it.
@@ -85,6 +90,12 @@ export interface Venue {
    * done any work. A venue that needs nothing from the start returns "done".
    */
   recordStart(worktree: string, until: Deadline): { readonly outcome: "done" } | Failed;
+  /**
+   * Called with each prompt a session in `worktree` is given, other than one
+   * squiz gave it. A venue whose change carries a description of its own
+   * returns "done".
+   */
+  recordPrompt(worktree: string, prompt: string, until: Deadline): { readonly outcome: "done" } | Failed;
   /**
    * The change to review in `worktree`. `asked` is the key a command was given,
    * such as the 41 of `squiz review 41` or `squiz host 41`, or null for a hook,

@@ -1,9 +1,14 @@
 /**
  * A hook's payload: a `Stop` or `SubagentStop` read into the session that owns
- * the work that just ended, or a `SessionStart` or `SubagentStart` read into the
- * directory work is starting in.
+ * the work that just ended, a `SessionStart` or `SubagentStart` read into the
+ * directory work is starting in, or a `UserPromptSubmit` read into the prompt a
+ * session was given and its directory.
  *
  * A start names no owner, so it is read for its `cwd` alone.
+ *
+ * A `UserPromptSubmit` carrying an `agent_id` is the brief a session gave its
+ * subagent, not a prompt the session was given. Copilot fires one for each
+ * subagent, in its parent's `cwd`.
  *
  * The owner is the session in the payload's `session_id`. On `Stop` that is the
  * session whose turn ended. On `SubagentStop` it is the session that dispatched
@@ -50,6 +55,7 @@ export type Owner = {
 export type Firing =
   | { readonly event: "SessionStart"; readonly directory: string }
   | { readonly event: "SubagentStart"; readonly directory: string }
+  | { readonly event: "UserPromptSubmit"; readonly directory: string; readonly prompt: string }
   | {
       readonly event: "Stop";
       readonly directory: string;
@@ -79,6 +85,7 @@ export type FiringRead =
   | { readonly outcome: "read"; readonly firing: Firing }
   | { readonly outcome: "no subagent's work" }
   | { readonly outcome: "a subagent's turn" }
+  | { readonly outcome: "a subagent's prompt" }
   | { readonly outcome: "unreadable"; readonly reason: string };
 
 export type HookEnvironment = Readonly<Record<string, string | undefined>>;
@@ -105,8 +112,9 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
     if (directory === undefined) return unreadable(NO_CWD);
     return { outcome: "read", firing: { event, directory } };
   }
+  if (event === "UserPromptSubmit") return promptFiring(payload);
   if (event !== "Stop" && event !== "SubagentStop") {
-    return unreadable('the payload\'s "hook_event_name" is not Stop, SubagentStop, SessionStart or SubagentStart');
+    return unreadable('the payload\'s "hook_event_name" is not Stop, SubagentStop, SessionStart, SubagentStart or UserPromptSubmit');
   }
 
   const agentType = payload["agent_type"];
@@ -155,6 +163,16 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
     outcome: "read",
     firing: { event, directory, owner, subagent: agentId, ...lastMessage, ...transcript, ...parentTranscript },
   };
+}
+
+function promptFiring(payload: Readonly<Record<string, unknown>>): FiringRead {
+  const agentId = payload["agent_id"];
+  if (typeof agentId === "string" && agentId !== "") return { outcome: "a subagent's prompt" };
+  const prompt = payload["prompt"];
+  if (typeof prompt !== "string" || prompt.trim() === "") return unreadable('the payload carries no "prompt"');
+  const directory = absoluteCwd(payload);
+  if (directory === undefined) return unreadable(NO_CWD);
+  return { outcome: "read", firing: { event: "UserPromptSubmit", directory, prompt } };
 }
 
 function lastMessageIn(value: unknown): { readonly lastMessage?: string } {
