@@ -49,6 +49,11 @@ export type Config = {
    * woken instead.
    */
   fixer: FixerAgent | null;
+  /**
+   * The commands the fixer may run beyond `squiz` and `git`, each by its name
+   * alone and with any arguments. Empty where the file names none.
+   */
+  fixerCommands: readonly string[];
 };
 
 // Every setting has a default, so a project that writes no file still runs.
@@ -63,6 +68,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   thinking: "medium",
   model: null,
   fixer: null,
+  fixerCommands: [],
 });
 
 /**
@@ -79,7 +85,7 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer"] as const;
+const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer", "fixerCommands"] as const;
 
 const settingList = `${settingNames.slice(0, -1).map((name) => `"${name}"`).join(", ")} and "${settingNames.at(-1)}"`;
 
@@ -192,7 +198,7 @@ function parse(source: string, path: string): Config {
   // Presence is decided by whether the key is there, never by whether its value
   // is truthy. `0` is a value a person wrote, and it is refused as out of range
   // rather than replaced by the default.
-  return {
+  const config: Config = {
     venue: has(raw, "venue") ? venueOf(path, raw["venue"]) : defaultConfig.venue,
     reviewer: has(raw, "reviewer") ? reviewerOf(path, raw["reviewer"]) : defaultConfig.reviewer,
     rounds: has(raw, "rounds")
@@ -223,7 +229,12 @@ function parse(source: string, path: string): Config {
       : defaultConfig.thinking,
     model: has(raw, "model") ? modelOf(path, raw["model"]) : defaultConfig.model,
     fixer: has(raw, "fixer") ? fixerOf(path, raw["fixer"]) : defaultConfig.fixer,
+    fixerCommands: has(raw, "fixerCommands") ? fixerCommandsOf(path, raw["fixerCommands"]) : defaultConfig.fixerCommands,
   };
+  if (config.fixer === null && config.fixerCommands.length > 0) {
+    throw new ConfigError(`${path}: "fixerCommands" names commands for a fixer, but "fixer" names none`);
+  }
+  return config;
 }
 
 function has(raw: Record<string, unknown>, setting: string): boolean {
@@ -270,6 +281,31 @@ function fixerOf(path: string, value: unknown): FixerAgent {
   if (named !== undefined) return named;
   // A null would read as the file leaving the run interactive, which it did not say.
   throw new ConfigError(reject(path, "fixer", value, `"claude" or "copilot"; leave "fixer" out for a session that is woken`));
+}
+
+/**
+ * A command as a shell line names it. No path, space, wildcard, `:` or
+ * parenthesis, so it reaches each CLI's grant as one command, never as a
+ * pattern or as a grant in the CLI's own syntax.
+ */
+const commandName = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u;
+
+function fixerCommandsOf(path: string, value: unknown): readonly string[] {
+  const valid =
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= 16 &&
+    value.every((name) => typeof name === "string" && commandName.test(name)) &&
+    new Set(value).size === value.length;
+  if (valid) return value as string[];
+  throw new ConfigError(
+    reject(
+      path,
+      "fixerCommands",
+      value,
+      `a list of 1 to 16 different command names, each up to 64 letters, digits and . _ + -, starting with a letter or a digit; leave "fixerCommands" out for none`,
+    ),
+  );
 }
 
 function thinkingOf(path: string, value: unknown): Thinking {
