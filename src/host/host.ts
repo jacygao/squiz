@@ -188,8 +188,8 @@ type Log = (line: string) => void;
 
 async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, log: Log): Promise<HostEnd> {
   const update = setup.update ?? updateState;
-  // When the host began waiting on each fixer, by its pid, kept across the rounds that run while it waits.
-  const waitingSince = new Map<number, number>();
+  // When the host began waiting on each fixer, by its pid and start time, kept across the rounds that run while it waits.
+  const waitingSince = new Map<string, number>();
   const write = (change: (state: EpisodeState) => EpisodeState): StateUpdate =>
     update(episode, change, { until: deadlineIn(STATE_WAIT_MS) });
 
@@ -581,7 +581,7 @@ async function awaitFixers(
   setup: HostSetup,
   episode: Episode,
   log: Log,
-  since: Map<number, number>,
+  since: Map<string, number>,
 ): Promise<"queued" | "settled" | Stop | HostEnd> {
   const clock = setup.clock ?? Date.now;
   const { timeout, rounds } = setup.round.config;
@@ -595,9 +595,10 @@ async function awaitFixers(
     if (read.state.closeReported === true) return "settled";
     const running = fixerRunning(read.state.records ?? [], setup.presence ?? stillRunning);
     if (running === undefined) return "settled";
-    const began = since.get(running.pid);
+    const key = `${running.pid} ${running.startedAt}`;
+    const began = since.get(key);
     if (began === undefined) {
-      since.set(running.pid, clock());
+      since.set(key, clock());
       log(`waiting for the fixer round ${running.round} started, process ${running.pid}, to exit, for at most ${boundSeconds} seconds`);
     } else if (clock() - began >= boundSeconds * 1_000) {
       const reason = `the fixer round ${running.round} started, process ${running.pid}, was not seen to exit within ${boundSeconds} seconds, the reviewer's time bound for each of the ${rounds} rounds the cap allows`;
@@ -612,11 +613,12 @@ async function awaitFixers(
 function fixerRunning(
   records: readonly StateRecord[],
   presence: (identity: ProcessIdentity, boundMs: number) => Presence,
-): { readonly round: number; readonly pid: number; readonly head: string } | undefined {
+): { readonly round: number; readonly pid: number; readonly startedAt: number; readonly head: string } | undefined {
   for (const record of records) {
     if (record.status !== "reviewed" || record.result !== "exited" || record.fixer?.outcome !== "started") continue;
     if (presence(record.fixer.process, FIXER_START_MS).outcome === "gone") continue;
-    return { round: record.round.number, pid: record.fixer.process.pid, head: (records.at(-1) ?? record).head };
+    const { pid, startedAt } = record.fixer.process;
+    return { round: record.round.number, pid, startedAt, head: (records.at(-1) ?? record).head };
   }
   return undefined;
 }
