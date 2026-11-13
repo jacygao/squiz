@@ -144,7 +144,7 @@ function decided(
   decision: TriggerDecision,
   threads: readonly ReviewThread[] = [],
   host: HostStart = { outcome: "not started" },
-): Triggered {
+): Extract<Triggered, { outcome: "decided" }> {
   return {
     outcome: "decided",
     change: CHANGE,
@@ -998,6 +998,35 @@ test("a gate that stops the trigger exits 1 with its reason and nothing on stdou
       "squiz: no review ran: no open pull request has \"feature-a\" as its head\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
     );
+  });
+});
+
+test("#852: a push GitHub never comes to report is waited for 60 seconds on the run's clock, then exits 1 naming both heads", async () => {
+  await withWorktree(async (fixture) => {
+    let clock = 1_000_000;
+    const handed: TriggerRequest[] = [];
+    const run = request(fixture, { triggered: { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } } }, handed);
+    const asked = run.trigger ?? assert.fail("the request has no trigger");
+
+    const printed = await runReview({
+      ...run,
+      now: () => clock,
+      trigger: (given) => {
+        const answered = asked(given);
+        clock += 30_000;
+        return answered;
+      },
+    });
+
+    assert.equal(printed.exit, 1, printed.stdout);
+    assert.equal(printed.stdout, "");
+    assert.equal(
+      printed.stderr,
+      "squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 60 seconds, though this worktree pushed 8d21a4f to it\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+    assert.equal(handed.length, 2, "the run asked GitHub again after its wait was spent, or stopped asking before");
+    assert.ok(handed.every((given) => given.holdUnreported === true), "a trigger was not asked to hold the push");
   });
 });
 

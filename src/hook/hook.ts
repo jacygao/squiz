@@ -110,6 +110,9 @@ function lineFor(triggered: Triggered): string | null {
       return `no review ran: ${triggered.reason}`;
     case "held":
       return null;
+    // A hook never asks to hold a push GitHub does not report yet.
+    case "unreported":
+      return null;
     case "failed":
       return `nothing was queued: ${triggered.reason}`;
     case "decided": {

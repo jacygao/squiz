@@ -2710,6 +2710,24 @@ squiz: `squiz status 41` shows whether one takes it later, and .squiz/41/host.lo
 squiz: put these lines in your report rather than running squiz review again
 ```
 
+**A run straight after a push waits for GitHub to report the pushed commit.**
+GitHub can go on reporting the pull request's old head for some seconds after a
+push lands, while the branch's remote-tracking ref, `@{push}`, already names the
+new commit. Where the head GitHub reports does not contain `@{push}`, and the
+repository has that head, the run decides on nothing. It asks GitHub again once a
+second, for up to 60 seconds, and acts on the first head it reports that does
+contain the pushed commit. Commits not yet pushed leave `@{push}` where GitHub
+already has it, a head this repository lacks was pushed from elsewhere, and a
+branch with no push destination has no `@{push}`, so each is taken as GitHub
+reports it. The hooks do not wait, and trigger on the head GitHub reports. Where
+GitHub has not reported the push after 60 seconds, or by the run's deadline where
+that comes first, the run exits 1:
+
+```
+squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 60 seconds, though this worktree pushed 8d21a4f to it
+squiz: put these lines in your report rather than running squiz review again
+```
+
 Every number and every thread in the output is computed from what the round read
 back from the pull request, so the coding agent can check each one there.
 
@@ -3099,6 +3117,7 @@ The last column names the surfaces each path reaches.
 | The reviewer exceeds the review budget | Exit 1, unless the round holds the reviewer's declaration, as the end of this row says. The reviewer process is killed, what it reported before the kill is posted, and the failure comment and stderr say how many findings arrived. The same line then says what squiz saw during the round, and never what caused the kill. For a `pi` reviewer it gives how many messages the reviewer completed, with the bound's seconds averaged over them, and how many requests its provider failed, quoting the first line of the last one's error. A Copilot round's line adds nothing of that, because Copilot reports neither while it runs. Where the machine slept during the review, the line ends by saying for how long, as in "the machine slept for 13 minutes of the round", whichever reviewer ran. The round is recorded as a failed round rather than a clean one, whatever it posted, and the summary that closes the episode notes that the bound cut it short. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. That round posts no failure comment, and exits 0, 2 or 3 as its outcome says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, summary's Notes |
 | A reviewer's pane cannot be closed | The reviewer is already stopped, and its pane stays open on the person's screen. | `host.log` |
 | A round's snapshot cannot be removed | The snapshot stays on disk, and the round's result stands. `host.log` names its path and why it could not be deleted (§ 5 The snapshot). | `host.log` |
+| GitHub does not report a push | `squiz review` asks again for up to 60 seconds, and then exits 1 naming the head GitHub reports and the commit the worktree pushed, as § 7 `squiz review` shows. Nothing is queued for either head. A hook triggers on the head GitHub reports. | `squiz review` stderr |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. Nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. A trigger whose calls cannot reach GitHub queues nothing. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |

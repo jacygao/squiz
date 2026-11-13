@@ -131,7 +131,31 @@ function readChange(worktree: string, asked: string | null, until: Deadline): Ch
     );
   }
   if (found.draft) return { outcome: "held", line: draftLine(found.number) };
-  return { outcome: "found", change: changeOf(found, worktree) };
+  const change = changeOf(found, worktree);
+  const unreported = unreportedPush(worktree, change.head, until);
+  return { outcome: "found", change: unreported === undefined ? change : { ...change, unreported } };
+}
+
+/**
+ * The commit `@{push}` names, where the head GitHub `reported` does not contain
+ * it. The remote-tracking ref moves when a push lands, before GitHub reports it.
+ *
+ * Commits not yet pushed leave `@{push}` where it was, so they are not
+ * unreported. Neither is a push the reported head contains, nor a reported head
+ * this repository lacks, which someone else pushed. A branch with no push
+ * destination, or a git that cannot answer, leaves GitHub's head unquestioned.
+ */
+function unreportedPush(worktree: string, reported: string, until: Deadline): string | undefined {
+  if (!FULL_COMMIT_NAME.test(reported)) return undefined;
+  const pushed = runGit(worktree, ["rev-parse", "--quiet", "--verify", "@{push}"], { until, answers: [0, 1] });
+  if (!pushed.ran || pushed.status !== 0) return undefined;
+  const commit = pushed.stdout.trim();
+  if (commit === reported) return undefined;
+  const present = hasCommit(worktree, reported, until);
+  if (!present.known || !present.has) return undefined;
+  const contained = runGit(worktree, ["merge-base", "--is-ancestor", commit, reported], { until, answers: [0, 1] });
+  if (!contained.ran || contained.status === 0) return undefined;
+  return commit;
 }
 
 function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange {

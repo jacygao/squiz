@@ -60,6 +60,12 @@ export type TriggerRequest = {
   readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
   /** What runs as the round host. `squiz host <key>` where not given. */
   readonly host?: (key: string) => HostCommand;
+  /**
+   * Return a change the worktree pushed past the head the venue reports as
+   * `unreported`, rather than decide on that head. `squiz review` asks for it
+   * and waits for the venue to catch up. A hook does not, and returns at once.
+   */
+  readonly holdUnreported?: boolean;
 };
 
 export type HostStart = { readonly outcome: "not started" } | Detached;
@@ -75,6 +81,8 @@ export type Triggered =
   | { readonly outcome: "held"; readonly line: string }
   /** The venue, or what the decision needs, could not be read, or the queue could not be written. Nothing was queued. */
   | { readonly outcome: "failed"; readonly reason: string }
+  /** The venue does not yet report the commit the worktree pushed. Nothing was listed or written. */
+  | { readonly outcome: "unreported"; readonly change: Change & { readonly unreported: string } }
   | {
       readonly outcome: "decided";
       readonly change: Change;
@@ -120,6 +128,9 @@ export function trigger(request: TriggerRequest): Triggered {
       return failed(lookup.reason);
   }
   const { change } = lookup;
+  if (request.holdUnreported === true && change.unreported !== undefined) {
+    return { outcome: "unreported", change: { ...change, unreported: change.unreported } };
+  }
 
   const listed = venue.listThreads(change, until);
   if (listed.outcome !== "listed") {

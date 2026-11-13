@@ -35,6 +35,12 @@ export type Change = {
   readonly base: string;
   readonly head: string;
   readonly description: string;
+  /**
+   * The commit this worktree pushed to the change that the venue does not yet
+   * report as its head, as GitHub does for a few seconds after a push. Absent
+   * where the venue reports what was pushed, or cannot be compared with it.
+   */
+  readonly unreported?: string;
 };
 
 export type Failed = { readonly outcome: "failed"; readonly reason: string };

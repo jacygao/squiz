@@ -1025,3 +1025,54 @@ test("#832: new replies after a clean close, with the same head, start nothing, 
     assert.deepEqual(archivesIn(fixture.episode), []);
   });
 });
+
+/** Give the fixture's worktree a remote it has pushed its branch to, so that `@{push}` names a commit. */
+function pushedToARemote(fixture: Fixture): (args: readonly string[]) => string {
+  const remote = `${fixture.worktree}.remote.git`;
+  execFileSync("git", ["init", "--quiet", "--bare", remote]);
+  const git = (args: readonly string[]): string => execFileSync("git", args, { cwd: fixture.worktree, encoding: "utf8" }).trim();
+  git(["remote", "add", "origin", remote]);
+  git(["push", "--quiet", "--set-upstream", "origin", BRANCH]);
+  return git;
+}
+
+test("#852: a run straight after a push, which GitHub still answers with the closed review's head, reviews the pushed commit rather than exiting 0 on the close", async () => {
+  await withPullRequest([{ findings: [], verdicts: [] }, { findings: [], verdicts: [] }], async (fixture) => {
+    const git = pushedToARemote(fixture);
+    const first = await review(fixture);
+    assert.equal(first.exit, 0, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const old = fixture.gh().head;
+
+    const pushed = fixture.commit();
+    git(["push", "--quiet"]);
+    fixture.setGh({ ...fixture.gh(), head: pushed, staleHeads: [old] });
+    const second = await review(fixture);
+
+    assert.equal(
+      second.stdout.split("\n")[1],
+      `Squiz reviewed PR #41 at ${pushed.slice(0, 7)}: round 1 of 3, no new findings.`,
+      `the run reported a review of a head it had not reviewed:\n${second.stdout}${second.stderr}\n${hostLog(fixture.episode)}`,
+    );
+    assert.equal(second.exit, 0);
+    assert.equal(started(fixture), 2, "no round ran on the pushed commit");
+  });
+});
+
+test("#852: commits not yet pushed leave the run on the head GitHub reports, and a closed review there exits 0 at once", async () => {
+  await withPullRequest([{ findings: [], verdicts: [] }], async (fixture) => {
+    pushedToARemote(fixture);
+    const first = await review(fixture);
+    assert.equal(first.exit, 0, `${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const head = fixture.gh().head;
+
+    fixture.commit();
+    const second = await review(fixture);
+
+    assert.equal(second.exit, 0, `${second.stdout}${second.stderr}`);
+    assert.equal(
+      second.stdout.split("\n")[1],
+      `Squiz's review of PR #41 closed at ${head.slice(0, 7)} after 1 round, with nothing open. Only a new head commit starts another review in this worktree.`,
+    );
+    assert.equal(started(fixture), 1);
+  });
+});
