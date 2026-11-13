@@ -60,6 +60,14 @@ export type TriggerRequest = {
   readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
   /** What runs as the round host. `squiz host <key>` where not given. */
   readonly host?: (key: string) => HostCommand;
+  /**
+   * Return a change the worktree pushed past the head the venue reports as
+   * `unreported`, rather than decide on that head. `squiz review` asks for it
+   * and waits for the venue to catch up. A hook does not, and returns at once.
+   */
+  readonly holdUnreported?: boolean;
+  /** The earlier deadline the venue's lookup of the change runs on, where it has one. `until` where not given. */
+  readonly lookUpBy?: Deadline;
 };
 
 export type HostStart = { readonly outcome: "not started" } | Detached;
@@ -73,8 +81,14 @@ export type Triggered =
    * of one where it says nothing of a state it chose not to queue.
    */
   | { readonly outcome: "held"; readonly line: string }
-  /** The venue, or what the decision needs, could not be read, or the queue could not be written. Nothing was queued. */
-  | { readonly outcome: "failed"; readonly reason: string }
+  /**
+   * The venue, or what the decision needs, could not be read, or the queue could
+   * not be written. Nothing was queued. `lookup` is true where the venue's lookup
+   * of the change itself failed, before its threads were listed.
+   */
+  | { readonly outcome: "failed"; readonly reason: string; readonly lookup?: true }
+  /** The venue does not yet report the commit the worktree pushed. Nothing was listed or written. */
+  | { readonly outcome: "unreported"; readonly change: Change & { readonly unreported: string } }
   | {
       readonly outcome: "decided";
       readonly change: Change;
@@ -108,7 +122,7 @@ export function trigger(request: TriggerRequest): Triggered {
     if (chosen.outcome === "failed") return failed(chosen.reason);
     venue = chosen.venue;
   }
-  const lookup = venue.readChange(directory, request.key ?? null, until);
+  const lookup = venue.readChange(directory, request.key ?? null, request.lookUpBy ?? until);
   switch (lookup.outcome) {
     case "found":
       break;
@@ -117,9 +131,12 @@ export function trigger(request: TriggerRequest): Triggered {
     case "none":
       return noReview(lookup.reason);
     case "failed":
-      return failed(lookup.reason);
+      return { ...failed(lookup.reason), lookup: true };
   }
   const { change } = lookup;
+  if (request.holdUnreported === true && change.unreported !== undefined) {
+    return { outcome: "unreported", change: { ...change, unreported: change.unreported } };
+  }
 
   const listed = venue.listThreads(change, until);
   if (listed.outcome !== "listed") {

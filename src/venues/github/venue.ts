@@ -131,7 +131,35 @@ function readChange(worktree: string, asked: string | null, until: Deadline): Ch
     );
   }
   if (found.draft) return { outcome: "held", line: draftLine(found.number) };
-  return { outcome: "found", change: changeOf(found, worktree) };
+  const change = changeOf(found, worktree);
+  const unreported = unreportedPush(worktree, change.head, until);
+  if (typeof unreported === "object") return failed(`whether ${change.name}'s head has this worktree's push could not be told: ${unreported.reason}`);
+  return { outcome: "found", change: unreported === undefined ? change : { ...change, unreported } };
+}
+
+/**
+ * The commit `@{push}` names, where the head GitHub `reported` does not contain
+ * it. The remote-tracking ref moves when a push lands, before GitHub reports it.
+ *
+ * Commits not yet pushed leave `@{push}` where it was, so they are not
+ * unreported. Neither is a push the reported head contains, nor a reported head
+ * this repository lacks, which someone else pushed, nor any head of a branch
+ * with no push destination. A git that does not answer fails, because reading
+ * it as no push would let the head from before one through.
+ */
+function unreportedPush(worktree: string, reported: string, until: Deadline): string | undefined | Failed {
+  if (!FULL_COMMIT_NAME.test(reported)) return undefined;
+  const pushed = runGit(worktree, ["rev-parse", "--quiet", "--verify", "@{push}"], { until, answers: [0, 1] });
+  if (!pushed.ran) return failed(pushed.reason);
+  if (pushed.status !== 0) return undefined;
+  const commit = pushed.stdout.trim();
+  if (commit === reported) return undefined;
+  const present = hasCommit(worktree, reported, until);
+  if (!present.known) return failed(present.reason);
+  if (!present.has) return undefined;
+  const contained = runGit(worktree, ["merge-base", "--is-ancestor", commit, reported], { until, answers: [0, 1] });
+  if (!contained.ran) return failed(contained.reason);
+  return contained.status === 0 ? undefined : commit;
 }
 
 function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange {

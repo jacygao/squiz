@@ -17,6 +17,8 @@ import { deadlineIn } from "../reviewers/deadline.ts";
 import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
 import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
+import { githubVenue } from "../venues/github/venue.ts";
+import type { Venue } from "../venues/venue.ts";
 import { takeHostLock } from "./lock.ts";
 import { trigger, type TriggerRequest, type Triggered } from "./trigger.ts";
 
@@ -359,6 +361,70 @@ test("a draft queues nothing, lists no threads, starts no host and makes no .squ
     assert.equal(existsSync(join(fixture.bin, "count")), false, "the trigger listed the threads of a draft");
     assert.equal(existsSync(join(fixture.worktree, ".squiz")), false);
     assert.deepEqual(hostLines(fixture), []);
+  });
+});
+
+const PUSHED = "8d21a4f6c3b9e0d7a5f2c8b1e4d9a6c3f7b0e258";
+
+/** The GitHub venue, reading every change as one the worktree pushed `PUSHED` to and GitHub does not yet report. */
+const pushedAhead: Venue = {
+  ...githubVenue,
+  readChange(worktree, asked, until) {
+    const lookup = githubVenue.readChange(worktree, asked, until);
+    return lookup.outcome === "found" ? { ...lookup, change: { ...lookup.change, unreported: PUSHED } } : lookup;
+  },
+};
+
+test("#852: squiz review's trigger returns a push GitHub does not yet report, lists no threads and makes no .squiz", async () => {
+  await withFixture((fixture) => {
+    const result = trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue: pushedAhead, holdUnreported: true }));
+
+    assert.equal(result.outcome, "unreported", `triggered as ${JSON.stringify(result)}`);
+    assert.equal(result.outcome === "unreported" ? result.change.unreported : undefined, PUSHED);
+    assert.equal(existsSync(join(fixture.bin, "count")), false, "the trigger listed the threads of a head it would not decide on");
+    assert.equal(existsSync(join(fixture.worktree, ".squiz")), false);
+    assert.deepEqual(hostLines(fixture), []);
+  });
+});
+
+test("#852: the venue looks the change up on the trigger's lookUpBy, where it is given one", async () => {
+  await withFixture((fixture) => {
+    const lookUpBy = deadlineIn(5_000);
+    const seen: unknown[] = [];
+    const venue: Venue = {
+      ...pushedAhead,
+      readChange(worktree, asked, until) {
+        seen.push(until);
+        return pushedAhead.readChange(worktree, asked, until);
+      },
+    };
+
+    trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue, holdUnreported: true, lookUpBy }));
+
+    assert.deepEqual(seen, [lookUpBy]);
+  });
+});
+
+test("#852: a failed lookup of the change is marked as the lookup's, and a failed listing of its threads is not", async () => {
+  await withFixture((fixture) => {
+    const lookupFails: Venue = { ...githubVenue, readChange: () => ({ outcome: "failed", reason: "gh ran out of the time it was given" }) };
+    const listingFails: Venue = { ...githubVenue, listThreads: () => ({ outcome: "failed", reason: "gh ran out of the time it was given" }) };
+
+    const lookup = trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue: lookupFails, holdUnreported: true }));
+    const listing = trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue: listingFails, holdUnreported: true }));
+
+    assert.equal(lookup.outcome === "failed" ? lookup.lookup : "not failed", true);
+    assert.equal(listing.outcome === "failed" ? listing.lookup : "not failed", undefined);
+  });
+});
+
+test("#852: a hook's trigger decides on the head GitHub reports, though the worktree pushed a later one", async () => {
+  await withFixture(async (fixture) => {
+    const result = decided(trigger(request(fixture, { venue: pushedAhead })));
+
+    assert.equal(result.decision.outcome, "queue");
+    assert.deepEqual(records(fixture.episode).map((record) => [record.head, record.status]), [[HEAD, "queued"]]);
+    await eventually(() => hostsThatTook(fixture).length === 1, "the host taking the state");
   });
 });
 

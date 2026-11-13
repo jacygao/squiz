@@ -174,6 +174,111 @@ test("readChange finds the open pull request whose head the worktree has checked
   });
 });
 
+/** `body` with the fixture's repository given a remote it has pushed `feature` to, so that `@{push}` names its commit. */
+async function withPushedRepository<T>(body: (worktree: string, pushed: string) => Promise<T> | T): Promise<T> {
+  return withRepository(async (worktree, commit) => {
+    const remote = `${worktree}.remote.git`;
+    try {
+      git(worktree, "init", "--quiet", "--bare", remote);
+      git(worktree, "remote", "add", "origin", remote);
+      git(worktree, "push", "--quiet", "--set-upstream", "origin", "feature");
+      return await body(worktree, commit);
+    } finally {
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
+}
+
+function commitIn(worktree: string, message: string): string {
+  git(worktree, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--allow-empty", "-m", message);
+  return git(worktree, "rev-parse", "HEAD");
+}
+
+test("#852: readChange names the commit the worktree pushed where the pull request's head is still the one before it", async () => {
+  await withPushedRepository(async (worktree, reported) => {
+    const pushed = commitIn(worktree, "two");
+    git(worktree, "push", "--quiet");
+    await withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
+      const change = readFound(worktree);
+
+      assert.equal(change.head, reported);
+      assert.equal(change.unreported, pushed);
+    });
+  });
+});
+
+test("#852: readChange names the commit a force-push left where the pull request's head is still the commit it replaced", async () => {
+  await withPushedRepository(async (worktree, reported) => {
+    git(worktree, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--amend", "--allow-empty", "-m", "one, again");
+    const pushed = git(worktree, "rev-parse", "HEAD");
+    git(worktree, "push", "--quiet", "--force");
+    await withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
+      assert.equal(readFound(worktree).unreported, pushed);
+    });
+  });
+});
+
+const reportedAsItIs: readonly [string, (worktree: string, pushed: string) => string][] = [
+  [
+    "the worktree has commits it has not pushed",
+    (worktree, pushed) => {
+      commitIn(worktree, "not pushed");
+      return pushed;
+    },
+  ],
+  ["someone else pushed a commit this repository does not have", () => HEAD],
+  [
+    "the pull request's head is past the commit the worktree last pushed or fetched",
+    (worktree) => {
+      const later = commitIn(worktree, "pushed from elsewhere");
+      git(worktree, "reset", "--quiet", "--hard", "HEAD~1");
+      return later;
+    },
+  ],
+];
+
+for (const [when, arrange] of reportedAsItIs) {
+  test(`#852: readChange names no unreported commit where ${when}`, async () => {
+    await withPushedRepository(async (worktree, pushed) => {
+      const reported = arrange(worktree, pushed);
+      await withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
+        const change = readFound(worktree);
+
+        assert.equal(change.head, reported);
+        assert.equal("unreported" in change, false, `an unreported commit was named: ${JSON.stringify(change)}`);
+      });
+    });
+  });
+}
+
+test("#852: readChange fails, rather than finding the head GitHub reports, where its deadline passes before the push is compared with it", async () => {
+  await withPushedRepository(async (worktree, reported) => {
+    commitIn(worktree, "two");
+    git(worktree, "push", "--quiet");
+    await withFakeGh([pullRequestRow({ headRefOid: reported })], (gh) => {
+      const spent = (): boolean => gh.calls() > 0;
+      const until = { ...deadlineIn(10_000), passed: spent, remaining: () => (spent() ? 0 : 10_000) };
+
+      const lookup = githubVenue.readChange(worktree, null, until);
+
+      assert.deepEqual(lookup, {
+        outcome: "failed",
+        reason: "whether PR #142's head has this worktree's push could not be told: git ran out of the time it was given",
+      });
+    });
+  });
+});
+
+test("#852: readChange names no unreported commit for a branch that has no push destination", async () => {
+  await withRepository(async (worktree) => {
+    const reported = commitIn(worktree, "two");
+    commitIn(worktree, "three");
+    await withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
+      assert.equal("unreported" in readFound(worktree), false);
+    });
+  });
+});
+
 test("readChange finds the pull request asked for by its number", async () => {
   await withRepository(async (worktree) => {
     await withFakeGh([pullRequestRow()], () => {

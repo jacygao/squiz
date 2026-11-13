@@ -144,7 +144,7 @@ function decided(
   decision: TriggerDecision,
   threads: readonly ReviewThread[] = [],
   host: HostStart = { outcome: "not started" },
-): Triggered {
+): Extract<Triggered, { outcome: "decided" }> {
   return {
     outcome: "decided",
     change: CHANGE,
@@ -819,6 +819,116 @@ test("a trigger again that the run's deadline cuts off exits 4, not 1 (#588)", a
   });
 });
 
+const NOT_REPORTED =
+  "squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 0 seconds, though this worktree pushed 8d21a4f to it\n" +
+  "squiz: put these lines in your report rather than running squiz review again\n";
+
+test("#852: a trigger again for a superseded state, whose wait for a push the run's deadline ends, exits 1 naming both heads rather than 4", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }]);
+    let spent = false;
+    const until: Deadline = { ...deadlineIn(10_000), passed: () => spent, remaining: () => (spent ? 0 : 10_000) };
+    const handed: TriggerRequest[] = [];
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }), until }),
+      trigger: (asked) => {
+        handed.push(asked);
+        if (handed.length === 1) return decided(fixture, { outcome: "result" });
+        spent = true;
+        return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(handed.length, 2, "the run did not trigger again");
+    assert.equal(printed.exit, 1, printed.stdout + printed.stderr);
+    assert.equal(printed.stderr, NOT_REPORTED);
+  });
+});
+
+test("#852: a run's deadline that arrives during the pause between lookups ends the wait for a push without asking GitHub again", async () => {
+  await withWorktree(async (fixture) => {
+    let spent = false;
+    const until: Deadline = { ...deadlineIn(10_000), passed: () => spent, remaining: () => (spent ? 0 : 10_000) };
+    const handed: TriggerRequest[] = [];
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }), until }),
+      trigger: (asked) => {
+        handed.push(asked);
+        if (spent) return { outcome: "failed", reason: "the worktree could not be resolved: git ran out of the time it was given" };
+        setTimeout(() => {
+          spent = true;
+        }, 0);
+        return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(printed.exit, 1, printed.stdout + printed.stderr);
+    assert.equal(printed.stderr, NOT_REPORTED);
+    assert.equal(handed.length, 1, "the run asked GitHub again once its deadline had passed");
+  });
+});
+
+test("#852: a lookup after the first runs on the push's bound, and one that bound cuts off exits 1 naming both heads", async () => {
+  await withWorktree(async (fixture) => {
+    let clock = 1_000_000;
+    const handed: TriggerRequest[] = [];
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }) }),
+      now: () => clock,
+      trigger: (asked) => {
+        handed.push(asked);
+        if (handed.length === 1) {
+          clock += 50_000;
+          return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
+        }
+        clock += 20_000;
+        return { outcome: "failed", reason: "the pull request for \"feature-a\" could not be looked up: gh ran out of the time it was given", lookup: true };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(handed[0]?.lookUpBy, undefined, "the first lookup was cut short by the push's bound");
+    assert.ok((handed[1]?.lookUpBy?.remaining() ?? Infinity) <= 0, "the second lookup did not run on the push's bound");
+    assert.equal(printed.exit, 1, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stderr,
+      "squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 70 seconds, though this worktree pushed 8d21a4f to it\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
+test("#852: a lookup that finds the push and a listing that then fails past the push's bound reports the listing's failure, not the push", async () => {
+  await withWorktree(async (fixture) => {
+    let clock = 1_000_000;
+    let asked = 0;
+    const listing = "the threads on PR #41 could not all be listed: gh ran out of the time it was given";
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }) }),
+      now: () => clock,
+      trigger: () => {
+        asked += 1;
+        if (asked === 1) {
+          clock += 50_000;
+          return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
+        }
+        clock += 20_000;
+        return { outcome: "failed", reason: listing };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(printed.exit, 1, printed.stdout + printed.stderr);
+    assert.ok(printed.stderr.includes(listing), `the listing's failure was replaced: ${printed.stderr}`);
+  });
+});
+
 test("a superseded state whose wait runs out before the newer state's round ends exits 4, naming both", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }, reviewing(LATER)]);
@@ -998,6 +1108,35 @@ test("a gate that stops the trigger exits 1 with its reason and nothing on stdou
       "squiz: no review ran: no open pull request has \"feature-a\" as its head\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
     );
+  });
+});
+
+test("#852: a push GitHub never comes to report is waited for 60 seconds on the run's clock, then exits 1 naming both heads", async () => {
+  await withWorktree(async (fixture) => {
+    let clock = 1_000_000;
+    const handed: TriggerRequest[] = [];
+    const run = request(fixture, { triggered: { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } } }, handed);
+    const asked = run.trigger ?? assert.fail("the request has no trigger");
+
+    const printed = await runReview({
+      ...run,
+      now: () => clock,
+      trigger: (given) => {
+        const answered = asked(given);
+        clock += 30_000;
+        return answered;
+      },
+    });
+
+    assert.equal(printed.exit, 1, printed.stdout);
+    assert.equal(printed.stdout, "");
+    assert.equal(
+      printed.stderr,
+      "squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 60 seconds, though this worktree pushed 8d21a4f to it\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+    assert.equal(handed.length, 2, "the run asked GitHub again after its wait was spent, or stopped asking before");
+    assert.ok(handed.every((given) => given.holdUnreported === true), "a trigger was not asked to hold the push");
   });
 });
 
