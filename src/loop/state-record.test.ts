@@ -19,6 +19,8 @@ const owner = {
   sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
   subagent: "a402ef8f56c1b2ed1",
   messagingSocket: "/tmp/claude-501/messaging-60517e1f.sock",
+  lastMessage: "The change is on the branch, and the tests pass.",
+  transcript: "/Users/someone/.claude/projects/-work-squiz/60517e1f/subagents/agent-a402ef8f56c1b2ed1.jsonl",
 };
 
 /** What every reviewed record carries: its round, and how many threads its findings opened. */
@@ -197,6 +199,8 @@ const malformed: readonly [string, unknown][] = [
   ["an owner that is not an object", { head, activity: null, status: "queued", owner: "me" }],
   ["an owner with no session", { head, activity: null, status: "queued", owner: { subagent: "a1" } }],
   ["an owner whose socket is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", messagingSocket: 3 } }],
+  ["an owner whose last message is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", lastMessage: { text: "done" } } }],
+  ["an owner whose transcript is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", transcript: 3 } }],
   ["an empty Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: "" }],
   ["a numeric Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: 2 }],
   // The round host puts it on a herdr command line, where this would be read as a flag.

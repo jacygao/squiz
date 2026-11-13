@@ -51,7 +51,16 @@ export type Firing =
   | { readonly event: "SessionStart"; readonly directory: string }
   | { readonly event: "SubagentStart"; readonly directory: string }
   | { readonly event: "Stop"; readonly directory: string; readonly owner: Owner }
-  | { readonly event: "SubagentStop"; readonly directory: string; readonly owner: Owner; readonly subagent: string };
+  | {
+      readonly event: "SubagentStop";
+      readonly directory: string;
+      readonly owner: Owner;
+      readonly subagent: string;
+      /** The subagent's final message, as its parent received it. Absent where the payload carries none. */
+      readonly lastMessage?: string;
+      /** The absolute path of the subagent's own transcript. Absent where the payload carries none. */
+      readonly transcript?: string;
+    };
 
 export type FiringRead =
   | { readonly outcome: "read"; readonly firing: Firing }
@@ -115,7 +124,21 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   if (typeof agentId !== "string" || agentId === "") {
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
-  return { outcome: "read", firing: { event, directory, owner, subagent: agentId } };
+  // Neither is needed to queue the work, so a payload without them, or with
+  // either in a shape this does not know, is read without it.
+  const lastMessage = payload["last_assistant_message"];
+  const transcript = payload["agent_transcript_path"];
+  return {
+    outcome: "read",
+    firing: {
+      event,
+      directory,
+      owner,
+      subagent: agentId,
+      ...(typeof lastMessage === "string" && lastMessage !== "" ? { lastMessage } : {}),
+      ...(typeof transcript === "string" && isAbsolute(transcript) ? { transcript } : {}),
+    },
+  };
 }
 
 /**

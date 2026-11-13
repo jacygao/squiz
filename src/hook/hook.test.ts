@@ -35,6 +35,7 @@ const HEAD = "3f9c2e0a1b2c3d4e5f60718293a4b5c6d7e8f901";
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const AGENT_ID = "a1e3196c5ad0f2410";
 const SOCKET = "/tmp/claude-code-messaging.sock";
+const AGENT_TRANSCRIPT = `/transcripts/${SESSION_ID}/subagents/agent-${AGENT_ID}.jsonl`;
 const BOUND_MS = 10_000;
 
 /** A firing as the runtime writes it to the hook's stdin, for a session in `cwd`. */
@@ -50,7 +51,13 @@ function stopPayload(cwd: string, over: Readonly<Record<string, unknown>> = {}):
 }
 
 function subagentStopPayload(cwd: string, over: Readonly<Record<string, unknown>> = {}): string {
-  return stopPayload(cwd, { hook_event_name: "SubagentStop", agent_id: AGENT_ID, agent_type: "general-purpose", ...over });
+  return stopPayload(cwd, {
+    hook_event_name: "SubagentStop",
+    agent_id: AGENT_ID,
+    agent_type: "general-purpose",
+    agent_transcript_path: AGENT_TRANSCRIPT,
+    ...over,
+  });
 }
 
 /** A worktree on `BRANCH`, a `gh` answering for it, and a file for whatever reports back. */
@@ -259,7 +266,7 @@ test("a Stop firing queues the state, owned by the session and its socket, and s
   });
 });
 
-test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent", async () => {
+test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent, with its last message and transcript", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
       payload: subagentStopPayload(place.worktree),
@@ -271,7 +278,34 @@ test("a SubagentStop firing queues the state, owned by the parent session, its s
       {
         head: HEAD,
         activity: null,
-        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET },
+        owner: {
+          sessionId: SESSION_ID,
+          subagent: AGENT_ID,
+          messagingSocket: SOCKET,
+          lastMessage: "The change is on the branch.",
+          transcript: AGENT_TRANSCRIPT,
+        },
+        status: "queued",
+      },
+    ]);
+  });
+});
+
+test("#802: a SubagentStop with no last_assistant_message queues the state with the rest of its owner, and says nothing", async () => {
+  // A hook that threw on the missing field would exit 0 with nothing queued,
+  // which reads like a branch with no pull request but for this record and the
+  // empty stderr.
+  await withPlace(async (place) => {
+    const payload = JSON.parse(subagentStopPayload(place.worktree)) as Record<string, unknown>;
+    delete payload["last_assistant_message"];
+    const fired = await fire(place, { payload: JSON.stringify(payload), environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(recordsIn(place), [
+      {
+        head: HEAD,
+        activity: null,
+        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET, transcript: AGENT_TRANSCRIPT },
         status: "queued",
       },
     ]);
@@ -344,7 +378,8 @@ test("Copilot's recorded SubagentStop, fired from outside any worktree, queues f
 
     assert.deepEqual(fired, { code: 0, stderr: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
-      { head: HEAD, activity: null, owner: { sessionId: SESSION_ID, subagent: AGENT_ID }, status: "queued" },
+      // Copilot's payload carries no agent_transcript_path.
+      { head: HEAD, activity: null, owner: { sessionId: SESSION_ID, subagent: AGENT_ID, lastMessage: "PONG" }, status: "queued" },
     ]);
   });
 });

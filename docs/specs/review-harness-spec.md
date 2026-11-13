@@ -108,7 +108,12 @@ the rest of this section describes, and:
   handed, the report file the reviewer reports into, the reviewer's session,
   `resume.txt`, the command that resumes that session, and `gh/`, the empty `gh`
   configuration the reviewer runs with (§ 5 Tools). The snapshot the reviewer
-  reads is in the temporary directory instead (§ 5 The snapshot).
+  reads is in the temporary directory instead (§ 5 The snapshot). A round that
+  leaves threads open with a round remaining also writes `handoff.md` there:
+  each open thread with every reply on it, the description, each agent's final
+  message and transcript path as its `SubagentStop` recorded them, and the
+  diff the reviewer read. Where the threads cannot be listed, the round writes
+  none, and `host.log` says why.
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.

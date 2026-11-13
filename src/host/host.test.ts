@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -22,7 +22,8 @@ import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { defaultConfig, type Config } from "../config/config.ts";
-import { renderComment } from "../findings/comment.ts";
+import { latestActivity } from "../findings/activity.ts";
+import { renderComment, renderReply } from "../findings/comment.ts";
 import type { Finding } from "../findings/finding.ts";
 import { type Adapter, type ParsedRun, type RoundCost, type ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -30,7 +31,7 @@ import { startChild } from "../sessions/child.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { identityOf, stillRunning, type ProcessIdentity } from "../sessions/process.ts";
 import { readState, writeState, type EpisodeState, type RoundRecord } from "../loop/episode-state.ts";
-import type { Episode } from "../loop/episode.ts";
+import { episodeAt, type Episode } from "../loop/episode.ts";
 import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { putRecord, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import type { CleanClose, Rulings } from "../loop/episode-state.ts";
@@ -39,6 +40,8 @@ import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { squizStatus } from "../review/status.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { githubVenue } from "../venues/github/venue.ts";
+import { addReply, openThread } from "../venues/local/record.ts";
+import { LOCAL_KEY, localVenue } from "../venues/local/venue.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 import { takeEpisodeHostLock } from "./lock.ts";
@@ -101,6 +104,8 @@ type Hosted = {
   readonly delivered: Readonly<Record<string, number>>;
   /** Each round's resume.txt, by its round's number, where it wrote one. */
   readonly resumes: Readonly<Record<string, string>>;
+  /** Each round's handoff.md, by its round's number, where it wrote one. */
+  readonly handoffs: Readonly<Record<string, string>>;
   /** The state of each closed episode archived under the episode's directory, oldest first. */
   readonly archives: readonly (EpisodeState | null)[];
   /** What `squiz status` printed once the host had exited. */
@@ -266,6 +271,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       notes: notesIn(episode),
       delivered: deliveredIn(episode),
       resumes: resumesIn(episode),
+      handoffs: filesIn(episode, "handoff.md"),
       archives: archivesIn(episode).map((archive) => {
         const archived = readState(archive);
         return archived.outcome === "read" ? archived.state : null;
@@ -338,14 +344,19 @@ function privateTmux(t: TestContext): Record<string, string | undefined> {
 }
 
 function resumesIn(episode: Episode): Record<string, string> {
+  return filesIn(episode, "resume.txt");
+}
+
+/** The file `name` in each round's directory that has one, by the round's number. */
+function filesIn(episode: Episode, name: string): Record<string, string> {
   const directory = join(episode.directory, "rounds");
-  const resumes: Record<string, string> = {};
-  if (!existsSync(directory)) return resumes;
+  const files: Record<string, string> = {};
+  if (!existsSync(directory)) return files;
   for (const round of readdirSync(directory)) {
-    const file = join(directory, round, "resume.txt");
-    if (existsSync(file) && statSync(file).isFile()) resumes[round] = readFileSync(file, "utf8");
+    const file = join(directory, round, name);
+    if (existsSync(file) && statSync(file).isFile()) files[round] = readFileSync(file, "utf8");
   }
-  return resumes;
+  return files;
 }
 
 function git(directory: string, args: readonly string[]): void {
@@ -1498,6 +1509,81 @@ test("a round that leaves threads open writes its owner a note naming the pull r
   });
 });
 
+/** A subagent whose stop recorded its last message and its transcript. */
+const REPORTING: Owner = {
+  ...PARENT,
+  lastMessage: "Renamed the flag, and the tests pass.",
+  transcript: "/Users/someone/.claude/projects/-work-tree/7a2c9e41/subagents/agent-a402ef8f56c1b2ed1.jsonl",
+};
+
+const REPLY_BODY = "**Squiz coding agent**\n\nWon't fix, because the old name is read only by the migration.";
+
+/** Have the listing after the round's thread is opened show it with the coding agent's reply on it. */
+function listOpenedThreadWithReply(fixture: Fixture): void {
+  const plain = threadsAnswer("PRRT_new");
+  const reply = { id: "PRRC_reply", databaseId: 52, author: { login: "someone" }, body: REPLY_BODY, createdAt: "2026-10-05T07:20:00Z" };
+  const answer = plain.replace('"createdAt":"2026-10-05T07:13:05Z"}', `"createdAt":"2026-10-05T07:13:05Z"},${JSON.stringify(reply)}`);
+  assert.notEqual(answer, plain, "the fixture's reply was not added to the listing");
+  writeFileSync(join(fixture.binaries, "threads-after-create"), answer, "utf8");
+  writeFileSync(join(fixture.binaries, "on-create.sh"), `cp '${join(fixture.binaries, "threads-after-create")}' '${join(fixture.binaries, "answer-threads")}'\n`, "utf8");
+}
+
+test("#802: a round that leaves threads open writes a handoff in its round's directory, holding the thread with its reply, the description, the agent's report and transcript, and the diff", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    before: listOpenedThreadWithReply,
+  });
+
+  assert.deepEqual(Object.keys(ran.handoffs), ["1"], `rounds/ holds handoffs ${JSON.stringify(Object.keys(ran.handoffs))}`);
+  const handoff = ran.handoffs["1"] ?? "";
+  const short = ran.firstHead.slice(0, 7);
+  for (const part of [
+    `# Handoff for PR #${PULL_REQUEST} at ${short}, round 1`,
+    WORK_THE_THREADS,
+    "## The description\n\nWhat this changes.",
+    `PRRT_new ${TRACKED}:88 high — The name says nothing.`,
+    "Won't fix, because the old name is read only by the migration.",
+    `### Subagent ${PARENT.subagent ?? ""}, dispatched by session ${PARENT.sessionId}`,
+    `Transcript: ${REPORTING.transcript ?? ""}`,
+    REPORTING.lastMessage ?? "",
+    "-// line 88\n+// line 88 CHANGED",
+  ]) {
+    assert.ok(handoff.includes(part), `the handoff lacks ${JSON.stringify(part)}:\n${handoff}`);
+  }
+  assert.match(ran.log, /round 1: wrote the handoff to .*rounds\/1\/handoff\.md/u);
+});
+
+test("#802: a round that closes the episode, with nothing open or with threads open, writes no handoff", async () => {
+  const clean = await host({ records: (fixture) => [queued(fixture.head(), null, REPORTING)] });
+  const capped = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    config: { rounds: 1 },
+    findings: [[finding("The name says nothing.")]],
+    before: listOpenedThreadWithReply,
+  });
+
+  assert.deepEqual(clean.handoffs, {});
+  assert.deepEqual(capped.handoffs, {});
+});
+
+test("#802: a round whose threads cannot be listed writes no handoff, rather than one without them, and host.log says why", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    onStart: (_, fixture) => rmSync(join(fixture.binaries, "answer-threads")),
+  });
+
+  assert.deepEqual(ran.handoffs, {});
+  assert.match(ran.log, /round 1: wrote no handoff: the threads could not be listed: .*no answer fixtured for threads/u);
+});
+
+test("#802: a round that leaves threads open with no owner recorded still writes its handoff", async () => {
+  const ran = await host({ records: atHead, findings: [[finding("The name says nothing.")]], before: listOpenedThreadWithReply });
+
+  assert.match(ran.handoffs["1"] ?? "", /## The agents' final reports\n\nNo agent's stop was recorded for this episode\./u);
+});
+
 test("a round whose threads cannot be listed for the note writes one that points to squiz review, and host.log says why", async () => {
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, MAIN)],
@@ -2188,5 +2274,88 @@ test("#820: a close on a change named the working tree whose summary was refused
   const [record] = recordsOf(ran.state);
   assert.ok(record?.status === "reviewed", `recorded as ${JSON.stringify(record)}`);
   assert.deepEqual(record.problems, ["the review of the working tree closed without its summary: the venue would not take the summary"]);
+});
+
+test("#802: under the local venue, a round that leaves a thread open writes the handoff in .squiz/local/, with the coding agent's reply and the working tree's diff", async () => {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), "squiz-host-local-")));
+  const worktree = join(root, "tree");
+  const previousTemporary = process.env["TMPDIR"];
+  try {
+    await mkdir(worktree);
+    await mkdir(join(root, "temporary"));
+    process.env["TMPDIR"] = join(root, "temporary");
+    git(worktree, ["init", "--quiet", "--initial-branch", BRANCH]);
+    git(worktree, ["config", "user.email", "squiz@example.invalid"]);
+    git(worktree, ["config", "user.name", "Squiz"]);
+    await mkdir(join(worktree, "src", "ui"), { recursive: true });
+    await writeFile(join(worktree, TRACKED), BASE_CARD, "utf8");
+    git(worktree, ["add", "."]);
+    git(worktree, ["commit", "--quiet", "--message", "the base"]);
+    const until = (): ReturnType<typeof deadlineIn> => deadlineIn(10_000);
+    assert.equal(localVenue.recordStart(worktree, until()).outcome, "done", "the base was not recorded");
+    // The change is the working tree's, never committed.
+    await writeFile(join(worktree, TRACKED), BASE_CARD.replace("// line 88\n", "// line 88 CHANGED\n"), "utf8");
+
+    const named = episodeAt(localVenue, worktree, LOCAL_KEY);
+    assert.ok(named.outcome === "found", `no episode: ${JSON.stringify(named)}`);
+    const { episode } = named;
+    await writeFile(join(episode.directory, "description.md"), "Rename the card's flag.\n", "utf8");
+    // A thread an earlier round opened, which the coding agent answered and this round gives no verdict.
+    const opened = openThread(episode.directory, TRACKED, { at: "line", line: 88 }, renderComment(finding("The name says nothing.")), { until: until() });
+    assert.equal(opened.outcome, "opened", `the thread was not opened: ${JSON.stringify(opened)}`);
+    const replied = addReply(episode.directory, "T1", renderReply("Won't fix, because the old name is read only by the migration."), { until: until() });
+    assert.equal(replied.outcome, "acted", `the reply was not written: ${JSON.stringify(replied)}`);
+
+    const read = localVenue.readChange(worktree, LOCAL_KEY, until());
+    assert.ok(read.outcome === "found", `the change was not read: ${JSON.stringify(read)}`);
+    const listed = localVenue.listThreads(read.change, until());
+    assert.ok(listed.outcome === "listed");
+    const written = writeState(episode, {
+      rounds: [],
+      spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 },
+      records: [queued(read.change.head, latestActivity(listed.threads), REPORTING)],
+    });
+    assert.equal(written.outcome, "written");
+
+    const adapter: Adapter = {
+      confine: () => ({ outcome: "prepared", environment: {} }),
+      argv: (invocation) => ({ command: "/bin/sh", args: ["-c", "exit 0"], directory: invocation.directory, stdin: "/dev/null", environment: {} }),
+      parse: async (stdout): Promise<ParsedRun> => {
+        for await (const chunk of stdout) void chunk;
+        return { cost: COST, result: { kind: "reviewed", findings: [], verdicts: [] } };
+      },
+      grants: ["read"],
+    };
+    const charterFile = join(root, "charter.md");
+    await writeFile(charterFile, "What a good review is.\n", "utf8");
+    await runHost({
+      worktree,
+      key: LOCAL_KEY,
+      round: { config: { ...defaultConfig, timeout: 5 }, adapter, charterFile, venue: localVenue },
+    });
+
+    const after = readState(episode);
+    const [record] = recordsOf(after.outcome === "read" ? after.state : null);
+    assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 2, `recorded as ${JSON.stringify(record)}`);
+    const file = join(episode.directory, "rounds", "1", "handoff.md");
+    assert.ok(existsSync(file), `no handoff in ${episode.directory}; host.log says:\n${readFileSync(join(episode.directory, "host.log"), "utf8")}`);
+    const handoff = readFileSync(file, "utf8");
+    for (const part of [
+      `# Handoff for the working tree at ${read.change.head.slice(0, 7)}, round 1`,
+      read.change.followUp,
+      "## The description\n\nRename the card's flag.",
+      `T1 ${TRACKED}:88 high — The name says nothing.`,
+      "Won't fix, because the old name is read only by the migration.",
+      `Transcript: ${REPORTING.transcript ?? ""}`,
+      REPORTING.lastMessage ?? "",
+      "-// line 88\n+// line 88 CHANGED",
+    ]) {
+      assert.ok(handoff.includes(part), `the handoff lacks ${JSON.stringify(part)}:\n${handoff}`);
+    }
+  } finally {
+    if (previousTemporary === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = previousTemporary;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 

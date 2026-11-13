@@ -21,7 +21,7 @@
  * nothing else.
  */
 
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { unthreadedNotes } from "../loop/summary-body.ts";
@@ -29,7 +29,7 @@ import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
 import { startNextEpisode, type NextEpisode } from "../loop/archive.ts";
 import { closedRecords, readState, type EpisodeState } from "../loop/episode-state.ts";
-import { episodeAt, type Episode } from "../loop/episode.ts";
+import { episodeAt, roundDirectory, type Episode } from "../loop/episode.ts";
 import type { Config } from "../config/config.ts";
 import type { ClosedBy } from "../loop/failure-body.ts";
 import {
@@ -58,6 +58,7 @@ import { updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
+import { handoffFor, handsBack } from "./handoff.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote, threadsToPrint } from "./owner-note.ts";
 import { wakeOwner } from "./wake.ts";
@@ -286,7 +287,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     };
     const end = await runRoundThen(
       roundSetup,
-      async (conclusion, change): Promise<HostEnd | undefined> => {
+      async (conclusion, change, diff): Promise<HostEnd | undefined> => {
         // Recording the result would make the worktree's directory again.
         if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
         const result = resultOf(
@@ -309,7 +310,14 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         }
         log(`round ${round.number}: ${result.line}`);
         for (const problem of result.problems) log(`round ${round.number}: ${problem}`);
-        await noteOwners(episode, written, log, change === undefined ? undefined : { venue: setup.round.venue, change });
+        // Listed once, for the notes and the handoff alike, and only where one needs it.
+        let listing: Listing | undefined;
+        const read = change === undefined ? undefined : { change, listed: () => (listing ??= threadsOf(setup.round.venue, change)) };
+        await noteOwners(episode, written, log, read);
+        if (read !== undefined) {
+          const records = recorded.state.records ?? [];
+          handOff(roundDirectory(episode, round.number), written, records, `round ${round.number}`, log, read, diff);
+        }
         return undefined;
       },
     );
@@ -348,26 +356,22 @@ function inOrder(records: readonly StateRecord[], after: StateKey | null = null)
   return records.map((record, index) => ({ record, name: names[index] ?? record.head.slice(0, 7) }));
 }
 
+/** The change a round read, and the threads on it as they stand once its result is recorded. */
+type Read = { readonly change: Change; readonly listed: () => Listing };
+
 /**
  * Write a note for the owner of each of `recorded` that gets one, and wake each
- * owner that has a socket. `read` is the change a round read and its venue,
- * which list the threads a note prints and give its follow-up.
+ * owner that has a socket. `read` lists the threads a note prints, and its
+ * change gives the note's follow-up.
  *
  * Without one, no note prints threads or a follow-up: only a round that read
  * its change records threads open.
  */
-async function noteOwners(
-  episode: Episode,
-  recorded: readonly Recorded[],
-  log: Log,
-  read?: { readonly venue: Venue; readonly change: Change },
-): Promise<void> {
+async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log, read?: Read): Promise<void> {
   const notes = join(episode.directory, "notes");
   const change = episodeChange(episode, read?.change);
-  // Listed once for all the notes, and only where one prints threads.
-  let listing: Listing | undefined;
   for (const { record, name, closed } of recorded) {
-    const listed = printsThreads(record) && read !== undefined ? (listing ??= threadsOf(read.venue, read.change)) : undefined;
+    const listed = printsThreads(record) && read !== undefined ? read.listed() : undefined;
     if (listed !== undefined && "reason" in listed) {
       log(`${named(record)}: the threads could not be listed for its note: ${listed.reason}`);
     }
@@ -391,6 +395,53 @@ async function noteOwners(
     if (woken.outcome === "woken") log(`${named(record)}: woke its owner through ${socket}`);
     else if (woken.outcome === "already delivered") log(`${named(record)}: its note was delivered before the host could post it`);
     else log(`${named(record)}: did not wake its owner: ${woken.reason}`);
+  }
+}
+
+/**
+ * Write `handoff.md` into `directory`, the round's own, for each of `recorded`
+ * that gets a handoff, and say in host.log what was written or why nothing was.
+ *
+ * `records` is the episode's records once the round's result is recorded, and
+ * `diff` the diff the round's reviewer read. Where the threads cannot be listed,
+ * or the diff was not kept, no handoff is written, because one without them
+ * would read as whole.
+ */
+function handOff(
+  directory: string,
+  recorded: readonly Recorded[],
+  records: readonly StateRecord[],
+  round: string,
+  log: Log,
+  read: Read,
+  diff: string | undefined,
+): void {
+  for (const { record } of recorded) {
+    if (!handsBack(record)) continue;
+    const listed = read.listed();
+    if ("reason" in listed) {
+      log(`${round}: wrote no handoff: the threads could not be listed: ${listed.reason}`);
+      continue;
+    }
+    if (diff === undefined) {
+      log(`${round}: wrote no handoff: the round kept no diff`);
+      continue;
+    }
+    const path = join(directory, "handoff.md");
+    // The result is recorded by now, and a throw here would stop the host
+    // before the states queued behind it.
+    try {
+      const handoff = handoffFor(read.change, record, listed.threads, diff, records);
+      if (handoff.outcome === "none") continue;
+      if (handoff.outcome === "no open thread listed") {
+        log(`${round}: wrote no handoff: none of the threads the round left open is open on ${read.change.name}`);
+        continue;
+      }
+      writeFileSync(path, handoff.text, "utf8");
+      log(`${round}: wrote the handoff to ${path}`);
+    } catch (cause) {
+      log(`${round}: wrote no handoff to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
   }
 }
 

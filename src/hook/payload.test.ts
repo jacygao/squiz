@@ -58,6 +58,8 @@ test("the hook's environment names the owner's socket", async () => {
     directory: "/work/session-directory",
     owner: { sessionId: SESSION_ID, socket: "/tmp/cc.sock" },
     subagent: AGENT_ID,
+    lastMessage: "The change is on the branch.",
+    transcript: `/transcripts/60517e1f/subagents/agent-${AGENT_ID}.jsonl`,
   });
 });
 
