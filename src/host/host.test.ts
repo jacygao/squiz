@@ -34,7 +34,7 @@ import { readState, writeState, type EpisodeState, type RoundRecord } from "../l
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { archivesIn, githubEpisode } from "../testing/episode.ts";
 import { putRecord, type Owner, type StateKey, type StateRecord } from "../loop/state-record.ts";
-import type { CleanClose, Rulings } from "../loop/episode-state.ts";
+import type { CleanClose, FixerSession, Rulings } from "../loop/episode-state.ts";
 import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { squizStatus } from "../review/status.ts";
@@ -122,6 +122,8 @@ type Arrangement = {
   /** The clean close on file, read once the records are made. */
   readonly cleanClose?: () => CleanClose;
   readonly rulings?: Rulings;
+  /** The headless fixer's session on file before the host starts. */
+  readonly fixerSession?: FixerSession;
   /** What each reviewer start reports, in order. An empty review where there is none. */
   readonly findings?: readonly (readonly Finding[])[];
   /** What each reviewer start rules on the threads it was handed, in order. None where there is none. */
@@ -206,6 +208,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         records: arranged.records?.(fixture) ?? [],
         ...(arranged.cleanClose === undefined ? {} : { cleanClose: arranged.cleanClose() }),
         ...(arranged.rulings === undefined ? {} : { rulings: arranged.rulings }),
+        ...(arranged.fixerSession === undefined ? {} : { fixerSession: arranged.fixerSession }),
       });
       assert.equal(written.outcome, "written", "the fixture's own state file must be written");
     }
@@ -2544,6 +2547,71 @@ test("#860: a round that runs while the host waits on a fixer does not restart t
   assert.ok(second?.status === "reviewed" && second.result === "exited" && second.fixer?.outcome === "not started", `recorded as ${JSON.stringify(second)}`);
   assert.equal((ran.stopped as { stopped?: string } | undefined)?.stopped, "fixer outlived its bound", ran.log);
 });
+
+test("#876: a resumed fixer still running at the host's bound on its wait ends in stopped.json naming the resumed process, and the host exits", async () => {
+  // Runs well past the test, unless the host waits on it out.
+  const fixer = standInFixer("claude", (runs) => `printf '%s\\n' "$@" > '${runs}'; sleep 20; echo ended >> '${runs}'`);
+  let argv = "";
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude", timeout: 60, rounds: 2 },
+    // The session REPORTING's stop came from.
+    fixerSession: { agent: "claude", id: PARENT.sessionId, round: 1, shown: [], open: [] },
+    ...fixer,
+    host: { ...fixer.host, clock: jumpingClock(60_000) },
+    after: () => {
+      argv = existsSync(fixer.runs()) ? readFileSync(fixer.runs(), "utf8") : "";
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.fixer?.outcome === "started", `recorded as ${JSON.stringify(record)}`);
+  stopGroup(record.fixer.process.pid);
+  assert.deepEqual(record.fixer.session, { id: PARENT.sessionId, resumed: true }, ran.log);
+  assert.ok(argv.split("\n").includes("--resume"), `the fixer was run with:\n${argv}`);
+  assert.ok(!argv.includes("ended"), "the host waited for the resumed fixer to exit, past its bound");
+  assert.deepEqual(ran.stopped, {
+    head: ran.firstHead,
+    stopped: "fixer outlived its bound",
+    reason: `the fixer round 1 started, process ${record.fixer.process.pid}, was not seen to exit within 120 seconds, the reviewer's time bound for each of the 2 rounds the cap allows`,
+  }, ran.log);
+});
+
+test("#876: a failed resume whose fresh start the state file refuses ends the host, rather than retrying it for good", { timeout: 60_000 }, async () => {
+  // A CLI that cannot find the session exits 1 at once.
+  const fixer = standInFixer("claude", (runs) => `echo ran >> '${runs}'; exit 1`);
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    fixerSession: { agent: "claude", id: PARENT.sessionId, round: 1, shown: [], open: [] },
+    ...fixer,
+    host: {
+      ...fixer.host,
+      // Refuses to reserve a start over a resume, which only the fallback does.
+      update: (episode, change, options) => {
+        const read = readState(episode);
+        const before = read.outcome === "read" ? read.state : { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 } };
+        const resumed = (before.records ?? []).some((record) => record.status === "reviewed" && record.result === "exited" && (record.fixer?.outcome === "started" || record.fixer?.outcome === "exited") && record.fixer.session?.resumed === true);
+        const reserving = (change(before).records ?? []).some((record) => record.status === "reviewed" && record.result === "exited" && record.fixer?.outcome === "unknown");
+        return resumed && reserving ? { outcome: "failed", reason: "the disk said no" } : updateState(episode, change, options);
+      },
+    },
+  });
+
+  assert.deepEqual(ran.end, { outcome: "state unwritable", reason: "the disk said no" }, ran.log);
+  assert.match(ran.log, /round 1: the resume of the fixer's session .* failed: it exited 1/u);
+});
+
+/** Kill the process group `pid` leads, where it is still running: a resumed fixer's shell and its CLI. */
+function stopGroup(pid: number): void {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
 
 /** Kill `pid`, where it is still running. */
 function stopProcess(pid: number): void {

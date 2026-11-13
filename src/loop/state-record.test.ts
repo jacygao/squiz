@@ -144,6 +144,18 @@ const everyState: readonly StateRecord[] = [
     fixer: { outcome: "started", agent: "claude", process: { pid: 4200, startedAt: 1_791_000_161 } },
   },
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "exited", agent: "copilot", pid: 4201 } },
+  // #876: a fixer started in a session squiz named, and one that resumed it.
+  {
+    head,
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["T1"],
+    ...reviewed,
+    fixer: { outcome: "started", agent: "claude", process: { pid: 4200, startedAt: 1_791_000_161 }, session: { id: "561adfe1", resumed: true } },
+  },
+  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "exited", agent: "copilot", pid: 4201, session: { id: "561adfe1", resumed: false } } },
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "failed", agent: "claude", reason: "spawn claude ENOENT" } },
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "not started", reason: "no handoff was written" } },
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "unknown", agent: "copilot", reason: "the intermediate process did not answer within 5000ms" } },
@@ -326,6 +338,9 @@ const malformed: readonly [string, unknown][] = [
   ["#803: a started fixer of an unknown agent", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "pi", process: { pid: 2, startedAt: 2 } } }],
   ["#803: an exited fixer with no pid", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "exited", agent: "copilot" } }],
   ["#803: a fixer that failed with no reason", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "failed", agent: "claude" } }],
+  // #876: a resume read as a fresh start is a failed resume the host never falls back from.
+  ["#876: a started fixer whose session has no id", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "claude", process: { pid: 2, startedAt: 2 }, session: { resumed: true } } }],
+  ["#876: a started fixer whose session does not say whether it resumed", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "exited", agent: "claude", pid: 2, session: { id: "561adfe1", resumed: "yes" } } }],
   ["#803: a fixer that failed naming no agent", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "failed", reason: "spawn claude ENOENT" } }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.

@@ -18,7 +18,7 @@
 
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
-import { isReviewer, type Reviewer } from "../config/config.ts";
+import { isReviewer, type FixerAgent, type Reviewer } from "../config/config.ts";
 import type { Verdict } from "../findings/status.ts";
 import type { RoundCost, Spend } from "../reviewers/adapter.ts";
 import type { Episode } from "./episode.ts";
@@ -167,6 +167,25 @@ export type EpisodeState = {
    * thread, and a close that runs no reviewer reads it here. Absent is none.
    */
   readonly rulings?: Rulings;
+  /**
+   * The headless fixer's session, which each later round resumes. Absent where
+   * no fixer has started, or where the last resume failed and nothing replaced it.
+   */
+  readonly fixerSession?: FixerSession;
+};
+
+/**
+ * What resuming the fixer needs, and never its prompt or transcript: the CLI
+ * that made the session, its id, the round whose fixer started it, and what it
+ * has been handed, so a resume is handed only the rest.
+ */
+export type FixerSession = {
+  readonly agent: FixerAgent;
+  readonly id: string;
+  readonly round: number;
+  readonly shown: readonly string[];
+  /** The node ids of the threads that were open when it was last handed anything. */
+  readonly open: readonly string[];
 };
 
 /** A ruling by thread node id. */
@@ -435,6 +454,12 @@ function stateFrom(parsed: unknown, path: string): StateRead {
     return unreadable(`${path}: "rulings" is ${render(rulings)} rather than a ruling for each thread`);
   }
 
+  const session = parsed["fixerSession"];
+  // Read wrongly, a session is resumed under a CLI that did not make it.
+  if (session !== undefined && !isFixerSession(session)) {
+    return unreadable(`${path}: "fixerSession" is ${render(session)} rather than a fixer's CLI, session id, round, shown comments and open threads`);
+  }
+
   return {
     outcome: "read",
     state: {
@@ -444,8 +469,25 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       ...(cleanClose === undefined ? {} : { cleanClose }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
       ...(rulings === undefined ? {} : { rulings }),
+      ...(session === undefined ? {} : { fixerSession: { agent: session.agent, id: session.id, round: session.round, shown: session.shown, open: session.open } }),
     },
   };
+}
+
+function isFixerSession(value: unknown): value is FixerSession {
+  if (!isRecord(value)) return false;
+  const { agent, id, round, shown, open } = value;
+  const ids = (list: unknown): boolean => Array.isArray(list) && list.every((each) => typeof each === "string" && each !== "");
+  return (
+    (agent === "claude" || agent === "copilot") &&
+    typeof id === "string" &&
+    id !== "" &&
+    typeof round === "number" &&
+    Number.isInteger(round) &&
+    round >= 1 &&
+    ids(shown) &&
+    ids(open)
+  );
 }
 
 function isStateKey(value: unknown): value is { readonly head: string; readonly activity: string | null } {

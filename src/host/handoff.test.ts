@@ -5,7 +5,8 @@ import type { Owner, StateRecord } from "../loop/state-record.ts";
 import { printedThread } from "../review/output.ts";
 import { followUpFor } from "../venues/github/venue.ts";
 import type { ReviewThread } from "../venues/venue.ts";
-import { handoffFor } from "./handoff.ts";
+import { threadLine } from "../findings/listing.ts";
+import { handoffFor, updateFor } from "./handoff.ts";
 
 const HEAD = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
 const EARLIER_HEAD = "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6";
@@ -206,4 +207,82 @@ test("#802: a listing that holds none of the threads the round left open still o
 
   assert.deepEqual(handoffFor(CHANGE, record, [thread("PRRT_b", "Clock skew", [], true)], DIFF, [record]), { outcome: "no open thread listed" });
   assert.deepEqual(handoffFor(CHANGE, record, [], DIFF, [record]), { outcome: "no open thread listed" });
+});
+
+const RULED_OPEN = "**Squiz reviewer · open**\n\nThe drain does not run on a timeout.";
+const RULED_FIXED = "**Squiz reviewer · fixed**\n\nThe reset now waits for an empty queue.";
+
+test("#876: an update holds only what changed since the fixer's last handoff: the new threads whole, the new replies and rulings on threads it was shown, and the threads closed since", () => {
+  const record = reviewed(2, ["PRRT_a", "PRRT_b", "PRRT_d"]);
+  const disputed = thread("PRRT_a", "Retry backoff resets", [WONT_FIX, RULED_OPEN]);
+  const closed = thread("PRRT_c", "The timer leaks", [WONT_FIX, RULED_FIXED], true);
+  const quiet = thread("PRRT_d", "A name says nothing");
+  // A person's thread, which the fixer was never shown.
+  const person = thread("PRRT_person", "A person's thread", ["A reply nobody handed on."], true);
+  const known = { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_c-c0", "PRRT_c-c1", "PRRT_d-c0"], open: ["PRRT_a", "PRRT_c", "PRRT_d"] };
+
+  const update = updateFor(CHANGE, record, [disputed, PLAIN, closed, quiet, person], known);
+
+  assert.equal(update.outcome, "composed", JSON.stringify(update));
+  assert.equal(
+    update.outcome === "composed" ? update.text : "",
+    [
+      "# Update for PR #41 at 3f9c2e0, round 2",
+      "Squiz reviewed PR #41 at 3f9c2e0 again in round 2: 3 threads are open. This holds only what changed since your last handoff.",
+      followUpFor(41),
+      "## New threads",
+      printedThread(PLAIN),
+      "## New replies on threads still open",
+      `${threadLine(disputed)}\n  **Squiz reviewer · open**\n\n  The drain does not run on a timeout.`,
+      "## Threads closed since",
+      `${threadLine(closed)}\n  **Squiz reviewer · fixed**\n\n  The reset now waits for an empty queue.`,
+      "## Still open, with nothing new",
+      threadLine(quiet),
+    ].join("\n\n") + "\n",
+  );
+  const after = update.outcome === "composed" ? update.known : { shown: [], open: [] };
+  assert.deepEqual(
+    [...after.shown].sort(),
+    ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2", "PRRT_b-c0", "PRRT_c-c0", "PRRT_c-c1", "PRRT_c-c2", "PRRT_d-c0"],
+    "what the fixer has now been shown is not every comment of each thread it was handed",
+  );
+  assert.deepEqual(after.open, ["PRRT_a", "PRRT_b", "PRRT_d"]);
+});
+
+test("#876: an update leaves out a section with nothing in it, and a round that hands nothing back gets none", () => {
+  const record = reviewed(2, ["PRRT_b"]);
+  const none = { shown: [], open: [] };
+
+  const update = updateFor(CHANGE, record, [PLAIN], none);
+  const text = update.outcome === "composed" ? update.text : "";
+  assert.ok(text.includes("## New threads"), text);
+  for (const empty of ["## New replies", "## Threads closed since", "## Still open"]) assert.ok(!text.includes(empty), `${empty} is there with nothing in it:\n${text}`);
+
+  assert.deepEqual(updateFor(CHANGE, reviewed(3, ["PRRT_b"]), [PLAIN], none), { outcome: "none" });
+  assert.deepEqual(updateFor(CHANGE, record, [], none), { outcome: "no open thread listed" });
+});
+
+test("#876: an update names a thread that closed with no new comment, as one whose ruling's reply failed to post does", () => {
+  const record = reviewed(2, ["PRRT_b"]);
+  const closed = thread("PRRT_c", "The timer leaks", [], true);
+
+  const update = updateFor(CHANGE, record, [PLAIN, closed], { shown: ["PRRT_b-c0", "PRRT_c-c0"], open: ["PRRT_b", "PRRT_c"] });
+
+  const text = update.outcome === "composed" ? update.text : "";
+  assert.ok(text.includes(`## Threads closed since\n\n${threadLine(closed)}\n`), `the closed thread is missing:\n${text}`);
+});
+
+test("#876: an update gives a thread reopened since, whose comments the fixer was shown while it was open, whole", () => {
+  const record = reviewed(2, ["PRRT_a"]);
+
+  const update = updateFor(CHANGE, record, [DISPUTED], { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2"], open: [] });
+
+  const text = update.outcome === "composed" ? update.text : "";
+  assert.ok(text.includes(`## New threads\n\n${printedThread(DISPUTED)}\n`), `the reopened thread is not given whole:\n${text}`);
+});
+
+test("#876: a handoff says which comments it showed and which threads were open, so a later update can leave them out", () => {
+  const record = reviewed(2, ["PRRT_a"]);
+  const handoff = handoffFor(CHANGE, record, [DISPUTED, PLAIN], DIFF, [record]);
+  assert.deepEqual(handoff.outcome === "composed" ? handoff.known : undefined, { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2"], open: ["PRRT_a"] });
 });

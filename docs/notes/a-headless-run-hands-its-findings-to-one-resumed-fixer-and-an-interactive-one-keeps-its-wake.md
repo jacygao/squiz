@@ -1,12 +1,12 @@
 ---
 settles: "§ 3 — how a round's result reaches a coding agent whose headless run has ended, that the round host starts its fixer, and that an interactive session keeps its wake; § 4 — that the local venue wakes its owner as the GitHub venue does, and holds no run with a blocking Stop"
-issue: [787, 801]
+issue: [787, 801, 876]
 recorded: 2026-11-07
-versions: { claude: 2.1.319, copilot: 1.0.106 }
-recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session that is still open, or what a resumed session can reach of its subagents; or a measurement compares a resumed fixer with a fresh one
+versions: { claude: "2.1.319, 2.1.325", copilot: "1.0.106, 1.0.110" }
+recheck-when: Claude Code or Copilot CLI change how `--resume` or `--session-id` treats a session, what a resume of an unknown id exits with, or what a resumed session can reach of its subagents; or a measurement compares a resumed fixer with a fresh one
 ---
 
-# A headless run hands its findings to a fresh fixer, and an interactive one keeps its wake
+# A headless run hands its findings to one resumed fixer, and an interactive one keeps its wake
 
 ## Intent
 
@@ -39,14 +39,23 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
   finishes, so a wake there always fails. A caller that declares the mode spares
   squiz from deciding whether a session is alive, which nothing here has shown
   it can do safely.
-- **Hand the findings to a fresh fixer, and give it the context squiz already
-  keeps.** That is the record (each thread with every reply, the
+- **Hand the first round's findings to a fresh fixer, with the context squiz
+  already keeps, and resume that one fixer for every later round of the
+  episode.** The first handoff is the record (each thread with every reply, the
   "won't fix, because" answers included), the diff, the description, each
-  agent's final report, and the paths to the transcripts so it can read more.
-  Most products that route review feedback to an agent start a new run for each
-  round in just this way, and Anthropic's Agent SDK documentation calls a fresh
-  session given captured state "often more robust" than a resume. Resuming the
-  original session is an optimisation to measure, not the foundation.
+  agent's final report, and the paths to the transcripts. A resume is handed
+  only what changed since: the new threads, the new replies and the reviewer's
+  rulings. no-mistakes runs its fixer this way, one session across every fix
+  turn of a run. The coding agent's own session is never resumed, and neither
+  is the reviewer, so no reviewer judges fixes to its own findings.
+- **Name the fixer's session up front, and resume it by that id.** Both CLIs
+  take `--session-id <uuid>` on a new run and hand the hook that id on every
+  stop, the resume's included, so squiz needs nothing from the run's output.
+- **Run a failed resume again as a fresh fixer on the whole handoff.** Both CLIs
+  exit 1 on a session they cannot find, before any stop fires, so the resumed
+  CLI's exit status is the only sign. A stop that carries another session's id
+  also gets a fresh fixer, since that is how a resume that started a new session
+  would read.
 - **Leave a closed interactive session's findings waiting, as now.** Closing a
   session may mean stop. Starting a fixer in that tree unasked spends credits
   and may edit files a person is changing. Continuing after a close is a later
@@ -116,6 +125,21 @@ Nothing.
   after a resume: `write_agent` answers `No agent found`. Other agent types and
   a sync-mode `task` are unverified.
 
+### Naming and resuming the fixer's session
+
+Run on Claude Code 2.1.325 and Copilot CLI 1.0.110 in a scratch repository
+with squiz's hooks off, and a plugin whose `Stop` hook saved its payload:
+
+| | Claude Code | Copilot CLI |
+|---|---|---|
+| Start | `claude -p <prompt> --session-id <uuid>`: `session_id` in `--output-format json` is the uuid | `copilot -p <prompt> --session-id=<uuid>`: `~/.copilot/session-state/<uuid>/` is made |
+| Resume | `claude -p <prompt> --resume <uuid>`: same `session_id`, and it answered with a token only the first turn was given | `copilot -p <prompt> --resume=<uuid>`: same `sessionId`, the token came back, and `events.jsonl` gained a `session.resume` event |
+| Unknown id | exit 1, `No conversation found with session ID: <uuid>` | exit 1, `Error: No session, task, or name matched '<uuid>'.`, and no directory made |
+| `Stop` payload, start and resume, with `--plugin-dir` on each | `"session_id": "<uuid>"` | `"session_id": "<uuid>"` |
+
+Copilot's `--session-id` resumes a session it finds and starts one where it
+finds none (its help text), so only `--resume` fails on an unknown id.
+
 ### Cost of a resume
 
 A resume sends the whole transcript again. The prompt cache lasts 5 minutes on
@@ -135,9 +159,12 @@ Squiz's round cap is that bound, and a headless fixer stays under it.
   documentation and help text, except the observations from earlier probes:
   the `-p` socket removed on exit, the second Copilot process, and what a
   resume of an exited `-p` run restores.
-- **No head-to-head comparison of a resumed fixer and a fresh one was found**,
-  in products or in papers. The decision to start fresh rests on what others
-  do and on the cost, not on measured fix quality.
+- **Resuming one fixer rests on no-mistakes' design, not on measured fix
+  quality.** The one measurement of a resumed fixer against a fresh one found
+  no difference in fixing when the fresh one was handed the task.
+- **No resumed fixer ran under squiz end to end.** The session routes above
+  were run against each CLI directly, and squiz's resume path only against a
+  stand-in.
 - **How a session is found to have ended was not tested** for either agent:
   `claude agents --json`, a stale socket left by a crash, Copilot's lock and
   pid.
