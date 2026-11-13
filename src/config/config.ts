@@ -25,6 +25,9 @@ export type Reviewer = "pi" | "copilot";
  */
 export type Thinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+/** The coding-agent CLIs squiz can start as a fixer. */
+export type FixerAgent = "claude" | "copilot";
+
 export type Config = {
   venue: VenueName;
   reviewer: Reviewer;
@@ -40,6 +43,12 @@ export type Config = {
    * file names none, which leaves the CLI on its own default.
    */
   model: string | null;
+  /**
+   * The CLI squiz starts, headless, to work the threads a round leaves open.
+   * `null` where the file names none: the run is interactive, and its owner is
+   * woken instead.
+   */
+  fixer: FixerAgent | null;
 };
 
 // Every setting has a default, so a project that writes no file still runs.
@@ -53,6 +62,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   tokens: 10_000_000,
   thinking: "medium",
   model: null,
+  fixer: null,
 });
 
 /**
@@ -69,13 +79,15 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model"] as const;
+const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer"] as const;
 
 const settingList = `${settingNames.slice(0, -1).map((name) => `"${name}"`).join(", ")} and "${settingNames.at(-1)}"`;
 
 const venues = ["github", "local"] as const;
 
 const reviewers = ["pi", "copilot"] as const;
+
+const fixers = ["claude", "copilot"] as const;
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -210,6 +222,7 @@ function parse(source: string, path: string): Config {
       ? thinkingOf(path, raw["thinking"])
       : defaultConfig.thinking,
     model: has(raw, "model") ? modelOf(path, raw["model"]) : defaultConfig.model,
+    fixer: has(raw, "fixer") ? fixerOf(path, raw["fixer"]) : defaultConfig.fixer,
   };
 }
 
@@ -250,6 +263,13 @@ function venueOf(path: string, value: unknown): VenueName {
 function reviewerOf(path: string, value: unknown): Reviewer {
   if (isReviewer(value)) return value;
   throw new ConfigError(reject(path, "reviewer", value, `"pi" or "copilot"`));
+}
+
+function fixerOf(path: string, value: unknown): FixerAgent {
+  const named = fixers.find((fixer) => value === fixer);
+  if (named !== undefined) return named;
+  // A null would read as the file leaving the run interactive, which it did not say.
+  throw new ConfigError(reject(path, "fixer", value, `"claude" or "copilot"; leave "fixer" out for a session that is woken`));
 }
 
 function thinkingOf(path: string, value: unknown): Thinking {

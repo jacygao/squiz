@@ -1,6 +1,6 @@
 ---
-settles: "§ 3 — how a round's result reaches a coding agent whose headless run has ended, and that an interactive session keeps its wake; § 4 — that the local venue wakes its owner as the GitHub venue does, and holds no run with a blocking Stop"
-issue: 787
+settles: "§ 3 — how a round's result reaches a coding agent whose headless run has ended, that the round host starts its fixer, and that an interactive session keeps its wake; § 4 — that the local venue wakes its owner as the GitHub venue does, and holds no run with a blocking Stop"
+issue: [787, 801]
 recorded: 2026-11-07
 versions: { claude: 2.1.319, copilot: 1.0.106 }
 recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session that is still open, or what a resumed session can reach of its subagents; or a measurement compares a resumed fixer with a fresh one
@@ -17,6 +17,8 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
 - How findings reach a coding agent whose headless run has already exited: by
   resuming its session, or by starting a fresh agent with the context on disk.
 - Whether resuming the parent brings back what its subagents knew.
+- Who starts the fixer: squiz's round host, or the caller acting on a signal
+  squiz writes.
 - Whether squiz can tell a live session from one that has ended.
 - What happens when a person closes an interactive session before its review
   finishes.
@@ -49,14 +51,15 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
   session may mean stop. Starting a fixer in that tree unasked spends credits
   and may edit files a person is changing. Continuing after a close is a later
   setting a person turns on, built on the headless handoff.
+- **Have squiz's round host start the fixer, and only in the headless mode the
+  caller declares.** Delivering the findings is squiz's job, and a caller that
+  started fixers would rebuild the loop squiz exists to run. The cost is that
+  the fixer's model, permissions, plugin directories and worktree are squiz's
+  to set.
 
 ## Needs your input
 
-- **Who starts the fixer: squiz's round host, or the caller acting on a signal
-  squiz writes.** Recommendation: the round host, behind the declared headless
-  mode. Delivery is squiz's job, and a caller that starts fixers rebuilds the
-  loop squiz exists to run. It does bring a coding agent's model, permissions
-  and worktree inside squiz.
+Nothing.
 
 ## Reference
 

@@ -10,6 +10,7 @@
  * Nothing here touches the filesystem or decides anything from a record.
  */
 
+import type { FixerAgent } from "../config/config.ts";
 import { isHerdrWorkspace } from "../sessions/herdr.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 
@@ -77,6 +78,20 @@ export type ReviewedRound = FinishedRound & { readonly reviewer: ReviewerPlace }
 /** A `squiz review` exit status a round can end on. */
 export type ReviewedExit = 0 | 2 | 3;
 
+/**
+ * How the fixer a round started to work its open threads went, as the round
+ * host's start of it saw.
+ */
+export type FixerStart =
+  | { readonly outcome: "started"; readonly agent: FixerAgent; readonly process: ProcessIdentity }
+  /** It started, and had ended before its identity could be read. */
+  | { readonly outcome: "exited"; readonly agent: FixerAgent; readonly pid: number }
+  | { readonly outcome: "failed"; readonly agent: FixerAgent; readonly reason: string }
+  /** It may have started, and nothing could say so, or what it is. */
+  | { readonly outcome: "unknown"; readonly agent: FixerAgent; readonly reason: string }
+  /** No start was tried, for the reason given. */
+  | { readonly outcome: "not started"; readonly reason: string };
+
 /** What closed an episode with threads still open. */
 export type ClosingBound = "round cap" | "token bound";
 
@@ -125,6 +140,8 @@ export type StateRecord = Shared &
             readonly openThreads: readonly string[];
             /** The bound that closed the episode with threads open, on a round that exited 3. */
             readonly closedAt?: ClosingBound;
+            /** The fixer started on the round's open threads, where `.squiz.json` names one. */
+            readonly fixer?: FixerStart;
           }
         | {
             // Nothing was left open, and a later state was queued behind this one,
@@ -403,7 +420,28 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
     return { problem: `has "closedAt" as ${render(closedAt)} rather than "round cap" or "token bound"` };
   }
   const bound: { closedAt?: ClosingBound } = closedAt === undefined ? {} : { closedAt };
-  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
+  const found = entry["fixer"];
+  if (found === undefined) return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
+  const fixer = fixerFrom(found);
+  if (fixer === undefined) return { problem: `has "fixer" as ${render(found)}` };
+  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, fixer, ...kept } };
+}
+
+function fixerFrom(found: unknown): FixerStart | undefined {
+  if (!isObject(found)) return undefined;
+  const outcome = found["outcome"];
+  const agent = found["agent"];
+  const reason = found["reason"];
+  if (outcome === "not started") return isText(reason) ? { outcome, reason } : undefined;
+  if (agent !== "claude" && agent !== "copilot") return undefined;
+  if (outcome === "failed" || outcome === "unknown") return isText(reason) ? { outcome, agent, reason } : undefined;
+  if (outcome === "started") {
+    const identity = identityFrom(found["process"]);
+    return identity === undefined ? undefined : { outcome, agent, process: identity };
+  }
+  const pid = found["pid"];
+  if (outcome !== "exited" || typeof pid !== "number" || !Number.isInteger(pid) || pid < 1) return undefined;
+  return { outcome, agent, pid };
 }
 
 function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {

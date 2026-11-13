@@ -3,7 +3,7 @@
  * `episodes/<n>/` once a new episode starts in its place.
  *
  * An archive holds what belonged to the closed episode alone: its state file,
- * its rounds and its summary file. Everything else in the directory belongs to
+ * its rounds, its summary file and its `closed.json`. Everything else in the directory belongs to
  * the worktree, and stays where it is: the local venue's base and objects, which
  * the next head is built from, its threads, whose ids keep counting, its failure
  * files, the notes and `host.log`. Moving any of those would make the next
@@ -25,6 +25,8 @@ const ROUNDS = "rounds";
 const STATE_FILE = "state.json";
 // The local venue's summary. A venue that posts its summary elsewhere has none.
 const SUMMARY_FILE = "summary.md";
+// The close a headless run waits on. An episode whose run was not headless has none.
+export const CLOSE_FILE = "closed.json";
 
 export type Archived =
   | { readonly outcome: "archived"; readonly directory: string }
@@ -32,7 +34,7 @@ export type Archived =
 
 /**
  * Write `closed` as the state file of the next archive under `episode`, and move
- * the episode's rounds and summary file into it.
+ * the episode's rounds, summary file and `closed.json` into it.
  *
  * The state file `episode` names is left for the caller to replace. Each
  * round's `resume.txt` is rewritten to name its session where it now is.
@@ -53,8 +55,10 @@ export function archiveEpisode(episode: Episode, closed: EpisodeState): Archived
       renameSync(rounds, moved);
       respell(moved, `${relative(episode.worktree, rounds)}/`, `${relative(episode.worktree, moved)}/`);
     }
-    const summary = join(episode.directory, SUMMARY_FILE);
-    if (existsSync(summary)) renameSync(summary, join(directory, SUMMARY_FILE));
+    for (const file of [SUMMARY_FILE, CLOSE_FILE]) {
+      const path = join(episode.directory, file);
+      if (existsSync(path)) renameSync(path, join(directory, file));
+    }
     return { outcome: "archived", directory };
   } catch (cause) {
     return { outcome: "failed", reason: `the closed episode could not be archived: ${cause instanceof Error ? cause.message : String(cause)}` };

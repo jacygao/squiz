@@ -19,18 +19,25 @@
  * recorded a messaging socket, the host then wakes it there. A note that cannot
  * be written, or a wake that does not arrive, goes to `host.log` and changes
  * nothing else.
+ *
+ * **Where `.squiz.json` names a fixer, the run is headless, and nothing is woken.**
+ * A round that leaves threads open with a round remaining starts the fixer on
+ * its handoff instead, and a round that closes the episode writes `closed.json`
+ * for whoever started the run to wait on. A fixer that does not start is
+ * recorded on the round's state as well as in `host.log`, because otherwise it
+ * reads exactly as a round that needed none.
  */
 
-import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { unthreadedNotes } from "../loop/summary-body.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { unappliedRulings, unpostedReasons } from "../loop/verdicts.ts";
-import { startNextEpisode, type NextEpisode } from "../loop/archive.ts";
+import { CLOSE_FILE, startNextEpisode, type NextEpisode } from "../loop/archive.ts";
 import { closedRecords, readState, type EpisodeState } from "../loop/episode-state.ts";
 import { episodeAt, roundDirectory, type Episode } from "../loop/episode.ts";
-import type { Config } from "../config/config.ts";
+import type { Config, FixerAgent } from "../config/config.ts";
 import type { ClosedBy } from "../loop/failure-body.ts";
 import {
   closedBeforeReview,
@@ -49,6 +56,7 @@ import {
   sameState,
   type ClosedBeforeReview,
   type ClosingBound,
+  type FixerStart,
   type ReviewerPlace,
   type RoundReport,
   type StateKey,
@@ -57,7 +65,8 @@ import {
 import { updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
-import type { ProcessIdentity } from "../sessions/process.ts";
+import { stillRunning, type ProcessIdentity } from "../sessions/process.ts";
+import { startFixer } from "./fixer.ts";
 import { handoffFor, handsBack } from "./handoff.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote, threadsToPrint } from "./owner-note.ts";
@@ -74,6 +83,10 @@ const STATE_WAIT_MS = 5_000;
 const LISTING_WAIT_MS = 30_000;
 
 const ALREADY_CLOSED = "the episode had closed before a round took this state";
+
+// Starting the fixer, and reading back what started. A start cut short at this
+// bound is recorded as a failure, and the next round's start is not held up.
+const FIXER_START_MS = 5_000;
 
 // A reviewed record must name where its reviewer ran. This stands in only where
 // a round reviewed without saying where its reviewer started, which is a defect.
@@ -92,6 +105,8 @@ export type HostSetup = {
   readonly lock?: typeof takeEpisodeHostLock;
   /** A line for `host.log` once the host holds the lock, such as one saying the defaults are in use. */
   readonly note?: string;
+  /** The environment a fixer's is made from. The host's own where not given. */
+  readonly environment?: NodeJS.ProcessEnv;
 };
 
 /** Why the host exited. */
@@ -241,7 +256,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         return { outcome: "state unwritable", reason: recorded.reason };
       }
       log(`${named(oldest)}: recorded failed`);
-      await noteOwners(episode, failed, log);
+      await noteOwners(episode, failed, log, setup.round.config.fixer !== null);
       continue;
     }
     if (started?.outcome === "started") log(`a new episode starts on a state the clean close never recorded: the closed one is in ${started.directory}`);
@@ -250,7 +265,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       if (unreviewed > 0) log(`${unreviewed === 1 ? "1 queued state" : `${unreviewed} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
       // A state queued for the next episode that a closed round still blocks failed, and says why.
       for (const { record } of closed) if (record.status === "failed") log(`${named(record)}: recorded failed: ${record.reason}`);
-      await noteOwners(episode, closed, log);
+      await noteOwners(episode, closed, log, setup.round.config.fixer !== null);
     }
     const round = taken;
     if (round === undefined) continue;
@@ -313,10 +328,16 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         // Listed once, for the notes and the handoff alike, and only where one needs it.
         let listing: Listing | undefined;
         const read = change === undefined ? undefined : { change, listed: () => (listing ??= threadsOf(setup.round.venue, change)) };
-        await noteOwners(episode, written, log, read);
-        if (read !== undefined) {
-          const records = recorded.state.records ?? [];
-          handOff(roundDirectory(episode, round.number), written, records, `round ${round.number}`, log, read, diff);
+        const agent = setup.round.config.fixer;
+        await noteOwners(episode, written, log, agent !== null, read);
+        const thisRound: Round = { directory: roundDirectory(episode, round.number), label: `round ${round.number}`, log };
+        const records = recorded.state.records ?? [];
+        const handoffs = read === undefined ? new Map<StateRecord, string>() : handOff(thisRound, written, records, read, diff);
+        if (agent !== null) {
+          const environment = setup.environment ?? process.env;
+          startFixers(episode, thisRound, written, records, handoffs, { agent, environment }, write);
+          const close = written.map(({ record }) => closeOf(record)).find((each) => each !== undefined);
+          if (close !== undefined) writeClose(episode, close, thisRound);
         }
         return undefined;
       },
@@ -365,9 +386,10 @@ type Read = { readonly change: Change; readonly listed: () => Listing };
  * change gives the note's follow-up.
  *
  * Without one, no note prints threads or a follow-up: only a round that read
- * its change records threads open.
+ * its change records threads open. A `headless` run wakes no one: its session
+ * has ended by the time its review does.
  */
-async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log, read?: Read): Promise<void> {
+async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log, headless: boolean, read?: Read): Promise<void> {
   const notes = join(episode.directory, "notes");
   const change = episodeChange(episode, read?.change);
   for (const { record, name, closed } of recorded) {
@@ -391,6 +413,10 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
     const socket = record.owner?.messagingSocket;
     const text = note.fields["text"];
     if (socket === undefined || text === undefined) continue;
+    if (headless) {
+      log(`${named(record)}: no wake: .squiz.json names a fixer, so the run is headless`);
+      continue;
+    }
     const woken = await wakeOwner({ notes, sessionId: note.sessionId, name: written.name, socket, text });
     if (woken.outcome === "woken") log(`${named(record)}: woke its owner through ${socket}`);
     else if (woken.outcome === "already delivered") log(`${named(record)}: its note was delivered before the host could post it`);
@@ -405,17 +431,16 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
  * `records` is the episode's records once the round's result is recorded, and
  * `diff` the diff the round's reviewer read. Where the threads cannot be listed,
  * or the diff was not kept, no handoff is written, because one without them
- * would read as whole.
+ * would read as whole. Returns the path written for each record that got one.
  */
 function handOff(
-  directory: string,
+  { directory, label: round, log }: Round,
   recorded: readonly Recorded[],
   records: readonly StateRecord[],
-  round: string,
-  log: Log,
   read: Read,
   diff: string | undefined,
-): void {
+): Map<StateRecord, string> {
+  const written = new Map<StateRecord, string>();
   for (const { record } of recorded) {
     if (!handsBack(record)) continue;
     const listed = read.listed();
@@ -438,10 +463,146 @@ function handOff(
         continue;
       }
       writeFileSync(path, handoff.text, "utf8");
+      written.set(record, path);
       log(`${round}: wrote the handoff to ${path}`);
     } catch (cause) {
       log(`${round}: wrote no handoff to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
+  }
+  return written;
+}
+
+/** A round's directory, how `host.log` names it, and the log. */
+type Round = { readonly directory: string; readonly label: string; readonly log: Log };
+
+/**
+ * Start a fixer on the handoff of each of `recorded` that hands its threads
+ * back, and record on its state how the start went.
+ *
+ * A state that got no handoff gets no fixer, and its record says so. That
+ * record, and `host.log`, are what tell a fixer that did not start from a
+ * round that needed none.
+ */
+function startFixers(
+  episode: Episode,
+  { directory, label, log }: Round,
+  recorded: readonly Recorded[],
+  records: readonly StateRecord[],
+  handoffs: ReadonlyMap<StateRecord, string>,
+  { agent, environment }: { readonly agent: FixerAgent; readonly environment: NodeJS.ProcessEnv },
+  write: (change: (state: EpisodeState) => EpisodeState) => StateUpdate,
+): void {
+  const logPath = join(directory, "fixer.log");
+  const put = (record: StateRecord, fixer: FixerStart): StateUpdate =>
+    write((state) => {
+      const held = (state.records ?? []).find((each) => sameState(each, record));
+      if (held?.status !== "reviewed" || held.result !== "exited") return state;
+      return withRecords(state, [{ ...held, fixer }]);
+    });
+  for (const { record } of recorded) {
+    if (!handsBack(record)) continue;
+    const handoff = handoffs.get(record);
+    const held = handoff === undefined ? { outcome: "not started" as const, reason: "no handoff was written" } : runningFixer(records, record);
+    if (held !== undefined) {
+      log(`${label}: ${fixerLine(held, logPath)}`);
+      const noted = put(record, held);
+      if (noted.outcome === "failed") log(`${label}: why no fixer started could not be recorded: ${noted.reason}`);
+      continue;
+    }
+    // Reserved before the start, so a start the state file then refuses still
+    // holds back every later fixer, as one that cannot be told gone does.
+    const reserved = put(record, { outcome: "unknown", agent, reason: "its start was never recorded" });
+    if (reserved.outcome === "failed") {
+      log(`${label}: no fixer started: its start could not be reserved: ${reserved.reason}`);
+      continue;
+    }
+    const fixer = fixerStarted(agent, startFixer({ agent, handoff: handoff ?? "", worktree: episode.worktree, logPath, environment }, FIXER_START_MS));
+    log(`${label}: ${fixerLine(fixer, logPath)}`);
+    const noted = put(record, fixer);
+    if (noted.outcome === "failed") log(`${label}: the fixer's start could not be recorded: ${noted.reason}`);
+  }
+}
+
+/**
+ * Why no fixer is started for `record`: a fixer an earlier round started is
+ * still running. Its own stop starts the next round, and a second fixer beside
+ * it would edit the same tree. `undefined` where none is.
+ */
+function runningFixer(records: readonly StateRecord[], record: StateRecord): FixerStart | undefined {
+  for (const earlier of records) {
+    if (earlier === record || earlier.status !== "reviewed" || earlier.result !== "exited") continue;
+    if (earlier.fixer?.outcome === "unknown") {
+      return { outcome: "not started", reason: `whether the fixer round ${earlier.round.number} started could not be told, so it may still be running` };
+    }
+    if (earlier.fixer?.outcome !== "started") continue;
+    // One that cannot be told running or gone is left to run, and none is started beside it.
+    if (stillRunning(earlier.fixer.process, FIXER_START_MS).outcome === "gone") continue;
+    return { outcome: "not started", reason: `the fixer round ${earlier.round.number} started, process ${earlier.fixer.process.pid}, is still running` };
+  }
+  return undefined;
+}
+
+function fixerStarted(agent: FixerAgent, detached: ReturnType<typeof startFixer>): FixerStart {
+  switch (detached.outcome) {
+    case "started":
+      return { outcome: "started", agent, process: detached.identity };
+    case "exited":
+      return { outcome: "exited", agent, pid: detached.pid };
+    case "failed":
+      return { outcome: "failed", agent, reason: detached.reason };
+    case "unknown":
+      return { outcome: "unknown", agent, reason: detached.reason };
+  }
+}
+
+function fixerLine(fixer: FixerStart, output: string): string {
+  switch (fixer.outcome) {
+    case "started":
+      return `started the fixer, ${fixer.agent}, as process ${fixer.process.pid}, writing to ${output}`;
+    case "exited":
+      return `started the fixer, ${fixer.agent}, as process ${fixer.pid}, writing to ${output}; it had exited before it could be checked`;
+    case "failed":
+      return `the fixer, ${fixer.agent}, did not start: ${fixer.reason}`;
+    case "unknown":
+      return `whether the fixer, ${fixer.agent}, started could not be told: ${fixer.reason}`;
+    case "not started":
+      return `no fixer started: ${fixer.reason}`;
+  }
+}
+
+/** What `closed.json` holds: the close a round recorded on its state. */
+type Close = {
+  readonly head: string;
+  readonly exitStatus: 0 | 3;
+  readonly openThreads: readonly string[];
+  readonly closedAt?: ClosingBound;
+};
+
+/** The close `record` carries, where it is one. */
+function closeOf(record: StateRecord): Close | undefined {
+  if (record.status === "reviewed" && record.result === "exited" && record.exitStatus !== 2) {
+    const { head, exitStatus, openThreads, closedAt } = record;
+    return { head, exitStatus, openThreads, ...(closedAt === undefined ? {} : { closedAt }) };
+  }
+  if (record.status === "not reviewed" && record.closed !== undefined) {
+    const { exitStatus, openThreads, closedAt } = record.closed;
+    return { head: record.head, exitStatus, openThreads, closedAt };
+  }
+  return undefined;
+}
+
+/**
+ * Write `close` to the episode's `closed.json`, whole or not at all, so a caller
+ * waiting on the file never reads half of it.
+ */
+function writeClose(episode: Episode, close: Close, { label: round, log }: Round): void {
+  const path = join(episode.directory, CLOSE_FILE);
+  try {
+    writeFileSync(`${path}.${process.pid}`, `${JSON.stringify(close, null, 2)}\n`, "utf8");
+    renameSync(`${path}.${process.pid}`, path);
+    log(`${round}: wrote the close to ${path}`);
+  } catch (cause) {
+    log(`${round}: wrote no close to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
 }
 

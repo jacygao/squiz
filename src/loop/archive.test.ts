@@ -70,6 +70,18 @@ test("#832: archiving a closed episode moves its state, rounds and summary under
   }
 });
 
+test("#803: archiving a closed episode moves its closed.json with it, so a caller waiting on the next episode's never reads the last one's", (t) => {
+  const episode = closedLocalEpisode(t);
+  const at = (...path: string[]): string => join(episode.directory, ...path);
+  const close = `{"head": "3f9c2e0aa", "exitStatus": 0, "openThreads": []}\n`;
+  writeFileSync(at("closed.json"), close);
+
+  archiveEpisode(episode, CLOSED);
+
+  assert.ok(!existsSync(at("closed.json")), "the closed episode's closed.json was left where the new episode's goes");
+  assert.equal(readFileSync(at("episodes", "1", "closed.json"), "utf8"), close);
+});
+
 test("#832: an archived round's resume command names the session where the archive put it", (t) => {
   const episode = closedLocalEpisode(t);
 
