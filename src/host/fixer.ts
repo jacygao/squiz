@@ -16,7 +16,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { FixerAgent } from "../config/config.ts";
-import { COPILOT_QUIET_FLAGS } from "../reviewers/copilot/argv.ts";
+import { COPILOT_QUIET_FLAGS } from "../sessions/copilot-settings.ts";
 import { startDetached, type Detached } from "../sessions/detach.ts";
 
 // The checkout or installed copy this module runs from: the plugin whose hooks start the next round.

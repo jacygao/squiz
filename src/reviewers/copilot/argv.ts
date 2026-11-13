@@ -28,14 +28,8 @@ import type { CommandLine, Invocation } from "../adapter.ts";
 import { historyTools } from "../git-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
+import { COPILOT_QUIET_FLAGS } from "../../sessions/copilot-settings.ts";
 import { SNAPSHOT_VARIABLE } from "./server.ts";
-
-/**
- * The flags every Copilot run squiz starts carries, the fixer's as well as the
- * reviewer's. They turn off the built-in GitHub MCP server, and leave the run
- * reaching GitHub's API and its model host, and no other.
- */
-export const COPILOT_QUIET_FLAGS: readonly string[] = ["--disable-builtin-mcps", "--no-auto-update", "--disable-client-telemetry"];
 
 /** The custom agent whose instructions are the charter, which `confine` writes. */
 export const AGENT_NAME = "squiz-reviewer";
