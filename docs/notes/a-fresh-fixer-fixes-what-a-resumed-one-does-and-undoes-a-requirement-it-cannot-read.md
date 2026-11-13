@@ -17,9 +17,11 @@ recheck-when: squiz hands the fixer the run's prompt or transcript (#859, #870),
 
 ## Decisions
 
-- **Keep the fresh fixer, and do not add a resume.** Both fixed every real
-  defect they were handed, broke nothing the finding did not ask for, and left
-  the project's own suite passing. On fixing, no difference was measured.
+- **Keep the fresh fixer, and do not add a resume.** Fresh fixers fixed all 30
+  real defects they were handed and resumed ones 29: one resumed Copilot fixer
+  declined a defect as older than its change. Every fixer left the project's
+  own suite passing. On fixing, no difference was measured, and nothing shows
+  a resume fixing better.
 - **Hand the fresh fixer the task, not the session.** The one difference was a
   finding that contradicts a requirement stated only in the task prompt. A
   fresh Copilot fixer with no description applied it in 10 of 15 trials. With
@@ -144,9 +146,10 @@ each one.
 
 ## Limits
 
-- **The tasks were easy for both models.** Every arm fixed every real defect,
-  so this shows no difference in fixing at the ceiling, and none on a defect
-  that needs the session's working knowledge to fix.
+- **The tasks were easy for both models.** 89 of 90 fixers fixed the real
+  defect, and the one that did not chose not to. This shows no difference in
+  fixing at the ceiling, and nothing about a defect that needs the session's
+  working knowledge to fix.
 - **Three tasks, five trials an arm, one model each.** The wrong-finding
   difference is 10 of 15 against 0 of 15, but it falls on two tasks. Each
   case is all or nothing, so it is two task-level results, not fifteen.
