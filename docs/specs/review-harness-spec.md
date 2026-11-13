@@ -458,7 +458,7 @@ input on `/dev/null`, and output in `.squiz/<number>/host.log`.
 It takes the oldest queued state, writes the reviewing record naming itself, and
 runs the round as the steps above set out. It exits when nothing is left queued,
 and when the worktree it serves is gone. In a headless run it first waits for
-every fixer to exit (Headless runs).
+every fixer to exit while the episode is open (Headless runs).
 
 **A host that finds nothing queued reads the queue again once its lock is
 released.** A trigger that queued a state before the release saw the host
@@ -782,10 +782,11 @@ bound closed it with threads open, which bound:
 The file appears whole: it is written beside its path and renamed into place. A
 caller that sees it reads the outcome from the episode's directory. It moves into `episodes/<n>/` with the rest of its episode (The state file).
 
-**A round host in a headless run outlives every fixer of its episode.** Once
-nothing is queued, it looks every second at the queue and at each fixer the
-records name as started, by its pid and start time. A state queued meanwhile is
-taken as any other. A fixer that cannot be told running or gone is waited on as
+**A round host in a headless run outlives every fixer of its open episode.**
+Once nothing is queued, it looks every second at the queue and at each fixer
+the records name as started, by its pid and start time. A state queued meanwhile
+is taken as any other. A close ends the wait: whatever a fixer still running
+then queues starts a host of its own. A fixer that cannot be told running or gone is waited on as
 one running is. `host.log` names the fixer it waits on:
 
 ```
