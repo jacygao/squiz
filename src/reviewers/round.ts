@@ -275,7 +275,7 @@ async function roundWithin(
       return {
         outcome: "setup",
         cost: spent,
-        reason: withModel(ran.reason, invocation, adapter, spent),
+        reason: ran.diagnosed === true ? ran.reason : withModel(ran.reason, invocation, adapter, spent),
         refusals: refused,
         ...held,
       };
@@ -300,8 +300,9 @@ async function roundWithin(
  * completed no message: the configured one, or else the user's default.
  *
  * A CLI that refuses a model it does not offer exits before its first request,
- * and in a pane nothing it said reaches the round, so the model is named as one
- * cause the person can check.
+ * and in a pane what it said may not reach the round, so the model is named as
+ * one cause the person can check. A reason the adapter diagnosed never reaches
+ * here, because its cause is known.
  */
 function withModel(reason: string, invocation: Invocation, adapter: Adapter, spent: Spend): string {
   if ((spent?.messages ?? 0) > 0) return reason;
@@ -364,6 +365,8 @@ type Attempt = {
    */
   readonly reported: RoundOutput;
   readonly failedRequests?: FailedRequests;
+  /** The reason is the adapter's diagnosis of what the reviewer said, which names no model. */
+  readonly diagnosed?: true;
 } & (
   | RunResult
   /** The time bound passed with no review finished, and the process was stopped. */
@@ -421,6 +424,10 @@ async function attempt(
   const inPane = offersPane(sessions.environment) ? adapter.argv({ ...invocation, terminal: "pane" }) : detached;
   const unprepared = emptied(invocation.reportsFile);
   if (unprepared !== null) return unstartable(unprepared);
+  // A file an earlier attempt left would be read as what this one said.
+  const keptIn = adapter.stderrFile?.(invocation);
+  const unkept = keptIn === undefined ? null : emptied(keptIn);
+  if (unkept !== null) return unstartable(unkept);
 
   const start = await startSession(
     {
@@ -547,16 +554,17 @@ async function attempt(
     // A child's exit status and the last of its stderr are both there only once
     // its output has closed.
     await within(closing, GRACE_MS);
-    if (child === undefined || (ended.kind !== "unparsed" && ended.kind !== "incomplete")) return ended;
+    if (ended.kind !== "unparsed" && ended.kind !== "incomplete") return ended;
 
     // A run that completed a message explained itself in the report file, and
     // stderr would only say the same thing a second way.
-    const said = complaint();
-    if ((ended.cost?.messages ?? 0) > 0 || said === "") return ended;
-    return {
-      ...ended,
-      reason: `${ended.reason}: ${endedAs(detached.command, child)}, and said: ${said}`,
-    };
+    if ((ended.cost?.messages ?? 0) > 0) return ended;
+    const said = child === undefined ? keptAt(keptIn) : complaint();
+    if (said === "") return ended;
+    const diagnosis = ended.kind === "incomplete" ? adapter.diagnose?.(said) : undefined;
+    if (diagnosis !== undefined) return { ...ended, reason: diagnosis, diagnosed: true };
+    const how = child === undefined ? "," : `: ${endedAs(detached.command, child)},`;
+    return { ...ended, reason: `${ended.reason}${how} and said: ${said}` };
   } catch (cause) {
     // Nothing after this attempt stops the reviewer, and the caller reads what it
     // spent from a file it would otherwise still be writing.
@@ -701,6 +709,16 @@ function drain(stderr: Readable): () => string {
   // failure of the round.
   stderr.on("error", () => {});
   return () => tail.trim();
+}
+
+/** The end of the stderr the command line kept in `file`, or nothing where it kept none. */
+function keptAt(file: string | undefined): string {
+  if (file === undefined) return "";
+  try {
+    return readFileSync(file, "utf8").slice(-COMPLAINT_LIMIT).trim();
+  } catch {
+    return "";
+  }
 }
 
 /** Resolves once the process is gone and its output is closed, however it ended. */

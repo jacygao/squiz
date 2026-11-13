@@ -1596,8 +1596,22 @@ setup problem, with no review run and nothing spent, and the reason names
 "model" in .squiz.json is "openai/gpt-5", which is not a model pi offers; it must be a provider and model as pi --list-models lists them, such as "openai/gpt-5-mini"
 ```
 
-Where a run completed no message, the round adds the model it was handed to the
-reason: the configured one, or else the user's default as the adapter reads it.
+**Where a run completed no message, the round adds what the reviewer said on
+stderr to the reason.** A detached reviewer's stderr is read as it runs. A
+reviewer in a pane writes to the pane, so the round reads the file an adapter's
+command line keeps its stderr in, and an adapter that keeps none has nothing
+read.
+
+An adapter may recognise a cause in what the reviewer said, and the reason is
+then the adapter's alone. The Copilot adapter recognises a reviewer that is not
+signed in (The Copilot adapter):
+
+```
+the reviewer is not signed in to Copilot: it said "Error: No authentication information found."
+```
+
+Otherwise the round adds the model the run was handed: the configured one, or
+else the user's default as the adapter reads it.
 
 ```
 the reviewer completed no message; "model" in .squiz.json is "gpt-5-nano", which the reviewer's CLI may not offer
@@ -1776,6 +1790,15 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
   `SQUIZ_SNAPSHOT` in the `env` of its MCP configuration.
 - **Append the run's usage to the report file only where Copilot exits 0 by
   itself.**
+- **Keep Copilot's stderr in `stderr.txt` in the session directory**, and write
+  it to the script's own stderr once Copilot exits, so that a round in a pane
+  reads what Copilot said. The script exits with Copilot's status.
+
+**A run whose stderr holds the line `Error: No authentication information
+found.` is a reviewer that is not signed in.** Copilot 1.0.109 prints that line,
+and exits 1 before any request, where it finds no login. The round's reason
+then quotes the line and names no model. A Copilot that words it differently is
+not recognised, and its reason is the round's own, with what it said.
 
 **The reviewer runs on the configured model, or else the user's default, and
 either one goes on `--model`.** Copilot refuses a model the user cannot use
@@ -1850,7 +1873,8 @@ reports no usable cost.
 
 A run that wrote nothing to the report file completed no message: Copilot could
 not be started, its model provider refused the run, or Copilot refused the
-configured model. Detached, the round adds the run's stderr to the reason.
+configured model. The round adds what Copilot said on stderr to the reason, in a
+pane as detached (Adapters).
 
 **A Copilot round records a cost only where Copilot ended by itself and its
 usage line carried token counts.** That cost is Copilot's own total, and is never
@@ -3093,7 +3117,7 @@ The last column names the surfaces each path reaches.
 | The reviewer's session cannot be recorded | The review goes on. Until a later write names it, the record names no reviewer for `squiz status` or a recovery to find. | `host.log` |
 | No pane can be opened | Where tmux or Herdr refuses to open a pane, the round host starts the reviewer detached, and the round goes on. `squiz status` shows the session as `detached`. Why the pane was refused is not kept. | `squiz status` |
 | The reviewer is not installed | Exit 1, and the failure comment and stderr name the reviewer that could not be started. It is reported as a setup problem rather than as a bad round. A missing Copilot arrives instead as a Copilot adapter run that completed no message, because the line the round starts is `sh`, and is reported as a setup problem by the row below. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
-| The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. The failure comment and stderr carry the reason the reviewer gave. Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
+| The reviewer runs, exits cleanly, and completes no message | Exit 1, and what the reviewer reported before its provider gave out is posted. A credential the provider refuses arrives here rather than above, because the reviewer starts and answers. The failure comment and stderr carry the reason the reviewer gave. For a Copilot reviewer that is not signed in, the reason says so and names no model (§ 5 Adapters). Not retried, because the reviewer already retried the request itself. Reported as a setup problem rather than as a bad round. An errored message in a round that completed others is a retry rather than a failure. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The reviewer's output cannot be read, and no retry recovers it | Exit 1, and what the reviewer reported before its output stopped being readable is posted. The failure comment and stderr say the review did not run. A retry whose output cannot be read either and a first attempt that left no time for a retry both arrive here. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The reviewer stops without finishing its review | Retried once, where the round has time left for one. Both attempts post what the reviewer reported before it stopped. A review that was never finished and an honest finding of nothing are distinguished before anything is posted. Exit 1 where the retry does not finish either, with a failure comment saying the review was never finished. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The reviewer exceeds the review budget | Exit 1, unless the round holds the reviewer's declaration, as the end of this row says. The reviewer process is killed, what it reported before the kill is posted, and the failure comment and stderr say how many findings arrived. The same line then says what squiz saw during the round, and never what caused the kill. For a `pi` reviewer it gives how many messages the reviewer completed, with the bound's seconds averaged over them, and how many requests its provider failed, quoting the first line of the last one's error. A Copilot round's line adds nothing of that, because Copilot reports neither while it runs. Where the machine slept during the review, the line ends by saying for how long, as in "the machine slept for 13 minutes of the round", whichever reviewer ran. The round is recorded as a failed round rather than a clean one, whatever it posted, and the summary that closes the episode notes that the bound cut it short. A round that already holds the reviewer's declaration is the review it declared instead, because the review was finished before the bound was reached, unless one of its reports could not be read back. That round posts no failure comment, and exits 0, 2 or 3 as its outcome says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, summary's Notes |

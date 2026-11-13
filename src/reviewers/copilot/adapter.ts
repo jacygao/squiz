@@ -8,10 +8,13 @@
  */
 
 import type { Adapter } from "../adapter.ts";
-import { argv, grants } from "./argv.ts";
+import { argv, grants, stderrFile } from "./argv.ts";
 import { confine, userModel } from "./confine.ts";
 import { readReports } from "./reports.ts";
 import { resumeLine } from "./session.ts";
+
+/** The line Copilot opens its stderr with when it finds no login, before any request. */
+const SIGNED_OUT = "Error: No authentication information found.";
 
 export const copilot: Adapter = {
   argv,
@@ -20,6 +23,11 @@ export const copilot: Adapter = {
   grants,
   resume: resumeLine,
   costAtExit: true,
+  stderrFile,
+  diagnose: (said) =>
+    said.split("\n").some((line) => line.trim() === SIGNED_OUT)
+      ? `the reviewer is not signed in to Copilot: it said "${SIGNED_OUT}"`
+      : undefined,
   userModel: (environment) => {
     const model = userModel(environment);
     return typeof model === "object" ? { problem: model.problem, failsTheRound: true } : model;

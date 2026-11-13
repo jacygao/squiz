@@ -320,6 +320,18 @@ export type Adapter = {
    * the message in flight.
    */
   readonly costAtExit?: true;
+  /**
+   * The file the command line keeps the CLI's stderr in. The round reads it for
+   * a reviewer in a pane, whose stderr goes to the pane. Absent where the line
+   * keeps none, and a pane's run then says nothing to the round.
+   */
+  readonly stderrFile?: (invocation: Invocation) => string;
+  /**
+   * Why a run that completed no message failed, where what the CLI said on
+   * stderr names a cause; `undefined` where it does not. The reason replaces the
+   * round's own, which would otherwise name the model as a cause.
+   */
+  readonly diagnose?: (said: string) => string | undefined;
   /** The user's default model, read from `environment`'s home and variables. It reads and never writes. */
   readonly userModel?: (environment: NodeJS.ProcessEnv) => UserModel;
   /** The level a round asked for `asked.thinking` runs at. It makes no model request and never throws. */

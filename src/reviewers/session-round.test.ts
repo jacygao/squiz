@@ -19,6 +19,7 @@ import { startChild } from "../sessions/child.ts";
 import { identityOf } from "../sessions/process.ts";
 import { openWindow } from "../sessions/tmux.ts";
 import type { Adapter, Invocation } from "./adapter.ts";
+import { copilot } from "./copilot/adapter.ts";
 import { pi } from "./pi/adapter.ts";
 import { grants } from "./pi/argv.ts";
 import { REPORTS_VARIABLE } from "./report-file.ts";
@@ -305,6 +306,36 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     assert.ok(place?.backend === "tmux", `the reviewer started in ${JSON.stringify(place)}`);
     assert.equal(place.identity.pid, note.pid, "the identity is not the reviewer's own");
     assert.ok(!server.windows().includes(place.window.id), "the reviewer's window is still open");
+  });
+
+  // A reviewer in a window says why it failed to the window, so the round reads
+  // only what the command line kept.
+  test("a reviewer in a window that failed is reported by the stderr its line kept, and a sign-out names no model (#849)", async (t) => {
+    const server = privateTmux(t);
+    const tree = treeFor(t);
+    const kept = join(tree, "kept-stderr.txt");
+    const saying = (said: string): string =>
+      `require("node:fs").writeFileSync(${JSON.stringify(kept)}, ${JSON.stringify(`${said}\n`)}); process.exit(1);`;
+    const failing = (said: string): Adapter => ({
+      ...adapterOf({ inPane: saying(said), detached: "process.exit(3)" }),
+      stderrFile: () => kept,
+      diagnose: copilot.diagnose,
+      userModel: () => "gpt-6-astra",
+    });
+    const sessions = { environment: server.environment, name: "squiz-142-r1" };
+
+    const signedOut = await runRound(failing("Error: No authentication information found."), invocationIn(tree), 30, sessions);
+    assert.equal(signedOut.outcome, "setup", accountOf(signedOut));
+    assert.equal(
+      signedOut.outcome === "setup" ? signedOut.reason : "",
+      'the reviewer is not signed in to Copilot: it said "Error: No authentication information found."',
+    );
+
+    const other = await runRound(failing("Error: something else went wrong"), invocationIn(tree), 30, sessions);
+    assert.match(
+      other.outcome === "setup" ? other.reason : "",
+      /^the reviewer completed no message, and said: Error: something else went wrong; .*"gpt-6-astra"/u,
+    );
   });
 
   // The Copilot adapter turns trust off this way, and the server carries it on.

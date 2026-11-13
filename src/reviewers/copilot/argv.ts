@@ -58,11 +58,17 @@ export function usageFile(invocation: Invocation): string {
   return join(resolve(invocation.directory, invocation.sessionDirectory), "usage.json");
 }
 
+/** The file the script keeps Copilot's stderr in, in the session directory. */
+export function stderrFile(invocation: Invocation): string {
+  return join(resolve(invocation.directory, invocation.sessionDirectory), "stderr.txt");
+}
+
 /** Build the line for one round, for a reviewer in a pane or one with no terminal. */
 export function argv(invocation: Invocation): CommandLine {
   const prompt = quoted(resolve(invocation.directory, invocation.promptFile));
   const reports = resolve(invocation.directory, invocation.reportsFile);
   const usage = quoted(usageFile(invocation));
+  const err = quoted(stderrFile(invocation));
   const config = {
     mcpServers: {
       [SERVER_NAME]: {
@@ -78,7 +84,7 @@ export function argv(invocation: Invocation): CommandLine {
     // The `.` keeps the prompt's trailing newlines, which `$(…)` would drop, and
     // `cat` failing leaves Copilot unstarted rather than run with no prompt.
     `prompt=$(cat ${prompt} && printf .)`,
-    `&& copilot -p "\${prompt%.}"`,
+    `&& { copilot -p "\${prompt%.}"`,
     `--agent ${AGENT_NAME}`,
     "--no-ask-user --allow-all-tools",
     `--available-tools=${grants.join(",")}`,
@@ -97,6 +103,9 @@ export function argv(invocation: Invocation): CommandLine {
     invocation.model === null ? '${COPILOT_MODEL:+--model "$COPILOT_MODEL"}' : '--model "$1"',
     `--reasoning-effort ${effortOf(invocation.thinking)}`,
     `--usage-output-file ${usage}`,
+    // Copilot's stderr is kept in a file as well as said, because a round in a
+    // pane reads nothing of the pane, and the script exits as Copilot did.
+    `2> ${err}; status=$?; cat ${err} >&2; [ "$status" -eq 0 ] || exit "$status"; }`,
     // An assignment fails where its substitution does, so a missing usage file
     // appends nothing. The file is indented JSON, and the report file takes one line.
     `&& usage=$(tr -d '\\n' < ${usage})`,

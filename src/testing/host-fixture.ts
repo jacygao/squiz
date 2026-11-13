@@ -14,6 +14,7 @@ import { defaultConfig, type Config } from "../config/config.ts";
 import type { Finding } from "../findings/finding.ts";
 import { runHost } from "../host/host.ts";
 import type { Adapter, ParsedRun, ThreadVerdict } from "../reviewers/adapter.ts";
+import { adapterFor } from "../reviewers/adapters.ts";
 import { githubVenue } from "../venues/github/venue.ts";
 
 /** What one reviewer start reports, and how long it runs before it does. */
@@ -21,6 +22,8 @@ export type PlannedStart = {
   readonly findings: readonly Finding[];
   readonly verdicts: readonly ThreadVerdict[];
   readonly holdSeconds?: number;
+  /** What the reviewer says on stderr before it exits 1 having completed no message, in place of a review. */
+  readonly fails?: string;
 };
 
 export type Plan = {
@@ -46,7 +49,7 @@ const adapter: Adapter = {
     current = plan.starts[started] ?? { findings: [], verdicts: [] };
     return {
       command: "/bin/sh",
-      args: ["-c", `sleep ${current.holdSeconds ?? 0}`],
+      args: ["-c", `sleep ${current.holdSeconds ?? 0}${current.fails === undefined ? "" : '; printf "%s\\n" "$0" >&2; exit 1'}`, current.fails ?? ""],
       directory: invocation.directory,
       stdin: "/dev/null",
       environment: {},
@@ -54,12 +57,18 @@ const adapter: Adapter = {
   },
   parse: async (stdout): Promise<ParsedRun> => {
     for await (const chunk of stdout) void chunk;
+    if (current.fails !== undefined) {
+      return { cost: { dollars: 0, tokens: 0, messages: 0 }, result: { kind: "incomplete", reason: "the reviewer completed no message" } };
+    }
     return {
       cost: { dollars: 0.01, tokens: 1200, messages: 1 },
       result: { kind: "reviewed", findings: current.findings, verdicts: current.verdicts },
     };
   },
   grants: ["read"],
+  // Copilot's own reading of what a reviewer that failed said, against a default model it could otherwise blame.
+  diagnose: adapterFor("copilot").diagnose,
+  userModel: () => "gpt-6-astra",
 };
 
 await runHost({
