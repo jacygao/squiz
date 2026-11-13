@@ -12,6 +12,7 @@
 
 import type { Owner, StateRecord } from "../loop/state-record.ts";
 import { printedThread } from "../review/output.ts";
+import { longestBacktickRun } from "../reviewers/prompt.ts";
 import type { Change, ReviewThread } from "../venues/venue.ts";
 import { threadsToPrint } from "./owner-note.ts";
 
@@ -88,7 +89,6 @@ function reports(records: readonly StateRecord[]): readonly string[] {
 
 /** `diff` in a fence longer than any run of backticks inside it. */
 function fenced(diff: string): string {
-  const longest = Math.max(0, ...[...diff.matchAll(/`+/gu)].map(([run]) => run.length));
-  const fence = "`".repeat(Math.max(3, longest + 1));
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(diff) + 1));
   return `${fence}diff\n${diff.endsWith("\n") || diff === "" ? diff : `${diff}\n`}${fence}`;
 }

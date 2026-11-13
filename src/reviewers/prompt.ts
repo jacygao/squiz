@@ -148,7 +148,8 @@ function block(content: string, info: string): string {
   return `${fence}${info}\n${content.replace(/\n+$/u, "")}\n${fence}`;
 }
 
-function longestBacktickRun(content: string): number {
+/** The length of the longest run of backticks in `content`, which a fence around it must outrun. */
+export function longestBacktickRun(content: string): number {
   let longest = 0;
   for (const run of content.matchAll(/`+/gu)) longest = Math.max(longest, run[0].length);
   return longest;

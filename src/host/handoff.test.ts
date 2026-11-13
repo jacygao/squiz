@@ -140,6 +140,15 @@ test("#802: a diff holding a fence of its own is fenced with a longer one", () =
   assert.ok(text.endsWith(`## The diff\n\n\`\`\`\`diff\n${diff}\`\`\`\`\n`), text);
 });
 
+test("#802: a diff with more backtick runs than a call takes arguments is fenced, rather than throwing", () => {
+  const record = reviewed(2, ["PRRT_b"]);
+  const diff = "+`a` ".repeat(300_000) + "\n";
+
+  const text = composed(handoffFor(CHANGE, record, [PLAIN], diff, [record]));
+
+  assert.ok(text.endsWith(`## The diff\n\n\`\`\`diff\n${diff}\`\`\`\n`), "the diff was not fenced with three backticks");
+});
+
 test("#802: a round that closed the episode, or left nothing open, hands nothing off", () => {
   for (const record of [reviewed(3, ["PRRT_b"]), reviewed(0, [])]) {
     assert.deepEqual(handoffFor(CHANGE, record, [PLAIN], DIFF, [record]), { outcome: "none" }, JSON.stringify(record));

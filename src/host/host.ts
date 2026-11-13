@@ -427,18 +427,20 @@ function handOff(
       log(`${round}: wrote no handoff: the round kept no diff`);
       continue;
     }
-    const handoff = handoffFor(read.change, record, listed.threads, diff, records);
-    if (handoff.outcome === "none") continue;
-    if (handoff.outcome === "no open thread listed") {
-      log(`${round}: wrote no handoff: none of the threads the round left open is open on ${read.change.name}`);
-      continue;
-    }
     const path = join(directory, "handoff.md");
+    // The result is recorded by now, and a throw here would stop the host
+    // before the states queued behind it.
     try {
+      const handoff = handoffFor(read.change, record, listed.threads, diff, records);
+      if (handoff.outcome === "none") continue;
+      if (handoff.outcome === "no open thread listed") {
+        log(`${round}: wrote no handoff: none of the threads the round left open is open on ${read.change.name}`);
+        continue;
+      }
       writeFileSync(path, handoff.text, "utf8");
       log(`${round}: wrote the handoff to ${path}`);
     } catch (cause) {
-      log(`${round}: wrote no handoff: ${path} could not be written: ${cause instanceof Error ? cause.message : String(cause)}`);
+      log(`${round}: wrote no handoff to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
   }
 }
