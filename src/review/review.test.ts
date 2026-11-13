@@ -886,7 +886,7 @@ test("#852: a lookup after the first runs on the push's bound, and one that boun
           return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
         }
         clock += 20_000;
-        return { outcome: "failed", reason: "the pull request for \"feature-a\" could not be looked up: gh ran out of the time it was given" };
+        return { outcome: "failed", reason: "the pull request for \"feature-a\" could not be looked up: gh ran out of the time it was given", lookup: true };
       },
     };
 
@@ -900,6 +900,32 @@ test("#852: a lookup after the first runs on the push's bound, and one that boun
       "squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 70 seconds, though this worktree pushed 8d21a4f to it\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
     );
+  });
+});
+
+test("#852: a lookup that finds the push and a listing that then fails past the push's bound reports the listing's failure, not the push", async () => {
+  await withWorktree(async (fixture) => {
+    let clock = 1_000_000;
+    let asked = 0;
+    const listing = "the threads on PR #41 could not all be listed: gh ran out of the time it was given";
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }) }),
+      now: () => clock,
+      trigger: () => {
+        asked += 1;
+        if (asked === 1) {
+          clock += 50_000;
+          return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
+        }
+        clock += 20_000;
+        return { outcome: "failed", reason: listing };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(printed.exit, 1, printed.stdout + printed.stderr);
+    assert.ok(printed.stderr.includes(listing), `the listing's failure was replaced: ${printed.stderr}`);
   });
 });
 

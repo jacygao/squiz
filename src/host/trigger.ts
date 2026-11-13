@@ -81,8 +81,12 @@ export type Triggered =
    * of one where it says nothing of a state it chose not to queue.
    */
   | { readonly outcome: "held"; readonly line: string }
-  /** The venue, or what the decision needs, could not be read, or the queue could not be written. Nothing was queued. */
-  | { readonly outcome: "failed"; readonly reason: string }
+  /**
+   * The venue, or what the decision needs, could not be read, or the queue could
+   * not be written. Nothing was queued. `lookup` is true where the venue's lookup
+   * of the change itself failed, before its threads were listed.
+   */
+  | { readonly outcome: "failed"; readonly reason: string; readonly lookup?: true }
   /** The venue does not yet report the commit the worktree pushed. Nothing was listed or written. */
   | { readonly outcome: "unreported"; readonly change: Change & { readonly unreported: string } }
   | {
@@ -127,7 +131,7 @@ export function trigger(request: TriggerRequest): Triggered {
     case "none":
       return noReview(lookup.reason);
     case "failed":
-      return failed(lookup.reason);
+      return { ...failed(lookup.reason), lookup: true };
   }
   const { change } = lookup;
   if (request.holdUnreported === true && change.unreported !== undefined) {

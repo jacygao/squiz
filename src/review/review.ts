@@ -154,7 +154,9 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       // A lookup after the first is still the wait for GitHub, so the bound cuts it off too.
       const triggered = askOnce(last === undefined ? undefined : deadlineIn(Math.min(reportedBy.remaining(), until.remaining()), now));
       if (triggered.outcome !== "unreported") {
-        return last !== undefined && triggered.outcome === "failed" && spent() ? notReported(last) : triggered;
+        // Only the lookup runs on the bound. What fails after it found the push is its own failure.
+        const cutOff = triggered.outcome === "failed" && triggered.lookup === true;
+        return last !== undefined && cutOff && spent() ? notReported(last) : triggered;
       }
       last = triggered;
       // Checked again after the pause, because a lookup on a spent deadline fails before GitHub is asked.

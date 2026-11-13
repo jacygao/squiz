@@ -405,6 +405,19 @@ test("#852: the venue looks the change up on the trigger's lookUpBy, where it is
   });
 });
 
+test("#852: a failed lookup of the change is marked as the lookup's, and a failed listing of its threads is not", async () => {
+  await withFixture((fixture) => {
+    const lookupFails: Venue = { ...githubVenue, readChange: () => ({ outcome: "failed", reason: "gh ran out of the time it was given" }) };
+    const listingFails: Venue = { ...githubVenue, listThreads: () => ({ outcome: "failed", reason: "gh ran out of the time it was given" }) };
+
+    const lookup = trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue: lookupFails, holdUnreported: true }));
+    const listing = trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue: listingFails, holdUnreported: true }));
+
+    assert.equal(lookup.outcome === "failed" ? lookup.lookup : "not failed", true);
+    assert.equal(listing.outcome === "failed" ? listing.lookup : "not failed", undefined);
+  });
+});
+
 test("#852: a hook's trigger decides on the head GitHub reports, though the worktree pushed a later one", async () => {
   await withFixture(async (fixture) => {
     const result = decided(trigger(request(fixture, { venue: pushedAhead })));
