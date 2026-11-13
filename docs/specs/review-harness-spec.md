@@ -737,8 +737,14 @@ MCP configuration of the run before it:
 
 ```
 claude -p <prompt> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
-copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)'
+copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' --disable-builtin-mcps --no-auto-update --disable-client-telemetry
 ```
+
+A Copilot fixer carries the three flags the Copilot reviewer does (The Copilot
+adapter), which turn off the built-in GitHub MCP server, auto-update and client
+telemetry. Without them, on Copilot 1.0.110, a fixer also reached
+`cafe.github.com` and `telemetry.enterprise.githubcopilot.com`. The hosts a
+fixer reaches with them have not been measured.
 
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
 names the session whose hook started the host. The prompt names the handoff:
@@ -3527,7 +3533,7 @@ src/
   review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
   hook/                      squiz hook: a stop resolves the change and queues its review, and a start hands the worktree to the venue
   host/                      the round host, which takes queued states, runs their rounds, and starts a headless run's fixer
-  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
+  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, the user's Copilot settings, and the flags every Copilot run carries; no review knowledge
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution and the reviewer's snapshot
   reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
@@ -3548,7 +3554,9 @@ the directory that does the work.
 **`src/sessions/` knows nothing about reviews.** It starts a command as a
 session, finds it again by pid and start time, closes its pane, reads a hook's
 payload into the session that stopped and the session that owns it, writes
-and delivers a note, and reads the user's Copilot settings. Nothing in it names
+and delivers a note, reads the user's Copilot settings, and holds the flags
+every Copilot run squiz starts carries, the reviewer's and the fixer's alike.
+Nothing in it names
 a pull request, a round or a finding, and it imports nothing from the rest of
 `src/`.
 

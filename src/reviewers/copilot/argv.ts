@@ -28,6 +28,7 @@ import type { CommandLine, Invocation } from "../adapter.ts";
 import { historyTools } from "../git-tools.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
 import { reportingTools } from "../reporting.ts";
+import { COPILOT_QUIET_FLAGS } from "../../sessions/copilot-settings.ts";
 import { SNAPSHOT_VARIABLE } from "./server.ts";
 
 /** The custom agent whose instructions are the charter, which `confine` writes. */
@@ -93,9 +94,7 @@ export function argv(invocation: Invocation): CommandLine {
     // closes that directory, leaving the reviewer its own snapshot only.
     "--disallow-temp-dir",
     "--no-custom-instructions",
-    "--disable-builtin-mcps",
-    // Leaves the reviewer reaching GitHub's API and its model host, and no other.
-    "--no-auto-update --disable-client-telemetry",
+    ...COPILOT_QUIET_FLAGS,
     '--additional-mcp-config "$0"',
     // A configured model is the script's `$1`, so the shell passes it on without
     // reading it. The user's default, which `confine` puts on `COPILOT_MODEL`,
