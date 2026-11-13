@@ -251,6 +251,24 @@ for (const [when, arrange] of reportedAsItIs) {
   });
 }
 
+test("#852: readChange fails, rather than finding the head GitHub reports, where its deadline passes before the push is compared with it", async () => {
+  await withPushedRepository(async (worktree, reported) => {
+    commitIn(worktree, "two");
+    git(worktree, "push", "--quiet");
+    await withFakeGh([pullRequestRow({ headRefOid: reported })], (gh) => {
+      const spent = (): boolean => gh.calls() > 0;
+      const until = { ...deadlineIn(10_000), passed: spent, remaining: () => (spent() ? 0 : 10_000) };
+
+      const lookup = githubVenue.readChange(worktree, null, until);
+
+      assert.deepEqual(lookup, {
+        outcome: "failed",
+        reason: "whether PR #142's head has this worktree's push could not be told: git ran out of the time it was given",
+      });
+    });
+  });
+});
+
 test("#852: readChange names no unreported commit for a branch that has no push destination", async () => {
   await withRepository(async (worktree) => {
     const reported = commitIn(worktree, "two");
