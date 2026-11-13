@@ -122,7 +122,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
   const notRun = (reason: string): Printed => print({ outcome: "not run", key, reason });
 
   const pollMs = request.pollMs ?? POLL_MS;
-  const askOnce = (): Triggered =>
+  const askOnce = (lookUpBy?: Deadline): Triggered =>
     (request.trigger ?? triggerReview)({
       directory,
       trigger: "review",
@@ -131,6 +131,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       environment: request.environment,
       until,
       holdUnreported: true,
+      ...(lookUpBy === undefined ? {} : { lookUpBy }),
       ...(request.presence === undefined ? {} : { presence: request.presence }),
       ...(request.host === undefined ? {} : { host: request.host }),
     });
@@ -144,19 +145,21 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     const started = now();
     const reportedBy = deadlineIn(PUSH_REPORTED_MS, now);
     const spent = (): boolean => reportedBy.passed() || until.passed();
+    const notReported = ({ change }: Unreported): NotReported => ({
+      outcome: "not reported",
+      reason: `${change.name} still has ${change.head.slice(0, 7)} as its head after ${Math.round((now() - started) / 1_000)} seconds, though this worktree pushed ${change.unreported.slice(0, 7)} to it`,
+    });
+    let last: Unreported | undefined;
     for (;;) {
-      const triggered = askOnce();
-      if (triggered.outcome !== "unreported") return triggered;
+      // A lookup after the first is still the wait for GitHub, so the bound cuts it off too.
+      const triggered = askOnce(last === undefined ? undefined : deadlineIn(Math.min(reportedBy.remaining(), until.remaining()), now));
+      if (triggered.outcome !== "unreported") {
+        return last !== undefined && triggered.outcome === "failed" && spent() ? notReported(last) : triggered;
+      }
+      last = triggered;
       // Checked again after the pause, because a lookup on a spent deadline fails before GitHub is asked.
       if (!spent()) await sleep(Math.max(1, Math.min(pollMs, reportedBy.remaining(), until.remaining())));
-      if (spent()) {
-        const { change } = triggered;
-        const waited = Math.round((now() - started) / 1_000);
-        return {
-          outcome: "not reported",
-          reason: `${change.name} still has ${change.head.slice(0, 7)} as its head after ${waited} seconds, though this worktree pushed ${change.unreported.slice(0, 7)} to it`,
-        };
-      }
+      if (spent()) return notReported(triggered);
     }
   };
   const first = await triggerNow();
@@ -332,6 +335,8 @@ function hostRunning(
 
 /** GitHub did not report the worktree's push in time. */
 type NotReported = { readonly outcome: "not reported"; readonly reason: string };
+
+type Unreported = Extract<Triggered, { readonly outcome: "unreported" }>;
 
 type Context = {
   readonly key: string;

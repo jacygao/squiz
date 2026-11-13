@@ -387,6 +387,24 @@ test("#852: squiz review's trigger returns a push GitHub does not yet report, li
   });
 });
 
+test("#852: the venue looks the change up on the trigger's lookUpBy, where it is given one", async () => {
+  await withFixture((fixture) => {
+    const lookUpBy = deadlineIn(5_000);
+    const seen: unknown[] = [];
+    const venue: Venue = {
+      ...pushedAhead,
+      readChange(worktree, asked, until) {
+        seen.push(until);
+        return pushedAhead.readChange(worktree, asked, until);
+      },
+    };
+
+    trigger(request(fixture, { trigger: "review", key: String(NUMBER), venue, holdUnreported: true, lookUpBy }));
+
+    assert.deepEqual(seen, [lookUpBy]);
+  });
+});
+
 test("#852: a hook's trigger decides on the head GitHub reports, though the worktree pushed a later one", async () => {
   await withFixture(async (fixture) => {
     const result = decided(trigger(request(fixture, { venue: pushedAhead })));

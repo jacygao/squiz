@@ -66,6 +66,8 @@ export type TriggerRequest = {
    * and waits for the venue to catch up. A hook does not, and returns at once.
    */
   readonly holdUnreported?: boolean;
+  /** The earlier deadline the venue's lookup of the change runs on, where it has one. `until` where not given. */
+  readonly lookUpBy?: Deadline;
 };
 
 export type HostStart = { readonly outcome: "not started" } | Detached;
@@ -116,7 +118,7 @@ export function trigger(request: TriggerRequest): Triggered {
     if (chosen.outcome === "failed") return failed(chosen.reason);
     venue = chosen.venue;
   }
-  const lookup = venue.readChange(directory, request.key ?? null, until);
+  const lookup = venue.readChange(directory, request.key ?? null, request.lookUpBy ?? until);
   switch (lookup.outcome) {
     case "found":
       break;

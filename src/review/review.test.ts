@@ -872,6 +872,37 @@ test("#852: a run's deadline that arrives during the pause between lookups ends 
   });
 });
 
+test("#852: a lookup after the first runs on the push's bound, and one that bound cuts off exits 1 naming both heads", async () => {
+  await withWorktree(async (fixture) => {
+    let clock = 1_000_000;
+    const handed: TriggerRequest[] = [];
+    const run: ReviewRequest = {
+      ...request(fixture, { triggered: decided(fixture, { outcome: "result" }) }),
+      now: () => clock,
+      trigger: (asked) => {
+        handed.push(asked);
+        if (handed.length === 1) {
+          clock += 50_000;
+          return { outcome: "unreported", change: { ...CHANGE, unreported: LATER.head } };
+        }
+        clock += 20_000;
+        return { outcome: "failed", reason: "the pull request for \"feature-a\" could not be looked up: gh ran out of the time it was given" };
+      },
+    };
+
+    const printed = await runReview(run);
+
+    assert.equal(handed[0]?.lookUpBy, undefined, "the first lookup was cut short by the push's bound");
+    assert.ok((handed[1]?.lookUpBy?.remaining() ?? Infinity) <= 0, "the second lookup did not run on the push's bound");
+    assert.equal(printed.exit, 1, printed.stdout + printed.stderr);
+    assert.equal(
+      printed.stderr,
+      "squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 70 seconds, though this worktree pushed 8d21a4f to it\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
 test("a superseded state whose wait runs out before the newer state's round ends exits 4, naming both", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [{ ...OWN, status: "not reviewed", reason: "superseded by 8d21a4f", supersededBy: LATER }, reviewing(LATER)]);
