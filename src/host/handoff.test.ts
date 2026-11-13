@@ -122,6 +122,36 @@ test("#802: each agent is given once, with what its latest stop recorded, and on
   );
 });
 
+test("#859: a session's own stop gives its report, and a Copilot subagent's names the parent's events.jsonl its events are in", () => {
+  const copilotParent = "af7a1b25-6bdc-459f-99e1-5c3ab2513f83";
+  const copilotSubagent = "dcc0b994-3d65-4ad3-92f3-ccf70b8232d5";
+  const events = `/Users/someone/.copilot/session-state/${copilotParent}/events.jsonl`;
+  const sessionTranscript = `/Users/someone/.claude/projects/-work-squiz/${PARENT}.jsonl`;
+  const records: readonly StateRecord[] = [
+    reviewed(2, ["PRRT_b"], { sessionId: PARENT, lastMessage: "DONE", transcript: sessionTranscript }, EARLIER_HEAD),
+    reviewed(2, ["PRRT_b"], { sessionId: copilotParent, subagent: copilotSubagent, lastMessage: "PONG", parentTranscript: events }),
+  ];
+  const record = records[1];
+  assert.ok(record !== undefined);
+
+  const text = composed(handoffFor(CHANGE, record, [PLAIN], DIFF, records));
+
+  const reports = text.slice(text.indexOf("## The agents' final reports"), text.indexOf("## The diff"));
+  assert.equal(
+    reports,
+    [
+      "## The agents' final reports",
+      `### Session ${PARENT}`,
+      `Transcript: ${sessionTranscript}`,
+      "DONE",
+      `### Subagent ${copilotSubagent}, dispatched by session ${copilotParent}`,
+      `Transcript: none of its own. Its events are in its parent's transcript, ${events}`,
+      "PONG",
+      "",
+    ].join("\n\n"),
+  );
+});
+
 test("#802: a change with no description, and no agent recorded, says so rather than leaving its section empty", () => {
   const record = reviewed(2, ["PRRT_b"]);
 

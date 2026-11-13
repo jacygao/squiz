@@ -92,14 +92,15 @@ function ownerOf(firing: Extract<Firing, { readonly owner: unknown }>): Owner {
     firing.event === "SubagentStop"
       ? {
           subagent: firing.subagent,
-          ...(firing.lastMessage === undefined ? {} : { lastMessage: firing.lastMessage }),
-          ...(firing.transcript === undefined ? {} : { transcript: firing.transcript }),
+          ...(firing.parentTranscript === undefined ? {} : { parentTranscript: firing.parentTranscript }),
         }
       : {};
   return {
     sessionId: firing.owner.sessionId,
     ...subagent,
     ...(firing.owner.socket === undefined ? {} : { messagingSocket: firing.owner.socket }),
+    ...(firing.lastMessage === undefined ? {} : { lastMessage: firing.lastMessage }),
+    ...(firing.transcript === undefined ? {} : { transcript: firing.transcript }),
   };
 }
 

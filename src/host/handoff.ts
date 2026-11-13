@@ -82,8 +82,13 @@ function reports(records: readonly StateRecord[]): readonly string[] {
       ? `### Session ${owner.sessionId}`
       : `### Subagent ${owner.subagent}, dispatched by session ${owner.sessionId}`,
     ...(owner.transcript === undefined ? [] : [`Transcript: ${owner.transcript}`]),
+    ...(owner.transcript !== undefined || owner.parentTranscript === undefined
+      ? []
+      : [`Transcript: none of its own. Its events are in its parent's transcript, ${owner.parentTranscript}`]),
     ...(owner.lastMessage === undefined ? [] : [owner.lastMessage.trim()]),
-    ...(owner.transcript === undefined && owner.lastMessage === undefined ? ["No final report or transcript was recorded for it."] : []),
+    ...(owner.transcript === undefined && owner.parentTranscript === undefined && owner.lastMessage === undefined
+      ? ["No final report or transcript was recorded for it."]
+      : []),
   ]);
 }
 

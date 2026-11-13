@@ -179,6 +179,21 @@ const everyState: readonly StateRecord[] = [
   },
 ];
 
+test("#859: a Copilot subagent's owner reads back with its parent's transcript", () => {
+  const record: StateRecord = {
+    head,
+    activity: null,
+    status: "queued",
+    owner: {
+      sessionId: "af7a1b25-6bdc-459f-99e1-5c3ab2513f83",
+      subagent: "dcc0b994-3d65-4ad3-92f3-ccf70b8232d5",
+      lastMessage: "PONG",
+      parentTranscript: "/Users/someone/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl",
+    },
+  };
+  assert.deepEqual(recordFrom(JSON.parse(JSON.stringify(record))), { record });
+});
+
 function roundShape(round: FinishedRound | undefined): string {
   if (round === undefined) return "with no round";
   return round.reviewer === undefined ? "with no reviewer" : `by a ${round.reviewer.backend} reviewer`;
@@ -216,6 +231,7 @@ const malformed: readonly [string, unknown][] = [
   ["an owner whose socket is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", messagingSocket: 3 } }],
   ["an owner whose last message is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", lastMessage: { text: "done" } } }],
   ["an owner whose transcript is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", transcript: 3 } }],
+  ["#859: an owner whose parent's transcript is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", subagent: "a1", parentTranscript: 3 } }],
   ["an empty Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: "" }],
   ["a numeric Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: 2 }],
   // The round host puts it on a herdr command line, where this would be read as a flag.
