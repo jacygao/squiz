@@ -88,9 +88,17 @@ function recordStart(directory: string): void {
 }
 
 function ownerOf(firing: Extract<Firing, { readonly owner: unknown }>): Owner {
+  const subagent =
+    firing.event === "SubagentStop"
+      ? {
+          subagent: firing.subagent,
+          ...(firing.lastMessage === undefined ? {} : { lastMessage: firing.lastMessage }),
+          ...(firing.transcript === undefined ? {} : { transcript: firing.transcript }),
+        }
+      : {};
   return {
     sessionId: firing.owner.sessionId,
-    ...(firing.event === "SubagentStop" ? { subagent: firing.subagent } : {}),
+    ...subagent,
     ...(firing.owner.socket === undefined ? {} : { messagingSocket: firing.owner.socket }),
   };
 }

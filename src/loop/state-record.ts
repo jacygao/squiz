@@ -32,6 +32,10 @@ export type Owner = {
   readonly subagent?: string;
   /** Present only where the hook found one. */
   readonly messagingSocket?: string;
+  /** The subagent's final message, present only where its stop's payload carried one. */
+  readonly lastMessage?: string;
+  /** The path of the subagent's transcript, present only where its stop's payload carried one. */
+  readonly transcript?: string;
 };
 
 export type Backend = "herdr" | "tmux" | "detached";
@@ -272,11 +276,20 @@ function ownerFrom(found: unknown): ReadOwner {
   if (socket !== undefined && !isText(socket)) {
     return { problem: `has "owner.messagingSocket" as ${render(socket)}` };
   }
+  const lastMessage = found["lastMessage"];
+  // Not rendered: it is the subagent's own words, of any length.
+  if (lastMessage !== undefined && !isText(lastMessage)) return { problem: `has an "owner.lastMessage" that is not text` };
+  const transcript = found["transcript"];
+  if (transcript !== undefined && !isText(transcript)) {
+    return { problem: `has "owner.transcript" as ${render(transcript)}` };
+  }
   return {
     owner: {
       sessionId,
       ...(subagent === undefined ? {} : { subagent }),
       ...(socket === undefined ? {} : { messagingSocket: socket }),
+      ...(lastMessage === undefined ? {} : { lastMessage }),
+      ...(transcript === undefined ? {} : { transcript }),
     },
   };
 }

@@ -124,8 +124,45 @@ test("on SubagentStop, the owner is the dispatching session, with its socket, an
     directory: DIRECTORY,
     owner: { sessionId: SESSION_ID, socket: SOCKET },
     subagent: AGENT_ID,
+    lastMessage: SECRET,
+    transcript: `/transcripts/${SESSION_ID}/subagents/agent-${AGENT_ID}.jsonl`,
   });
 });
+
+test("a SubagentStop with no last_assistant_message is still read whole, with its transcript", () => {
+  // An older CLI, or another runtime, sends no last message. Nothing else about
+  // the firing depends on it.
+  const text = subagentStopText();
+  const { last_assistant_message: _dropped, ...rest } = JSON.parse(text) as Record<string, unknown>;
+
+  assert.deepEqual(firingIn(readFiring(JSON.stringify(rest), WITH_SOCKET)), {
+    event: "SubagentStop",
+    directory: DIRECTORY,
+    owner: { sessionId: SESSION_ID, socket: SOCKET },
+    subagent: AGENT_ID,
+    transcript: `/transcripts/${SESSION_ID}/subagents/agent-${AGENT_ID}.jsonl`,
+  });
+});
+
+test("a SubagentStop whose last message or transcript is not a non-empty string is read without it, rather than refused", () => {
+  for (const value of [null, 7, "", { text: "done" }]) {
+    const firing = firingIn(readFiring(subagentStopText({ last_assistant_message: value, agent_transcript_path: value }), WITH_SOCKET));
+
+    assert.deepEqual(firing, {
+      event: "SubagentStop",
+      directory: DIRECTORY,
+      owner: { sessionId: SESSION_ID, socket: SOCKET },
+      subagent: AGENT_ID,
+    }, `read with both fields as ${JSON.stringify(value)}`);
+  }
+});
+
+test("a SubagentStop's transcript is kept only as an absolute path", () => {
+  const firing = firingIn(readFiring(subagentStopText({ agent_transcript_path: "subagents/agent.jsonl" }), WITH_SOCKET));
+
+  assert.equal("transcript" in firing, false, `a relative transcript path was kept: ${JSON.stringify(firing)}`);
+});
+
 
 test("an environment with no messaging socket gives an owner with no socket", () => {
   for (const environment of [{}, { CLAUDE_CODE_MESSAGING_SOCKET: undefined }]) {
@@ -279,11 +316,13 @@ test("under Copilot, a Stop for the session's own turn is owned by the session, 
 });
 
 test("under Copilot, a SubagentStop is owned by the parent session, with no socket, and names the subagent", () => {
+  // Copilot's carries a last message and no agent_transcript_path.
   assert.deepEqual(firingIn(readFiring(copilotSubagentStopText(), UNDER_COPILOT)), {
     event: "SubagentStop",
     directory: "/work/repo",
     owner: { sessionId: COPILOT_PARENT },
     subagent: COPILOT_SUBAGENT,
+    lastMessage: SECRET,
   });
 });
 
@@ -363,6 +402,7 @@ test("under Copilot, the owner's socket is the one squiz's extension listens on 
         directory: "/work/repo",
         owner: { sessionId: COPILOT_PARENT, socket: path },
         subagent: COPILOT_SUBAGENT,
+        lastMessage: SECRET,
       });
     } finally {
       await closed(server);
