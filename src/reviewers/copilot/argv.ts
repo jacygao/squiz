@@ -104,7 +104,7 @@ export function argv(invocation: Invocation): CommandLine {
     `--reasoning-effort ${effortOf(invocation.thinking)}`,
     `--usage-output-file ${usage}`,
     // Copilot's stderr is kept in a file as well as said, because a round in a
-    // pane reads nothing of the pane. A Copilot that failed is the status the script exits with.
+    // pane reads nothing of the pane. The script exits with a failed Copilot's status.
     `2> ${err}; status=$?; cat ${err} >&2; [ "$status" -eq 0 ] || exit "$status"; }`,
     // An assignment fails where its substitution does, so a missing usage file
     // appends nothing. The file is indented JSON, and the report file takes one line.
