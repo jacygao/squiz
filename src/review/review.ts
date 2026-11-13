@@ -134,23 +134,29 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       ...(request.presence === undefined ? {} : { presence: request.presence }),
       ...(request.host === undefined ? {} : { host: request.host }),
     });
-  /** A trigger asked again until GitHub reports the worktree's push, which fails where it has not within its bound. */
-  const triggerNow = async (): Promise<Exclude<Triggered, { readonly outcome: "unreported" }>> => {
+  /**
+   * A trigger asked again until GitHub reports the worktree's push. Where it has
+   * not by the bound or the run's deadline, the run is `not reported`, which no
+   * deadline turns into exit 4, because nothing was queued for either head.
+   */
+  const triggerNow = async (): Promise<Exclude<Triggered, { readonly outcome: "unreported" }> | NotReported> => {
     const now = request.now ?? Date.now;
     const started = now();
     const reportedBy = deadlineIn(PUSH_REPORTED_MS, now);
+    const spent = (): boolean => reportedBy.passed() || until.passed();
     for (;;) {
       const triggered = askOnce();
       if (triggered.outcome !== "unreported") return triggered;
-      if (reportedBy.passed() || until.passed()) {
+      // Checked again after the pause, because a lookup on a spent deadline fails before GitHub is asked.
+      if (!spent()) await sleep(Math.max(1, Math.min(pollMs, reportedBy.remaining(), until.remaining())));
+      if (spent()) {
         const { change } = triggered;
         const waited = Math.round((now() - started) / 1_000);
         return {
-          outcome: "failed",
+          outcome: "not reported",
           reason: `${change.name} still has ${change.head.slice(0, 7)} as its head after ${waited} seconds, though this worktree pushed ${change.unreported.slice(0, 7)} to it`,
         };
       }
-      await sleep(Math.max(1, Math.min(pollMs, until.remaining())));
     }
   };
   const first = await triggerNow();
@@ -242,6 +248,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     if (unqueued !== undefined && !until.passed()) {
       const again = await triggerNow();
       if (again.outcome === "held") return print({ outcome: "held", key, line: again.line });
+      if (again.outcome === "not reported") return notRun(again.reason);
       if (again.outcome !== "decided") {
         // A trigger the run's own deadline cut off is the deadline arriving, not a review that could not run.
         return until.passed() ? print(stillReviewing(context, state.records ?? [])) : notRun(again.reason);
@@ -322,6 +329,9 @@ function hostRunning(
   const holder = lockHolder(directory, "host.lock");
   return holder.outcome === "named" && presence(holder.holder, Math.max(1, boundMs)).outcome === "running";
 }
+
+/** GitHub did not report the worktree's push in time. */
+type NotReported = { readonly outcome: "not reported"; readonly reason: string };
 
 type Context = {
   readonly key: string;
