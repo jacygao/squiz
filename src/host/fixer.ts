@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { FixerAgent } from "../config/config.ts";
+import { COPILOT_QUIET_FLAGS } from "../reviewers/copilot/argv.ts";
 import { startDetached, type Detached } from "../sessions/detach.ts";
 
 // The checkout or installed copy this module runs from: the plugin whose hooks start the next round.
@@ -64,7 +65,7 @@ export function fixerCommand(agent: FixerAgent, prompt: string, root: string): {
     case "copilot":
       return {
         command: "copilot",
-        args: ["-p", prompt, "--plugin-dir", root, "--no-ask-user", "--allow-tool=write", "--allow-tool=shell(squiz)", "--allow-tool=shell(git)"],
+        args: ["-p", prompt, "--plugin-dir", root, "--no-ask-user", "--allow-tool=write", "--allow-tool=shell(squiz)", "--allow-tool=shell(git)", ...COPILOT_QUIET_FLAGS],
       };
   }
 }

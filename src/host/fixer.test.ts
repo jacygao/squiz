@@ -31,11 +31,23 @@ test("#803: a Claude Code fixer runs claude -p on the prompt, loading squiz from
   });
 });
 
-test("#803: a Copilot fixer runs copilot -p on the prompt, loading squiz from the plugin directory, asking nothing, with writes and squiz's and git's commands allowed", () => {
+test("#803, #863: a Copilot fixer runs copilot -p on the prompt, loading squiz from the plugin directory, asking nothing, with writes and squiz's and git's commands allowed, and without the built-in MCP servers, auto-update or client telemetry, as the reviewer runs", () => {
   const prompt = fixerPrompt(HANDOFF);
   assert.deepEqual(fixerCommand("copilot", prompt, ROOT), {
     command: "copilot",
-    args: ["-p", prompt, "--plugin-dir", ROOT, "--no-ask-user", "--allow-tool=write", "--allow-tool=shell(squiz)", "--allow-tool=shell(git)"],
+    args: [
+      "-p",
+      prompt,
+      "--plugin-dir",
+      ROOT,
+      "--no-ask-user",
+      "--allow-tool=write",
+      "--allow-tool=shell(squiz)",
+      "--allow-tool=shell(git)",
+      "--disable-builtin-mcps",
+      "--no-auto-update",
+      "--disable-client-telemetry",
+    ],
   });
 });
 

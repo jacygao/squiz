@@ -720,8 +720,14 @@ MCP configuration of the run before it:
 
 ```
 claude -p <prompt> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
-copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)'
+copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' --disable-builtin-mcps --no-auto-update --disable-client-telemetry
 ```
+
+A Copilot fixer carries the three flags the Copilot reviewer does (The Copilot
+adapter), which turn off the built-in GitHub MCP server, auto-update and client
+telemetry. Without them, on Copilot 1.0.110, a fixer also reached
+`cafe.github.com` and `telemetry.enterprise.githubcopilot.com`. The hosts a
+fixer reaches with them have not been measured.
 
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
 names the session whose hook started the host. The prompt names the handoff:
