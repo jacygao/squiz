@@ -87,8 +87,11 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
   `agent-<agentId>.meta.json`. They are deleted after `cleanupPeriodDays`, 30
   by default, and found on the same machine only.
 - **A resumed session can continue a subagent with `SendMessage` to its agent
-  id, and the subagent keeps its whole history** (unverified under `-p`).
-  Explore and Plan agents return no id and cannot be continued.
+  id, and the subagent keeps its whole history**, under `-p` too. One that ran
+  in a worktree resumes in the parent's directory instead:
+  `a-resumed-claude-session-keeps-its-subagents-and-a-resumed-copilot-session-loses-them.md`
+  has the measurement. Explore and Plan agents return no id and cannot be
+  continued.
 - A parent only ever holds its subagents' final reports. `SubagentStop`'s
   payload carries `last_assistant_message` and `agent_transcript_path`.
 - An async hook still running when a `-p` run ends is killed, so
@@ -100,13 +103,14 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
 
 - `copilot --resume=<id> -p` against an idle interactive session ran the turn in
   a second process. The session's pane never showed it, and both processes
-  wrote the same `events.jsonl`. Whether `--resume` continues a session that has
-  exited, under `-p`, is unverified.
+  wrote the same `events.jsonl`. `copilot -p --resume` continues a session
+  that has exited, with its transcript.
 - A session's directory under `~/.copilot/session-state/` holds `events.jsonl`
   and, while a process has it, `inuse.<pid>.lock`. Stale locks are a reported
   fault, so a lock means a live session only if its pid is running Copilot.
 - Subagents are not in files of their own. They are events inside the parent's
-  `events.jsonl`, and whether one can be continued after a resume is unknown.
+  `events.jsonl`, and none can be continued after a resume: `write_agent`
+  answers `No agent found`.
 
 ### Cost of a resume
 
@@ -123,9 +127,10 @@ Squiz's round cap is that bound, and a headless fixer stays under it.
 
 ## Limits
 
-- **Nothing here was run.** The Claude Code and Copilot facts come from their
-  documentation and help text, except the two observations from earlier probes:
-  the `-p` socket removed on exit, and the second Copilot process.
+- **Little here was run.** The Claude Code and Copilot facts come from their
+  documentation and help text, except the observations from earlier probes:
+  the `-p` socket removed on exit, the second Copilot process, and what a
+  resume of an exited `-p` run restores.
 - **No head-to-head comparison of a resumed fixer and a fresh one was found**,
   in products or in papers. The decision to start fresh rests on what others
   do and on the cost, not on measured fix quality.
