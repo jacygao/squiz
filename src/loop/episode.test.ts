@@ -77,6 +77,7 @@ function oneKeyVenue(tree: string, head: string, asked: { key: string; worktree:
   const refuse = (): { outcome: "failed"; reason: string } => ({ outcome: "failed", reason: "not asked of this venue" });
   return {
     recordStart: refuse,
+    recordPrompt: refuse,
     readChange: () => ({ outcome: "found", change }),
     episodeDirectory: (where, key) => {
       asked.push({ key, worktree: where });

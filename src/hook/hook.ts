@@ -1,15 +1,19 @@
 /**
- * The `Stop`, `SubagentStop`, `SessionStart` and `SubagentStart` entry point.
+ * The `Stop`, `SubagentStop`, `SessionStart`, `SubagentStart` and
+ * `UserPromptSubmit` entry point.
  *
  * A stop queues the change's state for the round host and returns. It never
  * runs a round and never waits on one. A start hands the worktree to the
- * venue's `recordStart` and does nothing else. Every firing exits 0, on every
+ * venue's `recordStart`, and a prompt hands its text to the venue's
+ * `recordPrompt`, and neither does anything else. A prompt squiz gave a
+ * session it started is not handed on. Every firing exits 0, on every
  * path: a non-zero exit is the one thing that stops the coding agent finishing
  * its turn. What it could not do, and a branch with no pull request, it says in
  * one line on stderr. Exiting 0 in silence over a failure would read as a state
  * queued, or a base recorded.
  */
 
+import { FIXER_VARIABLE } from "../host/fixer.ts";
 import { trigger, type TriggerRequest, type Triggered } from "../host/trigger.ts";
 import type { Owner } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -46,6 +50,8 @@ export async function runHook(call: HookCall): Promise<HookExit> {
     if (read.outcome === "no subagent's work") return 0;
     // The subagent's own SubagentStop follows, and queues its work.
     if (read.outcome === "a subagent's turn") return 0;
+    // A subagent's brief is not what the run was asked to do.
+    if (read.outcome === "a subagent's prompt") return 0;
     if (read.outcome === "unreadable") {
       reportFailure(`nothing was queued: ${read.reason}`);
       return 0;
@@ -53,6 +59,11 @@ export async function runHook(call: HookCall): Promise<HookExit> {
     const { firing } = read;
     if (firing.event === "SessionStart" || firing.event === "SubagentStart") {
       recordStart(firing.directory);
+      return 0;
+    }
+    if (firing.event === "UserPromptSubmit") {
+      const squizStarted = environment[FIXER_VARIABLE];
+      if (squizStarted === undefined || squizStarted === "") recordPrompt(firing.directory, firing.prompt);
       return 0;
     }
 
@@ -85,6 +96,29 @@ function recordStart(directory: string): void {
   }
   const recorded = chosen.venue.recordStart(directory, until);
   if (recorded.outcome === "failed") reportFailure(`no base was recorded: ${recorded.reason}`);
+}
+
+/**
+ * Hand `prompt`, given to a session in `directory`, to the venue its
+ * `.squiz.json` names. The line it writes on a failure never carries the
+ * prompt.
+ */
+function recordPrompt(directory: string, prompt: string): void {
+  try {
+    const until = deadlineIn(QUEUE_BUDGET_MS);
+    // A prompt fires for every session opened anywhere, as a start does.
+    const toplevel = worktreeToplevel(directory, until);
+    if (toplevel.outcome === "failed" && NOT_A_REPOSITORY.test(toplevel.reason)) return;
+    const chosen = venueAt(directory, until);
+    if (chosen.outcome === "failed") {
+      reportFailure(`no prompt was recorded: ${chosen.reason}`);
+      return;
+    }
+    const recorded = chosen.venue.recordPrompt(directory, prompt, until);
+    if (recorded.outcome === "failed") reportFailure(`no prompt was recorded: ${recorded.reason}`);
+  } catch (cause) {
+    reportFailure(`no prompt was recorded: the hook failed: ${reasonFor(cause)}`);
+  }
 }
 
 function ownerOf(firing: Extract<Firing, { readonly owner: unknown }>): Owner {

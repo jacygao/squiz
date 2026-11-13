@@ -499,8 +499,8 @@ and not before.
 
 ### The hooks
 
-**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`, and
-on its `SessionStart` and `SubagentStart`.** `Stop` fires when a regular
+**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`, on
+its `SessionStart` and `SubagentStart`, and on its `UserPromptSubmit`.** `Stop` fires when a regular
 session's turn ends, and `SubagentStop` when a subagent's does. Each stop
 firing resolves the pull request whose head is the branch checked out in the
 payload's `cwd`, records the session that owns the work, queues the state as The
@@ -528,6 +528,9 @@ worktree.
 ],
 "SubagentStart": [
   { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
+],
+"UserPromptSubmit": [
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
 ]
 ```
 
@@ -540,6 +543,39 @@ subagent does any work. A start hook takes its worktree from the payload's `cwd`
 as the stop hooks do. A start whose `cwd` is in no git repository records nothing
 and writes nothing on stderr, because both runtimes fire it for every session,
 wherever it is opened.
+
+**`UserPromptSubmit` hands the payload's `prompt` and its worktree to the
+venue's `recordPrompt` (§ 4 The contract), and does nothing else.** It takes
+the worktree from the payload's `cwd`, as the other hooks do, and prints nothing
+on stdout, where Claude Code would add it to the session's context. Under the
+GitHub venue it changes nothing. Both runtimes fire it from the plugin before the
+session works on the prompt. Claude Code 2.1.321 fires it under that name alone.
+Copilot 1.0.110 fires it from the plugin's `hooks.json` as well as its own
+`userPromptSubmitted`, which squiz does not register. Each sends the prompt in
+`prompt` and the directory in `cwd`:
+
+```json
+{"hook_event_name":"UserPromptSubmit","session_id":"51445ba2-2e4c-4c6b-943f-5ee4107e1dd9","timestamp":"2026-11-13T13:14:57.072Z","cwd":"/work/suss-task","prompt":"Add backoff. The first retry is immediate."}
+```
+
+Three prompts are not handed on:
+
+- **A subagent's brief.** Copilot fires `UserPromptSubmit` for the prompt a
+  session gives its subagent, with the subagent's `agent_id`, in the parent's
+  `cwd`. A payload carrying a non-empty `agent_id` records nothing and says
+  nothing. Claude Code 2.1.321 fires none for a subagent.
+- **A prompt squiz gave.** The fixer's environment carries `SQUIZ_FIXER`
+  (Headless runs below), and both runtimes hand a session's environment on to
+  its hooks. A firing whose environment has it with any value but the empty
+  string records nothing and says nothing. The reviewer loads no squiz plugin,
+  so no squiz hook fires in its session.
+- **A prompt in no git repository.** It records nothing and says nothing, as a
+  start does.
+
+A payload with no `prompt`, or with an empty one, queues and records nothing,
+and the hook says so on stderr. A `recordPrompt` that fails says
+`no prompt was recorded:` and the reason, on stderr. Neither line carries the
+prompt.
 
 **The plugin root is quoted in the command, so a root with a space in its path
 stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under
@@ -748,7 +784,9 @@ telemetry. Without them, on Copilot 1.0.110, a fixer also reached
 fixer reaches with them have not been measured.
 
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
-names the session whose hook started the host. The prompt names the handoff:
+names the session whose hook started the host, and with `SQUIZ_FIXER=1`, which
+keeps the fixer's prompt from being recorded as the run's (The hooks). The
+prompt names the handoff:
 
 ```
 Squiz reviewed this change and left threads open. /work/squiz-a/.squiz/local/rounds/1/handoff.md holds them, each with every reply on it, with the change's description, the agents' final reports and the diff the reviewer read.
@@ -877,6 +915,21 @@ queues nothing, and leaves it. A stopped episode is still live, so
 A caller bounds its wait, and reads `host.log` and `squiz status` to tell which
 it was.
 
+**A headless run's handoff gives the run's prompt where nobody wrote a
+description.** Under the local venue the description is `description.md`, else
+the first prompt the worktree's sessions were given (§ 4 The record). Where it
+is the prompt, a line under `## The description` says so before it:
+
+```
+## The description
+
+Nobody wrote a description of this change, so this is the prompt the run was started with:
+
+Add backoff. Requirement: the first retry is immediate.
+```
+
+Where there is neither, the section reads `The change has no description.`
+
 **A headless run's handoff holds the reports its stops carried** (The hooks).
 A run with no subagent hands the fixer its session's transcript path, and under
 Claude Code its final message too. Copilot's `Stop` carries no final message,
@@ -987,6 +1040,11 @@ type Change = {
   readonly base: string;
   readonly head: string;
   readonly description: string;
+  /**
+   * `prompt` where nobody wrote a description, and the description is the
+   * prompt the run was started with. Absent where someone wrote it.
+   */
+  readonly descriptionFrom?: "prompt";
 };
 
 type Failed = { readonly outcome: "failed"; readonly reason: string };
@@ -1005,6 +1063,12 @@ interface Venue {
    * done any work. A venue that needs nothing from the start returns "done".
    */
   recordStart(worktree: string, until: Deadline): { readonly outcome: "done" } | Failed;
+  /**
+   * Called with each prompt a session in `worktree` is given, other than one
+   * squiz gave it. A venue whose change carries a description of its own
+   * returns "done".
+   */
+  recordPrompt(worktree: string, prompt: string, until: Deadline): { readonly outcome: "done" } | Failed;
   /**
    * The change to review in `worktree`. `asked` is the key a command was given,
    * such as the 41 of `squiz review 41` or `squiz host 41`, or null for a hook,
@@ -1097,6 +1161,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | `key`, `name`, `rerun`, `summaryAt` | The pull request's number, `PR #41`, `squiz review 41`, `on the pull request` |
 | `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
 | `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
+| `recordPrompt` | Does nothing, and returns `done`. The pull request carries its own description, and the run's prompt never stands in for it. |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
 | `episodeDirectory` | `.squiz/<key>/` in the worktree, which keeps itself out of git (§ 3 The state file), for a key that is a pull request's number. Any other key is a failure. It runs no `gh`. |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
@@ -1115,7 +1180,7 @@ writes becomes part of the change.
 |---|---|
 | The pull request | The working tree's change against its base, under The base below |
 | Its head commit | The commit built from the working tree, under The change below |
-| Its description | `.squiz/local/description.md`, else none |
+| Its description | `.squiz/local/description.md`, else the run's prompt in `.squiz/local/prompt.md`, else none (The record below) |
 | The pull request's number, wherever it names the episode | `local`, which is `Change.key`: the directory `.squiz/local/`, the snapshot's `<digest>-local`, and the pane `squiz-local-r2`. `episodeDirectory` fails for any other key. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md`. `Change.summaryAt` is `in` and its path, such as `in /work/squiz-a/.squiz/local/summary.md`. |
@@ -1240,7 +1305,8 @@ puts in an episode's directory, beside the venue's own files:
   state.json  state.lock  host.lock  host.log  notes/  rounds/  review.txt   as under § 3
   threads.json   threads.lock
   summary.md     failure-1.md …
-  description.md
+  description.md                                                   written by whoever starts the run
+  prompt.md                                                        the run's prompt
   episodes/1/  state.json  rounds/  summary.md                     a closed episode, as under § 3
 ```
 
@@ -1248,12 +1314,25 @@ An interactive session stays in one worktree, so each piece of work after a
 clean close is a new head there, and a new episode. `summary.md` is the live
 episode's, and moves with its episode into `episodes/<n>/` when the next one
 starts. Everything else belongs to the worktree and stays: `base.json` and
-`objects/`, which every head is built from, `threads.json`, whose threads and
-ids carry on counting across episodes, and the failure files, numbered on from
-the highest there.
+`objects/`, which every head is built from, `prompt.md`, `threads.json`, whose
+threads and ids carry on counting across episodes, and the failure files,
+numbered on from the highest there.
 
-`description.md` is written by whoever starts the run. Squiz reads it and never
-writes it.
+**The change's description is `description.md` where it exists, even empty, and
+`prompt.md` otherwise.** Squiz reads `description.md` and never writes it.
+`readChange` reads both on every trigger, so a `description.md` written after
+the prompt was recorded still wins. A change described by `prompt.md` has
+`descriptionFrom` set to `prompt`, and the handoff says so (§ 3 Headless runs).
+The reviewer is handed either one as the change's description.
+
+**`prompt.md` is the first prompt any session in the worktree was given.**
+`recordPrompt` writes it where it is missing, and leaves one that exists as it
+is, as `recordStart` does `base.json`. A later prompt in the same session, a
+second session, a resume and the fixer each leave the first one in place, so in
+an interactive worktree it stays the prompt the worktree's first session
+started with, through every episode after. It holds the prompt as the payload
+carried it, with nothing added. It appears whole: it is written beside its path
+and linked into place.
 
 **`threads.json` holds every thread, each with its comments and where it stands.**
 It is written whole under `threads.lock`, which follows `state.lock`'s rules: a
@@ -1302,6 +1381,11 @@ Claude Code fires `SubagentStart` in the subagent's own worktree when it was
 dispatched with isolation, before the subagent has done any work. A Copilot
 subagent works in its parent's directory, so the record its session's start
 wrote is the one it keeps.
+
+**`UserPromptSubmit` records the run's prompt, under The record above.** A
+Claude Code subagent dispatched into a worktree of its own fires none there, so
+that worktree's change has no description unless its dispatcher writes
+`description.md`.
 
 **`Stop` and `SubagentStop` queue a state and record its owner as § 3 The hooks
 sets out, after building the worktree's head.** A subagent dispatched into a
@@ -2660,7 +2744,7 @@ through the link `squiz init` makes in a directory already on its `PATH`.
 | `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
 | `squiz doctor` | A person | Prints a line per dependency, saying it is present or naming what is missing or unauthenticated, and exits 1 where a required one is not usable (The setup check). |
 | `squiz version` | A person | Prints the version and the `bin/squiz` path of the squiz that answers, as `squiz 0.1.0 /Users/ana/squiz/bin/squiz`. `squiz --version` is the same command. |
-| `squiz hook` | Claude Code, Copilot | The entry point for `Stop`, `SubagentStop`, `SessionStart` and `SubagentStart`, named in `hooks.json`. A stop queues the review of the change in the payload's `cwd` and returns. A start hands that `cwd` to the venue's `recordStart`. § 3 The hooks sets out both. |
+| `squiz hook` | Claude Code, Copilot | The entry point for `Stop`, `SubagentStop`, `SessionStart`, `SubagentStart` and `UserPromptSubmit`, named in `hooks.json`. A stop queues the review of the change in the payload's `cwd` and returns. A start hands that `cwd` to the venue's `recordStart`, and a prompt hands it and the prompt to the venue's `recordPrompt`. § 3 The hooks sets out all three. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
@@ -3590,7 +3674,7 @@ distributed.
 ```
 .claude-plugin/plugin.json   manifest: name, version, description, and the Copilot extensions directory
 .claude-plugin/marketplace.json  the marketplace named squiz, listing this repository's root as the one plugin
-hooks/hooks.json             the Stop, SubagentStop, SessionStart and SubagentStart registrations, which Claude Code and Copilot both run
+hooks/hooks.json             the Stop, SubagentStop, SessionStart, SubagentStart and UserPromptSubmit registrations, which Claude Code and Copilot both run
 extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
 bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
 charter.md                   the standing review instructions, shipped as one file
@@ -3598,7 +3682,7 @@ src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
   review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
-  hook/                      squiz hook: a stop resolves the change and queues its review, and a start hands the worktree to the venue
+  hook/                      squiz hook: a stop resolves the change and queues its review, and a start or a prompt hands the worktree to the venue
   host/                      the round host, which takes queued states, runs their rounds, and starts a headless run's fixer
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, the user's Copilot settings, and the flags every Copilot run carries; no review knowledge
   loop/                      episode state, round cap, verdict decisions

@@ -58,9 +58,9 @@ test("#803: the fixer's prompt names the handoff, and tells it not to run squiz 
   assert.match(prompt, /Do not run `squiz review`/u);
 });
 
-test("#803: the fixer's environment drops the dispatching session's messaging socket, and keeps the rest", () => {
+test("#803: the fixer's environment drops the dispatching session's messaging socket, keeps the rest, and marks the fixer as squiz's (#870)", () => {
   const environment = fixerEnvironment({ PATH: "/usr/bin", CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/s.sock", CLAUDE_CONFIG_DIR: "/c", COPILOT_CLI: "1" });
-  assert.deepEqual(environment, { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/c", COPILOT_CLI: "1" });
+  assert.deepEqual(environment, { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/c", COPILOT_CLI: "1", SQUIZ_FIXER: "1" });
 });
 
 test("#803: a fixer started where its CLI is not on PATH fails, saying so, rather than reading as started", () => {

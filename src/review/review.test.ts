@@ -189,6 +189,7 @@ function venueListing(listThreads: Venue["listThreads"]): Venue {
   };
   return {
     recordStart: unreached,
+    recordPrompt: unreached,
     readChange: unreached,
     episodeDirectory: githubVenue.episodeDirectory,
     provideCommits: unreached,
