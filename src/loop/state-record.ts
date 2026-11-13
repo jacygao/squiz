@@ -33,10 +33,12 @@ export type Owner = {
   readonly subagent?: string;
   /** Present only where the hook found one. */
   readonly messagingSocket?: string;
-  /** The subagent's final message, present only where its stop's payload carried one. */
+  /** The final message of the agent that stopped, present only where its stop's payload carried one. */
   readonly lastMessage?: string;
-  /** The path of the subagent's transcript, present only where its stop's payload carried one. */
+  /** The path of that agent's own transcript, present only where its stop's payload carried one. */
   readonly transcript?: string;
+  /** The parent's transcript, which holds a subagent's events where the subagent has no transcript of its own. */
+  readonly parentTranscript?: string;
 };
 
 export type Backend = "herdr" | "tmux" | "detached";
@@ -294,11 +296,15 @@ function ownerFrom(found: unknown): ReadOwner {
     return { problem: `has "owner.messagingSocket" as ${render(socket)}` };
   }
   const lastMessage = found["lastMessage"];
-  // Not rendered: it is the subagent's own words, of any length.
+  // Not rendered: it is the agent's own words, of any length.
   if (lastMessage !== undefined && !isText(lastMessage)) return { problem: `has an "owner.lastMessage" that is not text` };
   const transcript = found["transcript"];
   if (transcript !== undefined && !isText(transcript)) {
     return { problem: `has "owner.transcript" as ${render(transcript)}` };
+  }
+  const parentTranscript = found["parentTranscript"];
+  if (parentTranscript !== undefined && !isText(parentTranscript)) {
+    return { problem: `has "owner.parentTranscript" as ${render(parentTranscript)}` };
   }
   return {
     owner: {
@@ -307,6 +313,7 @@ function ownerFrom(found: unknown): ReadOwner {
       ...(socket === undefined ? {} : { messagingSocket: socket }),
       ...(lastMessage === undefined ? {} : { lastMessage }),
       ...(transcript === undefined ? {} : { transcript }),
+      ...(parentTranscript === undefined ? {} : { parentTranscript }),
     },
   };
 }

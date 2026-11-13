@@ -111,7 +111,7 @@ the rest of this section describes, and:
   reads is in the temporary directory instead (§ 5 The snapshot). A round that
   leaves threads open with a round remaining also writes `handoff.md` there:
   each open thread with every reply on it, the description, each agent's final
-  message and transcript path as its `SubagentStop` recorded them, and the
+  message and transcript path as its stop recorded them (The hooks), and the
   diff the reviewer read. Where the threads cannot be listed, the round writes
   none, and `host.log` says why. In a headless run, `fixer.log` beside it holds
   the output of the fixer started on it (Headless runs below).
@@ -568,6 +568,23 @@ the empty string.
 - **A `CLAUDE_CODE_MESSAGING_SOCKET` in the hook's environment is never
   recorded.** Copilot puts no socket there.
 
+**A stop also records the agent's report its payload carries, for the
+handoff.** A field that is missing, or is not a non-empty string, is left out,
+and the rest of the owner is recorded as it would be without it. A transcript
+path is recorded only where it is absolute.
+
+| Event | Final message | Transcript |
+|---|---|---|
+| `Stop` | `last_assistant_message` | `transcript_path`, the session's own |
+| `SubagentStop` | `last_assistant_message` | `agent_transcript_path`, the subagent's own |
+
+Claude Code 2.1.321 sends every field in the table. Copilot 1.0.110 sends no
+`last_assistant_message` on `Stop`, and no `agent_transcript_path` on
+`SubagentStop`, because it writes a subagent's events into its parent's
+`events.jsonl`. For a `SubagentStop` with no `agent_transcript_path`, the hook
+records the payload's `transcript_path` as the parent's transcript, where that
+path is a Copilot transcript of the payload's `session_id`.
+
 Both hooks return as soon as they have queued, under Claude Code and Copilot
 alike. The result reaches the owner later, through the wake The report sets out,
 or in a headless run through a fixer (Headless runs).
@@ -787,9 +804,24 @@ that failed, a fixer that did not start, and a fixer whose run left no new
 state, so that its stop queued nothing. A caller bounds its wait, and reads
 `host.log` and `squiz status` to tell which it was.
 
-**A headless run's handoff holds only the reports its stops carried.** A `Stop`
-records no final message or transcript, and Copilot's `SubagentStop` carries no
-transcript path, so a run with no subagent hands the fixer no agent's report.
+**A headless run's handoff holds the reports its stops carried** (The hooks).
+A run with no subagent hands the fixer its session's transcript path, and under
+Claude Code its final message too. Copilot's `Stop` carries no final message,
+so under Copilot the fixer reads the session's report from its `events.jsonl`.
+A Copilot subagent's report names its parent's `events.jsonl`:
+
+```
+### Subagent dcc0b994-3d65-4ad3-92f3-ccf70b8232d5, dispatched by session af7a1b25-6bdc-459f-99e1-5c3ab2513f83
+
+Transcript: none of its own. Its events are in its parent's transcript, /Users/someone/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl
+
+PONG
+```
+
+**Where a subagent and its parent end on one state, the handoff shows the
+subagent's report.** The subagent's `SubagentStop` fires before the parent's
+`Stop`, and the first stop to queue a state is its owner. The parent's `Stop`
+finds the state queued and records nothing.
 
 ### Parallel coding agents
 

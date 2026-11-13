@@ -33,7 +33,7 @@
  * with no transcript behind them. One with no `agent_type` at all is read as a
  * subagent's, since the field's absence marks no firing apart.
  *
- * Nothing here throws, and no reason carries the payload's text: a subagent's
+ * Nothing here throws, and no reason carries the payload's text: an agent's
  * last message is in there.
  */
 
@@ -50,7 +50,15 @@ export type Owner = {
 export type Firing =
   | { readonly event: "SessionStart"; readonly directory: string }
   | { readonly event: "SubagentStart"; readonly directory: string }
-  | { readonly event: "Stop"; readonly directory: string; readonly owner: Owner }
+  | {
+      readonly event: "Stop";
+      readonly directory: string;
+      readonly owner: Owner;
+      /** The session's final message. Absent where the payload carries none, as Copilot's never does. */
+      readonly lastMessage?: string;
+      /** The absolute path of the session's transcript. Absent where the payload carries none. */
+      readonly transcript?: string;
+    }
   | {
       readonly event: "SubagentStop";
       readonly directory: string;
@@ -60,6 +68,11 @@ export type Firing =
       readonly lastMessage?: string;
       /** The absolute path of the subagent's own transcript. Absent where the payload carries none. */
       readonly transcript?: string;
+      /**
+       * The parent's Copilot transcript, which holds the subagent's events, where
+       * the payload names no transcript of the subagent's own. Absent otherwise.
+       */
+      readonly parentTranscript?: string;
     };
 
 export type FiringRead =
@@ -118,27 +131,38 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
 
   const directory = absoluteCwd(payload);
   if (directory === undefined) return unreadable(NO_CWD);
-  if (event === "Stop") return { outcome: "read", firing: { event, directory, owner } };
+  // None of the report's fields is needed to queue the work, so a payload
+  // without one, or with one in a shape this does not know, is read without it.
+  const lastMessage = lastMessageIn(payload["last_assistant_message"]);
+  if (event === "Stop") {
+    const transcript = transcriptIn(payload["transcript_path"]);
+    return { outcome: "read", firing: { event, directory, owner, ...lastMessage, ...transcript } };
+  }
 
   const agentId = payload["agent_id"];
   if (typeof agentId !== "string" || agentId === "") {
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
-  // Neither is needed to queue the work, so a payload without them, or with
-  // either in a shape this does not know, is read without it.
-  const lastMessage = payload["last_assistant_message"];
-  const transcript = payload["agent_transcript_path"];
+  const transcript = transcriptIn(payload["agent_transcript_path"]);
+  // Copilot keeps a subagent's events in its parent's transcript, and names no
+  // transcript of the subagent's own.
+  const parent = transcriptIn(payload["transcript_path"]).transcript;
+  const parentTranscript =
+    transcript.transcript === undefined && parent !== undefined && transcriptSession(parent) === sessionId
+      ? { parentTranscript: parent }
+      : {};
   return {
     outcome: "read",
-    firing: {
-      event,
-      directory,
-      owner,
-      subagent: agentId,
-      ...(typeof lastMessage === "string" && lastMessage !== "" ? { lastMessage } : {}),
-      ...(typeof transcript === "string" && isAbsolute(transcript) ? { transcript } : {}),
-    },
+    firing: { event, directory, owner, subagent: agentId, ...lastMessage, ...transcript, ...parentTranscript },
   };
+}
+
+function lastMessageIn(value: unknown): { readonly lastMessage?: string } {
+  return typeof value === "string" && value !== "" ? { lastMessage: value } : {};
+}
+
+function transcriptIn(value: unknown): { readonly transcript?: string } {
+  return typeof value === "string" && isAbsolute(value) ? { transcript: value } : {};
 }
 
 /**
