@@ -2557,7 +2557,7 @@ test("#876: a resumed fixer still running at the host's bound on its wait ends i
     findings: [[finding("The name says nothing.")]],
     config: { fixer: "claude", timeout: 60, rounds: 2 },
     // The session REPORTING's stop came from.
-    fixerSession: { agent: "claude", id: PARENT.sessionId, round: 1, shown: [] },
+    fixerSession: { agent: "claude", id: PARENT.sessionId, round: 1, shown: [], open: [] },
     ...fixer,
     host: { ...fixer.host, clock: jumpingClock(60_000) },
     after: () => {
@@ -2576,6 +2576,32 @@ test("#876: a resumed fixer still running at the host's bound on its wait ends i
     stopped: "fixer outlived its bound",
     reason: `the fixer round 1 started, process ${record.fixer.process.pid}, was not seen to exit within 120 seconds, the reviewer's time bound for each of the 2 rounds the cap allows`,
   }, ran.log);
+});
+
+test("#876: a failed resume whose fresh start the state file refuses ends the host, rather than retrying it for good", { timeout: 60_000 }, async () => {
+  // A CLI that cannot find the session exits 1 at once.
+  const fixer = standInFixer("claude", (runs) => `echo ran >> '${runs}'; exit 1`);
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    fixerSession: { agent: "claude", id: PARENT.sessionId, round: 1, shown: [], open: [] },
+    ...fixer,
+    host: {
+      ...fixer.host,
+      // Refuses to reserve a start over a resume, which only the fallback does.
+      update: (episode, change, options) => {
+        const read = readState(episode);
+        const before = read.outcome === "read" ? read.state : { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 } };
+        const resumed = (before.records ?? []).some((record) => record.status === "reviewed" && record.result === "exited" && (record.fixer?.outcome === "started" || record.fixer?.outcome === "exited") && record.fixer.session?.resumed === true);
+        const reserving = (change(before).records ?? []).some((record) => record.status === "reviewed" && record.result === "exited" && record.fixer?.outcome === "unknown");
+        return resumed && reserving ? { outcome: "failed", reason: "the disk said no" } : updateState(episode, change, options);
+      },
+    },
+  });
+
+  assert.deepEqual(ran.end, { outcome: "state unwritable", reason: "the disk said no" }, ran.log);
+  assert.match(ran.log, /round 1: the resume of the fixer's session .* failed: it exited 1/u);
 });
 
 /** Kill the process group `pid` leads, where it is still running: a resumed fixer's shell and its CLI. */

@@ -82,7 +82,7 @@ test("#876: the fixer's session comes back as written: its CLI, its id, the roun
   const state: EpisodeState = {
     rounds: [firstRound],
     spentOutsideRounds: unspent,
-    fixerSession: { agent: "copilot", id: "561adfe1-9888-48be-a97c-f4b6d9e081b3", round: 1, shown: ["C1", "C2"] },
+    fixerSession: { agent: "copilot", id: "561adfe1-9888-48be-a97c-f4b6d9e081b3", round: 1, shown: ["C1", "C2"], open: ["T1"] },
   };
 
   assert.deepEqual(writeState(episode, state), { outcome: "written" });
@@ -320,11 +320,12 @@ const unreadableContents: readonly string[] = [
   // #876: a fixer session read wrongly is a session resumed under the wrong CLI,
   // or one no later round resumes.
   `{"rounds": [], "fixerSession": "561adfe1", ${NONE_OUTSIDE}}`,
-  `{"rounds": [], "fixerSession": {"agent": "pi", "id": "561adfe1", "round": 1, "shown": []}, ${NONE_OUTSIDE}}`,
-  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "", "round": 1, "shown": []}, ${NONE_OUTSIDE}}`,
-  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 0, "shown": []}, ${NONE_OUTSIDE}}`,
-  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1}, ${NONE_OUTSIDE}}`,
-  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": [3]}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "pi", "id": "561adfe1", "round": 1, "shown": [], "open": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "", "round": 1, "shown": [], "open": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 0, "shown": [], "open": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "open": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": [3], "open": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": []}, ${NONE_OUTSIDE}}`,
   // Two records for one state leave no telling which of them is true.
   `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}], ${NONE_OUTSIDE}}`,
 ];

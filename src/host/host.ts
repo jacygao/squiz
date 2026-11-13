@@ -75,7 +75,7 @@ import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { newSessionId, startFixer } from "./fixer.ts";
-import { handoffFor, handsBack, updateFor } from "./handoff.ts";
+import { handoffFor, handsBack, updateFor, type Known } from "./handoff.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote, threadsToPrint } from "./owner-note.ts";
 import { NO_HANDOFF, STOP_FILE, stopOf, writeWhole, type Stop } from "./stopped.ts";
@@ -488,7 +488,7 @@ function handOff(
         continue;
       }
       writeFileSync(path, handoff.text, "utf8");
-      written.set(record, { path, shown: handoff.shown });
+      written.set(record, { path, known: handoff.known });
       log(`${round}: wrote the handoff to ${path}`);
     } catch (cause) {
       log(`${round}: wrote no handoff to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -535,15 +535,15 @@ function startFixers(
   }
 }
 
-/** The path of a round's `handoff.md`, and the comments it gives. */
-type Handed = { readonly path: string; readonly shown: readonly string[] };
+/** The path of a round's `handoff.md`, and what a fixer handed it knows. */
+type Handed = { readonly path: string; readonly known: Known };
 
 type FixerSetup = { readonly agent: FixerAgent; readonly commands: readonly string[]; readonly environment: NodeJS.ProcessEnv };
 
 type Write = (change: (state: EpisodeState) => EpisodeState) => StateUpdate;
 
-/** A session to resume, the update it is handed, and the comments it will then have been shown. */
-type Resume = { readonly session: FixerSession; readonly update: string; readonly shown: readonly string[] };
+/** A session to resume, the update it is handed, and what it will then know. */
+type Resume = { readonly session: FixerSession; readonly update: string; readonly known: Known };
 
 // Where a resumed fixer's exit status goes, in its round's directory.
 const RESUME_EXIT = "fixer.exit";
@@ -566,7 +566,8 @@ function putFixer(write: Write, record: StateRecord, fixer: FixerStart, session?
  * given and starting a new one otherwise, and record how the start went.
  *
  * A fixer that started becomes the episode's fixer session. One that did not
- * leaves the session as it was.
+ * leaves the session as it was. Returns why, where its start could not be
+ * reserved and nothing was started.
  */
 function startFixerOn(
   episode: Episode,
@@ -576,14 +577,14 @@ function startFixerOn(
   resume: Resume | undefined,
   { agent, commands, environment }: FixerSetup,
   write: Write,
-): void {
+): string | undefined {
   const logPath = join(directory, "fixer.log");
   // Reserved before the start, so a start the state file then refuses still
   // holds back every later fixer, as one that cannot be told gone does.
   const reserved = putFixer(write, record, { outcome: "unknown", agent, reason: "its start was never recorded" });
   if (reserved.outcome === "failed") {
     log(`${label}: no fixer started: its start could not be reserved: ${reserved.reason}`);
-    return;
+    return reserved.reason;
   }
   const id = resume?.session.id ?? newSessionId();
   log(resume === undefined ? `${label}: starting the fixer in a new session, ${id}` : `${label}: resuming the fixer's session ${id}, which round ${resume.session.round} started`);
@@ -604,9 +605,10 @@ function startFixerOn(
   log(`${label}: ${fixerLine(fixer, logPath)}`);
   const ran = fixer.outcome === "started" || fixer.outcome === "exited";
   const round = resume?.session.round ?? (record.status === "reviewed" ? record.round.number : 1);
-  const session: FixerSession | undefined = ran ? { agent, id, round, shown: resume?.shown ?? handoff.shown } : undefined;
+  const session: FixerSession | undefined = ran ? { agent, id, round, ...(resume?.known ?? handoff.known) } : undefined;
   const noted = putFixer(write, record, fixer, session);
   if (noted.outcome === "failed") log(`${label}: the fixer's start could not be recorded: ${noted.reason}`);
+  return undefined;
 }
 
 /**
@@ -630,11 +632,11 @@ function resumeOf(session: FixerSession | undefined, agent: FixerAgent, record: 
   if (read === undefined || listed === undefined || "reason" in listed) return fresh("the threads could not be listed for an update");
   const path = join(directory, "update.md");
   try {
-    const update = updateFor(read.change, record, listed.threads, session.shown);
+    const update = updateFor(read.change, record, listed.threads, session);
     if (update.outcome !== "composed") return fresh("no update could be composed");
     writeFileSync(path, update.text, "utf8");
     log(`${label}: wrote the update to ${path}`);
-    return { session, update: path, shown: update.shown };
+    return { session, update: path, known: update.known };
   } catch (cause) {
     return fresh(`wrote no update to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
@@ -718,9 +720,13 @@ async function awaitFixers(
       log(`${round.label}: the resume of the fixer's session ${failed.id} failed: it exited ${failed.status}; starting a fresh fixer on the whole handoff`);
       const dropped = update(({ fixerSession: _dropped, ...state }) => state);
       if (dropped.outcome === "failed") log(`${round.label}: the failed session could not be dropped: ${dropped.reason}`);
-      // A resume starts only on a written handoff, so the round has one.
-      const shown = read.state.fixerSession?.shown ?? [];
-      startFixerOn(episode, round, failed.record, { path: join(round.directory, "handoff.md"), shown }, undefined, { agent, commands: setup.round.config.fixerCommands, environment: setup.environment ?? process.env }, update);
+      // A resume starts only on a written handoff, so the round has one. The
+      // resume recorded the round's open threads, which the handoff gives whole.
+      const known = read.state.fixerSession ?? { shown: [], open: [] };
+      const setupOf = { agent, commands: setup.round.config.fixerCommands, environment: setup.environment ?? process.env };
+      const refused = startFixerOn(episode, round, failed.record, { path: join(round.directory, "handoff.md"), known: { shown: known.shown, open: known.open } }, undefined, setupOf, update);
+      // The failed resume is still the last state's fixer, so looking again would retry it for good.
+      if (refused !== undefined) return { outcome: "state unwritable", reason: refused };
       continue;
     }
     if (running === undefined) return "settled";

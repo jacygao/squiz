@@ -839,10 +839,12 @@ Work the threads as it says: fix what applies, and reply on each one to say what
 
 **A resume is handed only what changed since the session's last handoff.** The
 round writes `rounds/<k>/update.md` beside the handoff. It holds each open
-thread the session was shown nothing of, whole; each comment posted since on a
-thread it was shown, the reviewer's rulings among them; each thread it was
-shown that has closed since, with its new comments; and the open threads with
-nothing new, by name:
+thread that was not open at the session's last handoff, whole, so a reopened
+thread comes with its history; each comment posted since on a thread open then
+and open still, the reviewer's rulings among them; each thread open then that
+has closed, with its new comments where it has any, since a ruling whose reply
+failed to post still resolves its thread; and the open threads with nothing
+new, by name:
 
 ```
 # Update for PR #41 at 3f9c2e0, round 2
@@ -875,8 +877,9 @@ round 2: resuming the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3, whic
 ```
 
 **The episode records its fixer session as `fixerSession` in the state file**:
-the CLI, the session id, the round whose fixer started it, and the node ids of
-the comments it has been shown. It never holds a prompt or a transcript. A
+the CLI, the session id, the round whose fixer started it, the node ids of the
+comments it has been shown, and those of the threads open at its last handoff.
+It never holds a prompt or a transcript. A
 fixer that started records the session in the same update that records its
 start. One that did not start leaves the session as it was.
 
@@ -904,7 +907,10 @@ round 2: the resume of the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3 
 ```
 
 A fixer started fresh this way is never resumed again in the same round. One
-that wrote no status was killed, and is treated as any fixer that exited.
+that wrote no status was killed, and is treated as any fixer that exited. Where
+the state file refuses to reserve the fresh start, the host exits as for any
+record it cannot write, since the failed resume would otherwise be found again
+on every look.
 
 **The fixer's own stop starts the next round**, as any stop does (The hooks).
 Its edits, its commit or its replies are a new state, which the hook queues.

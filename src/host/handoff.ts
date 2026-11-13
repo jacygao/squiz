@@ -22,8 +22,14 @@ export type Handoff =
   | { readonly outcome: "none" }
   /** The round left threads open, and the listing shows none of them open. */
   | { readonly outcome: "no open thread listed" }
-  /** `shown` is the node id of every comment the text gives. */
-  | { readonly outcome: "composed"; readonly text: string; readonly shown: readonly string[] };
+  /** `known` is what the agent handed the text knows of the threads once it has read it. */
+  | { readonly outcome: "composed"; readonly text: string; readonly known: Known };
+
+/**
+ * What a fixer has been handed: the node id of every comment it has been shown,
+ * and of each thread that was open when it was last handed anything.
+ */
+export type Known = { readonly shown: readonly string[]; readonly open: readonly string[] };
 
 /**
  * The handoff for `record`, the state a round has just recorded, on `change`.
@@ -64,36 +70,37 @@ export function handoffFor(
     "## The diff",
     fenced(diff),
   ].join("\n\n") + "\n";
-  return { outcome: "composed", text, shown: commentsOf(open) };
+  return { outcome: "composed", text, known: { shown: commentsOf(open), open: open.map((thread) => thread.id) } };
 }
 
 /**
  * What a resumed fixer is handed for `record`: what changed on `listed` since
- * it was handed the comments `shown`.
+ * it was last handed anything, which `known` says.
  *
- * That is each open thread it was shown nothing of, whole; each new comment on
- * an open thread it was shown, the reviewer's ruling among them; each thread it
- * was shown that has closed since, with its new comments; and the open threads
- * with nothing new, by name. A closed thread it was never shown is left out.
- * `shown` in the result is every comment it has now been shown.
+ * That is each open thread that was not open then, whole, so a reopened thread
+ * comes with its history; each new comment on a thread open then and still
+ * open, the reviewer's ruling among them; each thread open then that has closed,
+ * with its new comments if it has any; and the open threads with nothing new,
+ * by name.
  */
 export function updateFor(
   change: Pick<Change, "name" | "followUp">,
   record: StateRecord,
   listed: readonly ReviewThread[],
-  shown: readonly string[],
+  known: Known,
 ): Handoff {
   if (!handsBack(record)) return { outcome: "none" };
   const open = threadsToPrint(record.openThreads, listed);
   if (open.length === 0) return { outcome: "no open thread listed" };
 
-  const seen = new Set(shown);
+  const seen = new Set(known.shown);
+  const wasOpen = new Set(known.open);
   const unseen = (thread: ReviewThread): readonly ThreadComment[] => thread.comments.filter((comment) => !seen.has(comment.id));
-  const wasShown = (thread: ReviewThread): boolean => thread.comments.some((comment) => seen.has(comment.id));
-  const fresh = open.filter((thread) => !wasShown(thread));
-  const replied = open.filter((thread) => wasShown(thread) && unseen(thread).length > 0);
-  const quiet = open.filter((thread) => wasShown(thread) && unseen(thread).length === 0);
-  const closed = listed.filter((thread) => !open.includes(thread) && wasShown(thread) && unseen(thread).length > 0);
+  const fresh = open.filter((thread) => !wasOpen.has(thread.id));
+  const replied = open.filter((thread) => wasOpen.has(thread.id) && unseen(thread).length > 0);
+  const quiet = open.filter((thread) => wasOpen.has(thread.id) && unseen(thread).length === 0);
+  // A thread can close with no new comment: a ruling whose reply failed to post still resolves it.
+  const closed = listed.filter((thread) => !open.includes(thread) && wasOpen.has(thread.id));
 
   const at = `${change.name} at ${record.head.slice(0, 7)}`;
   const round = record.round.number;
@@ -109,7 +116,11 @@ export function updateFor(
     ...section("## Threads closed since", closed, withNew),
     ...section("## Still open, with nothing new", quiet, threadLine),
   ].join("\n\n") + "\n";
-  return { outcome: "composed", text, shown: [...new Set([...shown, ...commentsOf([...open, ...closed])])] };
+  return {
+    outcome: "composed",
+    text,
+    known: { shown: [...new Set([...known.shown, ...commentsOf([...open, ...closed])])], open: open.map((thread) => thread.id) },
+  };
 }
 
 function commentsOf(threads: readonly ReviewThread[]): readonly string[] {
@@ -119,7 +130,7 @@ function commentsOf(threads: readonly ReviewThread[]): readonly string[] {
 /** `thread`'s line, then each of `comments` indented under it, as `printedThread` gives a reply. */
 function printedComments(thread: ReviewThread, comments: readonly ThreadComment[]): string {
   const bodies = comments.map((comment) => trimmed(comment.body).map((line) => (line.trim() === "" ? "" : `  ${line}`)).join("\n"));
-  return [threadLine(thread), bodies.join("\n\n")].join("\n");
+  return bodies.length === 0 ? threadLine(thread) : [threadLine(thread), bodies.join("\n\n")].join("\n");
 }
 
 /** The lines of `body`, without the blank lines that open and close it. */

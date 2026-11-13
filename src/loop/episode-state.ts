@@ -176,14 +176,16 @@ export type EpisodeState = {
 
 /**
  * What resuming the fixer needs, and never its prompt or transcript: the CLI
- * that made the session, its id, the round whose fixer started it, and the node
- * ids of the comments it has been handed, so a resume is handed only the rest.
+ * that made the session, its id, the round whose fixer started it, and what it
+ * has been handed, so a resume is handed only the rest.
  */
 export type FixerSession = {
   readonly agent: FixerAgent;
   readonly id: string;
   readonly round: number;
   readonly shown: readonly string[];
+  /** The node ids of the threads that were open when it was last handed anything. */
+  readonly open: readonly string[];
 };
 
 /** A ruling by thread node id. */
@@ -455,7 +457,7 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   const session = parsed["fixerSession"];
   // Read wrongly, a session is resumed under a CLI that did not make it.
   if (session !== undefined && !isFixerSession(session)) {
-    return unreadable(`${path}: "fixerSession" is ${render(session)} rather than a fixer's CLI, session id, round and shown comments`);
+    return unreadable(`${path}: "fixerSession" is ${render(session)} rather than a fixer's CLI, session id, round, shown comments and open threads`);
   }
 
   return {
@@ -467,14 +469,15 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       ...(cleanClose === undefined ? {} : { cleanClose }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
       ...(rulings === undefined ? {} : { rulings }),
-      ...(session === undefined ? {} : { fixerSession: { agent: session.agent, id: session.id, round: session.round, shown: session.shown } }),
+      ...(session === undefined ? {} : { fixerSession: { agent: session.agent, id: session.id, round: session.round, shown: session.shown, open: session.open } }),
     },
   };
 }
 
 function isFixerSession(value: unknown): value is FixerSession {
   if (!isRecord(value)) return false;
-  const { agent, id, round, shown } = value;
+  const { agent, id, round, shown, open } = value;
+  const ids = (list: unknown): boolean => Array.isArray(list) && list.every((each) => typeof each === "string" && each !== "");
   return (
     (agent === "claude" || agent === "copilot") &&
     typeof id === "string" &&
@@ -482,8 +485,8 @@ function isFixerSession(value: unknown): value is FixerSession {
     typeof round === "number" &&
     Number.isInteger(round) &&
     round >= 1 &&
-    Array.isArray(shown) &&
-    shown.every((each) => typeof each === "string" && each !== "")
+    ids(shown) &&
+    ids(open)
   );
 }
 

@@ -219,9 +219,9 @@ test("#876: an update holds only what changed since the fixer's last handoff: th
   const quiet = thread("PRRT_d", "A name says nothing");
   // A person's thread, which the fixer was never shown.
   const person = thread("PRRT_person", "A person's thread", ["A reply nobody handed on."], true);
-  const shown = ["PRRT_a-c0", "PRRT_a-c1", "PRRT_c-c0", "PRRT_c-c1", "PRRT_d-c0"];
+  const known = { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_c-c0", "PRRT_c-c1", "PRRT_d-c0"], open: ["PRRT_a", "PRRT_c", "PRRT_d"] };
 
-  const update = updateFor(CHANGE, record, [disputed, PLAIN, closed, quiet, person], shown);
+  const update = updateFor(CHANGE, record, [disputed, PLAIN, closed, quiet, person], known);
 
   assert.equal(update.outcome, "composed", JSON.stringify(update));
   assert.equal(
@@ -240,27 +240,49 @@ test("#876: an update holds only what changed since the fixer's last handoff: th
       threadLine(quiet),
     ].join("\n\n") + "\n",
   );
+  const after = update.outcome === "composed" ? update.known : { shown: [], open: [] };
   assert.deepEqual(
-    [...(update.outcome === "composed" ? update.shown : [])].sort(),
+    [...after.shown].sort(),
     ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2", "PRRT_b-c0", "PRRT_c-c0", "PRRT_c-c1", "PRRT_c-c2", "PRRT_d-c0"],
     "what the fixer has now been shown is not every comment of each thread it was handed",
   );
+  assert.deepEqual(after.open, ["PRRT_a", "PRRT_b", "PRRT_d"]);
 });
 
 test("#876: an update leaves out a section with nothing in it, and a round that hands nothing back gets none", () => {
   const record = reviewed(2, ["PRRT_b"]);
+  const none = { shown: [], open: [] };
 
-  const update = updateFor(CHANGE, record, [PLAIN], []);
+  const update = updateFor(CHANGE, record, [PLAIN], none);
   const text = update.outcome === "composed" ? update.text : "";
   assert.ok(text.includes("## New threads"), text);
   for (const empty of ["## New replies", "## Threads closed since", "## Still open"]) assert.ok(!text.includes(empty), `${empty} is there with nothing in it:\n${text}`);
 
-  assert.deepEqual(updateFor(CHANGE, reviewed(3, ["PRRT_b"]), [PLAIN], []), { outcome: "none" });
-  assert.deepEqual(updateFor(CHANGE, record, [], []), { outcome: "no open thread listed" });
+  assert.deepEqual(updateFor(CHANGE, reviewed(3, ["PRRT_b"]), [PLAIN], none), { outcome: "none" });
+  assert.deepEqual(updateFor(CHANGE, record, [], none), { outcome: "no open thread listed" });
 });
 
-test("#876: a handoff says which comments it showed, so a later update can leave them out", () => {
+test("#876: an update names a thread that closed with no new comment, as one whose ruling's reply failed to post does", () => {
+  const record = reviewed(2, ["PRRT_b"]);
+  const closed = thread("PRRT_c", "The timer leaks", [], true);
+
+  const update = updateFor(CHANGE, record, [PLAIN, closed], { shown: ["PRRT_b-c0", "PRRT_c-c0"], open: ["PRRT_b", "PRRT_c"] });
+
+  const text = update.outcome === "composed" ? update.text : "";
+  assert.ok(text.includes(`## Threads closed since\n\n${threadLine(closed)}\n`), `the closed thread is missing:\n${text}`);
+});
+
+test("#876: an update gives a thread reopened since, whose comments the fixer was shown while it was open, whole", () => {
+  const record = reviewed(2, ["PRRT_a"]);
+
+  const update = updateFor(CHANGE, record, [DISPUTED], { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2"], open: [] });
+
+  const text = update.outcome === "composed" ? update.text : "";
+  assert.ok(text.includes(`## New threads\n\n${printedThread(DISPUTED)}\n`), `the reopened thread is not given whole:\n${text}`);
+});
+
+test("#876: a handoff says which comments it showed and which threads were open, so a later update can leave them out", () => {
   const record = reviewed(2, ["PRRT_a"]);
   const handoff = handoffFor(CHANGE, record, [DISPUTED, PLAIN], DIFF, [record]);
-  assert.deepEqual(handoff.outcome === "composed" ? handoff.shown : [], ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2"]);
+  assert.deepEqual(handoff.outcome === "composed" ? handoff.known : undefined, { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2"], open: ["PRRT_a"] });
 });
