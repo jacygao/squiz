@@ -23,7 +23,7 @@ import { readState } from "../loop/episode-state.ts";
 import { githubEpisode } from "../testing/episode.ts";
 import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP, withCwd } from "../testing/stop-payloads.ts";
+import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP, withCwd } from "../sessions/stop-payloads.ts";
 
 const hookModule = new URL("./hook.ts", import.meta.url).href;
 const triggerModule = new URL("../host/trigger.ts", import.meta.url).href;

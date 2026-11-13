@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP } from "../testing/stop-payloads.ts";
+import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP } from "./stop-payloads.ts";
 import { readFiring, readFiringWithSocket, type Firing, type FiringRead, type HookEnvironment, type Owner } from "./firing.ts";
 
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
