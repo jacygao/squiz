@@ -416,6 +416,24 @@ test("a run that completed no message on the user's default model names that mod
   });
 });
 
+test("a run whose stderr the adapter diagnoses gives the adapter's reason, and names no model (#849)", async () => {
+  await inATree(async (tree) => {
+    const signedOut = {
+      ...reviewer(refusingToStart).adapter,
+      userModel: () => "gpt-6-astra",
+      diagnose: (said: string) => (said.includes("Unknown provider") ? "the reviewer is not signed in" : undefined),
+    };
+    const round = await runRound(signedOut, at(tree), 10);
+    assert.equal(round.outcome, "setup");
+    const reason = round.outcome === "setup" ? round.reason : "";
+    assert.equal(reason, "the reviewer is not signed in", "a reviewer that is not signed in is not one whose model is wrong");
+
+    // A run the adapter cannot diagnose may still be on a model the CLI does not offer.
+    const undiagnosed = await runRound({ ...signedOut, diagnose: () => undefined }, at(tree), 10);
+    assert.match(undiagnosed.outcome === "setup" ? undiagnosed.reason : "", /gpt-6-astra/u);
+  });
+});
+
 // The round has no terminal to give. A line built for a pane would get
 // `/dev/null` instead, and an interactive CLI there is a run nobody can see.
 test("a command line that needs a terminal is not started without one", async () => {

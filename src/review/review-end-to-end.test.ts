@@ -630,6 +630,24 @@ test("a round leaves the repository clean in git status, with nothing about .squ
   );
 });
 
+// The terminal line is read back from the state file, and the comment is posted
+// by the round, so each is checked where it lands.
+test("a reviewer that is not signed in is reported so in the terminal and on the pull request, naming no model (#849)", async () => {
+  await withPullRequest([{ findings: [], verdicts: [], fails: "Error: No authentication information found." }], async (fixture) => {
+    const printed = await review(fixture);
+
+    const reason = 'the reviewer could not run: the reviewer is not signed in to Copilot: it said "Error: No authentication information found."';
+    assert.equal(printed.exit, 1, `${printed.stdout}${printed.stderr}\n${hostLog(fixture.episode)}`);
+    const [comment] = fixture.gh().issueComments;
+    assert.equal(comment?.split("\n")[0], `**Squiz review failed — ${reason}**`);
+    assert.equal(
+      printed.stderr,
+      `squiz: review failed: ${reason}\nsquiz: the failure is posted on PR #41\n` +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
 test("a round whose only finding GitHub refused exits 1 saying it could not post it, rather than nothing open", async () => {
   await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {
     fixture.setGh({ ...fixture.gh(), rejectCreate: true });

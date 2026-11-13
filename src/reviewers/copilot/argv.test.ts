@@ -8,7 +8,7 @@ import { test, type TestContext } from "node:test";
 import type { Thinking } from "../../config/config.ts";
 import type { CommandLine, Invocation } from "../adapter.ts";
 import { REPORTS_VARIABLE } from "../report-file.ts";
-import { AGENT_NAME, argv, grants, serverFile } from "./argv.ts";
+import { AGENT_NAME, argv, grants, serverFile, stderrFile } from "./argv.ts";
 import { SNAPSHOT_VARIABLE } from "./server.ts";
 
 const invocation: Invocation = {
@@ -196,6 +196,7 @@ function standInTree(t: TestContext): { readonly tree: string; readonly bin: str
       'printf "%s\\0" "$@" > "$STAND_IN_ARGS"',
       'usage=""',
       'while [ $# -gt 0 ]; do [ "$1" = --usage-output-file ] && usage=$2; shift; done',
+      '[ -n "$STAND_IN_STDERR" ] && printf "%s\\n" "$STAND_IN_STDERR" >&2',
       '[ -n "$usage" ] && [ "$STAND_IN_USAGE" != none ] && printf \'{\\n  "totalNanoAiu": 5,\\n  "modelMetrics": {}\\n}\\n\' > "$usage"',
       'case $STAND_IN_END in',
       "  term) trap 'exit 0' TERM; : > \"$STAND_IN_ARGS.waiting\"; sleep 30 & wait; exit 0 ;;",
@@ -349,6 +350,27 @@ test("a Copilot that exits non-zero has nothing appended", (t) => {
   const ran = run(t, "1");
   assert.equal(ran.status, 1);
   assert.equal(ran.reports, "", "a run that failed recorded a usage line");
+});
+
+// In a pane the round reads none of the reviewer's stderr, and a Copilot that is
+// not signed in says so there and nowhere else.
+test("a Copilot that exits non-zero leaves what it said on stderr in the session's file, and still says it on stderr", (t) => {
+  const { tree, bin } = standInTree(t);
+  const line = lineIn(tree);
+  writeFileSync(join(tree, ".squiz/7/rounds/1/prompt.md"), AWKWARD_PROMPT);
+  writeFileSync(join(tree, ".squiz/7/rounds/1/reports.jsonl"), "");
+  const result = spawnSync(line.command, line.args, {
+    cwd: line.directory,
+    env: { ...environmentFor(bin, tree, "3"), STAND_IN_STDERR: "Error: No authentication information found." },
+    stdio: ["ignore", "ignore", "pipe"],
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 3, "the script must exit as Copilot did");
+  assert.equal(result.stderr, "Error: No authentication information found.\n");
+  const kept = stderrFile({ ...invocation, directory: tree, sessionDirectory: join(tree, ".squiz/7/rounds/1/session") });
+  assert.equal(readFileSync(kept, "utf8"), "Error: No authentication information found.\n");
+  assert.equal(ranIn(tree, result.status).reports, "", "a run that failed recorded a usage line");
 });
 
 test("a Copilot that exits 0 and wrote no usage file has nothing appended", (t) => {

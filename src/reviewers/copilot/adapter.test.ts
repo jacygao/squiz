@@ -35,3 +35,36 @@ test("the adapter reads the report file the reporting server writes", async () =
   }
   assert.deepEqual((await copilot.parse(file())).result, { kind: "reviewed", findings: [], verdicts: [], read: [] });
 });
+
+/**
+ * What Copilot CLI 1.0.109 printed on stderr, and exited 1 with, when it found
+ * no login. A Copilot that changes it stops matching, and the round falls back
+ * to the generic reason with these words in it.
+ */
+const SIGNED_OUT = [
+  "Error: No authentication information found.",
+  "",
+  "Copilot can be authenticated with GitHub using an OAuth Token or a Fine-Grained Personal Access Token.",
+  "",
+  "To authenticate, you can use any of the following methods:",
+  "  • Start 'copilot' and run the '/login' command",
+  "  • Set the COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN environment variable",
+  "  • Run 'gh auth login' to authenticate with the GitHub CLI",
+].join("\n");
+
+test("a run that says it found no login is diagnosed as not signed in (#849)", () => {
+  assert.equal(
+    copilot.diagnose?.(SIGNED_OUT),
+    'the reviewer is not signed in to Copilot: it said "Error: No authentication information found."',
+  );
+});
+
+test("a run that said anything else is left undiagnosed", () => {
+  assert.equal(copilot.diagnose?.(""), undefined);
+  assert.equal(
+    copilot.diagnose?.("Error: Authentication token found but could not be validated.\n\n  Failed to fetch PAT user login (401): GitHub returned: Bad credentials"),
+    undefined,
+    "a token GitHub refused may be the network, so it is not called a sign-out",
+  );
+  assert.equal(copilot.diagnose?.('Error: Model "gpt-0" is not available.'), undefined);
+});
