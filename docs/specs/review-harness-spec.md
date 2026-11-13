@@ -118,8 +118,8 @@ the rest of this section describes, and:
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
-- `closed.json`, in a headless run, once the episode has closed (Headless runs
-  below).
+- `closed.json`, in a headless run, once the episode has closed, and
+  `stopped.json` while it has stopped short of its close (Headless runs below).
 - `episodes/<n>/`, for each closed episode a later one replaced, numbered from 1
   in the order they closed: its state file, its `rounds/`, its `closed.json`,
   and the local venue's `summary.md` (§ 4 The record), moved there when a new
@@ -457,7 +457,8 @@ input on `/dev/null`, and output in `.squiz/<number>/host.log`.
 
 It takes the oldest queued state, writes the reviewing record naming itself, and
 runs the round as the steps above set out. It exits when nothing is left queued,
-and when the worktree it serves is gone.
+and when the worktree it serves is gone. In a headless run it first waits for
+every fixer to exit while the episode is open (Headless runs).
 
 **A host that finds nothing queued reads the queue again once its lock is
 released.** A trigger that queued a state before the release saw the host
@@ -498,8 +499,8 @@ and not before.
 
 ### The hooks
 
-**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`, and
-on its `SessionStart` and `SubagentStart`.** `Stop` fires when a regular
+**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`, on
+its `SessionStart` and `SubagentStart`, and on its `UserPromptSubmit`.** `Stop` fires when a regular
 session's turn ends, and `SubagentStop` when a subagent's does. Each stop
 firing resolves the pull request whose head is the branch checked out in the
 payload's `cwd`, records the session that owns the work, queues the state as The
@@ -527,6 +528,9 @@ worktree.
 ],
 "SubagentStart": [
   { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
+],
+"UserPromptSubmit": [
+  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
 ]
 ```
 
@@ -539,6 +543,39 @@ subagent does any work. A start hook takes its worktree from the payload's `cwd`
 as the stop hooks do. A start whose `cwd` is in no git repository records nothing
 and writes nothing on stderr, because both runtimes fire it for every session,
 wherever it is opened.
+
+**`UserPromptSubmit` hands the payload's `prompt` and its worktree to the
+venue's `recordPrompt` (§ 4 The contract), and does nothing else.** It takes
+the worktree from the payload's `cwd`, as the other hooks do, and prints nothing
+on stdout, where Claude Code would add it to the session's context. Under the
+GitHub venue it changes nothing. Both runtimes fire it from the plugin before the
+session works on the prompt. Claude Code 2.1.321 fires it under that name alone.
+Copilot 1.0.110 fires it from the plugin's `hooks.json` as well as its own
+`userPromptSubmitted`, which squiz does not register. Each sends the prompt in
+`prompt` and the directory in `cwd`:
+
+```json
+{"hook_event_name":"UserPromptSubmit","session_id":"51445ba2-2e4c-4c6b-943f-5ee4107e1dd9","timestamp":"2026-11-13T13:14:57.072Z","cwd":"/work/suss-task","prompt":"Add backoff. The first retry is immediate."}
+```
+
+Three prompts are not handed on:
+
+- **A subagent's brief.** Copilot fires `UserPromptSubmit` for the prompt a
+  session gives its subagent, with the subagent's `agent_id`, in the parent's
+  `cwd`. A payload carrying a non-empty `agent_id` records nothing and says
+  nothing. Claude Code 2.1.321 fires none for a subagent.
+- **A prompt squiz gave.** The fixer's environment carries `SQUIZ_FIXER`
+  (Headless runs below), and both runtimes hand a session's environment on to
+  its hooks. A firing whose environment has it with any value but the empty
+  string records nothing and says nothing. The reviewer loads no squiz plugin,
+  so no squiz hook fires in its session.
+- **A prompt in no git repository.** It records nothing and says nothing, as a
+  start does.
+
+A payload with no `prompt`, or with an empty one, queues and records nothing,
+and the hook says so on stderr. A `recordPrompt` that fails says
+`no prompt was recorded:` and the reason, on stderr. Neither line carries the
+prompt.
 
 **The plugin root is quoted in the command, so a root with a space in its path
 stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under
@@ -737,8 +774,14 @@ MCP configuration of the run before it:
 
 ```
 claude -p <prompt> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
-copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)'
+copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' --disable-builtin-mcps --no-auto-update --disable-client-telemetry
 ```
+
+A Copilot fixer carries the three flags the Copilot reviewer does (The Copilot
+adapter), which turn off the built-in GitHub MCP server, auto-update and client
+telemetry. Without them, on Copilot 1.0.110, a fixer also reached
+`cafe.github.com` and `telemetry.enterprise.githubcopilot.com`. The hosts a
+fixer reaches with them have not been measured.
 
 **The fixer edits files and runs `squiz` and `git`, and each command
 `fixerCommands` names (§ 10 Configuration).** The CLI refuses any other
@@ -749,7 +792,7 @@ after `git`. A repository whose tests run as `node --test` names `node`:
 
 ```
 claude -p <prompt> … --allowedTools 'Bash(squiz:*)' 'Bash(git:*)' 'Bash(node:*)'
-copilot -p <prompt> … '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' '--allow-tool=shell(node)'
+copilot -p <prompt> … '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' '--allow-tool=shell(node)' --disable-builtin-mcps …
 ```
 
 A granted command runs whatever it is given, and the fixer writes the files it
@@ -757,7 +800,9 @@ runs, so naming `node` lets the fixer run any program `node` can. Without
 `fixerCommands` the fixer cannot run the project's tests.
 
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
-names the session whose hook started the host. The prompt names the handoff:
+names the session whose hook started the host, and with `SQUIZ_FIXER=1`, which
+keeps the fixer's prompt from being recorded as the run's (The hooks). The
+prompt names the handoff:
 
 ```
 Squiz reviewed this change and left threads open. /work/squiz-a/.squiz/local/rounds/1/handoff.md holds them, each with every reply on it, with the change's description, the agents' final reports and the diff the reviewer read.
@@ -812,13 +857,94 @@ bound closed it with threads open, which bound:
 ```
 
 The file appears whole: it is written beside its path and renamed into place. A
-caller waits for it, then reads the outcome from the episode's directory. It
-moves into `episodes/<n>/` with the rest of its episode (The state file).
+caller that sees it reads the outcome from the episode's directory. It moves into `episodes/<n>/` with the rest of its episode (The state file).
 
-**Three things leave a headless episode open with no `closed.json`:** a round
-that failed, a fixer that did not start, and a fixer whose run left no new
-state, so that its stop queued nothing. A caller bounds its wait, and reads
-`host.log` and `squiz status` to tell which it was.
+**A round host in a headless run outlives every fixer of its open episode.**
+Once nothing is queued, it looks every second at the queue and at each fixer
+the records name as started, by its pid and start time. A state queued meanwhile
+is taken as any other. A close ends the wait: whatever a fixer still running
+then queues starts a host of its own. `host.log` names the fixer it waits on:
+
+```
+waiting for the fixer round 1 started, process 4200, to exit, for at most 2700 seconds
+```
+
+**The wait on one fixer is bounded by the reviewer's time bound for each round
+the cap allows**, `timeout` × `rounds` seconds, 2,700 by default, counted from
+when the host first waits on it. A round that runs while the host waits does
+not start the count again. A fixer that cannot be told running or gone
+is waited on as one running is, and the time counts toward the bound. A host
+that waited without one would hold `host.lock` for good, and every later
+trigger would read the episode as in hand. Once the bound passes, the host
+writes `stopped.json` naming it and exits. A fixer that then stops and queues a
+state starts a host of its own, and its trigger removes the file.
+
+**An episode that stops short of its close writes `stopped.json`** in the
+episode's directory, beside where `closed.json` would be. The host writes it as
+it exits, once no fixer is running or the bound on its wait has passed, and only
+where the episode has not closed and no state is queued or under review. It holds the head of the last state
+recorded, which case stopped the episode, and why:
+
+```json
+{
+  "head": "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+  "stopped": "fixer queued nothing",
+  "reason": "the fixer round 1 started, process 4200, exited, and its run queued nothing"
+}
+```
+
+| `stopped` | The last state recorded | `reason` |
+|---|---|---|
+| `round failed` | Failed | Why it failed |
+| `fixer did not start` | Handed its threads back, and its fixer failed to start, got no handoff, or had no start recorded | Why, from its `fixer` field |
+| `fixer queued nothing` | Handed its threads back, and its fixer started and exited | Which fixer, and that its run queued nothing |
+| `earlier fixer queued nothing` | Handed its threads back, and started no fixer because an earlier one was running, which then exited | Which earlier fixer, and that its last stop queued nothing |
+| `fixer outlived its bound` | Any, with a fixer not seen to exit within the bound above | Which fixer, and the bound |
+
+The host decides and writes it under `state.lock`, beside its path and renamed
+into place, as `closed.json` is. `host.log` says what it wrote:
+
+```
+wrote the stop to /work/squiz-a/.squiz/local/stopped.json: fixer queued nothing
+```
+
+A file that cannot be written is a line in `host.log` saying why, and the
+caller's wait runs to its own bound.
+
+**A caller waits for `closed.json` or `stopped.json`, whichever appears.** The
+two are never there together. The trigger that next queues a state removes
+`stopped.json` in the same update, under `state.lock`, so a retry by
+`squiz review`, or a new commit, never runs beside it. A trigger that cannot
+remove it queues nothing, and fails naming the file. A hook on a failed state
+queues nothing, and leaves it. A stopped episode is still live, so
+`stopped.json` never moves into `episodes/<n>/`.
+
+**Three things leave a headless episode open with neither file:**
+
+- A fixer whose start could not be told. It may still be running, so while one
+  is on the episode's records nothing is written.
+- A round host that dies, or cannot write the state file. Nothing is left to
+  notice the episode stopped.
+- A last state that names no stop, such as one not reviewed because a head no
+  trigger queued superseded it. `host.log` says `marked no stop:` and why.
+
+A caller bounds its wait, and reads `host.log` and `squiz status` to tell which
+it was.
+
+**A headless run's handoff gives the run's prompt where nobody wrote a
+description.** Under the local venue the description is `description.md`, else
+the first prompt the worktree's sessions were given (§ 4 The record). Where it
+is the prompt, a line under `## The description` says so before it:
+
+```
+## The description
+
+Nobody wrote a description of this change, so this is the prompt the run was started with:
+
+Add backoff. Requirement: the first retry is immediate.
+```
+
+Where there is neither, the section reads `The change has no description.`
 
 **A headless run's handoff holds the reports its stops carried** (The hooks).
 A run with no subagent hands the fixer its session's transcript path, and under
@@ -930,6 +1056,11 @@ type Change = {
   readonly base: string;
   readonly head: string;
   readonly description: string;
+  /**
+   * `prompt` where nobody wrote a description, and the description is the
+   * prompt the run was started with. Absent where someone wrote it.
+   */
+  readonly descriptionFrom?: "prompt";
 };
 
 type Failed = { readonly outcome: "failed"; readonly reason: string };
@@ -948,6 +1079,12 @@ interface Venue {
    * done any work. A venue that needs nothing from the start returns "done".
    */
   recordStart(worktree: string, until: Deadline): { readonly outcome: "done" } | Failed;
+  /**
+   * Called with each prompt a session in `worktree` is given, other than one
+   * squiz gave it. A venue whose change carries a description of its own
+   * returns "done".
+   */
+  recordPrompt(worktree: string, prompt: string, until: Deadline): { readonly outcome: "done" } | Failed;
   /**
    * The change to review in `worktree`. `asked` is the key a command was given,
    * such as the 41 of `squiz review 41` or `squiz host 41`, or null for a hook,
@@ -1040,6 +1177,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | `key`, `name`, `rerun`, `summaryAt` | The pull request's number, `PR #41`, `squiz review 41`, `on the pull request` |
 | `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
 | `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
+| `recordPrompt` | Does nothing, and returns `done`. The pull request carries its own description, and the run's prompt never stands in for it. |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
 | `episodeDirectory` | `.squiz/<key>/` in the worktree, which keeps itself out of git (§ 3 The state file), for a key that is a pull request's number. Any other key is a failure. It runs no `gh`. |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
@@ -1058,7 +1196,7 @@ writes becomes part of the change.
 |---|---|
 | The pull request | The working tree's change against its base, under The base below |
 | Its head commit | The commit built from the working tree, under The change below |
-| Its description | `.squiz/local/description.md`, else none |
+| Its description | `.squiz/local/description.md`, else the run's prompt in `.squiz/local/prompt.md`, else none (The record below) |
 | The pull request's number, wherever it names the episode | `local`, which is `Change.key`: the directory `.squiz/local/`, the snapshot's `<digest>-local`, and the pane `squiz-local-r2`. `episodeDirectory` fails for any other key. |
 | A review thread, its replies, resolving and re-opening it | An entry in `threads.json`, under The record below |
 | The summary comment | `summary.md`. `Change.summaryAt` is `in` and its path, such as `in /work/squiz-a/.squiz/local/summary.md`. |
@@ -1183,7 +1321,8 @@ puts in an episode's directory, beside the venue's own files:
   state.json  state.lock  host.lock  host.log  notes/  rounds/  review.txt   as under § 3
   threads.json   threads.lock
   summary.md     failure-1.md …
-  description.md
+  description.md                                                   written by whoever starts the run
+  prompt.md                                                        the run's prompt
   episodes/1/  state.json  rounds/  summary.md                     a closed episode, as under § 3
 ```
 
@@ -1191,12 +1330,25 @@ An interactive session stays in one worktree, so each piece of work after a
 clean close is a new head there, and a new episode. `summary.md` is the live
 episode's, and moves with its episode into `episodes/<n>/` when the next one
 starts. Everything else belongs to the worktree and stays: `base.json` and
-`objects/`, which every head is built from, `threads.json`, whose threads and
-ids carry on counting across episodes, and the failure files, numbered on from
-the highest there.
+`objects/`, which every head is built from, `prompt.md`, `threads.json`, whose
+threads and ids carry on counting across episodes, and the failure files,
+numbered on from the highest there.
 
-`description.md` is written by whoever starts the run. Squiz reads it and never
-writes it.
+**The change's description is `description.md` where it exists, even empty, and
+`prompt.md` otherwise.** Squiz reads `description.md` and never writes it.
+`readChange` reads both on every trigger, so a `description.md` written after
+the prompt was recorded still wins. A change described by `prompt.md` has
+`descriptionFrom` set to `prompt`, and the handoff says so (§ 3 Headless runs).
+The reviewer is handed either one as the change's description.
+
+**`prompt.md` is the first prompt any session in the worktree was given.**
+`recordPrompt` writes it where it is missing, and leaves one that exists as it
+is, as `recordStart` does `base.json`. A later prompt in the same session, a
+second session, a resume and the fixer each leave the first one in place, so in
+an interactive worktree it stays the prompt the worktree's first session
+started with, through every episode after. It holds the prompt as the payload
+carried it, with nothing added. It appears whole: it is written beside its path
+and linked into place.
 
 **`threads.json` holds every thread, each with its comments and where it stands.**
 It is written whole under `threads.lock`, which follows `state.lock`'s rules: a
@@ -1245,6 +1397,11 @@ Claude Code fires `SubagentStart` in the subagent's own worktree when it was
 dispatched with isolation, before the subagent has done any work. A Copilot
 subagent works in its parent's directory, so the record its session's start
 wrote is the one it keeps.
+
+**`UserPromptSubmit` records the run's prompt, under The record above.** A
+Claude Code subagent dispatched into a worktree of its own fires none there, so
+that worktree's change has no description unless its dispatcher writes
+`description.md`.
 
 **`Stop` and `SubagentStop` queue a state and record its owner as § 3 The hooks
 sets out, after building the worktree's head.** A subagent dispatched into a
@@ -2603,7 +2760,7 @@ through the link `squiz init` makes in a directory already on its `PATH`.
 | `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
 | `squiz doctor` | A person | Prints a line per dependency, saying it is present or naming what is missing or unauthenticated, and exits 1 where a required one is not usable (The setup check). |
 | `squiz version` | A person | Prints the version and the `bin/squiz` path of the squiz that answers, as `squiz 0.1.0 /Users/ana/squiz/bin/squiz`. `squiz --version` is the same command. |
-| `squiz hook` | Claude Code, Copilot | The entry point for `Stop`, `SubagentStop`, `SessionStart` and `SubagentStart`, named in `hooks.json`. A stop queues the review of the change in the payload's `cwd` and returns. A start hands that `cwd` to the venue's `recordStart`. § 3 The hooks sets out both. |
+| `squiz hook` | Claude Code, Copilot | The entry point for `Stop`, `SubagentStop`, `SessionStart`, `SubagentStart` and `UserPromptSubmit`, named in `hooks.json`. A stop queues the review of the change in the payload's `cwd` and returns. A start hands that `cwd` to the venue's `recordStart`, and a prompt hands it and the prompt to the venue's `recordPrompt`. § 3 The hooks sets out all three. |
 | `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
 | `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
 | `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
@@ -3533,7 +3690,7 @@ distributed.
 ```
 .claude-plugin/plugin.json   manifest: name, version, description, and the Copilot extensions directory
 .claude-plugin/marketplace.json  the marketplace named squiz, listing this repository's root as the one plugin
-hooks/hooks.json             the Stop, SubagentStop, SessionStart and SubagentStart registrations, which Claude Code and Copilot both run
+hooks/hooks.json             the Stop, SubagentStop, SessionStart, SubagentStart and UserPromptSubmit registrations, which Claude Code and Copilot both run
 extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
 bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
 charter.md                   the standing review instructions, shipped as one file
@@ -3541,9 +3698,9 @@ src/
   cli.ts                     the entry point bin/squiz execs, one subcommand each
   config/                    .squiz.json, its defaults and its ranges
   review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
-  hook/                      squiz hook: a stop resolves the change and queues its review, and a start hands the worktree to the venue
+  hook/                      squiz hook: a stop resolves the change and queues its review, and a start or a prompt hands the worktree to the venue
   host/                      the round host, which takes queued states, runs their rounds, and starts a headless run's fixer
-  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
+  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, the user's Copilot settings, and the flags every Copilot run carries; no review knowledge
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution and the reviewer's snapshot
   reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
@@ -3564,7 +3721,9 @@ the directory that does the work.
 **`src/sessions/` knows nothing about reviews.** It starts a command as a
 session, finds it again by pid and start time, closes its pane, reads a hook's
 payload into the session that stopped and the session that owns it, writes
-and delivers a note, and reads the user's Copilot settings. Nothing in it names
+and delivers a note, reads the user's Copilot settings, and holds the flags
+every Copilot run squiz starts carries, the reviewer's and the fixer's alike.
+Nothing in it names
 a pull request, a round or a finding, and it imports nothing from the rest of
 `src/`.
 

@@ -16,6 +16,7 @@ import { worktreeToplevel } from "../../worktree/toplevel.ts";
 import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venue.ts";
 import { localDirectory, readBase, recordBase } from "./base.ts";
 import { buildHead, provideCommits } from "./head.ts";
+import { readPrompt, recordPrompt } from "./prompt.ts";
 import { addReply, listThreads, openThread, setResolved, summaryPath, writeFailure, writeSummary, type NewAnchor, type Opened } from "./record.ts";
 
 /** The one key the local venue names an episode by. */
@@ -34,6 +35,12 @@ export const localVenue: Venue = {
     const root = rootOf(worktree, until);
     if (typeof root !== "string") return root;
     return recordBase(root, until);
+  },
+  recordPrompt(worktree, prompt, until) {
+    if (until.passed()) return failed("the deadline had passed");
+    const root = rootOf(worktree, until);
+    if (typeof root !== "string") return root;
+    return recordPrompt(root, prompt);
   },
   readChange,
   episodeDirectory(worktree, key) {
@@ -89,7 +96,7 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
   const built = buildHead(root, base.base, until);
   if (built.outcome === "failed") return built;
   const description = descriptionIn(root);
-  if (typeof description !== "string") return description;
+  if ("outcome" in description) return description;
 
   const rerun = inWorktree(root, "squiz review");
   const change: WorkingTreeChange = {
@@ -104,21 +111,29 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
     ].join("\n"),
     base: base.base,
     head: built.head,
-    description,
+    ...description,
     worktree: root,
   };
   return { outcome: "found", change };
 }
 
-/** `description.md`, written by whoever started the run, or none where there is no such file. */
-function descriptionIn(worktree: string): string | Failed {
+/**
+ * `description.md`, written by whoever started the run, else the run's prompt,
+ * else none. A `description.md` that exists wins, even an empty one.
+ */
+function descriptionIn(worktree: string): Pick<Change, "description" | "descriptionFrom"> | Failed {
   const path = join(localDirectory(worktree), DESCRIPTION_FILE);
   try {
-    return readFileSync(path, "utf8");
+    return { description: readFileSync(path, "utf8") };
   } catch (cause) {
-    if (typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT") return "";
-    return failed(`${path} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`);
+    if (!(typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT")) {
+      return failed(`${path} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
   }
+  const prompt = readPrompt(worktree);
+  if (prompt === null) return { description: "" };
+  if (typeof prompt !== "string") return prompt;
+  return { description: prompt, descriptionFrom: "prompt" };
 }
 
 function rootOf(directory: string, until: Deadline): string | Failed {

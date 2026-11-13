@@ -1,6 +1,7 @@
 /**
  * The user's own Copilot directory and the settings Copilot keeps in it, which
- * every Copilot session of that user starts with.
+ * every Copilot session of that user starts with, and the flags every Copilot
+ * session squiz starts carries.
  *
  * Nothing here throws. Every outcome is a value the caller reads.
  */
@@ -8,6 +9,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+
+/**
+ * The flags every Copilot run squiz starts carries, the fixer's as well as the
+ * reviewer's. They turn off the built-in GitHub MCP server, and leave the run
+ * reaching GitHub's API and its model host, and no other.
+ */
+export const COPILOT_QUIET_FLAGS: readonly string[] = ["--disable-builtin-mcps", "--no-auto-update", "--disable-client-telemetry"];
 
 /** The user's Copilot directory: `COPILOT_HOME` where it is set, and `~/.copilot` otherwise. */
 export function copilotHome(environment: NodeJS.ProcessEnv): string {

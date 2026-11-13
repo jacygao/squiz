@@ -54,6 +54,8 @@ export function draftLine(number: number): string {
 export const githubVenue: Venue = {
   // The pull request names its own base.
   recordStart: () => ({ outcome: "done" }),
+  // The pull request carries its own description.
+  recordPrompt: () => ({ outcome: "done" }),
   readChange,
   episodeDirectory(worktree, key) {
     const number = numberIn(key);

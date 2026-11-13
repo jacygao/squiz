@@ -161,6 +161,20 @@ test("#802: a change with no description, and no agent recorded, says so rather 
   assert.ok(text.includes("## The agents' final reports\n\nNo agent's stop was recorded for this episode.\n\n"), text);
 });
 
+test("#870: a description that is the run's prompt is given under the description heading, and says it is the prompt", () => {
+  const record = reviewed(2, ["PRRT_b"]);
+  const prompt = "Add backoff. Requirement: the first retry is immediate.\n";
+
+  const text = composed(handoffFor({ ...CHANGE, description: prompt, descriptionFrom: "prompt" }, record, [PLAIN], DIFF, [record]));
+
+  assert.ok(
+    text.includes(
+      "## The description\n\nNobody wrote a description of this change, so this is the prompt the run was started with:\n\nAdd backoff. Requirement: the first retry is immediate.\n\n## The open threads",
+    ),
+    text,
+  );
+});
+
 test("#802: a diff holding a fence of its own is fenced with a longer one", () => {
   const record = reviewed(2, ["PRRT_b"]);
   const diff = "+```ts\n+const a = 1;\n+```\n";

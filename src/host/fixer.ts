@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { FixerAgent } from "../config/config.ts";
+import { COPILOT_QUIET_FLAGS } from "../sessions/copilot-settings.ts";
 import { startDetached, type Detached } from "../sessions/detach.ts";
 
 // The checkout or installed copy this module runs from: the plugin whose hooks start the next round.
@@ -73,19 +74,27 @@ export function fixerCommand(
     case "copilot":
       return {
         command: "copilot",
-        args: ["-p", prompt, "--plugin-dir", root, "--no-ask-user", "--allow-tool=write", ...granted.map((name) => `--allow-tool=shell(${name})`)],
+        args: ["-p", prompt, "--plugin-dir", root, "--no-ask-user", "--allow-tool=write", ...granted.map((name) => `--allow-tool=shell(${name})`), ...COPILOT_QUIET_FLAGS],
       };
   }
 }
 
 /**
+ * Set in the fixer's environment, which both CLIs hand on to its hooks. The
+ * fixer's prompt is squiz's, and a hook that recorded it would describe the
+ * run's change by it.
+ */
+export const FIXER_VARIABLE = "SQUIZ_FIXER";
+
+/**
  * The fixer's environment: the round host's, without the messaging socket of
- * the session whose hook started the host. The fixer's own hook would record
- * that socket as the fixer's, and it names a session that has ended.
+ * the session whose hook started the host, and with `FIXER_VARIABLE` set. The
+ * fixer's own hook would record that socket as the fixer's, and it names a
+ * session that has ended.
  */
 export function fixerEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const { CLAUDE_CODE_MESSAGING_SOCKET: _socket, ...kept } = environment;
-  return kept;
+  return { ...kept, [FIXER_VARIABLE]: "1" };
 }
 
 /** Start the fixer `spec` describes, detached, and say what started. `boundMs` bounds the start. */

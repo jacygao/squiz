@@ -64,3 +64,10 @@ test("the GitHub venue records nothing at a start, and touches nothing", () => {
     outcome: "done",
   });
 });
+
+// A pull request has a description of its own, which the run's prompt must not stand in for.
+test("#870: the GitHub venue records no prompt, and touches nothing", () => {
+  assert.deepEqual(githubVenue.recordPrompt("/nowhere/at/all", "Keys are lowercased.", deadlineIn(0)), {
+    outcome: "done",
+  });
+});

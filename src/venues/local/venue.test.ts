@@ -284,4 +284,59 @@ test("a call whose deadline has passed is not made, and fails", (t) => {
   assert.equal(localVenue.provideCommits(change, gone).outcome, "failed");
   assert.equal(localVenue.readChange(worktree, null, gone).outcome, "failed");
   assert.equal(localVenue.recordStart(worktree, gone).outcome, "failed");
+  assert.equal(localVenue.recordPrompt(worktree, "Keys are lowercased.", gone).outcome, "failed");
+});
+
+const PROMPT = "Extend the parser. Requirement: keys are lowercased, and the last one wins.";
+
+test("#870: a worktree with no description.md is described by the first prompt recorded in it, marked as the run's prompt", (t) => {
+  const worktree = worktreeIn(t);
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+
+  assert.deepEqual(localVenue.recordPrompt(join(worktree, "sub"), PROMPT, deadlineIn(30_000)), { outcome: "done" });
+  assert.deepEqual(localVenue.recordPrompt(worktree, "Now rename the function.", deadlineIn(30_000)), { outcome: "done" });
+
+  const change = changeIn(worktree);
+  assert.equal(change.description, PROMPT, "a later prompt replaced the first");
+  assert.equal(change.descriptionFrom, "prompt");
+  assert.equal(readFileSync(join(worktree, ".squiz", "local", "prompt.md"), "utf8"), PROMPT);
+  assert.equal(git(worktree, ["status", "--porcelain", "--untracked-files=all"]), "", "the prompt became part of the change");
+});
+
+test("#870: a description.md the caller wrote is the description, whether it came before the prompt or after it, and squiz leaves it as it is", (t) => {
+  const worktree = worktreeIn(t);
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+  const written = join(worktree, ".squiz", "local", "description.md");
+  writeFileSync(written, "Make the queue retry.\n");
+
+  localVenue.recordPrompt(worktree, PROMPT, deadlineIn(30_000));
+  const before = changeIn(worktree);
+  assert.equal(before.description, "Make the queue retry.\n");
+  assert.equal("descriptionFrom" in before, false);
+  assert.equal(readFileSync(written, "utf8"), "Make the queue retry.\n");
+
+  writeFileSync(written, "");
+  const emptied = changeIn(worktree);
+  assert.equal(emptied.description, "", "an empty description.md lost to the prompt");
+  assert.equal("descriptionFrom" in emptied, false);
+});
+
+// A guard for existing behaviour: with neither file, the change has no description.
+test("a worktree with no description.md and no prompt has no description", (t) => {
+  const worktree = worktreeIn(t);
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+
+  const change = changeIn(worktree);
+  assert.equal(change.description, "");
+  assert.equal("descriptionFrom" in change, false);
+});
+
+test("#870: a prompt in no git worktree records nothing, and says why", (t) => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "squiz-local-outside-")));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+
+  const recorded = localVenue.recordPrompt(outside, PROMPT, deadlineIn(30_000));
+
+  assert.equal(recorded.outcome, "failed");
+  assert.equal(existsSync(join(outside, ".squiz")), false);
 });

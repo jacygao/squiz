@@ -203,10 +203,10 @@ function isAncestor(git: (args: readonly string[]) => ReturnType<typeof runGit>,
 
 /**
  * Link `path` into being holding `text`, unless something has that name. Two
- * starts at once both find no record, and a link fails where the name exists,
- * so the first one stands.
+ * writers at once both find no record, and a link fails where the name exists,
+ * so the first one stands, and no reader sees it half written.
  */
-function place(path: string, text: string): { readonly outcome: "done" } | Failed {
+export function place(path: string, text: string): { readonly outcome: "done" } | Failed {
   const draft = `${path}.${process.pid}.${randomUUID()}.writing`;
   try {
     writeFileSync(draft, text, { flag: "wx" });
