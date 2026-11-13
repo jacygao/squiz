@@ -16,6 +16,7 @@ import { runHost } from "../host/host.ts";
 import type { Adapter, ParsedRun, ThreadVerdict } from "../reviewers/adapter.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { githubVenue } from "../venues/github/venue.ts";
+import { localVenue } from "../venues/local/venue.ts";
 
 /** What one reviewer start reports, and how long it runs before it does. */
 export type PlannedStart = {
@@ -33,7 +34,9 @@ export type Plan = {
    * The round cap and token bound, where a test sets them. Every host reads the
    * plan afresh, so a test can lower one between runs.
    */
-  readonly config?: Partial<Pick<Config, "rounds" | "tokens">>;
+  readonly config?: Partial<Pick<Config, "rounds" | "tokens" | "fixer">>;
+  /** The venue every host reviews in. The GitHub venue where not given. */
+  readonly venue?: "local";
 };
 
 const [number = "", planFile = ""] = process.argv.slice(2);
@@ -74,5 +77,5 @@ const adapter: Adapter = {
 await runHost({
   worktree: process.cwd(),
   key: number,
-  round: { venue: githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
+  round: { venue: plan.venue === "local" ? localVenue : githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
 });

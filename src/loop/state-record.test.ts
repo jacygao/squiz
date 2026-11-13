@@ -132,6 +132,20 @@ const everyState: readonly StateRecord[] = [
     newFindings: 1,
     unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
   },
+  // #803: a round that handed its threads to a fixer, in each way the start can go.
+  {
+    head,
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["T1"],
+    ...reviewed,
+    fixer: { outcome: "started", agent: "claude", process: { pid: 4200, startedAt: 1_791_000_161 } },
+  },
+  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "exited", agent: "copilot", pid: 4201 } },
+  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "failed", agent: "claude", reason: "spawn claude ENOENT" } },
+  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "not started", reason: "no handoff was written" } },
   {
     head,
     activity: reply,
@@ -288,6 +302,14 @@ const malformed: readonly [string, unknown][] = [
   ["findings no thread holds that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], unthreaded: [1] }],
   ["problems that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
   ["failure lines that are not strings", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, lines: "posted" }],
+  // #803: a fixer read wrongly is a running fixer missed, and a second one started beside it.
+  ["#803: a fixer that is not an object", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: "started" }],
+  ["#803: a fixer with an unknown outcome", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "running", agent: "claude", pid: 1 } }],
+  ["#803: a started fixer with no process", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "claude" } }],
+  ["#803: a started fixer of an unknown agent", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "pi", process: { pid: 2, startedAt: 2 } } }],
+  ["#803: an exited fixer with no pid", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "exited", agent: "copilot" } }],
+  ["#803: a fixer that failed with no reason", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "failed", agent: "claude" } }],
+  ["#803: a fixer that failed naming no agent", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "failed", reason: "spawn claude ENOENT" } }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.
   ["a failed record not saying whether its owner was noted", { head, activity: null, status: "failed", reason: "r" }],

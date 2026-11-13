@@ -48,7 +48,7 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the seven defaults", () => {
+test("an absent .squiz.json is not an error, and yields the eight defaults", () => {
   assert.deepEqual(load(null), {
     venue: "github",
     reviewer: "pi",
@@ -57,10 +57,11 @@ test("an absent .squiz.json is not an error, and yields the seven defaults", () 
     tokens: 10_000_000,
     thinking: "medium",
     model: null,
+    fixer: null,
   });
 });
 
-test("a .squiz.json with no keys yields the same seven defaults", () => {
+test("a .squiz.json with no keys yields the same eight defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -73,7 +74,7 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini"}`,
+      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini", "fixer": "copilot"}`,
     ),
     {
       venue: "local",
@@ -83,6 +84,7 @@ test("every setting the file names is read", () => {
       tokens: 400_000,
       thinking: "high",
       model: "gpt-5-mini",
+      fixer: "copilot",
     },
   );
 });
@@ -92,6 +94,15 @@ test("venue accepts github and local, and refuses anything else, naming the valu
   assert.equal(load(`{"venue": "local"}`).venue, "local");
   for (const contents of [`{"venue": "lcoal"}`, `{"venue": ""}`, `{"venue": "GitHub"}`, `{"venue": null}`, `{"venue": 1}`]) {
     assert.match(rejection(contents).message, /: "venue" is .*, but it must be "github" or "local"$/u, contents);
+  }
+});
+
+test("#803: fixer names claude or copilot, is none where the file leaves it out, and refuses anything else", () => {
+  assert.equal(load(`{}`).fixer, null);
+  assert.equal(load(`{"fixer": "claude"}`).fixer, "claude");
+  assert.equal(load(`{"fixer": "copilot"}`).fixer, "copilot");
+  for (const contents of [`{"fixer": "pi"}`, `{"fixer": ""}`, `{"fixer": null}`, `{"fixer": true}`, `{"fixer": "Claude"}`]) {
+    assert.match(rejection(contents).message, /: "fixer" is .*, but it must be "claude" or "copilot"; leave "fixer" out for a session that is woken$/u, contents);
   }
 });
 
@@ -314,7 +325,7 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking" and "model"/);
+  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking", "model" and "fixer"/);
 });
 
 test("a .squiz.json that is there and cannot be read is not read as absent", () => {

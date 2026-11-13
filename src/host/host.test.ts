@@ -137,7 +137,7 @@ type Arrangement = {
   readonly before?: (fixture: Fixture) => void;
   /** Run once the host has returned or thrown, while the temporary directory is still the fixture's. */
   readonly after?: () => void;
-  readonly host?: Partial<Pick<HostSetup, "update" | "lock">>;
+  readonly host?: Partial<Pick<HostSetup, "update" | "lock" | "environment">>;
   /** What the reviewer runs, as a script for `/bin/sh -c`, with the state file as `$1`. It exits at once where none is given. */
   readonly reviewer?: string;
   /** What every round runs with, over what the fixture gives it. */
@@ -2359,3 +2359,207 @@ test("#802: under the local venue, a round that leaves a thread open writes the 
   }
 });
 
+
+/** Block for up to `ms` until `path` exists, for a detached process the fixture outlives only until it returns. */
+function awaitFile(path: string, ms: number): boolean {
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let waited = 0; !existsSync(path) && waited < ms; waited += 50) Atomics.wait(pause, 0, 0, 50);
+  return existsSync(path);
+}
+
+type StandInFixer = Pick<Arrangement, "before" | "host"> & {
+  /** The file the stand-in writes its arguments to, a line each. */
+  readonly argv: () => string;
+  /** The episode's closed.json. */
+  readonly marker: () => string;
+};
+
+/**
+ * Put a stand-in for `agent` among the fixture's commands, which writes the
+ * arguments it was given to `argv()`. The host's fixer gets a PATH of the
+ * fixture's commands and the system's, so no real CLI can run.
+ */
+function standInFixer(agent: "claude" | "copilot"): StandInFixer {
+  let binaries = "";
+  let marker = "";
+  const argv = (): string => join(binaries, `${agent}-argv`);
+  return {
+    before: (fixture) => {
+      binaries = fixture.binaries;
+      marker = join(fixture.episode.directory, "closed.json");
+      standIn(fixture.binaries, agent, `printf '%s\\n' "$@" > '${argv()}.part' && mv '${argv()}.part' '${argv()}'`);
+      listOpenedThreadWithReply(fixture);
+    },
+    host: {
+      environment: {
+        get PATH() {
+          return `${binaries}:/usr/bin:/bin`;
+        },
+      },
+    },
+    argv,
+    marker: () => marker,
+  };
+}
+
+test("#803: with a fixer named, a round that leaves threads open starts it on the handoff, records its process, and says so in host.log", async () => {
+  const fixer = standInFixer("claude");
+  let argv: readonly string[] = [];
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    ...fixer,
+    after: () => {
+      if (awaitFile(fixer.argv(), 5_000)) argv = readFileSync(fixer.argv(), "utf8").split("\n");
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 2, `recorded as ${JSON.stringify(record)}`);
+  assert.ok(record.fixer?.outcome === "started" || record.fixer?.outcome === "exited", `the fixer is recorded as ${JSON.stringify(record.fixer)}`);
+  assert.equal(record.fixer.agent, "claude");
+  assert.match(ran.log, /round 1: started the fixer, claude, as process \d+, writing to .*rounds\/1\/fixer\.log/u);
+  assert.equal(argv[0], "-p", `the fixer was run with ${JSON.stringify(argv)}`);
+  assert.match(argv[1] ?? "", /rounds\/1\/handoff\.md holds them/u);
+  assert.ok(argv.includes("--plugin-dir"), `the fixer was run with ${JSON.stringify(argv)}`);
+});
+
+test("#803: with a fixer named whose CLI is not on PATH, the round records the fixer failed and host.log says why, which a round that needed no fixer never does", async () => {
+  const nowhere = { environment: { PATH: "/usr/bin:/bin" } };
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "copilot" },
+    before: listOpenedThreadWithReply,
+    host: nowhere,
+  });
+  const clean = await host({ records: (fixture) => [queued(fixture.head(), null, REPORTING)], config: { fixer: "copilot" }, host: nowhere });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.fixer?.outcome, "failed", `the fixer is recorded as ${JSON.stringify(record.fixer)}`);
+  assert.match(ran.log, /round 1: the fixer, copilot, did not start: .*ENOENT/u);
+  const [closed] = recordsOf(clean.state);
+  assert.ok(closed?.status === "reviewed" && closed.result === "exited" && closed.exitStatus === 0, `recorded as ${JSON.stringify(closed)}`);
+  assert.equal(closed.fixer, undefined);
+  assert.doesNotMatch(clean.log, /fixer/u);
+});
+
+test("#803: with a fixer named, a round whose threads cannot be listed writes no handoff, and records its fixer not started, naming why", async () => {
+  const fixer = standInFixer("claude");
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    ...fixer,
+    onStart: (_, fixture) => {
+      rmSync(join(fixture.binaries, "answer-threads"));
+      // The listing the stand-in sets up for after the thread is opened.
+      rmSync(join(fixture.binaries, "on-create.sh"));
+    },
+    after: () => void awaitFile(fixer.argv(), 1_000),
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
+  assert.deepEqual(record.fixer, { outcome: "not started", reason: "no handoff was written" });
+  assert.match(ran.log, /round 1: no fixer started: no handoff was written/u);
+});
+
+test("#803: a fixer an earlier round started that is still running gets no second fixer beside it", async () => {
+  const fixer = standInFixer("claude");
+  const running = ownIdentity();
+  const earlier: StateRecord = {
+    head: EARLIER_ROUND.head,
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["PRRT_open"],
+    round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+    newFindings: 1,
+    fixer: { outcome: "started", agent: "claude", process: running },
+  };
+  let ran = false;
+  const hosted = await host({
+    records: (fixture) => [earlier, queued(fixture.head(), null, REPORTING)],
+    rounds: [EARLIER_ROUND],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    ...fixer,
+    after: () => {
+      ran = awaitFile(fixer.argv(), 1_000);
+    },
+  });
+
+  const record = recordsOf(hosted.state)[1];
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 2, `recorded as ${JSON.stringify(record)}`);
+  const reason = `the fixer round 1 started, process ${running.pid}, is still running`;
+  assert.deepEqual(record.fixer, { outcome: "not started", reason });
+  assert.ok(hosted.log.includes(`round 2: no fixer started: ${reason}`), hosted.log);
+  assert.equal(ran, false, "a second fixer ran beside the first");
+});
+
+test("#803: with a fixer named, the round host wakes no owner, and the note waits in notes/", async () => {
+  const socket = await ownerSocket();
+  try {
+    const fixer = standInFixer("claude");
+    const ran = await host({
+      records: (fixture) => [queued(fixture.head(), null, { ...PARENT, messagingSocket: socket.path })],
+      findings: [[finding("The name says nothing.")]],
+      config: { fixer: "claude" },
+      ...fixer,
+      after: () => void awaitFile(fixer.argv(), 5_000),
+    });
+
+    assert.deepEqual(socket.received(), []);
+    assert.equal(ran.notes[PARENT.sessionId]?.length, 1, `notes/ holds ${JSON.stringify(ran.notes)}`);
+    assert.doesNotMatch(ran.log, /woke its owner/u);
+    assert.match(ran.log, /no wake: \.squiz\.json names a fixer/u);
+  } finally {
+    await socket.close();
+  }
+});
+
+test("#803: with a fixer named, a round that closes the episode writes closed.json, holding the close, and starts no fixer", async () => {
+  const fixer = standInFixer("claude");
+  let marker = "";
+  let ran = false;
+  const capped = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude", rounds: 1 },
+    ...fixer,
+    after: () => {
+      ran = awaitFile(fixer.argv(), 1_000);
+      if (existsSync(fixer.marker())) marker = readFileSync(fixer.marker(), "utf8");
+    },
+  });
+
+  const [record] = recordsOf(capped.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 3, `recorded as ${JSON.stringify(record)}`);
+  assert.equal(record.fixer, undefined);
+  assert.notEqual(marker, "", `no closed.json; host.log says:\n${capped.log}`);
+  assert.deepEqual(JSON.parse(marker), { head: capped.firstHead, exitStatus: 3, openThreads: ["PRRT_new"], closedAt: "round cap" });
+  assert.match(capped.log, /round 1: wrote the close to .*closed\.json/u);
+  assert.equal(ran, false, "a fixer ran after the closing round");
+});
+
+test("#803: with no fixer named, a round that closes the episode writes no closed.json", async () => {
+  let marker = "";
+  let found = true;
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    before: (fixture) => {
+      marker = join(fixture.episode.directory, "closed.json");
+    },
+    after: () => {
+      found = existsSync(marker);
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 0, `recorded as ${JSON.stringify(record)}`);
+  assert.equal(found, false);
+});
