@@ -113,14 +113,17 @@ the rest of this section describes, and:
   each open thread with every reply on it, the description, each agent's final
   message and transcript path as its `SubagentStop` recorded them, and the
   diff the reviewer read. Where the threads cannot be listed, the round writes
-  none, and `host.log` says why.
+  none, and `host.log` says why. In a headless run, `fixer.log` beside it holds
+  the output of the fixer started on it (Headless runs below).
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
+- `closed.json`, in a headless run, once the episode has closed (Headless runs
+  below).
 - `episodes/<n>/`, for each closed episode a later one replaced, numbered from 1
-  in the order they closed: its state file, its `rounds/`, and the local venue's
-  `summary.md` (§ 4 The record), moved there when a new head starts a new
-  episode, as set out below.
+  in the order they closed: its state file, its `rounds/`, its `closed.json`,
+  and the local venue's `summary.md` (§ 4 The record), moved there when a new
+  head starts a new episode, as set out below.
 
 **`.squiz/` keeps itself out of git.** Wherever squiz makes an episode's
 directory and `.squiz/.gitignore` is missing, it writes one holding `*`. One that
@@ -153,7 +156,7 @@ Each record has one of five statuses:
 |---|---|
 | Queued | A trigger asked for a review of this state, and no round has started it. |
 | Reviewing | A round host is running the round. The record names the host, and once the reviewer starts, the reviewer's session and snapshot, so that a recovery can find and stop them. |
-| Reviewed | The round's result: its exit status and the threads it left open. A round that left nothing open while a later state was queued behind it records *reviewed clean, episode open* instead, with no exit status. That record gets exit status 0 where it later closes the episode, when the state behind it is superseded by it. A round that left the episode open also records each finding no thread holds, as § 6's Notes would give it. |
+| Reviewed | The round's result: its exit status and the threads it left open. A round that left nothing open while a later state was queued behind it records *reviewed clean, episode open* instead, with no exit status. That record gets exit status 0 where it later closes the episode, when the state behind it is superseded by it. A round that left the episode open also records each finding no thread holds, as § 6's Notes would give it. In a headless run, a round that handed its threads back also records how its fixer's start went (Headless runs below). |
 | Failed | Why the round failed, and whether its owner has had a note about it. |
 | Not reviewed | Why no round reviewed it: the episode closed first, or a later state superseded it. |
 
@@ -566,7 +569,8 @@ the empty string.
   recorded.** Copilot puts no socket there.
 
 Both hooks return as soon as they have queued, under Claude Code and Copilot
-alike. The result reaches the owner later, through the wake The report sets out.
+alike. The result reaches the owner later, through the wake The report sets out,
+or in a headless run through a fixer (Headless runs).
 
 **A `SubagentStop` firing whose `agent_type` is empty is no subagent's work.** In
 an interactive session, Claude Code fires several of them after a turn ends, each
@@ -688,6 +692,97 @@ background wakes it when it exits.
 **A note no wake reached stays where it was written.** The owner learns the
 result by running `squiz review` or `squiz status`, and the pull request holds it
 in any case.
+
+### Headless runs
+
+**A run is headless where `.squiz.json` names a `fixer`, `claude` or `copilot`
+(§ 10 Configuration).** Whoever starts the run declares it, and squiz never
+decides it from whether a session is alive. The setting reaches the hook, the
+round host and the commands alike, because each reads `.squiz.json`.
+
+**A headless run is woken by nothing.** Its hooks return at once, as every hook
+does, and its run has ended by the time its review does. The round host still
+writes each note in `notes/`, and in place of the wake writes a line in
+`host.log`:
+
+```
+3f9c2e0: no wake: .squiz.json names a fixer, so the run is headless
+```
+
+**A round that leaves threads open with a round remaining starts a fixer on its
+handoff.** Once the round has written `rounds/<k>/handoff.md`, the round host
+starts a fresh run of the CLI `fixer` names, never a resume of an earlier
+session. The fixer runs in the change's worktree, detached as the round host
+is, with its output in `rounds/<k>/fixer.log`. It runs on the CLI's own default
+model. Its command line loads squiz from the plugin directory of the squiz
+that starts it, because a new run is handed no plugin directory, settings or
+MCP configuration of the run before it:
+
+```
+claude -p <prompt> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
+copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)'
+```
+
+Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
+names the session whose hook started the host. The prompt names the handoff:
+
+```
+Squiz reviewed this change and left threads open. /work/squiz-a/.squiz/local/rounds/1/handoff.md holds them, each with every reply on it, with the change's description, the agents' final reports and the diff the reviewer read.
+
+Work the threads as it says: fix what applies, and reply on each one to say what you changed or why you disagree. Do not run `squiz review`: squiz reviews your work again when you finish.
+```
+
+**The fixer's own stop starts the next round**, as any stop does (The hooks).
+Its edits, its commit or its replies are a new state, which the hook queues.
+
+**The round cap bounds the fixers.** Only a round that leaves threads open with
+a round remaining hands anything back, so the closing round starts no fixer,
+whether it closes with threads open or with none. A cap of R starts at most
+R−1 fixers in an episode.
+
+**No fixer starts beside one still running.** Where a fixer an earlier round of
+the episode started is running, or cannot be told running or gone, by its pid
+and start time, the round starts none, and its record says why. A round no
+handoff was written for starts none either.
+
+**The reviewed record says how the fixer's start went**, in its `fixer` field,
+and `host.log` says the same in one line:
+
+| `outcome` | What it holds | `host.log` |
+|---|---|---|
+| `started` | The CLI, and the fixer's pid and start time | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log` |
+| `exited` | The CLI and the pid, for a fixer that ended before its start time could be read | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log; it had exited before it could be checked` |
+| `failed` | The CLI, and why it did not start | `round 1: the fixer, copilot, did not start: spawn copilot ENOENT` |
+| `not started` | Why no start was tried | `round 2: no fixer started: the fixer round 1 started, process 4200, is still running` |
+
+A round that needed no fixer has no `fixer` field and no such line.
+
+**The round that closes a headless episode writes `closed.json`** in the
+episode's directory, once the close is recorded and its summary posted. It
+holds the close's head, its exit status, the threads it left open and, where a
+bound closed it with threads open, which bound:
+
+```json
+{
+  "head": "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+  "exitStatus": 3,
+  "openThreads": ["T1"],
+  "closedAt": "round cap"
+}
+```
+
+The file appears whole: it is written beside its path and renamed into place. A
+caller waits for it, then reads the outcome from the episode's directory. It
+moves into `episodes/<n>/` with the rest of its episode (The state file).
+
+**Three things leave a headless episode open with no `closed.json`:** a round
+that failed, a fixer that did not start, and a fixer whose run left no new
+state, so that its stop queued nothing. A caller bounds its wait, and reads
+`host.log` and `squiz status` to tell which it was.
+
+**A headless run's handoff holds only the reports its stops carried.** A `Stop`
+records no final message or transcript, and Copilot's `SubagentStop` carries no
+transcript path, so a run with no subagent hands the fixer no agent's report.
 
 ### Parallel coding agents
 
@@ -1104,7 +1199,10 @@ result wakes the session that dispatched it, as in the GitHub venue.
 **A headless run has ended by the time its review does.** Under `claude -p` or
 `copilot -p` the review still runs, its threads and summary are written, and its
 note waits in `.squiz/local/notes/`, as § 3 says of a note no wake reached.
-Nothing hands those findings to a coding agent once the run has exited.
+Where `.squiz.json` names a `fixer`, a fresh fixer works the threads in the
+worktree, and `.squiz/local/closed.json` marks the close, as § 3 Headless runs
+sets out. Where it names none, nothing hands the findings to a coding agent
+once the run has exited.
 
 #### The commands
 
@@ -3389,7 +3487,7 @@ src/
   config/                    .squiz.json, its defaults and its ranges
   review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
   hook/                      squiz hook: a stop resolves the change and queues its review, and a start hands the worktree to the venue
-  host/                      the round host, which takes queued states and runs their rounds
+  host/                      the round host, which takes queued states, runs their rounds, and starts a headless run's fixer
   sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
   loop/                      episode state, round cap, verdict decisions
   worktree/                  toplevel resolution and the reviewer's snapshot
@@ -3582,6 +3680,11 @@ worktree is a configuration that cannot be read.
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 5 Adapters) |
+| `fixer` | none | The coding-agent CLI squiz starts, headless, to work the threads a round leaves open, `claude` or `copilot`. Naming one declares every run in the repository headless (§ 3 Headless runs). None wakes the session that owns the work instead (§ 3 The report) |
+
+`fixer` is per repository, as every setting is, so a repository whose runs are
+headless names it, and one worked in interactive sessions leaves it out. A
+`null` or empty `fixer` is refused rather than read as none.
 
 `model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
 with a letter, a digit or `@`. An empty string is refused rather than read as
