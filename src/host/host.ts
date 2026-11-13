@@ -256,7 +256,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         return { outcome: "state unwritable", reason: recorded.reason };
       }
       log(`${named(oldest)}: recorded failed`);
-      await noteOwners(episode, failed, log);
+      await noteOwners(episode, failed, log, setup.round.config.fixer !== null);
       continue;
     }
     if (started?.outcome === "started") log(`a new episode starts on a state the clean close never recorded: the closed one is in ${started.directory}`);
@@ -265,7 +265,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
       if (unreviewed > 0) log(`${unreviewed === 1 ? "1 queued state" : `${unreviewed} queued states`} recorded not reviewed: ${ALREADY_CLOSED}`);
       // A state queued for the next episode that a closed round still blocks failed, and says why.
       for (const { record } of closed) if (record.status === "failed") log(`${named(record)}: recorded failed: ${record.reason}`);
-      await noteOwners(episode, closed, log);
+      await noteOwners(episode, closed, log, setup.round.config.fixer !== null);
     }
     const round = taken;
     if (round === undefined) continue;
@@ -329,7 +329,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         let listing: Listing | undefined;
         const read = change === undefined ? undefined : { change, listed: () => (listing ??= threadsOf(setup.round.venue, change)) };
         const agent = setup.round.config.fixer;
-        await noteOwners(episode, written, log, read, agent !== null);
+        await noteOwners(episode, written, log, agent !== null, read);
         const thisRound: Round = { directory: roundDirectory(episode, round.number), label: `round ${round.number}`, log };
         const records = recorded.state.records ?? [];
         const handoffs = read === undefined ? new Map<StateRecord, string>() : handOff(thisRound, written, records, read, diff);
@@ -389,7 +389,7 @@ type Read = { readonly change: Change; readonly listed: () => Listing };
  * its change records threads open. A `headless` run wakes no one: its session
  * has ended by the time its review does.
  */
-async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log, read?: Read, headless = false): Promise<void> {
+async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: Log, headless: boolean, read?: Read): Promise<void> {
   const notes = join(episode.directory, "notes");
   const change = episodeChange(episode, read?.change);
   for (const { record, name, closed } of recorded) {
@@ -518,6 +518,9 @@ function startFixers(
 function runningFixer(records: readonly StateRecord[], record: StateRecord): FixerStart | undefined {
   for (const earlier of records) {
     if (earlier === record || earlier.status !== "reviewed" || earlier.result !== "exited") continue;
+    if (earlier.fixer?.outcome === "unknown") {
+      return { outcome: "not started", reason: `whether the fixer round ${earlier.round.number} started could not be told, so it may still be running` };
+    }
     if (earlier.fixer?.outcome !== "started") continue;
     // One that cannot be told running or gone is left to run, and none is started beside it.
     if (stillRunning(earlier.fixer.process, FIXER_START_MS).outcome === "gone") continue;
@@ -535,7 +538,7 @@ function fixerStarted(agent: FixerAgent, detached: ReturnType<typeof startFixer>
     case "failed":
       return { outcome: "failed", agent, reason: detached.reason };
     case "unknown":
-      return { outcome: "failed", agent, reason: `whether it started could not be told: ${detached.reason}` };
+      return { outcome: "unknown", agent, reason: detached.reason };
   }
 }
 
@@ -547,6 +550,8 @@ function fixerLine(fixer: FixerStart, output: string): string {
       return `started the fixer, ${fixer.agent}, as process ${fixer.pid}, writing to ${output}; it had exited before it could be checked`;
     case "failed":
       return `the fixer, ${fixer.agent}, did not start: ${fixer.reason}`;
+    case "unknown":
+      return `whether the fixer, ${fixer.agent}, started could not be told: ${fixer.reason}`;
     case "not started":
       return `no fixer started: ${fixer.reason}`;
   }

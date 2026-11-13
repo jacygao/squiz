@@ -87,6 +87,8 @@ export type FixerStart =
   /** It started, and had ended before its identity could be read. */
   | { readonly outcome: "exited"; readonly agent: FixerAgent; readonly pid: number }
   | { readonly outcome: "failed"; readonly agent: FixerAgent; readonly reason: string }
+  /** It may have started, and nothing could say so, or what it is. */
+  | { readonly outcome: "unknown"; readonly agent: FixerAgent; readonly reason: string }
   /** No start was tried, for the reason given. */
   | { readonly outcome: "not started"; readonly reason: string };
 
@@ -432,7 +434,7 @@ function fixerFrom(found: unknown): FixerStart | undefined {
   const reason = found["reason"];
   if (outcome === "not started") return isText(reason) ? { outcome, reason } : undefined;
   if (agent !== "claude" && agent !== "copilot") return undefined;
-  if (outcome === "failed") return isText(reason) ? { outcome, agent, reason } : undefined;
+  if (outcome === "failed" || outcome === "unknown") return isText(reason) ? { outcome, agent, reason } : undefined;
   if (outcome === "started") {
     const identity = identityFrom(found["process"]);
     return identity === undefined ? undefined : { outcome, agent, process: identity };

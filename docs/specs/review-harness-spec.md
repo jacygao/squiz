@@ -753,6 +753,7 @@ and `host.log` says the same in one line:
 | `started` | The CLI, and the fixer's pid and start time | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log` |
 | `exited` | The CLI and the pid, for a fixer that ended before its start time could be read | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log; it had exited before it could be checked` |
 | `failed` | The CLI, and why it did not start | `round 1: the fixer, copilot, did not start: spawn copilot ENOENT` |
+| `unknown` | The CLI, and why nothing could say whether it started. No later round of the episode starts a fixer. | `round 1: whether the fixer, claude, started could not be told: the intermediate process did not answer within 5000ms` |
 | `not started` | Why no start was tried | `round 2: no fixer started: the fixer round 1 started, process 4200, is still running` |
 
 A round that needed no fixer has no `fixer` field and no such line.

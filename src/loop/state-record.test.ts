@@ -146,6 +146,7 @@ const everyState: readonly StateRecord[] = [
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "exited", agent: "copilot", pid: 4201 } },
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "failed", agent: "claude", reason: "spawn claude ENOENT" } },
   { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "not started", reason: "no handoff was written" } },
+  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "unknown", agent: "copilot", reason: "the intermediate process did not answer within 5000ms" } },
   {
     head,
     activity: reply,

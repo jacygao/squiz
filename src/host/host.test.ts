@@ -2563,3 +2563,60 @@ test("#803: with no fixer named, a round that closes the episode writes no close
   assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 0, `recorded as ${JSON.stringify(record)}`);
   assert.equal(found, false);
 });
+
+test("#803: with a fixer named, a state whose reviewing record cannot be written fails and wakes no owner", async () => {
+  const socket = await ownerSocket();
+  try {
+    let calls = 0;
+    const ran = await host({
+      records: (fixture) => [queued(fixture.head(), null, { ...MAIN, messagingSocket: socket.path })],
+      config: { fixer: "claude" },
+      host: {
+        environment: { PATH: "/usr/bin:/bin" },
+        update: (episode, change, options) => {
+          calls += 1;
+          return calls === 1 ? { outcome: "failed", reason: "the disk said no" } : updateState(episode, change, options);
+        },
+      },
+    });
+
+    const [record] = recordsOf(ran.state);
+    assert.ok(record?.status === "failed", `recorded as ${JSON.stringify(record)}`);
+    assert.deepEqual(socket.received(), []);
+    assert.equal(ran.notes[MAIN.sessionId]?.length, 1, `notes/ holds ${JSON.stringify(ran.notes)}`);
+  } finally {
+    await socket.close();
+  }
+});
+
+test("#803: a fixer an earlier round may have started, whose start could not be told, gets no second fixer beside it", async () => {
+  const fixer = standInFixer("claude");
+  const earlier: StateRecord = {
+    head: EARLIER_ROUND.head,
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["PRRT_open"],
+    round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+    newFindings: 1,
+    fixer: { outcome: "unknown", agent: "claude", reason: "the intermediate process did not answer within 5000ms" },
+  };
+  let ran = false;
+  const hosted = await host({
+    records: (fixture) => [earlier, queued(fixture.head(), null, REPORTING)],
+    rounds: [EARLIER_ROUND],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    ...fixer,
+    after: () => {
+      ran = awaitFile(fixer.argv(), 1_000);
+    },
+  });
+
+  const record = recordsOf(hosted.state)[1];
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 2, `recorded as ${JSON.stringify(record)}`);
+  const reason = "whether the fixer round 1 started could not be told, so it may still be running";
+  assert.deepEqual(record.fixer, { outcome: "not started", reason });
+  assert.equal(ran, false, "a second fixer ran beside one that may have started");
+});
