@@ -493,19 +493,32 @@ function startFixers(
   write: (change: (state: EpisodeState) => EpisodeState) => StateUpdate,
 ): void {
   const logPath = join(directory, "fixer.log");
-  for (const { record } of recorded) {
-    if (!handsBack(record)) continue;
-    const handoff = handoffs.get(record);
-    const fixer: FixerStart =
-      handoff === undefined
-        ? { outcome: "not started", reason: "no handoff was written" }
-        : (runningFixer(records, record) ?? fixerStarted(agent, startFixer({ agent, handoff, worktree: episode.worktree, logPath, environment }, FIXER_START_MS)));
-    log(`${label}: ${fixerLine(fixer, logPath)}`);
-    const noted = write((state) => {
+  const put = (record: StateRecord, fixer: FixerStart): StateUpdate =>
+    write((state) => {
       const held = (state.records ?? []).find((each) => sameState(each, record));
       if (held?.status !== "reviewed" || held.result !== "exited") return state;
       return withRecords(state, [{ ...held, fixer }]);
     });
+  for (const { record } of recorded) {
+    if (!handsBack(record)) continue;
+    const handoff = handoffs.get(record);
+    const held = handoff === undefined ? { outcome: "not started" as const, reason: "no handoff was written" } : runningFixer(records, record);
+    if (held !== undefined) {
+      log(`${label}: ${fixerLine(held, logPath)}`);
+      const noted = put(record, held);
+      if (noted.outcome === "failed") log(`${label}: why no fixer started could not be recorded: ${noted.reason}`);
+      continue;
+    }
+    // Reserved before the start, so a start the state file then refuses still
+    // holds back every later fixer, as one that cannot be told gone does.
+    const reserved = put(record, { outcome: "unknown", agent, reason: "its start was never recorded" });
+    if (reserved.outcome === "failed") {
+      log(`${label}: no fixer started: its start could not be reserved: ${reserved.reason}`);
+      continue;
+    }
+    const fixer = fixerStarted(agent, startFixer({ agent, handoff: handoff ?? "", worktree: episode.worktree, logPath, environment }, FIXER_START_MS));
+    log(`${label}: ${fixerLine(fixer, logPath)}`);
+    const noted = put(record, fixer);
     if (noted.outcome === "failed") log(`${label}: the fixer's start could not be recorded: ${noted.reason}`);
   }
 }

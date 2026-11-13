@@ -2372,6 +2372,8 @@ type StandInFixer = Pick<Arrangement, "before" | "host"> & {
   readonly argv: () => string;
   /** The episode's closed.json. */
   readonly marker: () => string;
+  /** The file the stand-in adds a line to each time it runs. */
+  readonly runs: () => string;
 };
 
 /**
@@ -2383,11 +2385,12 @@ function standInFixer(agent: "claude" | "copilot"): StandInFixer {
   let binaries = "";
   let marker = "";
   const argv = (): string => join(binaries, `${agent}-argv`);
+  const runs = (): string => join(binaries, `${agent}-runs`);
   return {
     before: (fixture) => {
       binaries = fixture.binaries;
       marker = join(fixture.episode.directory, "closed.json");
-      standIn(fixture.binaries, agent, `printf '%s\\n' "$@" > '${argv()}.part' && mv '${argv()}.part' '${argv()}'`);
+      standIn(fixture.binaries, agent, `echo ran >> '${runs()}'; printf '%s\\n' "$@" > '${argv()}.part' && mv '${argv()}.part' '${argv()}'`);
       listOpenedThreadWithReply(fixture);
     },
     host: {
@@ -2398,6 +2401,7 @@ function standInFixer(agent: "claude" | "copilot"): StandInFixer {
       },
     },
     argv,
+    runs,
     marker: () => marker,
   };
 }
@@ -2619,4 +2623,45 @@ test("#803: a fixer an earlier round may have started, whose start could not be 
   const reason = "whether the fixer round 1 started could not be told, so it may still be running";
   assert.deepEqual(record.fixer, { outcome: "not started", reason });
   assert.equal(ran, false, "a second fixer ran beside one that may have started");
+});
+
+test("#803: a fixer whose start the state file will not take stays reserved, and the next round starts no second fixer beside it", async () => {
+  const fixer = standInFixer("claude");
+  let runs = 0;
+  let pushed = "";
+  const hosted = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")], [finding("The name still says nothing.")]],
+    config: { fixer: "claude" },
+    ...fixer,
+    onStart: (index, fixture) => {
+      if (index !== 0) return;
+      pushed = fixture.push();
+      // The reply the listing shows once round 1 has opened its thread is part of the state.
+      queueNow(fixture.episode, queued(pushed, "PRRC_reply", REPORTING));
+    },
+    host: {
+      ...fixer.host,
+      // Refuses every write that would record a fixer as started.
+      update: (episode, change, options) => {
+        const read = readState(episode);
+        const after = change(read.outcome === "read" ? read.state : { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 } });
+        const starts = (after.records ?? []).some((record) => record.status === "reviewed" && record.result === "exited" && (record.fixer?.outcome === "started" || record.fixer?.outcome === "exited"));
+        return starts ? { outcome: "failed", reason: "the disk said no" } : updateState(episode, change, options);
+      },
+    },
+    after: () => {
+      awaitFile(fixer.argv(), 5_000);
+      // A second fixer would have started by the time the host returned.
+      runs = existsSync(fixer.runs()) ? readFileSync(fixer.runs(), "utf8").trim().split("\n").length : 0;
+    },
+  });
+
+  const [first, second] = recordsOf(hosted.state);
+  assert.ok(first?.status === "reviewed" && first.result === "exited" && first.exitStatus === 2, `recorded as ${JSON.stringify(first)}`);
+  assert.equal(first.fixer?.outcome, "unknown", `the first fixer is recorded as ${JSON.stringify(first.fixer)}`);
+  assert.match(hosted.log, /round 1: the fixer's start could not be recorded: the disk said no/u);
+  assert.ok(second?.status === "reviewed" && second.result === "exited" && second.exitStatus === 2, `recorded as ${JSON.stringify(second)}`);
+  assert.equal(second.fixer?.outcome, "not started", `the second fixer is recorded as ${JSON.stringify(second.fixer)}`);
+  assert.equal(runs, 1, `${runs} fixers ran`);
 });

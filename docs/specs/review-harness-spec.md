@@ -758,6 +758,12 @@ and `host.log` says the same in one line:
 
 A round that needed no fixer has no `fixer` field and no such line.
 
+**The round records the fixer as `unknown` before it starts it**, with the
+reason `its start was never recorded`, and replaces that with how the start
+went. A state file that refuses the reservation starts no fixer. One that takes
+the reservation and refuses the result keeps the reservation, which holds back
+every later fixer of the episode, as any `unknown` does.
+
 **The round that closes a headless episode writes `closed.json`** in the
 episode's directory, once the close is recorded and its summary posted. It
 holds the close's head, its exit status, the threads it left open and, where a
