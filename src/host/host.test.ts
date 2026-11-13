@@ -17,7 +17,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFile
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -110,6 +110,8 @@ type Hosted = {
   readonly archives: readonly (EpisodeState | null)[];
   /** What `squiz status` printed once the host had exited. */
   readonly status: { readonly stdout: string; readonly stderr: string };
+  /** The episode's stopped.json once the host had exited, parsed, or undefined where there was none. */
+  readonly stopped: unknown;
 };
 
 type Arrangement = {
@@ -137,7 +139,7 @@ type Arrangement = {
   readonly before?: (fixture: Fixture) => void;
   /** Run once the host has returned or thrown, while the temporary directory is still the fixture's. */
   readonly after?: () => void;
-  readonly host?: Partial<Pick<HostSetup, "update" | "lock" | "environment">>;
+  readonly host?: Partial<Pick<HostSetup, "update" | "lock" | "environment" | "clock" | "presence">>;
   /** What the reviewer runs, as a script for `/bin/sh -c`, with the state file as `$1`. It exits at once where none is given. */
   readonly reviewer?: string;
   /** What every round runs with, over what the fixture gives it. */
@@ -277,6 +279,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
         return archived.outcome === "read" ? archived.state : null;
       }),
       status,
+      stopped: stopIn(join(episode.directory, "stopped.json")),
     };
   } finally {
     arranged.after?.();
@@ -2376,12 +2379,18 @@ type StandInFixer = Pick<Arrangement, "before" | "host"> & {
   readonly runs: () => string;
 };
 
+/** The stopped.json at `path`, parsed, or undefined where there is none. */
+function stopIn(path: string): unknown {
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+}
+
 /**
  * Put a stand-in for `agent` among the fixture's commands, which writes the
- * arguments it was given to `argv()`. The host's fixer gets a PATH of the
- * fixture's commands and the system's, so no real CLI can run.
+ * arguments it was given to `argv()`, or runs `script` where one is given. The
+ * host's fixer gets a PATH of the fixture's commands and the system's, so no
+ * real CLI can run.
  */
-function standInFixer(agent: "claude" | "copilot"): StandInFixer {
+function standInFixer(agent: "claude" | "copilot", script?: (runs: string) => string): StandInFixer {
   let binaries = "";
   let marker = "";
   const argv = (): string => join(binaries, `${agent}-argv`);
@@ -2390,7 +2399,7 @@ function standInFixer(agent: "claude" | "copilot"): StandInFixer {
     before: (fixture) => {
       binaries = fixture.binaries;
       marker = join(fixture.episode.directory, "closed.json");
-      standIn(fixture.binaries, agent, `echo ran >> '${runs()}'; printf '%s\\n' "$@" > '${argv()}.part' && mv '${argv()}.part' '${argv()}'`);
+      standIn(fixture.binaries, agent, script?.(runs()) ?? `echo ran >> '${runs()}'; printf '%s\\n' "$@" > '${argv()}.part' && mv '${argv()}.part' '${argv()}'`);
       listOpenedThreadWithReply(fixture);
     },
     host: {
@@ -2405,6 +2414,177 @@ function standInFixer(agent: "claude" | "copilot"): StandInFixer {
     marker: () => marker,
   };
 }
+
+test("#860: in a headless run, a round that failed ends in stopped.json naming it, written only once no state is left queued", async () => {
+  let stopFile = "";
+  let whileQueued: boolean | undefined;
+  let pushed = "";
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    incomplete: "the provider refused the credential",
+    config: { fixer: "claude" },
+    host: { environment: { PATH: "/usr/bin:/bin" } },
+    before: (fixture) => {
+      stopFile = join(fixture.episode.directory, "stopped.json");
+    },
+    onStart: (index, fixture) => {
+      if (index === 0) {
+        pushed = fixture.push();
+        queueNow(fixture.episode, queued(pushed, null, REPORTING));
+      } else {
+        whileQueued = existsSync(stopFile);
+      }
+    },
+  });
+
+  const [first, last] = recordsOf(ran.state);
+  assert.equal(first?.status, "failed", `recorded as ${JSON.stringify(recordsOf(ran.state))}`);
+  assert.ok(last?.status === "failed" && last.head === pushed, `recorded as ${JSON.stringify(recordsOf(ran.state))}`);
+  assert.equal(whileQueued, false, "stopped.json was there while a state was still queued");
+  assert.deepEqual(ran.stopped, { head: pushed, stopped: "round failed", reason: last.reason }, ran.log);
+  assert.match(ran.log, /wrote the stop to .*stopped\.json: round failed/u);
+});
+
+test("#860: in a headless run, a fixer that did not start, or got no handoff to start on, ends in stopped.json naming it, with why", async () => {
+  const absent = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "copilot" },
+    before: listOpenedThreadWithReply,
+    host: { environment: { PATH: "/usr/bin:/bin" } },
+  });
+  const noHandoff = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    ...standInFixer("claude"),
+    onStart: (_, fixture) => {
+      rmSync(join(fixture.binaries, "answer-threads"));
+      rmSync(join(fixture.binaries, "on-create.sh"));
+    },
+  });
+
+  const [failed] = recordsOf(absent.state);
+  assert.ok(failed?.status === "reviewed" && failed.result === "exited" && failed.fixer?.outcome === "failed", `recorded as ${JSON.stringify(failed)}`);
+  assert.deepEqual(absent.stopped, { head: absent.firstHead, stopped: "fixer did not start", reason: failed.fixer.reason }, absent.log);
+  assert.deepEqual(noHandoff.stopped, { head: noHandoff.firstHead, stopped: "fixer did not start", reason: "no handoff was written" }, noHandoff.log);
+});
+
+/**
+ * A clock for the host that jumps `stepMs` each time it is read, so a wait
+ * bounded in minutes passes within a few looks.
+ */
+function jumpingClock(stepMs: number): () => number {
+  let now = Date.now();
+  return () => (now += stepMs);
+}
+
+for (const ps of ["answers", "cannot answer"] as const) {
+  test(`#860: in a headless run whose ps ${ps}, a fixer still running at the host's bound on its wait ends in stopped.json naming the bound, and the host exits`, async () => {
+    // Runs well past the test, unless the host waits on it out.
+    const fixer = standInFixer("claude", (runs) => `echo started >> '${runs}'; sleep 20; echo ended >> '${runs}'`);
+    let ended = true;
+    const ran = await host({
+      records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+      findings: [[finding("The name says nothing.")]],
+      config: { fixer: "claude", timeout: 60, rounds: 2 },
+      ...fixer,
+      host: {
+        ...fixer.host,
+        clock: jumpingClock(60_000),
+        ...(ps === "answers" ? {} : { presence: () => ({ outcome: "unknown", reason: "ps did not answer within 5000ms" }) }),
+      },
+      after: () => {
+        ended = existsSync(fixer.runs()) && readFileSync(fixer.runs(), "utf8").includes("ended");
+      },
+    });
+
+    const [record] = recordsOf(ran.state);
+    assert.ok(record?.status === "reviewed" && record.result === "exited" && record.fixer?.outcome === "started", `recorded as ${JSON.stringify(record)}`);
+    stopProcess(record.fixer.process.pid);
+    assert.equal(ended, false, "the host waited for the fixer to exit, past its bound");
+    assert.deepEqual(ran.stopped, {
+      head: ran.firstHead,
+      stopped: "fixer outlived its bound",
+      reason: `the fixer round 1 started, process ${record.fixer.process.pid}, was not seen to exit within 120 seconds, the reviewer's time bound for each of the 2 rounds the cap allows`,
+    }, ran.log);
+  });
+}
+
+test("#860: a round that runs while the host waits on a fixer does not restart the bound on that wait", async () => {
+  const fixer = standInFixer("claude", (runs) => `echo started >> '${runs}'; sleep 20; echo ended >> '${runs}'`);
+  // Bounded at 180 seconds: a timeout of 60 for each of 3 rounds.
+  let now = Date.now();
+  let watching: ReturnType<typeof setInterval> | undefined;
+  let pushed = "";
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")], [finding("The name still says nothing.")]],
+    config: { fixer: "claude", timeout: 60, rounds: 3 },
+    ...fixer,
+    host: { ...fixer.host, clock: () => now },
+    onStart: (index, fixture) => {
+      // Into the second round's review, the wait on the fixer has run past its bound.
+      if (index === 1) now += 190_000;
+      if (index !== 0) return;
+      const hostLog = join(fixture.episode.directory, "host.log");
+      watching = setInterval(() => {
+        if (pushed !== "" || !existsSync(hostLog) || !readFileSync(hostLog, "utf8").includes("waiting for the fixer")) return;
+        pushed = fixture.push();
+        queueNow(fixture.episode, queued(pushed, "PRRC_reply", REPORTING));
+      }, 50);
+    },
+    after: () => clearInterval(watching),
+  });
+
+  const [first, second] = recordsOf(ran.state);
+  assert.ok(first?.status === "reviewed" && first.result === "exited" && first.fixer?.outcome === "started", `recorded as ${JSON.stringify(recordsOf(ran.state))}`);
+  stopProcess(first.fixer.process.pid);
+  assert.ok(second?.status === "reviewed" && second.result === "exited" && second.fixer?.outcome === "not started", `recorded as ${JSON.stringify(second)}`);
+  assert.equal((ran.stopped as { stopped?: string } | undefined)?.stopped, "fixer outlived its bound", ran.log);
+});
+
+/** Kill `pid`, where it is still running. */
+function stopProcess(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
+
+test("#860: in a headless run, a fixer whose run queued nothing ends in stopped.json once it exits, and not while it runs", async () => {
+  const fixer = standInFixer("claude", (runs) => `echo started >> '${runs}'; sleep 2; echo ended >> '${runs}'`);
+  let early = false;
+  let watching: ReturnType<typeof setInterval> | undefined;
+  let ended = false;
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")]],
+    config: { fixer: "claude" },
+    ...fixer,
+    onStart: () => {
+      watching = setInterval(() => {
+        const runs = existsSync(fixer.runs()) ? readFileSync(fixer.runs(), "utf8") : "";
+        if (runs.includes("started") && !runs.includes("ended") && existsSync(join(dirname(fixer.marker()), "stopped.json"))) early = true;
+      }, 50);
+    },
+    after: () => {
+      clearInterval(watching);
+      ended = existsSync(fixer.runs()) && readFileSync(fixer.runs(), "utf8").includes("ended");
+    },
+  });
+
+  const [record] = recordsOf(ran.state);
+  assert.ok(record?.status === "reviewed" && record.result === "exited" && record.fixer?.outcome === "started", `recorded as ${JSON.stringify(record)}`);
+  assert.equal(early, false, "stopped.json was there while the fixer still ran");
+  assert.equal(ended, true, "the host returned before the fixer exited");
+  assert.deepEqual(ran.stopped, {
+    head: ran.firstHead,
+    stopped: "fixer queued nothing",
+    reason: `the fixer round 1 started, process ${record.fixer.process.pid}, exited, and its run queued nothing`,
+  }, ran.log);
+});
 
 test("#803: with a fixer named, a round that leaves threads open starts it on the handoff, records its process, and says so in host.log", async () => {
   const fixer = standInFixer("claude");
@@ -2471,9 +2651,14 @@ test("#803: with a fixer named, a round whose threads cannot be listed writes no
   assert.match(ran.log, /round 1: no fixer started: no handoff was written/u);
 });
 
-test("#803: a fixer an earlier round started that is still running gets no second fixer beside it", async () => {
+test("#803 #860: a fixer an earlier round started that is still running gets no second fixer beside it, and once it exits with nothing queued, stopped.json names it", async () => {
   const fixer = standInFixer("claude");
-  const running = ownIdentity();
+  // The earlier fixer, which runs past the round and stops queuing nothing.
+  const sleeper = spawn("/bin/sh", ["-c", "sleep 3"], { stdio: "ignore" });
+  const read = identityOf(sleeper.pid ?? 0, 5_000);
+  assert.ok(read.outcome === "read", `the earlier fixer's identity was not read: ${JSON.stringify(read)}`);
+  const running = read.identity;
+  let exitedFirst = false;
   const earlier: StateRecord = {
     head: EARLIER_ROUND.head,
     activity: null,
@@ -2494,6 +2679,7 @@ test("#803: a fixer an earlier round started that is still running gets no secon
     ...fixer,
     after: () => {
       ran = awaitFile(fixer.argv(), 1_000);
+      exitedFirst = sleeper.exitCode !== null;
     },
   });
 
@@ -2503,6 +2689,12 @@ test("#803: a fixer an earlier round started that is still running gets no secon
   assert.deepEqual(record.fixer, { outcome: "not started", reason });
   assert.ok(hosted.log.includes(`round 2: no fixer started: ${reason}`), hosted.log);
   assert.equal(ran, false, "a second fixer ran beside the first");
+  assert.equal(exitedFirst, true, "the host returned while the earlier fixer still ran");
+  assert.deepEqual(hosted.stopped, {
+    head: record.head,
+    stopped: "earlier fixer queued nothing",
+    reason: `round 2 started no fixer while the one round 1 started ran, and that one's last stop queued nothing`,
+  }, hosted.log);
 });
 
 test("#803: with a fixer named, the round host wakes no owner, and the note waits in notes/", async () => {

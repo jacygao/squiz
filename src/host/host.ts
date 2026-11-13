@@ -25,11 +25,15 @@
  * its handoff instead, and a round that closes the episode writes `closed.json`
  * for whoever started the run to wait on. A fixer that does not start is
  * recorded on the round's state as well as in `host.log`, because otherwise it
- * reads exactly as a round that needed none.
+ * reads exactly as a round that needed none. With nothing queued, the host
+ * waits for every fixer to exit before it does, because a fixer whose stop
+ * queued nothing is noticed by nothing else. Where the episode has then
+ * stopped short of its close, it writes `stopped.json` instead.
  */
 
-import { appendFileSync, existsSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { unthreadedNotes } from "../loop/summary-body.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
@@ -62,14 +66,15 @@ import {
   type StateKey,
   type StateRecord,
 } from "../loop/state-record.ts";
-import { updateState, type StateUpdate } from "../loop/state-update.ts";
+import { underStateLock, updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
-import { stillRunning, type ProcessIdentity } from "../sessions/process.ts";
+import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { startFixer } from "./fixer.ts";
 import { handoffFor, handsBack } from "./handoff.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote, threadsToPrint } from "./owner-note.ts";
+import { NO_HANDOFF, STOP_FILE, stopOf, writeWhole, type Stop } from "./stopped.ts";
 import { wakeOwner } from "./wake.ts";
 
 // Each `ps` run that tells whether the lock's holder is still running.
@@ -87,6 +92,9 @@ const ALREADY_CLOSED = "the episode had closed before a round took this state";
 // Starting the fixer, and reading back what started. A start cut short at this
 // bound is recorded as a failure, and the next round's start is not held up.
 const FIXER_START_MS = 5_000;
+
+// The pause between looks at a fixer the host waits on, and at the queue its stops add to.
+const FIXER_POLL_MS = 1_000;
 
 // A reviewed record must name where its reviewer ran. This stands in only where
 // a round reviewed without saying where its reviewer started, which is a defect.
@@ -107,6 +115,10 @@ export type HostSetup = {
   readonly note?: string;
   /** The environment a fixer's is made from. The host's own where not given. */
   readonly environment?: NodeJS.ProcessEnv;
+  /** The time in milliseconds, which bounds the wait on a fixer. `Date.now` where not given. */
+  readonly clock?: () => number;
+  /** Whether a fixer the host waits on is still running, asked within `boundMs`. `stillRunning` where not given. */
+  readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
 };
 
 /** Why the host exited. */
@@ -176,6 +188,8 @@ type Log = (line: string) => void;
 
 async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, log: Log): Promise<HostEnd> {
   const update = setup.update ?? updateState;
+  // When the host began waiting on each fixer, by its pid and start time, kept across the rounds that run while it waits.
+  const waitingSince = new Map<string, number>();
   const write = (change: (state: EpisodeState) => EpisodeState): StateUpdate =>
     update(episode, change, { until: deadlineIn(STATE_WAIT_MS) });
 
@@ -184,7 +198,14 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     const read = readState(episode);
     if (read.outcome === "unreadable") return { outcome: "state unreadable", reason: read.reason };
     const oldest = read.outcome === "read" ? queuedIn(read.state)[0] : undefined;
-    if (oldest === undefined) return { outcome: "nothing queued" };
+    if (oldest === undefined) {
+      if (setup.round.config.fixer === null) return { outcome: "nothing queued" };
+      const waited = await awaitFixers(setup, episode, log, waitingSince);
+      if (waited === "queued") continue;
+      if (waited !== "settled" && "outcome" in waited) return waited;
+      markStop(episode, log, waited === "settled" ? undefined : waited);
+      return { outcome: "nothing queued" };
+    }
 
     const startedAt = nowSeconds();
     let taken: { readonly record: QueuedRecord; readonly number: number } | undefined;
@@ -502,7 +523,7 @@ function startFixers(
   for (const { record } of recorded) {
     if (!handsBack(record)) continue;
     const handoff = handoffs.get(record);
-    const held = handoff === undefined ? { outcome: "not started" as const, reason: "no handoff was written" } : runningFixer(records, record);
+    const held = handoff === undefined ? { outcome: "not started" as const, reason: NO_HANDOFF } : runningFixer(records, record);
     if (held !== undefined) {
       log(`${label}: ${fixerLine(held, logPath)}`);
       const noted = put(record, held);
@@ -540,6 +561,94 @@ function runningFixer(records: readonly StateRecord[], record: StateRecord): Fix
     return { outcome: "not started", reason: `the fixer round ${earlier.round.number} started, process ${earlier.fixer.process.pid}, is still running` };
   }
   return undefined;
+}
+
+/**
+ * Wait until no fixer the episode's records name as started is running, and
+ * say whether a state was queued first.
+ *
+ * One that cannot be told running or gone is waited on, as one running is,
+ * but no fixer is waited on past the bound: a host that never exits holds the
+ * host lock, and every later trigger would read the episode as in hand. A
+ * fixer still not seen to exit by then gives the stop to write. A closed
+ * episode is waited on no further: whatever its fixers' stops queue starts a
+ * host of its own.
+ *
+ * `since` holds when the wait on each fixer began. A round that runs while the
+ * host waits does not start the bound again.
+ */
+async function awaitFixers(
+  setup: HostSetup,
+  episode: Episode,
+  log: Log,
+  since: Map<string, number>,
+): Promise<"queued" | "settled" | Stop | HostEnd> {
+  const clock = setup.clock ?? Date.now;
+  const { timeout, rounds } = setup.round.config;
+  const boundSeconds = timeout * rounds;
+  for (;;) {
+    if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
+    const read = readState(episode);
+    if (read.outcome === "unreadable") return { outcome: "state unreadable", reason: read.reason };
+    if (read.outcome === "absent") return "settled";
+    if (queuedIn(read.state).length > 0) return "queued";
+    if (read.state.closeReported === true) return "settled";
+    const running = fixerRunning(read.state.records ?? [], setup.presence ?? stillRunning);
+    if (running === undefined) return "settled";
+    const key = `${running.pid} ${running.startedAt}`;
+    const began = since.get(key);
+    if (began === undefined) {
+      since.set(key, clock());
+      log(`waiting for the fixer round ${running.round} started, process ${running.pid}, to exit, for at most ${boundSeconds} seconds`);
+    } else if (clock() - began >= boundSeconds * 1_000) {
+      const reason = `the fixer round ${running.round} started, process ${running.pid}, was not seen to exit within ${boundSeconds} seconds, the reviewer's time bound for each of the ${rounds} rounds the cap allows`;
+      log(`stopped waiting: ${reason}`);
+      return { head: running.head, stopped: "fixer outlived its bound", reason };
+    }
+    await sleep(FIXER_POLL_MS);
+  }
+}
+
+/** A fixer of `records` that is running, or cannot be told running or gone. */
+function fixerRunning(
+  records: readonly StateRecord[],
+  presence: (identity: ProcessIdentity, boundMs: number) => Presence,
+): { readonly round: number; readonly pid: number; readonly startedAt: number; readonly head: string } | undefined {
+  for (const record of records) {
+    if (record.status !== "reviewed" || record.result !== "exited" || record.fixer?.outcome !== "started") continue;
+    if (presence(record.fixer.process, FIXER_START_MS).outcome === "gone") continue;
+    const { pid, startedAt } = record.fixer.process;
+    return { round: record.round.number, pid, startedAt, head: (records.at(-1) ?? record).head };
+  }
+  return undefined;
+}
+
+/**
+ * Write `stopped.json` where the episode has stopped short of its close, and
+ * say in `host.log` what was written, or why nothing was.
+ *
+ * It is decided and written under the state lock, so a trigger that queues a
+ * state, and removes the file in the same update, comes before it or after it
+ * and never between.
+ */
+function markStop(episode: Episode, log: Log, outlived?: Stop): void {
+  const path = join(episode.directory, STOP_FILE);
+  const marked = underStateLock(
+    episode,
+    (state): string | undefined => {
+      const stopping = stopOf(state, outlived);
+      if (stopping.outcome === "not stopped") return stopping.quiet ? undefined : `marked no stop: ${stopping.reason}`;
+      try {
+        writeWhole(path, stopping.stop);
+        return `wrote the stop to ${path}: ${stopping.stop.stopped}`;
+      } catch (cause) {
+        return `wrote no stop to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`;
+      }
+    },
+    { until: deadlineIn(STATE_WAIT_MS) },
+  );
+  const line = marked.outcome === "held" ? marked.value : `wrote no stop to ${path}: ${marked.reason}`;
+  if (line !== undefined) log(line);
 }
 
 function fixerStarted(agent: FixerAgent, detached: ReturnType<typeof startFixer>): FixerStart {
@@ -591,15 +700,11 @@ function closeOf(record: StateRecord): Close | undefined {
   return undefined;
 }
 
-/**
- * Write `close` to the episode's `closed.json`, whole or not at all, so a caller
- * waiting on the file never reads half of it.
- */
+/** Write `close` to the episode's `closed.json`, whole or not at all. */
 function writeClose(episode: Episode, close: Close, { label: round, log }: Round): void {
   const path = join(episode.directory, CLOSE_FILE);
   try {
-    writeFileSync(`${path}.${process.pid}`, `${JSON.stringify(close, null, 2)}\n`, "utf8");
-    renameSync(`${path}.${process.pid}`, path);
+    writeWhole(path, close);
     log(`${round}: wrote the close to ${path}`);
   } catch (cause) {
     log(`${round}: wrote no close to ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);

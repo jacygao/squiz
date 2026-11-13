@@ -34,6 +34,7 @@ import { lockHolder } from "../sessions/lock-file.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { venueAt, type Change, type ReviewThread, type Venue } from "../venues/venue.ts";
 import { worktreeToplevel } from "../worktree/toplevel.ts";
+import { clearStop } from "./stopped.ts";
 
 const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
 
@@ -160,6 +161,7 @@ export function trigger(request: TriggerRequest): Triggered {
   });
 
   let queued = false;
+  let stopLeft: string | undefined;
   if (decision.outcome === "queue") {
     const workspace = request.environment["HERDR_WORKSPACE_ID"];
     const fresh: StateRecord = {
@@ -176,6 +178,10 @@ export function trigger(request: TriggerRequest): Triggered {
         // A record or a close written since the read came from another trigger or
         // a host, and the decision no longer applies.
         if (episodeOver(current, state) || now?.status !== record?.status) return current;
+        // A caller waiting on the episode would read a stop left beside the
+        // queued state as the end of it, so the state is not queued without its removal.
+        stopLeft = clearStop(episode);
+        if (stopLeft !== undefined) return current;
         queued = true;
         // A failed state queued again goes on the end, as any state queued now
         // does, because the records' order is the order the rounds take them in.
@@ -187,6 +193,7 @@ export function trigger(request: TriggerRequest): Triggered {
       { until },
     );
     if (updated.outcome === "failed") return failed(updated.reason);
+    if (stopLeft !== undefined) return failed(`the state was not queued: ${stopLeft}`);
   }
 
   // A host seen running before the queue was written can have found its queue

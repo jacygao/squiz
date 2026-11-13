@@ -37,7 +37,15 @@ export type Plan = {
   readonly config?: Partial<Pick<Config, "rounds" | "tokens" | "fixer">>;
   /** The venue every host reviews in. The GitHub venue where not given. */
   readonly venue?: "local";
+  /** What each run of `fixer-stand-in.ts` does, in order. A run past the end changes the tree and stops once. */
+  readonly fixes?: readonly PlannedFix[];
 };
+
+/**
+ * What one fixer run does: change the tree and stop, stop having changed
+ * nothing, or change the tree, stop, wait for that change's review, and stop again.
+ */
+export type PlannedFix = "changes" | "changes nothing" | "stops twice";
 
 const [number = "", planFile = ""] = process.argv.slice(2);
 const plan = JSON.parse(readFileSync(planFile, "utf8")) as Plan;

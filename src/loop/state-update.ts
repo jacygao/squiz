@@ -91,6 +91,29 @@ export function updateState(
   return held.outcome === "held" ? held.value : notWritten(held.reason);
 }
 
+/**
+ * Run `act` on the episode's state as it stands, under the state lock, and
+ * write nothing to the state file. It is for a write elsewhere that must not
+ * fall between another writer's read and its write.
+ *
+ * Fails where the lock is not taken by `options.until`, or the file cannot be
+ * read. Never throws, unless `act` does.
+ */
+export function underStateLock<T>(episode: Episode, act: (state: EpisodeState) => T, options: UpdateOptions): Locked<T> {
+  const held = holdingLock(
+    episode.directory,
+    LOCK_NAME,
+    (): Locked<T> => {
+      const found = readState(episode);
+      if (found.outcome === "unreadable") return { outcome: "failed", reason: found.reason };
+      return { outcome: "held", value: act(found.outcome === "read" ? found.state : { rounds: [], spentOutsideRounds: unspent }) };
+    },
+    options,
+    options.until.passed(),
+  );
+  return held.outcome === "held" ? held.value : held;
+}
+
 /** What `act` returned, or why the lock it needed was never taken. */
 export type Locked<T> =
   | { readonly outcome: "held"; readonly value: T }

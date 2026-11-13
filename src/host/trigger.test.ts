@@ -501,6 +501,23 @@ test("a hook leaves a failed state failed, and squiz review queues it again", as
   });
 });
 
+test("#860: a hook on a failed state leaves the episode's stopped.json, and squiz review, queuing the state again, removes it", async () => {
+  await withFixture(async (fixture) => {
+    const failed: StateRecord = { ...state, status: "failed", reason: "the round host died", ownerNoted: true };
+    seed(fixture.episode, { records: [failed] });
+    const stopFile = join(fixture.episode.directory, "stopped.json");
+    writeFileSync(stopFile, `${JSON.stringify({ head: HEAD, stopped: "round failed", reason: failed.reason })}\n`, "utf8");
+
+    decided(trigger(request(fixture)));
+    assert.equal(existsSync(stopFile), true, "a hook that queued nothing removed stopped.json");
+
+    const byReview = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
+    assert.equal(byReview.queued, true);
+    assert.equal(existsSync(stopFile), false, "stopped.json is still there with a state queued");
+    await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
+  });
+});
+
 test("#424: a failed state squiz review queues again goes behind every state recorded after it, so the records keep the order rounds ran in", async () => {
   await withFixture(async (fixture) => {
     const failed: StateRecord = { ...state, status: "failed", reason: "the round host died", ownerNoted: true };
