@@ -42,10 +42,15 @@ export type Plan = {
 };
 
 /**
- * What one fixer run does: change the tree and stop, stop having changed
- * nothing, or change the tree, stop, wait for that change's review, and stop again.
+ * What one fixer run does:
+ *
+ * - `changes`: change the tree and stop.
+ * - `changes nothing`: stop having changed nothing.
+ * - `stops twice`: change the tree, stop, wait for that change's review, and stop again.
+ * - `cannot resume`: exit 1 at once where it was asked to resume a session, and change and stop otherwise.
+ * - `stops as another session`: change the tree, and stop carrying a session id other than its own.
  */
-export type PlannedFix = "changes" | "changes nothing" | "stops twice";
+export type PlannedFix = "changes" | "changes nothing" | "stops twice" | "cannot resume" | "stops as another session";
 
 const [number = "", planFile = ""] = process.argv.slice(2);
 const plan = JSON.parse(readFileSync(planFile, "utf8")) as Plan;

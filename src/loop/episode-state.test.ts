@@ -77,6 +77,18 @@ test("state written comes back as it was written", (t) => {
   assert.deepEqual(readState(episode), { outcome: "read", state });
 });
 
+test("#876: the fixer's session comes back as written: its CLI, its id, the round that started it, and the comments it has been shown", (t) => {
+  const episode = episodeIn(t);
+  const state: EpisodeState = {
+    rounds: [firstRound],
+    spentOutsideRounds: unspent,
+    fixerSession: { agent: "copilot", id: "561adfe1-9888-48be-a97c-f4b6d9e081b3", round: 1, shown: ["C1", "C2"] },
+  };
+
+  assert.deepEqual(writeState(episode, state), { outcome: "written" });
+  assert.deepEqual(readState(episode), { outcome: "read", state });
+});
+
 test("how long each round ran and posted, and the bound that cut one short, come back as written", (t) => {
   const episode = episodeIn(t);
   const state: EpisodeState = {
@@ -305,6 +317,14 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "rulings": [], ${NONE_OUTSIDE}}`,
   `{"rounds": [], "rulings": {"PRRT_a": "resolved"}, ${NONE_OUTSIDE}}`,
   `{"rounds": [], "rulings": {"PRRT_a": null}, ${NONE_OUTSIDE}}`,
+  // #876: a fixer session read wrongly is a session resumed under the wrong CLI,
+  // or one no later round resumes.
+  `{"rounds": [], "fixerSession": "561adfe1", ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "pi", "id": "561adfe1", "round": 1, "shown": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "", "round": 1, "shown": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 0, "shown": []}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": [3]}, ${NONE_OUTSIDE}}`,
   // Two records for one state leave no telling which of them is true.
   `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}], ${NONE_OUTSIDE}}`,
 ];

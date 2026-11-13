@@ -9,7 +9,8 @@
  *
  * Its arguments are the host fixture's plan file and a file to append to, then
  * the arguments the fixer was started with. It appends one line per stop: the
- * prompt it was given, then how the trigger went.
+ * prompt it was given, the session it ran in and whether it resumed it, then
+ * how the trigger went. Its stops carry that session's id, as both CLIs' do.
  */
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -23,24 +24,34 @@ import { LOCAL_KEY, localVenue } from "../venues/local/venue.ts";
 import type { Plan } from "./host-fixture.ts";
 
 const hostFixture = fileURLToPath(new URL("host-fixture.ts", import.meta.url));
-const [planFile = "", log = "", , prompt = ""] = process.argv.slice(2);
+const [planFile = "", log = "", , prompt = "", ...options] = process.argv.slice(2);
 const plan = JSON.parse(readFileSync(planFile, "utf8")) as Plan;
 const countFile = `${planFile}.fixed`;
 const run = existsSync(countFile) ? Number(readFileSync(countFile, "utf8")) : 0;
 writeFileSync(countFile, String(run + 1), "utf8");
 const fix = plan.fixes?.[run] ?? "changes";
 
+/** The value of `--name value` or `--name=value` among the options, as both CLIs take it. */
+function option(name: string): string | undefined {
+  const at = options.indexOf(name);
+  if (at !== -1) return options[at + 1];
+  return options.find((each) => each.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
+const resumed = option("--resume");
+const session = resumed ?? option("--session-id") ?? `fixer-${process.pid}`;
+
 function stop(): void {
   const triggered = trigger({
     directory: process.cwd(),
     trigger: "hook",
-    owner: { sessionId: `fixer-${process.pid}` },
+    owner: { sessionId: fix === "stops as another session" ? `another-${process.pid}` : session },
     environment: process.env,
     until: deadlineIn(10_000),
     host: (key) => ({ command: process.execPath, args: [hostFixture, key, planFile] }),
   });
   const how = triggered.outcome === "decided" ? `${triggered.decision.outcome}, queued ${String(triggered.queued)}` : triggered.outcome;
-  appendFileSync(log, `${JSON.stringify({ prompt, triggered: how })}\n`, "utf8");
+  appendFileSync(log, `${JSON.stringify({ prompt, session, resumed: resumed !== undefined, triggered: how })}\n`, "utf8");
 }
 
 /** Block until the local episode records `count` reviewed states, or 60 seconds pass. */
@@ -55,6 +66,8 @@ function awaitReviewed(count: number): void {
   }
 }
 
+// A CLI asked to resume a session it cannot find exits 1 before any turn, so no stop fires.
+if (fix === "cannot resume" && resumed !== undefined) process.exit(1);
 if (fix !== "changes nothing") appendFileSync("fixed.txt", `a fix by process ${process.pid}\n`, "utf8");
 stop();
 if (fix === "stops twice") {

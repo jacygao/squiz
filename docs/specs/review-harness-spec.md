@@ -114,7 +114,9 @@ the rest of this section describes, and:
   message and transcript path as its stop recorded them (The hooks), and the
   diff the reviewer read. Where the threads cannot be listed, the round writes
   none, and `host.log` says why. In a headless run, `fixer.log` beside it holds
-  the output of the fixer started on it (Headless runs below).
+  the output of the fixer started on it, and a round that resumes the fixer's
+  session also writes `update.md`, what changed since its last handoff, and
+  `fixer.exit`, the resumed CLI's exit status (Headless runs below).
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
@@ -765,17 +767,31 @@ writes each note in `notes/`, and in place of the wake writes a line in
 
 **A round that leaves threads open with a round remaining starts a fixer on its
 handoff.** Once the round has written `rounds/<k>/handoff.md`, the round host
-starts a fresh run of the CLI `fixer` names, never a resume of an earlier
-session. The fixer runs in the change's worktree, detached as the round host
-is, with its output in `rounds/<k>/fixer.log`. It runs on the CLI's own default
-model. Its command line loads squiz from the plugin directory of the squiz
-that starts it, because a new run is handed no plugin directory, settings or
-MCP configuration of the run before it:
+runs the CLI `fixer` names. The fixer runs in the change's worktree, detached
+as the round host is, with its output in `rounds/<k>/fixer.log`. It runs on the
+CLI's own default model.
+
+**An episode has one fixer session.** The first round that starts a fixer
+starts it in a new session, under a UUID squiz chooses. Every later round of
+the episode resumes that session instead of starting another. The reviewer is
+never resumed: each round's review runs in a session of its own, so no reviewer
+judges fixes to its own findings. A new episode starts a new fixer session.
+
+Both CLIs take the session's id on the command line. Its command line loads
+squiz from the plugin directory of the squiz that starts it, and carries the
+same grants and flags whether it starts the session or resumes it, because a
+run, resumed or not, inherits no plugin directory, permission mode, settings or
+MCP configuration from the run before it:
 
 ```
-claude -p <prompt> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
-copilot -p <prompt> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' --disable-builtin-mcps --no-auto-update --disable-client-telemetry
+claude -p <prompt> --session-id <id> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
+claude -p <prompt> --resume <id> --plugin-dir <squiz> --permission-mode acceptEdits --allowedTools 'Bash(squiz:*)' 'Bash(git:*)'
+copilot -p <prompt> --session-id=<id> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' --disable-builtin-mcps --no-auto-update --disable-client-telemetry
+copilot -p <prompt> --resume=<id> --plugin-dir <squiz> --no-ask-user --allow-tool=write '--allow-tool=shell(squiz)' '--allow-tool=shell(git)' --disable-builtin-mcps --no-auto-update --disable-client-telemetry
 ```
+
+Copilot is resumed with `--resume`, which fails on an id it cannot find.
+`--session-id` resumes a session it finds and starts one where it finds none.
 
 A Copilot fixer carries the three flags the Copilot reviewer does (The Copilot
 adapter), which turn off the built-in GitHub MCP server, auto-update and client
@@ -801,22 +817,103 @@ runs, so naming `node` lets the fixer run any program `node` can. Without
 
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
 names the session whose hook started the host, and with `SQUIZ_FIXER=1`, which
-keeps the fixer's prompt from being recorded as the run's (The hooks). The
-prompt names the handoff:
+keeps the fixer's prompt from being recorded as the run's (The hooks).
+
+**The prompt that starts the session names the handoff:**
 
 ```
 Squiz reviewed this change and left threads open. /work/squiz-a/.squiz/local/rounds/1/handoff.md holds them, each with every reply on it, with the change's description, the agents' final reports and the diff the reviewer read.
 
 Work the threads as it says: fix what applies, and reply on each one to say what you changed or why you disagree. Do not run `squiz review`: squiz reviews your work again when you finish.
+
+- Before changing code, check that the finding holds. Where it does not, change nothing for it, and say why in your reply.
+
+- Name the invariant each finding breaks, and every place in the changed area where it must hold. Fix it at all of them, with the same small correction or at the one boundary they share, not only where the finding points.
+
+- Add no machinery: no new handling, state, fallback, retry or subsystem to manage a symptom.
+
+- Make every edit first. Then re-trace the failing sequence each finding describes through the code as it now is, and the ordinary path through every function you changed and its callers, and remove anything your fix left unreachable.
+
+- Then run one focused check of the changed area, such as the test file you touched, rather than the whole suite. Where you cannot run it, say so in your reply.
 ```
+
+**A resume is handed only what changed since the session's last handoff.** The
+round writes `rounds/<k>/update.md` beside the handoff. It holds each open
+thread the session was shown nothing of, whole; each comment posted since on a
+thread it was shown, the reviewer's rulings among them; each thread it was
+shown that has closed since, with its new comments; and the open threads with
+nothing new, by name:
+
+```
+# Update for PR #41 at 3f9c2e0, round 2
+
+Squiz reviewed PR #41 at 3f9c2e0 again in round 2: 1 thread is open. This holds only what changed since your last handoff.
+
+…the venue's follow-up…
+
+## New replies on threads still open
+
+PRRT_a src/sync/queue.ts:134 high — Retry backoff resets
+  **Squiz reviewer · open**
+
+  The drain does not run on a timeout.
+```
+
+The resume's prompt names the update first and the handoff second, then gives
+the same instructions and rules:
+
+```
+Squiz reviewed your work again and left threads open. /work/squiz-a/.squiz/local/rounds/2/update.md holds what changed since your last handoff: the threads opened since, the replies and rulings posted since, and the threads closed since. /work/squiz-a/.squiz/local/rounds/2/handoff.md holds the whole handoff again, should you need it.
+```
+
+`host.log` says which it was:
+
+```
+round 1: starting the fixer in a new session, 561adfe1-9888-48be-a97c-f4b6d9e081b3
+round 2: wrote the update to /work/squiz-a/.squiz/local/rounds/2/update.md
+round 2: resuming the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3, which round 1 started
+```
+
+**The episode records its fixer session as `fixerSession` in the state file**:
+the CLI, the session id, the round whose fixer started it, and the node ids of
+the comments it has been shown. It never holds a prompt or a transcript. A
+fixer that started records the session in the same update that records its
+start. One that did not start leaves the session as it was.
+
+**A round starts a fresh fixer rather than resuming** where `.squiz.json` now
+names another CLI than the session's, or where the state it hands back was
+queued by a stop carrying another session's id. Both CLIs hand the hook the
+session's id on every stop, so a resume that had started a new session would
+read that way. `host.log` says why:
+
+```
+round 2: starting a fresh fixer: the state it hands back was queued by session 0b7e…, not by the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3
+```
+
+**A resume that fails is run again as a fresh fixer.** A resumed fixer runs
+under `/bin/sh`, which writes the CLI's exit status to `rounds/<k>/fixer.exit`
+when it ends, and the process recorded is that shell. Both CLIs exit 1 at once
+on a session they cannot find, before any stop fires. Where the round host
+finds no fixer running and nothing queued, and the last state's resumed fixer
+has written a status other than 0, it drops the session, starts a fresh fixer on
+that round's `handoff.md` in a new session, and records it on the state in
+place of the resume:
+
+```
+round 2: the resume of the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3 failed: it exited 1; starting a fresh fixer on the whole handoff
+```
+
+A fixer started fresh this way is never resumed again in the same round. One
+that wrote no status was killed, and is treated as any fixer that exited.
 
 **The fixer's own stop starts the next round**, as any stop does (The hooks).
 Its edits, its commit or its replies are a new state, which the hook queues.
 
 **The round cap bounds the fixers.** Only a round that leaves threads open with
 a round remaining hands anything back, so the closing round starts no fixer,
-whether it closes with threads open or with none. A cap of R starts at most
-R−1 fixers in an episode.
+whether it closes with threads open or with none. A cap of R runs the fixer at
+most R−1 times in an episode, each run a start or a resume of its session, and
+a resume that failed is run again fresh within its own round.
 
 **No fixer starts beside one still running.** Where a fixer an earlier round of
 the episode started is running, or cannot be told running or gone, by its pid
@@ -828,8 +925,8 @@ and `host.log` says the same in one line:
 
 | `outcome` | What it holds | `host.log` |
 |---|---|---|
-| `started` | The CLI, and the fixer's pid and start time | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log` |
-| `exited` | The CLI and the pid, for a fixer that ended before its start time could be read | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log; it had exited before it could be checked` |
+| `started` | The CLI, the fixer's pid and start time, and its `session`: the id, and whether it resumed it | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log` |
+| `exited` | The CLI, the pid and the `session`, for a fixer that ended before its start time could be read | `round 1: started the fixer, claude, as process 4200, writing to …/rounds/1/fixer.log; it had exited before it could be checked` |
 | `failed` | The CLI, and why it did not start | `round 1: the fixer, copilot, did not start: spawn copilot ENOENT` |
 | `unknown` | The CLI, and why nothing could say whether it started. No later round of the episode starts a fixer. | `round 1: whether the fixer, claude, started could not be told: the intermediate process did not answer within 5000ms` |
 | `not started` | Why no start was tried | `round 2: no fixer started: the fixer round 1 started, process 4200, is still running` |
@@ -1411,7 +1508,7 @@ result wakes the session that dispatched it, as in the GitHub venue.
 **A headless run has ended by the time its review does.** Under `claude -p` or
 `copilot -p` the review still runs, its threads and summary are written, and its
 note waits in `.squiz/local/notes/`, as § 3 says of a note no wake reached.
-Where `.squiz.json` names a `fixer`, a fresh fixer works the threads in the
+Where `.squiz.json` names a `fixer`, the episode's fixer works the threads in the
 worktree, and `.squiz/local/closed.json` marks the close, as § 3 Headless runs
 sets out. Where it names none, nothing hands the findings to a coding agent
 once the run has exited.

@@ -85,14 +85,17 @@ export type ReviewedExit = 0 | 2 | 3;
  * host's start of it saw.
  */
 export type FixerStart =
-  | { readonly outcome: "started"; readonly agent: FixerAgent; readonly process: ProcessIdentity }
+  | { readonly outcome: "started"; readonly agent: FixerAgent; readonly process: ProcessIdentity; readonly session?: StartedSession }
   /** It started, and had ended before its identity could be read. */
-  | { readonly outcome: "exited"; readonly agent: FixerAgent; readonly pid: number }
+  | { readonly outcome: "exited"; readonly agent: FixerAgent; readonly pid: number; readonly session?: StartedSession }
   | { readonly outcome: "failed"; readonly agent: FixerAgent; readonly reason: string }
   /** It may have started, and nothing could say so, or what it is. */
   | { readonly outcome: "unknown"; readonly agent: FixerAgent; readonly reason: string }
   /** No start was tried, for the reason given. */
   | { readonly outcome: "not started"; readonly reason: string };
+
+/** The session a fixer ran in, and whether it resumed it rather than starting it. */
+export type StartedSession = { readonly id: string; readonly resumed: boolean };
 
 /** What closed an episode with threads still open. */
 export type ClosingBound = "round cap" | "token bound";
@@ -442,13 +445,23 @@ function fixerFrom(found: unknown): FixerStart | undefined {
   if (outcome === "not started") return isText(reason) ? { outcome, reason } : undefined;
   if (agent !== "claude" && agent !== "copilot") return undefined;
   if (outcome === "failed" || outcome === "unknown") return isText(reason) ? { outcome, agent, reason } : undefined;
+  const session = found["session"];
+  const read = session === undefined ? undefined : sessionFrom(session);
+  if (session !== undefined && read === undefined) return undefined;
+  const kept = read === undefined ? {} : { session: read };
   if (outcome === "started") {
     const identity = identityFrom(found["process"]);
-    return identity === undefined ? undefined : { outcome, agent, process: identity };
+    return identity === undefined ? undefined : { outcome, agent, process: identity, ...kept };
   }
   const pid = found["pid"];
   if (outcome !== "exited" || typeof pid !== "number" || !Number.isInteger(pid) || pid < 1) return undefined;
-  return { outcome, agent, pid };
+  return { outcome, agent, pid, ...kept };
+}
+
+function sessionFrom(found: unknown): StartedSession | undefined {
+  if (!isObject(found)) return undefined;
+  const { id, resumed } = found;
+  return isText(id) && typeof resumed === "boolean" ? { id, resumed } : undefined;
 }
 
 function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {
