@@ -2511,6 +2511,39 @@ for (const ps of ["answers", "cannot answer"] as const) {
   });
 }
 
+test("#860: a round that runs while the host waits on a fixer does not restart the bound on that wait", async () => {
+  const fixer = standInFixer("claude", (runs) => `echo started >> '${runs}'; sleep 20; echo ended >> '${runs}'`);
+  // Bounded at 180 seconds: a timeout of 60 for each of 3 rounds.
+  let now = Date.now();
+  let watching: ReturnType<typeof setInterval> | undefined;
+  let pushed = "";
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing.")], [finding("The name still says nothing.")]],
+    config: { fixer: "claude", timeout: 60, rounds: 3 },
+    ...fixer,
+    host: { ...fixer.host, clock: () => now },
+    onStart: (index, fixture) => {
+      // Into the second round's review, the wait on the fixer has run past its bound.
+      if (index === 1) now += 190_000;
+      if (index !== 0) return;
+      const hostLog = join(fixture.episode.directory, "host.log");
+      watching = setInterval(() => {
+        if (pushed !== "" || !existsSync(hostLog) || !readFileSync(hostLog, "utf8").includes("waiting for the fixer")) return;
+        pushed = fixture.push();
+        queueNow(fixture.episode, queued(pushed, "PRRC_reply", REPORTING));
+      }, 50);
+    },
+    after: () => clearInterval(watching),
+  });
+
+  const [first, second] = recordsOf(ran.state);
+  assert.ok(first?.status === "reviewed" && first.result === "exited" && first.fixer?.outcome === "started", `recorded as ${JSON.stringify(recordsOf(ran.state))}`);
+  stopProcess(first.fixer.process.pid);
+  assert.ok(second?.status === "reviewed" && second.result === "exited" && second.fixer?.outcome === "not started", `recorded as ${JSON.stringify(second)}`);
+  assert.equal((ran.stopped as { stopped?: string } | undefined)?.stopped, "fixer outlived its bound", ran.log);
+});
+
 /** Kill `pid`, where it is still running. */
 function stopProcess(pid: number): void {
   try {

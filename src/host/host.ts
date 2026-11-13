@@ -188,6 +188,8 @@ type Log = (line: string) => void;
 
 async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, log: Log): Promise<HostEnd> {
   const update = setup.update ?? updateState;
+  // When the host began waiting on each fixer, by its pid, kept across the rounds that run while it waits.
+  const waitingSince = new Map<number, number>();
   const write = (change: (state: EpisodeState) => EpisodeState): StateUpdate =>
     update(episode, change, { until: deadlineIn(STATE_WAIT_MS) });
 
@@ -198,7 +200,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     const oldest = read.outcome === "read" ? queuedIn(read.state)[0] : undefined;
     if (oldest === undefined) {
       if (setup.round.config.fixer === null) return { outcome: "nothing queued" };
-      const waited = await awaitFixers(setup, episode, log);
+      const waited = await awaitFixers(setup, episode, log, waitingSince);
       if (waited === "queued") continue;
       if (waited !== "settled" && "outcome" in waited) return waited;
       markStop(episode, log, waited === "settled" ? undefined : waited);
@@ -571,12 +573,19 @@ function runningFixer(records: readonly StateRecord[], record: StateRecord): Fix
  * fixer still not seen to exit by then gives the stop to write. A closed
  * episode is waited on no further: whatever its fixers' stops queue starts a
  * host of its own.
+ *
+ * `since` holds when the wait on each fixer began. A round that runs while the
+ * host waits does not start the bound again.
  */
-async function awaitFixers(setup: HostSetup, episode: Episode, log: Log): Promise<"queued" | "settled" | Stop | HostEnd> {
+async function awaitFixers(
+  setup: HostSetup,
+  episode: Episode,
+  log: Log,
+  since: Map<number, number>,
+): Promise<"queued" | "settled" | Stop | HostEnd> {
   const clock = setup.clock ?? Date.now;
   const { timeout, rounds } = setup.round.config;
   const boundSeconds = timeout * rounds;
-  let awaited: { readonly pid: number; readonly since: number } | undefined;
   for (;;) {
     if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
     const read = readState(episode);
@@ -586,10 +595,11 @@ async function awaitFixers(setup: HostSetup, episode: Episode, log: Log): Promis
     if (read.state.closeReported === true) return "settled";
     const running = fixerRunning(read.state.records ?? [], setup.presence ?? stillRunning);
     if (running === undefined) return "settled";
-    if (running.pid !== awaited?.pid) {
-      awaited = { pid: running.pid, since: clock() };
+    const began = since.get(running.pid);
+    if (began === undefined) {
+      since.set(running.pid, clock());
       log(`waiting for the fixer round ${running.round} started, process ${running.pid}, to exit, for at most ${boundSeconds} seconds`);
-    } else if (clock() - awaited.since >= boundSeconds * 1_000) {
+    } else if (clock() - began >= boundSeconds * 1_000) {
       const reason = `the fixer round ${running.round} started, process ${running.pid}, was not seen to exit within ${boundSeconds} seconds, the reviewer's time bound for each of the ${rounds} rounds the cap allows`;
       log(`stopped waiting: ${reason}`);
       return { head: running.head, stopped: "fixer outlived its bound", reason };

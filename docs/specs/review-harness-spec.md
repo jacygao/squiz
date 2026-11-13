@@ -794,7 +794,8 @@ waiting for the fixer round 1 started, process 4200, to exit, for at most 2700 s
 
 **The wait on one fixer is bounded by the reviewer's time bound for each round
 the cap allows**, `timeout` × `rounds` seconds, 2,700 by default, counted from
-when the host begins waiting on it. A fixer that cannot be told running or gone
+when the host first waits on it. A round that runs while the host waits does
+not start the count again. A fixer that cannot be told running or gone
 is waited on as one running is, and the time counts toward the bound. A host
 that waited without one would hold `host.lock` for good, and every later
 trigger would read the episode as in hand. Once the bound passes, the host
