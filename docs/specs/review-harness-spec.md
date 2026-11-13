@@ -786,17 +786,25 @@ caller that sees it reads the outcome from the episode's directory. It moves int
 Once nothing is queued, it looks every second at the queue and at each fixer
 the records name as started, by its pid and start time. A state queued meanwhile
 is taken as any other. A close ends the wait: whatever a fixer still running
-then queues starts a host of its own. A fixer that cannot be told running or gone is waited on as
-one running is. `host.log` names the fixer it waits on:
+then queues starts a host of its own. `host.log` names the fixer it waits on:
 
 ```
-waiting for the fixer round 1 started, process 4200, to exit
+waiting for the fixer round 1 started, process 4200, to exit, for at most 2700 seconds
 ```
+
+**The wait on one fixer is bounded by the reviewer's time bound for each round
+the cap allows**, `timeout` × `rounds` seconds, 2,700 by default, counted from
+when the host begins waiting on it. A fixer that cannot be told running or gone
+is waited on as one running is, and the time counts toward the bound. A host
+that waited without one would hold `host.lock` for good, and every later
+trigger would read the episode as in hand. Once the bound passes, the host
+writes `stopped.json` naming it and exits. A fixer that then stops and queues a
+state starts a host of its own, and its trigger removes the file.
 
 **An episode that stops short of its close writes `stopped.json`** in the
 episode's directory, beside where `closed.json` would be. The host writes it as
-it exits, once no fixer is running, and only where the episode has not closed
-and no state is queued or under review. It holds the head of the last state
+it exits, once no fixer is running or the bound on its wait has passed, and only
+where the episode has not closed and no state is queued or under review. It holds the head of the last state
 recorded, which case stopped the episode, and why:
 
 ```json
@@ -813,6 +821,7 @@ recorded, which case stopped the episode, and why:
 | `fixer did not start` | Handed its threads back, and its fixer failed to start, got no handoff, or had no start recorded | Why, from its `fixer` field |
 | `fixer queued nothing` | Handed its threads back, and its fixer started and exited | Which fixer, and that its run queued nothing |
 | `earlier fixer queued nothing` | Handed its threads back, and started no fixer because an earlier one was running, which then exited | Which earlier fixer, and that its last stop queued nothing |
+| `fixer outlived its bound` | Any, with a fixer not seen to exit within the bound above | Which fixer, and the bound |
 
 The host decides and writes it under `state.lock`, beside its path and renamed
 into place, as `closed.json` is. `host.log` says what it wrote:

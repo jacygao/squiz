@@ -69,12 +69,12 @@ import {
 import { underStateLock, updateState, type StateUpdate } from "../loop/state-update.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
-import { stillRunning, type ProcessIdentity } from "../sessions/process.ts";
+import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { startFixer } from "./fixer.ts";
 import { handoffFor, handsBack } from "./handoff.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
 import { ownerNote, threadsToPrint } from "./owner-note.ts";
-import { NO_HANDOFF, STOP_FILE, stopOf, writeWhole } from "./stopped.ts";
+import { NO_HANDOFF, STOP_FILE, stopOf, writeWhole, type Stop } from "./stopped.ts";
 import { wakeOwner } from "./wake.ts";
 
 // Each `ps` run that tells whether the lock's holder is still running.
@@ -115,6 +115,10 @@ export type HostSetup = {
   readonly note?: string;
   /** The environment a fixer's is made from. The host's own where not given. */
   readonly environment?: NodeJS.ProcessEnv;
+  /** The time in milliseconds, which bounds the wait on a fixer. `Date.now` where not given. */
+  readonly clock?: () => number;
+  /** Whether a fixer the host waits on is still running, asked within `boundMs`. `stillRunning` where not given. */
+  readonly presence?: (identity: ProcessIdentity, boundMs: number) => Presence;
 };
 
 /** Why the host exited. */
@@ -194,10 +198,10 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
     const oldest = read.outcome === "read" ? queuedIn(read.state)[0] : undefined;
     if (oldest === undefined) {
       if (setup.round.config.fixer === null) return { outcome: "nothing queued" };
-      const waited = await awaitFixers(episode, log);
+      const waited = await awaitFixers(setup, episode, log);
       if (waited === "queued") continue;
-      if (waited !== "settled") return waited;
-      markStop(episode, log);
+      if (waited !== "settled" && "outcome" in waited) return waited;
+      markStop(episode, log, waited === "settled" ? undefined : waited);
       return { outcome: "nothing queued" };
     }
 
@@ -561,12 +565,18 @@ function runningFixer(records: readonly StateRecord[], record: StateRecord): Fix
  * Wait until no fixer the episode's records name as started is running, and
  * say whether a state was queued first.
  *
- * One that cannot be told running or gone is waited on, as one running is.
- * A closed episode is waited on no further: whatever its fixers' stops queue
- * starts a host of its own.
+ * One that cannot be told running or gone is waited on, as one running is,
+ * but no fixer is waited on past the bound: a host that never exits holds the
+ * host lock, and every later trigger would read the episode as in hand. A
+ * fixer still not seen to exit by then gives the stop to write. A closed
+ * episode is waited on no further: whatever its fixers' stops queue starts a
+ * host of its own.
  */
-async function awaitFixers(episode: Episode, log: Log): Promise<"queued" | "settled" | HostEnd> {
-  let awaited: number | undefined;
+async function awaitFixers(setup: HostSetup, episode: Episode, log: Log): Promise<"queued" | "settled" | Stop | HostEnd> {
+  const clock = setup.clock ?? Date.now;
+  const { timeout, rounds } = setup.round.config;
+  const boundSeconds = timeout * rounds;
+  let awaited: { readonly pid: number; readonly since: number } | undefined;
   for (;;) {
     if (worktreeGone(episode.worktree)) return { outcome: "worktree gone" };
     const read = readState(episode);
@@ -574,22 +584,29 @@ async function awaitFixers(episode: Episode, log: Log): Promise<"queued" | "sett
     if (read.outcome === "absent") return "settled";
     if (queuedIn(read.state).length > 0) return "queued";
     if (read.state.closeReported === true) return "settled";
-    const running = fixerRunning(read.state.records ?? []);
+    const running = fixerRunning(read.state.records ?? [], setup.presence ?? stillRunning);
     if (running === undefined) return "settled";
-    if (running.pid !== awaited) {
-      awaited = running.pid;
-      log(`waiting for the fixer round ${running.round} started, process ${running.pid}, to exit`);
+    if (running.pid !== awaited?.pid) {
+      awaited = { pid: running.pid, since: clock() };
+      log(`waiting for the fixer round ${running.round} started, process ${running.pid}, to exit, for at most ${boundSeconds} seconds`);
+    } else if (clock() - awaited.since >= boundSeconds * 1_000) {
+      const reason = `the fixer round ${running.round} started, process ${running.pid}, was not seen to exit within ${boundSeconds} seconds, the reviewer's time bound for each of the ${rounds} rounds the cap allows`;
+      log(`stopped waiting: ${reason}`);
+      return { head: running.head, stopped: "fixer outlived its bound", reason };
     }
     await sleep(FIXER_POLL_MS);
   }
 }
 
 /** A fixer of `records` that is running, or cannot be told running or gone. */
-function fixerRunning(records: readonly StateRecord[]): { readonly round: number; readonly pid: number } | undefined {
+function fixerRunning(
+  records: readonly StateRecord[],
+  presence: (identity: ProcessIdentity, boundMs: number) => Presence,
+): { readonly round: number; readonly pid: number; readonly head: string } | undefined {
   for (const record of records) {
     if (record.status !== "reviewed" || record.result !== "exited" || record.fixer?.outcome !== "started") continue;
-    if (stillRunning(record.fixer.process, FIXER_START_MS).outcome === "gone") continue;
-    return { round: record.round.number, pid: record.fixer.process.pid };
+    if (presence(record.fixer.process, FIXER_START_MS).outcome === "gone") continue;
+    return { round: record.round.number, pid: record.fixer.process.pid, head: (records.at(-1) ?? record).head };
   }
   return undefined;
 }
@@ -602,12 +619,12 @@ function fixerRunning(records: readonly StateRecord[]): { readonly round: number
  * state, and removes the file in the same update, comes before it or after it
  * and never between.
  */
-function markStop(episode: Episode, log: Log): void {
+function markStop(episode: Episode, log: Log, outlived?: Stop): void {
   const path = join(episode.directory, STOP_FILE);
   const marked = underStateLock(
     episode,
     (state): string | undefined => {
-      const stopping = stopOf(state);
+      const stopping = stopOf(state, outlived);
       if (stopping.outcome === "not stopped") return stopping.quiet ? undefined : `marked no stop: ${stopping.reason}`;
       try {
         writeWhole(path, stopping.stop);
