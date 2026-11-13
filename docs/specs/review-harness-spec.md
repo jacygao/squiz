@@ -1792,7 +1792,8 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
   itself.**
 - **Keep Copilot's stderr in `stderr.txt` in the session directory**, and write
   it to the script's own stderr once Copilot exits, so that a round in a pane
-  reads what Copilot said. The script exits with Copilot's status.
+  reads what Copilot said. Where Copilot exits non-zero, the script exits with
+  Copilot's status.
 
 **A run whose stderr holds the line `Error: No authentication information
 found.` is a reviewer that is not signed in.** Copilot 1.0.109 prints that line,
