@@ -87,8 +87,8 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
   `agent-<agentId>.meta.json`. They are deleted after `cleanupPeriodDays`, 30
   by default, and found on the same machine only.
 - **A resumed session can continue a subagent with `SendMessage` to its agent
-  id, and the subagent keeps its whole history**, under `-p` too. One that ran
-  in a worktree resumes in the parent's directory instead:
+  id, and the subagent keeps its whole history**, under `-p` too. One whose
+  worktree was removed resumes in the parent's directory instead:
   `a-resumed-claude-session-keeps-its-subagents-and-a-resumed-copilot-session-loses-them.md`
   has the measurement. Explore and Plan agents return no id and cannot be
   continued.
@@ -109,8 +109,9 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` treats a session 
   and, while a process has it, `inuse.<pid>.lock`. Stale locks are a reported
   fault, so a lock means a live session only if its pid is running Copilot.
 - Subagents are not in files of their own. They are events inside the parent's
-  `events.jsonl`, and none can be continued after a resume: `write_agent`
-  answers `No agent found`.
+  `events.jsonl`. A background `general-purpose` subagent cannot be continued
+  after a resume: `write_agent` answers `No agent found`. Other agent types and
+  a sync-mode `task` are unverified.
 
 ### Cost of a resume
 
