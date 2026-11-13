@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 
 import type { Finding } from "../findings/finding.ts";
 import { readState } from "../loop/episode-state.ts";
-import { episodeAt } from "../loop/episode.ts";
+import { episodeAt, type Episode } from "../loop/episode.ts";
+import type { StateRecord } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
 import type { Plan } from "../testing/host-fixture.ts";
 import { standIn } from "../testing/stand-in.ts";
@@ -101,81 +102,159 @@ function git(directory: string, args: readonly string[]): void {
   execFileSync("git", args, { cwd: directory, stdio: "ignore" });
 }
 
-test("#803: under a cap of 3, a headless run's fixers work the threads twice, the closing round starts none, and closed.json holds the close", { timeout: 120_000 }, async () => {
+/** A headless run under way: its original run's stop has queued round 1. */
+type Headless = {
+  readonly episode: Episode;
+  /** host.log as it stands. */
+  readonly log: () => string;
+  /** Each stop of a fixer run so far: the prompt the run was given, and how its trigger went. */
+  readonly stops: () => readonly { readonly prompt: string; readonly triggered: string }[];
+  /** The episode's records as they stand. */
+  readonly records: () => readonly StateRecord[];
+};
+
+/**
+ * Start a headless run on the local venue in `root`, under `config`, whose
+ * reviewer starts report `starts` and whose fixer runs do `fixes`, and have the
+ * original run's stop queue its first round. The host, and every fixer after
+ * it, runs on a PATH on which no real CLI is.
+ */
+function headless(root: string, config: Plan["config"], starts: Plan["starts"], fixes: Plan["fixes"] = []): Headless {
+  const worktree = join(root, "tree");
+  const binaries = join(root, "bin");
+  mkdirSync(worktree);
+  mkdirSync(binaries);
+  git(worktree, ["init", "--quiet", "--initial-branch", "work"]);
+  git(worktree, ["config", "user.email", "squiz@example.invalid"]);
+  git(worktree, ["config", "user.name", "Squiz"]);
+  writeFileSync(join(worktree, "card.ts"), "// line 1\n");
+  writeFileSync(join(worktree, ".squiz.json"), `{"venue": "local"}\n`);
+  git(worktree, ["add", "."]);
+  git(worktree, ["commit", "--quiet", "--message", "the base"]);
+  assert.equal(localVenue.recordStart(worktree, deadlineIn(10_000)).outcome, "done", "the base was not recorded");
+  // The original run's work.
+  writeFileSync(join(worktree, "card.ts"), "// line 1\n// line 2\n");
+
+  const charterFile = join(root, "charter.md");
+  writeFileSync(charterFile, "What a good review is.\n");
+  const plan: Plan = { charterFile, venue: "local", config, starts, fixes };
+  const planFile = join(root, "plan.json");
+  writeFileSync(planFile, JSON.stringify(plan));
+  const fixesLog = join(root, "fixes.log");
+  standIn(binaries, "claude", `exec '${process.execPath}' '${fixerStandIn}' '${planFile}' '${fixesLog}' "$@"`);
+  process.env["PATH"] = `${binaries}:/usr/bin:/bin`;
+
+  const first = trigger({
+    directory: worktree,
+    trigger: "hook",
+    owner: { sessionId: "the-original-run" },
+    environment: {},
+    until: deadlineIn(10_000),
+    host: (key) => ({ command: process.execPath, args: [hostFixture, key, planFile] }),
+  });
+  assert.ok(first.outcome === "decided" && first.queued, `the original run's stop queued nothing: ${JSON.stringify(first)}`);
+
+  const named = episodeAt(localVenue, worktree, LOCAL_KEY);
+  assert.ok(named.outcome === "found");
+  const { episode } = named;
+  const hostLog = join(episode.directory, "host.log");
+  return {
+    episode,
+    log: () => (existsSync(hostLog) ? readFileSync(hostLog, "utf8") : ""),
+    stops: () => (existsSync(fixesLog) ? readFileSync(fixesLog, "utf8").trim().split("\n") : []).map((line) => JSON.parse(line) as { prompt: string; triggered: string }),
+    records: () => {
+      const read = readState(episode);
+      return read.outcome === "read" ? (read.state.records ?? []) : [];
+    },
+  };
+}
+
+/** Wait up to 90 seconds for `path` to exist, and say whether it does. */
+async function appears(path: string): Promise<boolean> {
+  for (let waited = 0; !existsSync(path) && waited < 90_000; waited += 100) await sleep(100);
+  return existsSync(path);
+}
+
+/** How each record ended: its exit status and its fixer's start, or its status alone. */
+function endings(records: readonly StateRecord[]): readonly string[] {
+  return records.map((record) => {
+    if (record.status !== "reviewed" || record.result !== "exited") return record.status;
+    const started = record.fixer?.outcome === "started" || record.fixer?.outcome === "exited";
+    return `exit ${record.exitStatus}, ${record.fixer === undefined ? "no fixer" : started ? "a fixer started" : record.fixer.outcome}`;
+  });
+}
+
+/** Run `body` in a temporary directory, with PATH put back and the directory removed after. */
+async function inRoot(body: (root: string) => Promise<void>): Promise<void> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "squiz-fixer-end-")));
   const previous = process.env["PATH"];
   try {
-    const worktree = join(root, "tree");
-    const binaries = join(root, "bin");
-    mkdirSync(worktree);
-    mkdirSync(binaries);
-    git(worktree, ["init", "--quiet", "--initial-branch", "work"]);
-    git(worktree, ["config", "user.email", "squiz@example.invalid"]);
-    git(worktree, ["config", "user.name", "Squiz"]);
-    writeFileSync(join(worktree, "card.ts"), "// line 1\n");
-    writeFileSync(join(worktree, ".squiz.json"), `{"venue": "local"}\n`);
-    git(worktree, ["add", "."]);
-    git(worktree, ["commit", "--quiet", "--message", "the base"]);
-    assert.equal(localVenue.recordStart(worktree, deadlineIn(10_000)).outcome, "done", "the base was not recorded");
-    // The original run's work.
-    writeFileSync(join(worktree, "card.ts"), "// line 1\n// line 2\n");
-
-    const charterFile = join(root, "charter.md");
-    writeFileSync(charterFile, "What a good review is.\n");
-    const plan: Plan = {
-      charterFile,
-      venue: "local",
-      config: { rounds: 3, fixer: "claude" },
-      starts: [
-        { findings: [FINDING], verdicts: [] },
-        { findings: [], verdicts: [STILL_OPEN] },
-        { findings: [], verdicts: [STILL_OPEN] },
-      ],
-    };
-    const planFile = join(root, "plan.json");
-    writeFileSync(planFile, JSON.stringify(plan));
-    const fixes = join(root, "fixes.log");
-    standIn(binaries, "claude", `exec '${process.execPath}' '${fixerStandIn}' '${planFile}' '${fixes}' "$@"`);
-    // The host, and every fixer after it, inherits this PATH, on which no real CLI is.
-    process.env["PATH"] = `${binaries}:/usr/bin:/bin`;
-
-    const first = trigger({
-      directory: worktree,
-      trigger: "hook",
-      owner: { sessionId: "the-original-run" },
-      environment: {},
-      until: deadlineIn(10_000),
-      host: (key) => ({ command: process.execPath, args: [hostFixture, key, planFile] }),
-    });
-    assert.ok(first.outcome === "decided" && first.queued, `the original run's stop queued nothing: ${JSON.stringify(first)}`);
-
-    const named = episodeAt(localVenue, worktree, LOCAL_KEY);
-    assert.ok(named.outcome === "found");
-    const { episode } = named;
-    const marker = join(episode.directory, "closed.json");
-    const hostLog = join(episode.directory, "host.log");
-    const log = (): string => (existsSync(hostLog) ? readFileSync(hostLog, "utf8") : "");
-    for (let waited = 0; !existsSync(marker) && waited < 90_000; waited += 100) await sleep(100);
-    assert.ok(existsSync(marker), `the episode never closed; host.log says:\n${log()}`);
-    // A fixer the closing round started would have started before the close was written.
-    await sleep(1_500);
-
-    const runs = (existsSync(fixes) ? readFileSync(fixes, "utf8").trim().split("\n") : []).map((line) => JSON.parse(line) as { prompt: string; triggered: string });
-    assert.equal(runs.length, 2, `${runs.length} fixers ran under a cap of 3:\n${JSON.stringify(runs, null, 2)}\nhost.log says:\n${log()}`);
-    assert.match(runs[0]?.prompt ?? "", /rounds\/1\/handoff\.md holds them/u);
-    assert.match(runs[1]?.prompt ?? "", /rounds\/2\/handoff\.md holds them/u);
-    const read = readState(episode);
-    const records = read.outcome === "read" ? (read.state.records ?? []) : [];
-    const ended = records.map((record) => {
-      if (record.status !== "reviewed" || record.result !== "exited") return record.status;
-      const started = record.fixer?.outcome === "started" || record.fixer?.outcome === "exited";
-      return `exit ${record.exitStatus}, ${record.fixer === undefined ? "no fixer" : started ? "a fixer started" : record.fixer.outcome}`;
-    });
-    assert.deepEqual(ended, ["exit 2, a fixer started", "exit 2, a fixer started", "exit 3, no fixer"]);
-    assert.deepEqual(JSON.parse(readFileSync(marker, "utf8")), { head: records[2]?.head, exitStatus: 3, openThreads: ["T1"], closedAt: "round cap" });
+    await body(root);
   } finally {
     if (previous === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previous;
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+test("#803: under a cap of 3, a headless run's fixers work the threads twice, the closing round starts none, and closed.json holds the close", { timeout: 120_000 }, async () => {
+  await inRoot(async (root) => {
+    const run = headless(root, { rounds: 3, fixer: "claude" }, [
+      { findings: [FINDING], verdicts: [] },
+      { findings: [], verdicts: [STILL_OPEN] },
+      { findings: [], verdicts: [STILL_OPEN] },
+    ]);
+    const marker = join(run.episode.directory, "closed.json");
+    assert.ok(await appears(marker), `the episode never closed; host.log says:\n${run.log()}`);
+    // A fixer the closing round started would have started before the close was written.
+    await sleep(1_500);
+
+    const runs = run.stops();
+    assert.equal(runs.length, 2, `${runs.length} fixers ran under a cap of 3:\n${JSON.stringify(runs, null, 2)}\nhost.log says:\n${run.log()}`);
+    assert.match(runs[0]?.prompt ?? "", /rounds\/1\/handoff\.md holds them/u);
+    assert.match(runs[1]?.prompt ?? "", /rounds\/2\/handoff\.md holds them/u);
+    const records = run.records();
+    assert.deepEqual(endings(records), ["exit 2, a fixer started", "exit 2, a fixer started", "exit 3, no fixer"]);
+    assert.deepEqual(JSON.parse(readFileSync(marker, "utf8")), { head: records[2]?.head, exitStatus: 3, openThreads: ["T1"], closedAt: "round cap" });
+    assert.equal(existsSync(join(run.episode.directory, "stopped.json")), false, "an episode that closed also says it stopped short");
+  });
+});
+
+test("#860: a headless run whose fixer changes nothing ends in stopped.json once the fixer exits, though nothing triggers again", { timeout: 120_000 }, async () => {
+  await inRoot(async (root) => {
+    const run = headless(root, { rounds: 3, fixer: "claude" }, [{ findings: [FINDING], verdicts: [] }], ["changes nothing"]);
+    const stopFile = join(run.episode.directory, "stopped.json");
+    assert.ok(await appears(stopFile), `no stopped.json; host.log says:\n${run.log()}`);
+
+    assert.deepEqual(run.stops().map(({ triggered }) => triggered), ["result, queued false"]);
+    const records = run.records();
+    assert.deepEqual(endings(records), ["exit 2, a fixer started"]);
+    const stop = JSON.parse(readFileSync(stopFile, "utf8")) as Record<string, unknown>;
+    assert.equal(stop["head"], records[0]?.head);
+    assert.equal(stop["stopped"], "fixer queued nothing");
+    assert.equal(existsSync(join(run.episode.directory, "closed.json")), false);
+  });
+});
+
+test("#860: a headless run whose fixer was held back behind an earlier one, whose last stop then queues nothing, ends in stopped.json naming that", { timeout: 120_000 }, async () => {
+  await inRoot(async (root) => {
+    const run = headless(
+      root,
+      { rounds: 3, fixer: "claude" },
+      [
+        { findings: [FINDING], verdicts: [] },
+        { findings: [], verdicts: [STILL_OPEN] },
+      ],
+      ["stops twice"],
+    );
+    const stopFile = join(run.episode.directory, "stopped.json");
+    assert.ok(await appears(stopFile), `no stopped.json; host.log says:\n${run.log()}`);
+
+    const records = run.records();
+    assert.deepEqual(endings(records), ["exit 2, a fixer started", "exit 2, not started"], `host.log says:\n${run.log()}`);
+    assert.equal(run.stops().length, 2, `the fixer's stops were ${JSON.stringify(run.stops())}`);
+    const stop = JSON.parse(readFileSync(stopFile, "utf8")) as Record<string, unknown>;
+    assert.equal(stop["head"], records[1]?.head);
+    assert.equal(stop["stopped"], "earlier fixer queued nothing");
+  });
 });

@@ -118,8 +118,8 @@ the rest of this section describes, and:
 - `notes/`, the notes for the sessions that own the work, under The report.
 - `host.log`, the round host's output.
 - `state.lock`, held while the state file is changed.
-- `closed.json`, in a headless run, once the episode has closed (Headless runs
-  below).
+- `closed.json`, in a headless run, once the episode has closed, and
+  `stopped.json` while it has stopped short of its close (Headless runs below).
 - `episodes/<n>/`, for each closed episode a later one replaced, numbered from 1
   in the order they closed: its state file, its `rounds/`, its `closed.json`,
   and the local venue's `summary.md` (§ 4 The record), moved there when a new
@@ -457,7 +457,8 @@ input on `/dev/null`, and output in `.squiz/<number>/host.log`.
 
 It takes the oldest queued state, writes the reviewing record naming itself, and
 runs the round as the steps above set out. It exits when nothing is left queued,
-and when the worktree it serves is gone.
+and when the worktree it serves is gone. In a headless run it first waits for
+every fixer to exit (Headless runs).
 
 **A host that finds nothing queued reads the queue again once its lock is
 released.** A trigger that queued a state before the release saw the host
@@ -779,13 +780,68 @@ bound closed it with threads open, which bound:
 ```
 
 The file appears whole: it is written beside its path and renamed into place. A
-caller waits for it, then reads the outcome from the episode's directory. It
-moves into `episodes/<n>/` with the rest of its episode (The state file).
+caller that sees it reads the outcome from the episode's directory. It moves into `episodes/<n>/` with the rest of its episode (The state file).
 
-**Three things leave a headless episode open with no `closed.json`:** a round
-that failed, a fixer that did not start, and a fixer whose run left no new
-state, so that its stop queued nothing. A caller bounds its wait, and reads
-`host.log` and `squiz status` to tell which it was.
+**A round host in a headless run outlives every fixer of its episode.** Once
+nothing is queued, it looks every second at the queue and at each fixer the
+records name as started, by its pid and start time. A state queued meanwhile is
+taken as any other. A fixer that cannot be told running or gone is waited on as
+one running is. `host.log` names the fixer it waits on:
+
+```
+waiting for the fixer round 1 started, process 4200, to exit
+```
+
+**An episode that stops short of its close writes `stopped.json`** in the
+episode's directory, beside where `closed.json` would be. The host writes it as
+it exits, once no fixer is running, and only where the episode has not closed
+and no state is queued or under review. It holds the head of the last state
+recorded, which case stopped the episode, and why:
+
+```json
+{
+  "head": "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+  "stopped": "fixer queued nothing",
+  "reason": "the fixer round 1 started, process 4200, exited, and its run queued nothing"
+}
+```
+
+| `stopped` | The last state recorded | `reason` |
+|---|---|---|
+| `round failed` | Failed | Why it failed |
+| `fixer did not start` | Handed its threads back, and its fixer failed to start, got no handoff, or had no start recorded | Why, from its `fixer` field |
+| `fixer queued nothing` | Handed its threads back, and its fixer started and exited | Which fixer, and that its run queued nothing |
+| `earlier fixer queued nothing` | Handed its threads back, and started no fixer because an earlier one was running, which then exited | Which earlier fixer, and that its last stop queued nothing |
+
+The host decides and writes it under `state.lock`, beside its path and renamed
+into place, as `closed.json` is. `host.log` says what it wrote:
+
+```
+wrote the stop to /work/squiz-a/.squiz/local/stopped.json: fixer queued nothing
+```
+
+A file that cannot be written is a line in `host.log` saying why, and the
+caller's wait runs to its own bound.
+
+**A caller waits for `closed.json` or `stopped.json`, whichever appears.** The
+two are never there together. The trigger that next queues a state removes
+`stopped.json` in the same update, under `state.lock`, so a retry by
+`squiz review`, or a new commit, never runs beside it. A trigger that cannot
+remove it queues nothing, and fails naming the file. A hook on a failed state
+queues nothing, and leaves it. A stopped episode is still live, so
+`stopped.json` never moves into `episodes/<n>/`.
+
+**Three things leave a headless episode open with neither file:**
+
+- A fixer whose start could not be told. It may still be running, so while one
+  is on the episode's records nothing is written.
+- A round host that dies, or cannot write the state file. Nothing is left to
+  notice the episode stopped.
+- A last state that names no stop, such as one not reviewed because a head no
+  trigger queued superseded it. `host.log` says `marked no stop:` and why.
+
+A caller bounds its wait, and reads `host.log` and `squiz status` to tell which
+it was.
 
 **A headless run's handoff holds only the reports its stops carried.** A `Stop`
 records no final message or transcript, and Copilot's `SubagentStop` carries no
