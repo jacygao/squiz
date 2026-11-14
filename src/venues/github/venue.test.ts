@@ -711,6 +711,22 @@ test("#889: listThreads reads a finding about the change as a whole, and the rep
   });
 });
 
+test("#889: a general thread's comments are listed back exactly as they were handed over, trailing whitespace included", async () => {
+  await withRepository(async (worktree) => {
+    const finding = `${G1_FINDING}  \n\n`;
+    const reply = `${G1_REPLY}\n`;
+    const comments = conversation([
+      conversationComment(2, `${finding}\n\n<sub>Squiz thread G1</sub> <!-- squiz:thread G1 -->`),
+      conversationComment(4, `${reply}\n\n> In reply to G1: x <!-- squiz:reply G1 -->`),
+    ]);
+    await withFakeGh([pullRequestRow(), NO_REVIEW_THREADS, comments], () => {
+      const listed = githubVenue.listThreads(readFound(worktree), deadlineIn(10_000));
+      const bodies = listed.outcome === "listed" ? listed.threads[0]?.comments.map((comment) => comment.body) : listed;
+      assert.deepEqual(bodies, [finding, reply]);
+    });
+  });
+});
+
 // A general finding squiz fails to list back reads exactly like one that was fixed.
 test("#889: listThreads fails where the pull request's conversation comments cannot all be listed", async () => {
   await withRepository(async (worktree) => {

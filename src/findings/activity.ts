@@ -26,8 +26,23 @@ import { readThread } from "./thread.ts";
  *   would leave the answer unchanged.
  * - Where neither decides, the larger node id wins. That says nothing about which
  *   came later, but gives the same answer however the threads are listed.
+ *
+ * A general thread's comments take their REST ids from another sequence than
+ * the other threads', so the two are never compared by REST id. Where the newest
+ * of each was posted in the same second, either may be the later, and the answer
+ * is both node ids, the other thread's first: a reply added in that second to
+ * either kind of thread changes it.
  */
 export function latestActivity(threads: readonly ReviewThread[]): string | null {
+  const onFiles = newestReply(threads.filter((thread) => thread.anchor.at !== "change"));
+  const onTheChange = newestReply(threads.filter((thread) => thread.anchor.at === "change"));
+  if (onFiles === null || onTheChange === null) return (onFiles ?? onTheChange)?.id ?? null;
+  const byTime = Date.parse(onFiles.createdAt) - Date.parse(onTheChange.createdAt);
+  if (byTime !== 0) return (byTime > 0 ? onFiles : onTheChange).id;
+  return `${onFiles.id} ${onTheChange.id}`;
+}
+
+function newestReply(threads: readonly ReviewThread[]): ThreadComment | null {
   let newest: ThreadComment | null = null;
   for (const thread of threads) {
     if (readThread(thread).raised !== "finding") continue;
@@ -36,7 +51,7 @@ export function latestActivity(threads: readonly ReviewThread[]): string | null 
       if (newest === null || postedAfter(reply, newest)) newest = reply;
     }
   }
-  return newest?.id ?? null;
+  return newest;
 }
 
 function postedAfter(reply: ThreadComment, than: ThreadComment): boolean {

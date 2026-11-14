@@ -24,8 +24,12 @@ import type { ThreadAction } from "./thread-actions.ts";
 /** How a general thread's id is spelled, and the only spelling read as one. */
 const GENERAL_ID = /^G[1-9][0-9]*$/u;
 
-/** The trailer a comment's last line carries, and what it says about the comment. */
-const TRAILER = /<!-- squiz:(thread|reply) (G[1-9][0-9]*) -->$/u;
+/**
+ * The separator and the trailer that end a comment squiz posted, and what the
+ * trailer says about it. The separator is the blank line squiz wrote, or one a
+ * person's edit saved with CRLF endings.
+ */
+const TRAILER = /\r?\n\r?\n[^\n]*<!-- squiz:(thread|reply) (G[1-9][0-9]*) -->\s*$/u;
 
 const PAGE_SIZE = 100;
 
@@ -187,13 +191,14 @@ function postComment(number: number, body: string, call: GhCall, named: string):
   return { outcome: "posted", body: answer.body };
 }
 
-/** What a trailer says, and the body with the trailer and the blank line before it taken off. */
+/**
+ * What a trailer says, and the body with the separator and the trailer taken
+ * off: the body as it was handed over, its own whitespace kept.
+ */
 function trailerOf(body: string): { readonly kind: "thread" | "reply"; readonly id: string; readonly body: string } | null {
-  const kept = body.trimEnd();
-  const start = kept.lastIndexOf("\n") + 1;
-  const found = TRAILER.exec(kept.slice(start));
+  const found = TRAILER.exec(body);
   if (found === null) return null;
-  return { kind: found[1] === "thread" ? "thread" : "reply", id: found[2] ?? "", body: kept.slice(0, start).trimEnd() };
+  return { kind: found[1] === "thread" ? "thread" : "reply", id: found[2] ?? "", body: body.slice(0, found.index) };
 }
 
 type ListedComment = { readonly comment: ThreadComment; readonly isMinimized: boolean };

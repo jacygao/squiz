@@ -150,7 +150,12 @@ episode has reviewed.** A state is two things, read when a trigger starts:
   holds no activity, whatever is said on it. The latest activity is the GitHub
   identifier of the newest such reply on the pull request, or none. An edited
   reply keeps its identifier and changes nothing. A deleted one can change which
-  reply is newest, and that is a change like any other.
+  reply is newest, and that is a change like any other. GitHub gives a reply's
+  time to the second, and a reply on a general thread (§ 5 Pull request
+  comments) has a REST id of another sequence than a reply on any other
+  thread's, so nothing orders the two within one second. Where the newest of
+  each was posted in the same second, the latest activity is both identifiers,
+  the other thread's first, separated by a space.
 
 Each record has one of five statuses:
 
