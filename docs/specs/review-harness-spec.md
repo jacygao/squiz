@@ -850,9 +850,9 @@ fixer reaches with them have not been measured.
 
 **The fixer edits files and runs `squiz` and `git`, and each command
 `fixerCommands` names (§ 10 Configuration).** The CLI refuses any other
-command, since nobody is there to approve it, except the file and read-only
-commands, such as `touch` and `ls`, that Claude Code's `acceptEdits` allows on
-its own. Each named command is granted by its name alone, with any arguments,
+command, since nobody is there to approve it, except the few it runs without a
+grant. Claude Code's `acceptEdits` runs file and read-only commands, such as
+`touch` and `ls`. Copilot runs `ls` and refuses `touch`. Each named command is granted by its name alone, with any arguments,
 after `git`. A repository whose tests run as `node --test` names `node`:
 
 ```
