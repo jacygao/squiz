@@ -1,6 +1,6 @@
 {
   "name": "squiz",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A local review loop that lives on the pull request.",
   "license": "MIT",
   "private": true,
