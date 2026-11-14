@@ -722,9 +722,9 @@ async function awaitFixers(
       if (dropped.outcome === "failed") log(`${round.label}: the failed session could not be dropped: ${dropped.reason}`);
       // A resume starts only on a written handoff, so the round has one. The
       // resume recorded the round's open threads, which the handoff gives whole.
-      const known = read.state.fixerSession ?? { shown: [], open: [] };
+      const { agent: _agent, id: _id, round: _round, ...known } = read.state.fixerSession ?? { agent, id: "", round: 0, shown: [], open: [] };
       const setupOf = { agent, commands: setup.round.config.fixerCommands, environment: setup.environment ?? process.env };
-      const refused = startFixerOn(episode, round, failed.record, { path: join(round.directory, "handoff.md"), known: { shown: known.shown, open: known.open } }, undefined, setupOf, update);
+      const refused = startFixerOn(episode, round, failed.record, { path: join(round.directory, "handoff.md"), known }, undefined, setupOf, update);
       // The failed resume is still the last state's fixer, so looking again would retry it for good.
       if (refused !== undefined) return { outcome: "state unwritable", reason: refused };
       continue;

@@ -3,9 +3,9 @@
  * the agent whose work was reviewed may have ended. The episode's first fixer
  * starts on it, and a later round resumes that fixer on its update instead.
  *
- * It holds the open threads with every reply on them, the change's description,
- * each agent's final report and the path of its transcript, and the diff the
- * reviewer read. A handoff that left any of these out would still read as a
+ * It holds the open threads with every reply on them, the round's findings no
+ * thread holds, the change's description, each agent's final report and the
+ * path of its transcript, and the diff the reviewer read. A handoff that left any of these out would still read as a
  * whole one, so where the open threads cannot be shown none is composed.
  *
  * Nothing here touches the filesystem or the venue.
@@ -29,9 +29,17 @@ export type Handoff =
 
 /**
  * What a fixer has been handed: the node id of every comment it has been shown,
- * and of each thread that was open when it was last handed anything.
+ * of each thread that was open when it was last handed anything, and the Notes
+ * line of each finding no thread holds that it has been handed.
  */
-export type Known = { readonly shown: readonly string[]; readonly open: readonly string[] };
+export type Known = { readonly shown: readonly string[]; readonly open: readonly string[]; readonly noted?: readonly string[] };
+
+/**
+ * How a fixer answers a finding no thread holds. There is no thread to reply
+ * on, and its final message is what its stop records.
+ */
+const ON_NO_THREAD =
+  "No thread holds these, so there is nothing to reply on. Fix what applies, and say in your final message what you changed for each, or why you changed nothing.";
 
 /**
  * The handoff for `record`, the state a round has just recorded, on `change`.
@@ -56,9 +64,11 @@ export function handoffFor(
   const at = `${change.name} at ${record.head.slice(0, 7)}`;
   const round = record.round.number;
   const description = change.description.trim() === "" ? "The change has no description." : change.description.trim();
+  const noted = record.unthreaded ?? [];
+  const onNoThread = noted.length === 0 ? "" : `, and ${noted.length === 1 ? "1 finding is" : `${noted.length} findings are`} on no thread`;
   const text = [
     `# Handoff for ${at}, round ${round}`,
-    `Squiz reviewed ${at} in round ${round}: ${open.length === 1 ? "1 thread is" : `${open.length} threads are`} open.`,
+    `Squiz reviewed ${at} in round ${round}: ${open.length === 1 ? "1 thread is" : `${open.length} threads are`} open${onNoThread}.`,
     nextStep(change),
     "## The description",
     ...(change.descriptionFrom === "prompt" && change.description.trim() !== ""
@@ -67,12 +77,17 @@ export function handoffFor(
     description,
     "## The open threads",
     ...open.map(printedThread),
+    ...unthreadedSection("## Findings on no thread", noted),
     "## The agents' final reports",
     ...reports(records),
     "## The diff",
     fenced(diff),
   ].join("\n\n") + "\n";
-  return { outcome: "composed", text, known: { shown: commentsOf(open), open: open.map((thread) => thread.id) } };
+  return {
+    outcome: "composed",
+    text,
+    known: { shown: commentsOf(open), open: open.map((thread) => thread.id), ...(noted.length === 0 ? {} : { noted }) },
+  };
 }
 
 /**
@@ -82,8 +97,9 @@ export function handoffFor(
  * That is each open thread that was not open then, whole, so a reopened thread
  * comes with its history; each new comment on a thread open then and still
  * open, the reviewer's ruling among them; each thread open then that has closed,
- * with its new comments if it has any; and the open threads with nothing new,
- * by name.
+ * with its new comments if it has any; the open threads with nothing new, by
+ * name; and each finding the round left on no thread that it was not handed
+ * before, so that one raised again is not handed twice.
  */
 export function updateFor(
   change: Pick<Change, "name" | "fixerFollowUp">,
@@ -103,6 +119,8 @@ export function updateFor(
   const quiet = open.filter((thread) => wasOpen.has(thread.id) && unseen(thread).length === 0);
   // A thread can close with no new comment: a ruling whose reply failed to post still resolves it.
   const closed = listed.filter((thread) => !open.includes(thread) && wasOpen.has(thread.id));
+  const noted = new Set(known.noted ?? []);
+  const newlyNoted = [...new Set(record.unthreaded ?? [])].filter((note) => !noted.has(note));
 
   const at = `${change.name} at ${record.head.slice(0, 7)}`;
   const round = record.round.number;
@@ -117,12 +135,23 @@ export function updateFor(
     ...section("## New replies on threads still open", replied, withNew),
     ...section("## Threads closed since", closed, withNew),
     ...section("## Still open, with nothing new", quiet, threadLine),
+    ...unthreadedSection("## New findings on no thread", newlyNoted),
   ].join("\n\n") + "\n";
+  const allNoted = [...noted, ...newlyNoted];
   return {
     outcome: "composed",
     text,
-    known: { shown: [...new Set([...known.shown, ...commentsOf([...open, ...closed])])], open: open.map((thread) => thread.id) },
+    known: {
+      shown: [...new Set([...known.shown, ...commentsOf([...open, ...closed])])],
+      open: open.map((thread) => thread.id),
+      ...(allNoted.length === 0 ? {} : { noted: allNoted }),
+    },
   };
+}
+
+/** `notes` under `heading`, with how to answer them, or nothing where there are none. */
+function unthreadedSection(heading: string, notes: readonly string[]): readonly string[] {
+  return notes.length === 0 ? [] : [heading, ON_NO_THREAD, notes.map((note) => `- ${note}`).join("\n")];
 }
 
 /** What a fixer does next, as its prompt says it. */

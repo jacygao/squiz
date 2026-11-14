@@ -64,11 +64,9 @@ export type EpisodeClose = {
   /** What became of every finding this round raised. */
   readonly findings: PostedFindings;
   /**
-   * The Notes lines of the findings no thread holds that the last round to reach
-   * its end raised, where that round is an earlier one than this.
-   *
-   * Empty where this round reviewed. Its reviewer read the whole change again, so
-   * whatever of an earlier round's findings it still found it raised itself.
+   * The Notes lines of the findings no thread holds that earlier rounds raised
+   * and this one did not raise again. Where this round ran no reviewer, the last
+   * round to reach its end gives its own unchanged.
    */
   readonly earlier: readonly string[];
   /**

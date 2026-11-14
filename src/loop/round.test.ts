@@ -2489,36 +2489,103 @@ test("#606: a close before the review names the findings no thread holds that th
   assert.ok(body.includes(`**Notes**\n\n- ${left}\n`), `the summary did not name the earlier finding: ${body}`);
 });
 
-/**
- * A round that reviews read the whole change again, so the finding an earlier
- * round left on no thread is either raised again by it or no longer found.
- */
-test("#606: a round that reviews and closes settles an earlier round's findings no thread holds", async () => {
+test("#882: a close before the review names a finding no thread holds that the last round reaching its end did not raise again, with the round that raised it", async () => {
+  const first = "About the change as a whole: The helpers lack the required tests";
+  const last = "About the change as a whole: The retry queue duplicates the scheduler";
+  const left = (number: number, head: string, unthreaded: readonly string[]) => ({
+    head,
+    activity: null,
+    status: "reviewed",
+    result: "exited",
+    exitStatus: 2,
+    openThreads: ["PRRT_new"],
+    round: { number, startedAt: number, endedAt: number + 1, reviewer: { backend: "detached" } },
+    newFindings: 0,
+    unthreaded,
+  });
   const ran = await runInFixture({
     config: { rounds: 2 },
     stateSource: JSON.stringify({
-      rounds: [EARLIER_ROUND],
+      rounds: [EARLIER_ROUND, EARLIER_ROUND],
       spentOutsideRounds: unspent,
-      records: [
-        {
-          head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
-          activity: null,
-          status: "reviewed",
-          result: "exited",
-          exitStatus: 2,
-          openThreads: [],
-          round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
-          newFindings: 0,
-          unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
-        },
-      ],
+      records: [left(1, "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", [first]), left(2, "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", [last])],
     }),
+    answers: { ...POSTING, threads: listed([{ id: "PRRT_new", isResolved: false }]) },
+    reviewer: reviews({}),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
+  const body = summaryBody(ran);
+  assert.ok(
+    body.includes(`**Notes**\n\n- Raised in round 1 and not raised again: ${first}\n- ${last}\n`),
+    `the summary does not name both rounds' findings on no thread: ${body}`,
+  );
+});
+
+/** A state whose round 1 left the episode open with `unthreaded` on no thread. */
+function leftOnNoThread(unthreaded: readonly string[]): string {
+  return JSON.stringify({
+    rounds: [EARLIER_ROUND],
+    spentOutsideRounds: unspent,
+    records: [
+      {
+        head: "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90",
+        activity: null,
+        status: "reviewed",
+        result: "exited",
+        exitStatus: 2,
+        openThreads: [],
+        round: { number: 1, startedAt: 1, endedAt: 2, reviewer: { backend: "detached" } },
+        newFindings: 0,
+        unthreaded,
+      },
+    ],
+  });
+}
+
+/**
+ * A later round not raising a finding again does not say it was fixed: in #880
+ * round 3 raised half of one again, on a thread. The summary says what is true.
+ */
+test("#882: a round that reviews and closes names an earlier round's finding no thread holds as raised and not raised again", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    stateSource: leftOnNoThread(["About the change as a whole: The retry queue duplicates the scheduler"]),
     answers: POSTING,
     reviewer: reviews({}),
   });
 
   assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
-  assert.doesNotMatch(summaryBody(ran), /retry queue/u);
+  const body = summaryBody(ran);
+  assert.match(body, /^\*\*Squiz review — 2 rounds, 1 finding\*\*/u);
+  assert.ok(
+    body.includes("**Notes**\n\n- Raised in round 1 and not raised again: About the change as a whole: The retry queue duplicates the scheduler"),
+    `the summary does not name the earlier round's finding: ${body}`,
+  );
+});
+
+test("#882: a finding no thread holds that the closing round raised again is named once, as the closing round's", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 2 },
+    stateSource: leftOnNoThread(["About the change as a whole: The retry queue duplicates the scheduler"]),
+    answers: POSTING,
+    reviewer: reviews({
+      findings: [
+        {
+          scope: "change",
+          severity: "medium",
+          headline: "The retry queue duplicates the scheduler",
+          reasoning: ["Nothing calls the scheduler."],
+          suggestedFix: "Use the scheduler.",
+        },
+      ],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
+  const body = summaryBody(ran);
+  assert.equal(body.split("The retry queue duplicates the scheduler").length - 1, 1, `the finding is not named once: ${body}`);
+  assert.ok(body.includes("- About the change as a whole: The retry queue duplicates the scheduler"), body);
 });
 
 /**
