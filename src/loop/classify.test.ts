@@ -358,6 +358,28 @@ test("a finding nothing threaded is not classified", () => {
   );
 });
 
+// A general thread squiz listed back and nobody ruled on is a finding still open, never one fixed.
+test("#889: a general thread listed back with no ruling stays open, as a finding about the change as a whole", () => {
+  const general: ReviewThread = {
+    id: "G1",
+    isResolved: false,
+    isOutdated: false,
+    path: "",
+    anchor: { at: "change" },
+    comments: [comment(renderComment(onTheChange("The approach is wrong")))],
+  };
+  const classified = classifyAtClose({ ...quiet, handedOver: [general], verdicts: rulings({ G1: null }) });
+  assert.deepEqual(classified, [{ status: "open", headline: "The approach is wrong", location: undefined }]);
+});
+
+test("#889: a general thread the round opened is open, as a finding about the change as a whole", () => {
+  const classified = classifyAtClose({
+    ...quiet,
+    findings: posted(threaded(onTheChange("The approach is wrong"), "change", "G2")),
+  });
+  assert.deepEqual(classified, [{ status: "open", headline: "The approach is wrong", location: undefined }]);
+});
+
 test("a threaded finding naming no file is not classified", () => {
   const classified = classifyAtClose({
     ...quiet,

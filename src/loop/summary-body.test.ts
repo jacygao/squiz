@@ -388,6 +388,17 @@ test("the unsettled findings keep the order they were classified in", () => {
   );
 });
 
+test("#889: an open thread about the change as a whole needs a person, named as about the change", () => {
+  const comment = renderSummary({
+    ...quiet,
+    threads: [{ status: "open", headline: "The retry queue duplicates the scheduler", location: undefined }],
+  });
+  assert.ok(
+    comment.includes("**Needs a person**\n\n- The change as a whole — The retry queue duplicates the scheduler (open)"),
+    comment,
+  );
+});
+
 test("the round cap is a note, because nothing reviewed what is still open again", () => {
   const comment = renderSummary({
     ...quiet,

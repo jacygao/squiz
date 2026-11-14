@@ -101,7 +101,7 @@ function threadNode(id: string, comments: readonly CommentNode[]): unknown {
 
 function listing(threads: readonly unknown[], next: string | null = null): string {
   return answered({
-    data: { node: { reviewThreads: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes: threads } } },
+    data: { node: { reviewThreads: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes: threads }, comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } },
   });
 }
 

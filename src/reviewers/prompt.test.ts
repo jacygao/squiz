@@ -155,6 +155,13 @@ test("every thread handed over is carried with its comments and its resolved sta
   );
 });
 
+// Handed its own general thread, the reviewer rules on it rather than raising the finding a second time.
+test("#889: a general thread is handed over under its id, as on the change as a whole", () => {
+  const general: ReviewThread = { ...settled, id: "G1", isResolved: false, path: "", anchor: { at: "change" } };
+  const text = round([general]);
+  assert.ok(text.includes("### G1\n\nNot resolved. On the change as a whole.\n\n"), text);
+});
+
 /**
  * A verdict is applied to the thread it names, so the identifier is what the
  * reviewer has to have. Every heading at this level is a thread's own id, in

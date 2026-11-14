@@ -71,13 +71,22 @@ type UnnamedLineAnchor = {
 };
 
 /**
- * What a thread is anchored to: one of three things, and never two of them at
+ * A thread about the change as a whole, which names no file and no line. Its
+ * `path` is empty.
+ */
+type ChangeAnchor = {
+  readonly at: "change";
+  readonly line?: never;
+};
+
+/**
+ * What a thread is anchored to: one of four things, and never two of them at
  * once.
  *
  * A reader takes the case first and the line only from the case that has one,
  * so it cannot report a thread about a file on a line of that file.
  */
-export type ThreadAnchor = LineAnchor | FileAnchor | UnnamedLineAnchor;
+export type ThreadAnchor = LineAnchor | FileAnchor | UnnamedLineAnchor | ChangeAnchor;
 
 export type ReviewThread = {
   /**
@@ -110,9 +119,11 @@ export function threadLocation(thread: ReviewThread): string {
       return `${thread.path} (whole file)`;
     case "unnamed-line":
       return `${thread.path} (line unknown)`;
+    case "change":
+      return "(whole change)";
     default: {
       // An anchor case none of the above names. `anchor` is `never` only
-      // while those three are all there is, so a fourth stops this compiling.
+      // while those four are all there is, so a fifth stops this compiling.
       const unhandled: never = anchor;
       return unhandled;
     }

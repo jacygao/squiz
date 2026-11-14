@@ -118,6 +118,13 @@ test("a pull request with nothing open says so in words", () => {
   assert.equal(threadListing("#80", [thread({ isResolved: true })]), none);
 });
 
+test("#889: a general thread is listed by its id as on the whole change", () => {
+  const printed = threadListing("#80", [
+    thread({ id: "G1", path: "", anchor: { at: "change" }, comments: [comment("**Squiz reviewer · medium — Paging duplicates the cursor**")] }),
+  ]);
+  assert.equal(printed, "1 open thread on #80\nG1 (whole change) medium — Paging duplicates the cursor\n");
+});
+
 test("a thread on the file as a whole is listed as its file, not as its first line", () => {
   // Both threads are on one pull request, and GitHub reads both back on line 1.
   // Listing them alike is what this exists to stop.

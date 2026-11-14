@@ -1,6 +1,7 @@
 /**
  * Posting a round's new findings: each one routed, then opened as the thread its
  * routing names, and left to the summary comment where no thread can hold it.
+ * A finding about the change as a whole opens a thread on no file and no line.
  *
  * Nothing here throws, and no finding is dropped. Exactly one outcome comes back
  * for every finding handed in, because a finding that reaches neither a thread
@@ -37,8 +38,8 @@ export type NewFindings = {
   readonly change: Change;
 };
 
-/** Whether a thread hangs on one line of a file or on the file as a whole. */
-export type ThreadPlacement = "inline" | "file";
+/** Whether a thread hangs on one line of a file, on the file as a whole, or on the change as a whole. */
+export type ThreadPlacement = "inline" | "file" | "change";
 
 /**
  * A thread whose node id came back, which is every thread a later round can rule
@@ -137,7 +138,7 @@ export function postFindings(round: NewFindings, call: Sending): PostedFindings 
   return { outcomes, unreadableDiff: routed.unreadableDiff };
 }
 
-/** One finding's whole account, which for a general routing is posted nowhere. */
+/** One finding's whole account, which for one naming a place the diff lacks is posted nowhere. */
 function post(routing: Routing, round: NewFindings, call: Sending): FindingOutcome {
   switch (routing.placement) {
     case "inline":
@@ -145,6 +146,10 @@ function post(routing: Routing, round: NewFindings, call: Sending): FindingOutco
     case "file":
       return onFile(routing, round, call);
     case "general":
+      if (routing.finding.scope === "change") {
+        const posting = call.venue.openGeneralThread(round.change, renderComment(routing.finding), deadlineOf(call));
+        return outcomeOf(posting, routing.finding, "change", undefined);
+      }
       return { outcome: "noted", finding: routing.finding, location: routing.unplacedAnchor };
   }
 }
@@ -204,7 +209,7 @@ function outcomeOf(
   posting: ThreadPosting,
   finding: Finding,
   placement: ThreadPlacement,
-  location: string,
+  location: string | undefined,
 ): FindingOutcome {
   switch (posting.outcome) {
     case "posted":

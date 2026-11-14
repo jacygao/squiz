@@ -111,6 +111,10 @@ function answer(body) {
       const nodes = state.threads.map((t) => ({ id: t.id, comments: { nodes: [{ databaseId: t.comments[0].databaseId }] } }));
       return http("200 OK", { data: { node: { pullRequest: { reviewThreads: page(nodes) } } } });
     }
+    // The conversation, which holds no general thread in these runs.
+    if (query.includes("isMinimized")) {
+      return http("200 OK", { data: { node: { comments: page([]) } } });
+    }
     if (query.includes("$pullRequest")) {
       return http("200 OK", { data: { node: { reviewThreads: page(state.threads.map(threadNode)) } } });
     }

@@ -431,18 +431,18 @@ test("provideCommits fails on a commit that is not a full sha", () => {
 test("listThreads lists the pull request's threads by the node id it was read with", async () => {
   await withRepository(async (worktree) => {
     const page = api(200, { data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } });
-    await withFakeGh([pullRequestRow(), page], (gh) => {
+    await withFakeGh([pullRequestRow(), page, conversation([])], (gh) => {
       const listed = githubVenue.listThreads(readFound(worktree), deadlineIn(10_000));
       assert.deepEqual(listed, { outcome: "listed", threads: [] });
       assert.equal(JSON.parse(gh.stdinAt(2)).variables.pullRequest, NODE_ID);
-      assert.equal(gh.calls(), 2, "a change read here carries its node id, so none is looked up");
+      assert.equal(gh.calls(), 3, "a change read here carries its node id, so none is looked up");
     });
   });
 });
 
 test("listThreads looks the node id up for a change it did not read", async () => {
   const page = api(200, { data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } });
-  await withFakeGh([api(200, { node_id: NODE_ID }), page], (gh) => {
+  await withFakeGh([api(200, { node_id: NODE_ID }), page, conversation([])], (gh) => {
     assert.deepEqual(githubVenue.listThreads(foreign, deadlineIn(10_000)), { outcome: "listed", threads: [] });
     assert.ok(gh.argumentsAt(1).includes("repos/{owner}/{repo}/pulls/142"));
     assert.equal(JSON.parse(gh.stdinAt(2)).variables.pullRequest, NODE_ID);
@@ -637,6 +637,7 @@ test("no member makes a call once its deadline has nothing left, and each fails 
         listThreads: githubVenue.listThreads(foreign, spent),
         openThread: githubVenue.openThread(foreign, anchor, "x", spent),
         openFileThread: githubVenue.openFileThread(foreign, "a.ts", "x", spent),
+        openGeneralThread: githubVenue.openGeneralThread(foreign, "x", spent),
         reply: githubVenue.reply("PRRT_a", "x", spent),
         resolve: githubVenue.resolve("PRRT_a", spent),
         reopen: githubVenue.reopen("PRRT_a", spent),
@@ -649,6 +650,154 @@ test("no member makes a call once its deadline has nothing left, and each fails 
         assert.match(reason, /ran out/u, `${member} gave ${JSON.stringify(reason)}`);
       }
       assert.equal(gh.calls(), 0);
+    });
+  });
+});
+
+/** One conversation comment on the pull request, as the general listing reads it back. */
+function conversationComment(id: number, body: string, fields: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> {
+  const second = String(id % 60).padStart(2, "0");
+  return { id: `IC_${id}`, databaseId: id, author: { login: "squiz-bot" }, body, createdAt: `2026-11-14T10:00:${second}Z`, isMinimized: false, ...fields };
+}
+
+/** A page of the pull request's conversation comments. */
+function conversation(comments: readonly unknown[], next: string | null = null): Answer {
+  return api(200, { data: { node: { comments: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes: comments } } } });
+}
+
+const NO_REVIEW_THREADS = api(200, { data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } });
+
+const G1_FINDING = "**Squiz reviewer · high — The change duplicates the scheduler**\n\n- Nothing calls the scheduler.";
+const G1_POSTED = `${G1_FINDING}\n\n<sub>Squiz thread G1</sub> <!-- squiz:thread G1 -->`;
+const G1_REPLY = "**Squiz coding agent**\n\nThe queue now runs on the scheduler.";
+const G1_REPLY_POSTED = `${G1_REPLY}\n\n> In reply to G1: **Squiz reviewer · high — The change duplicates the scheduler** <!-- squiz:reply G1 -->`;
+
+/** Run `body` with `worktree` as the process's directory, as `squiz reply` and the round host run. */
+async function inDirectory<T>(worktree: string, body: () => Promise<T> | T): Promise<T> {
+  const previous = process.cwd();
+  process.chdir(worktree);
+  try {
+    return await body();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+test("#889: listThreads reads a finding about the change as a whole, and the replies tied to it, as one thread after the review threads", async () => {
+  await withRepository(async (worktree) => {
+    const comments = conversation([
+      conversationComment(1, "**Squiz review — 1 round, 1 finding**\n\nFixed 0"),
+      conversationComment(2, G1_POSTED, { isMinimized: true }),
+      conversationComment(3, "Why does this need a scheduler at all?"),
+      conversationComment(4, G1_REPLY_POSTED),
+      conversationComment(5, "**Squiz coding agent**\n\nOn a thread nobody opened.\n\n> In reply to G7: x <!-- squiz:reply G7 -->"),
+    ]);
+    await withFakeGh([pullRequestRow(), NO_REVIEW_THREADS, comments], (gh) => {
+      const listed = githubVenue.listThreads(readFound(worktree), deadlineIn(10_000));
+      assert.equal(listed.outcome, "listed", JSON.stringify(listed));
+      const threads = listed.outcome === "listed" ? listed.threads : [];
+      assert.deepEqual(
+        threads.map((thread) => ({ id: thread.id, isResolved: thread.isResolved, isOutdated: thread.isOutdated, path: thread.path, anchor: thread.anchor })),
+        [{ id: "G1", isResolved: true, isOutdated: false, path: "", anchor: { at: "change" } }],
+        "the finding is not read as one thread, resolved because its comment is hidden",
+      );
+      assert.deepEqual(
+        threads[0]?.comments.map((comment) => [comment.id, comment.body]),
+        [["IC_2", G1_FINDING], ["IC_4", G1_REPLY]],
+        "the thread does not carry its finding and its reply as they were handed over",
+      );
+      assert.equal(JSON.parse(gh.stdinAt(3)).variables.node, NODE_ID);
+    });
+  });
+});
+
+// A general finding squiz fails to list back reads exactly like one that was fixed.
+test("#889: listThreads fails where the pull request's conversation comments cannot all be listed", async () => {
+  await withRepository(async (worktree) => {
+    const firstPage = conversation([conversationComment(2, G1_POSTED)], "next");
+    await withFakeGh([pullRequestRow(), NO_REVIEW_THREADS, firstPage, { stderr: "connection reset\n", status: 1 }], () => {
+      assert.deepEqual(githubVenue.listThreads(readFound(worktree), deadlineIn(10_000)), {
+        outcome: "failed",
+        reason: "gh exited 1: connection reset",
+      });
+    });
+  });
+});
+
+test("#889: listThreads fails where a conversation comment is not one it can read", async () => {
+  await withRepository(async (worktree) => {
+    await withFakeGh([pullRequestRow(), NO_REVIEW_THREADS, conversation([{ id: "IC_2", body: G1_POSTED }])], () => {
+      const listed = githubVenue.listThreads(readFound(worktree), deadlineIn(10_000));
+      assert.equal(listed.outcome, "failed", JSON.stringify(listed));
+    });
+  });
+});
+
+test("#889: openGeneralThread posts a conversation comment naming the next G id after those on the pull request", async () => {
+  const onIt = conversation([conversationComment(2, G1_POSTED), conversationComment(6, G1_POSTED.replaceAll("G1", "G2"))]);
+  const posted = api(201, { id: 77, node_id: "IC_77", html_url: "https://github.com/o/r/pull/142#issuecomment-77" });
+  await withFakeGh([api(200, { node_id: NODE_ID }), onIt, posted], (gh) => {
+    const opened = githubVenue.openGeneralThread(foreign, G1_FINDING, deadlineIn(10_000));
+    assert.deepEqual(opened, { outcome: "posted", threadId: "G3", commentId: "77", url: "https://github.com/o/r/pull/142#issuecomment-77" });
+    assert.ok(gh.argumentsAt(3).includes("repos/{owner}/{repo}/issues/142/comments"), "the finding is not posted as a conversation comment");
+    assert.deepEqual(JSON.parse(gh.stdinAt(3)), { body: `${G1_FINDING}\n\n<sub>Squiz thread G3</sub> <!-- squiz:thread G3 -->` });
+  });
+});
+
+test("#889: openGeneralThread fails, with gh's reason, where the comment could not be posted", async () => {
+  await withFakeGh([api(200, { node_id: NODE_ID }), conversation([]), apiError(403, { message: "Forbidden" }, "Forbidden")], () => {
+    const opened = githubVenue.openGeneralThread(foreign, G1_FINDING, deadlineIn(10_000));
+    assert.deepEqual(opened, { outcome: "failed", reason: "gh exited 1 on HTTP 403: gh: Forbidden (HTTP 403)" });
+  });
+});
+
+test("#889: a reply to a G id is a conversation comment tied to its finding, quoting the finding's first line", async () => {
+  await withRepository(async (worktree) => {
+    await withFakeGh([pullRequestRow(), conversation([conversationComment(2, G1_POSTED)]), api(201, { id: 78 })], async (gh) => {
+      const replied = await inDirectory(worktree, () => githubVenue.reply("G1", G1_REPLY, deadlineIn(10_000)));
+      assert.deepEqual(replied, { outcome: "acted" });
+      assert.ok(gh.argumentsAt(3).includes("repos/{owner}/{repo}/issues/142/comments"));
+      assert.deepEqual(JSON.parse(gh.stdinAt(3)), { body: G1_REPLY_POSTED });
+    });
+  });
+});
+
+test("#889: a reply to a G id the pull request holds no finding for is refused, naming the id", async () => {
+  await withRepository(async (worktree) => {
+    await withFakeGh([pullRequestRow(), conversation([conversationComment(2, G1_POSTED)])], async (gh) => {
+      const replied = await inDirectory(worktree, () => githubVenue.reply("G9", G1_REPLY, deadlineIn(10_000)));
+      assert.deepEqual(replied, { outcome: "failed", reason: `PR #142 holds no thread "G9"` });
+      assert.equal(gh.calls(), 2, "something was posted for a thread that is not there");
+    });
+  });
+});
+
+test("#889: resolving a G id hides its finding's comment as resolved, and re-opening it shows the comment again", async () => {
+  await withRepository(async (worktree) => {
+    const onIt = conversation([conversationComment(2, G1_POSTED)]);
+    const hidden = api(200, { data: { minimizeComment: { minimizedComment: { isMinimized: true } } } });
+    const shown = api(200, { data: { unminimizeComment: { unminimizedComment: { isMinimized: false } } } });
+    await withFakeGh([pullRequestRow(), onIt, hidden, pullRequestRow(), onIt, shown], async (gh) => {
+      const until = deadlineIn(10_000);
+      assert.deepEqual(await inDirectory(worktree, () => githubVenue.resolve("G1", until)), { outcome: "acted" });
+      assert.deepEqual(await inDirectory(worktree, () => githubVenue.reopen("G1", until)), { outcome: "acted" });
+      const resolving = JSON.parse(gh.stdinAt(3));
+      assert.match(resolving.query, /minimizeComment\(input: \{ subjectId: \$comment, classifier: RESOLVED \}\)/u);
+      assert.equal(resolving.variables.comment, "IC_2");
+      const reopening = JSON.parse(gh.stdinAt(6));
+      assert.match(reopening.query, /unminimizeComment/u);
+      assert.equal(reopening.variables.comment, "IC_2");
+    });
+  });
+});
+
+test("#889: resolving a G id whose comment GitHub will not hide fails, with GitHub's reason", async () => {
+  await withRepository(async (worktree) => {
+    const refused = api(200, { data: { minimizeComment: null }, errors: [{ type: "NOT_FOUND", message: "Could not resolve to a node with the global id of 'IC_2'." }] });
+    await withFakeGh([pullRequestRow(), conversation([conversationComment(2, G1_POSTED)]), refused], async () => {
+      const resolved = await inDirectory(worktree, () => githubVenue.resolve("G1", deadlineIn(10_000)));
+      assert.equal(resolved.outcome, "failed");
+      assert.match(resolved.outcome === "failed" ? resolved.reason : "", /Could not resolve to a node/u);
     });
   });
 });

@@ -17,7 +17,7 @@ import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venu
 import { localDirectory, readBase, recordBase } from "./base.ts";
 import { buildHead, provideCommits } from "./head.ts";
 import { readPrompt, recordPrompt } from "./prompt.ts";
-import { addReply, listThreads, openThread, setResolved, summaryPath, writeFailure, writeSummary, type NewAnchor, type Opened } from "./record.ts";
+import { addReply, listThreads, openThread, setResolved, summaryPath, writeFailure, writeSummary, type Opened } from "./record.ts";
 
 /** The one key the local venue names an episode by. */
 export const LOCAL_KEY = "local";
@@ -55,11 +55,13 @@ export const localVenue: Venue = {
     return listThreads(localDirectory(worktreeOf(change)));
   },
   openThread(change, anchor, body, until) {
-    return posting(openThread(localDirectory(worktreeOf(change)), anchor.path, { at: "line", line: anchor.line }, body, { until }));
+    return posting(openThread(localDirectory(worktreeOf(change)), { path: anchor.path, anchor: { at: "line", line: anchor.line } }, body, { until }));
   },
   openFileThread(change, path, body, until) {
-    const anchor: NewAnchor = { at: "file" };
-    return posting(openThread(localDirectory(worktreeOf(change)), path, anchor, body, { until }));
+    return posting(openThread(localDirectory(worktreeOf(change)), { path, anchor: { at: "file" } }, body, { until }));
+  },
+  openGeneralThread(change, body, until) {
+    return posting(openThread(localDirectory(worktreeOf(change)), { anchor: { at: "change" } }, body, { until }));
   },
   // Ids count up from T1 in every worktree, so an id names a thread only in
   // the worktree it is used in.

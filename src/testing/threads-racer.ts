@@ -31,7 +31,7 @@ const note = (outcome: { readonly outcome: string; readonly reason?: string }): 
 for (let step = 0; step < Number(count); step += 1) {
   const options = { until: deadlineIn(LONG_MS) };
   if (mode === "open-and-reply") {
-    note(openThread(directory, "src/a.ts", { at: "line", line: step + 1 }, `${label}-open-${step}`, options));
+    note(openThread(directory, { path: "src/a.ts", anchor: { at: "line", line: step + 1 } }, `${label}-open-${step}`, options));
     note(addReply(directory, "T1", `${label}-reply-${step}`, options));
   } else {
     note(setResolved(directory, "T1", true, options));

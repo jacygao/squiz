@@ -61,8 +61,8 @@ function exited(child: ChildProcess): Promise<NodeJS.Signals | null> {
 test("threads.json holds each thread with its anchor, its comments and where it stands, as § 4 shows", (t) => {
   const directory = directoryIn(t);
 
-  const opened = openThread(directory, "packages/sync/src/queue.ts", { at: "line", line: 134 }, reviewer, soon());
-  const fileThread = openThread(directory, "README.md", { at: "file" }, reviewer, soon());
+  const opened = openThread(directory, { path: "packages/sync/src/queue.ts", anchor: { at: "line", line: 134 } }, reviewer, soon());
+  const fileThread = openThread(directory, { path: "README.md", anchor: { at: "file" } }, reviewer, soon());
   const replied = addReply(directory, "T1", agent, soon());
 
   assert.equal(opened.outcome, "opened", JSON.stringify(opened));
@@ -88,8 +88,8 @@ test("threads.json holds each thread with its anchor, its comments and where it 
 
 test("threads are listed in the order they were opened, never outdated, and every comment's author is local", (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 3 }, reviewer, soon());
-  openThread(directory, "b.ts", { at: "file" }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 3 } }, reviewer, soon());
+  openThread(directory, { path: "b.ts", anchor: { at: "file" } }, reviewer, soon());
   addReply(directory, "T1", agent, soon());
 
   const listed = listThreads(directory);
@@ -119,7 +119,7 @@ test("a worktree's directory with no threads.json lists no threads", (t) => {
 
 test("resolving and re-opening a thread changes where it stands, and nothing else", (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 3 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 3 } }, reviewer, soon());
 
   assert.deepEqual(setResolved(directory, "T1", true, soon()), { outcome: "acted" });
   const resolved = listThreads(directory);
@@ -133,15 +133,15 @@ test("resolving and re-opening a thread changes where it stands, and nothing els
 
 test("ids count up across the file's whole life: after a resolve, a re-open, and another process's write", async (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 3 }, reviewer, soon());
-  openThread(directory, "b.ts", { at: "line", line: 4 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 3 } }, reviewer, soon());
+  openThread(directory, { path: "b.ts", anchor: { at: "line", line: 4 } }, reviewer, soon());
   addReply(directory, "T1", agent, soon());
   setResolved(directory, "T1", true, soon());
   setResolved(directory, "T1", false, soon());
 
   // A process that never saw the writes above reads where the count stands from the file.
   assert.equal(await racer(directory, "open-and-reply", "later", 1, 0), "exit 0, failed 0");
-  const opened = openThread(directory, "c.ts", { at: "file" }, reviewer, soon());
+  const opened = openThread(directory, { path: "c.ts", anchor: { at: "file" } }, reviewer, soon());
 
   assert.deepEqual(opened.outcome === "opened" ? [opened.threadId, opened.commentId] : opened, ["T4", "C6"]);
   assert.deepEqual(idsIn(directory), { threads: ["T1", "T2", "T3", "T4"], comments: ["C1", "C3", "C5", "C2", "C4", "C6"] });
@@ -149,9 +149,9 @@ test("ids count up across the file's whole life: after a resolve, a re-open, and
 
 test("ten threads and more are counted as numbers, so T10 follows T9 and C10 is the newest", (t) => {
   const directory = directoryIn(t);
-  for (let step = 0; step < 9; step += 1) openThread(directory, "a.ts", { at: "line", line: step + 1 }, reviewer, soon());
+  for (let step = 0; step < 9; step += 1) openThread(directory, { path: "a.ts", anchor: { at: "line", line: step + 1 } }, reviewer, soon());
 
-  const tenth = openThread(directory, "a.ts", { at: "line", line: 10 }, reviewer, soon());
+  const tenth = openThread(directory, { path: "a.ts", anchor: { at: "line", line: 10 } }, reviewer, soon());
   addReply(directory, "T1", agent, soon());
   const listed = listThreads(directory);
 
@@ -169,7 +169,7 @@ test("ten threads and more are counted as numbers, so T10 follows T9 and C10 is 
 
 test("a reply or a resolve on an id the file does not hold is refused, and the file is left as it was", (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 3 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 3 } }, reviewer, soon());
   const before = readFileSync(join(directory, "threads.json"));
 
   const outcomes = [
@@ -198,7 +198,7 @@ test("every body is stored and listed byte for byte as it was handed over", (t) 
     "",
   ];
 
-  openThread(directory, "a.ts", { at: "line", line: 1 }, bodies[0] ?? "", soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 1 } }, bodies[0] ?? "", soon());
   for (const body of bodies.slice(1)) addReply(directory, "T1", body, soon());
 
   const listed = listThreads(directory);
@@ -211,7 +211,7 @@ test("every body is stored and listed byte for byte as it was handed over", (t) 
 
 test("writers in four processes at once lose no thread and no reply, and ids stay unique and counting up", { timeout: 120_000 }, async (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 1 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 1 } }, reviewer, soon());
   const count = 40;
   const labels = ["A", "B", "C", "D"];
   // Far enough ahead that every process has loaded and is spinning toward it.
@@ -238,7 +238,7 @@ test("writers in four processes at once lose no thread and no reply, and ids sta
 test("a reader never sees part of threads.json, even when its writer is killed in the middle of writing", { timeout: 120_000 }, async (t) => {
   const directory = directoryIn(t);
   // Large enough that writing the file takes many system calls.
-  openThread(directory, "a.ts", { at: "line", line: 1 }, "x".repeat(8 * 1024 * 1024), soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 1 } }, "x".repeat(8 * 1024 * 1024), soon());
 
   for (let kill = 0; kill < 6; kill += 1) {
     const writer = spawn(process.execPath, [racerFile, directory, "toggle", "W", "1000", "0"], { stdio: "ignore" });
@@ -261,7 +261,7 @@ test("a reader never sees part of threads.json, even when its writer is killed i
 
 test("a lock left by a writer killed while holding it is taken over, and the write is made", { timeout: 30_000 }, async (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 1 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 1 } }, reviewer, soon());
   const script = [
     `import { takeLock } from ${JSON.stringify(lockFile)};`,
     `const taking = takeLock(${JSON.stringify(directory)}, "threads.lock", { boundMs: 5000 });`,
@@ -279,7 +279,7 @@ test("a lock left by a writer killed while holding it is taken over, and the wri
 
 test("a lock held by a live process is never broken: the write fails at its deadline, naming the holder, and writes nothing", { timeout: 30_000 }, async (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 1 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 1 } }, reviewer, soon());
   const before = readFileSync(join(directory, "threads.json"));
   // Takes the lock, says so, and keeps it until its input closes.
   const script = [
@@ -308,7 +308,7 @@ test("a threads.json that cannot be read fails every call with one line naming i
 
     const outcomes = [
       listThreads(directory),
-      openThread(directory, "a.ts", { at: "file" }, reviewer, soon()),
+      openThread(directory, { path: "a.ts", anchor: { at: "file" } }, reviewer, soon()),
       addReply(directory, "T1", agent, soon()),
       setResolved(directory, "T1", true, soon()),
     ];
@@ -348,7 +348,7 @@ test("a threads.json holding one id twice is refused by every call, and left as 
 
 test("a deadline that runs out while the record is being read is not taken for one already spent, and nothing is written", (t) => {
   const directory = directoryIn(t);
-  openThread(directory, "a.ts", { at: "line", line: 1 }, reviewer, soon());
+  openThread(directory, { path: "a.ts", anchor: { at: "line", line: 1 } }, reviewer, soon());
   const before = readFileSync(join(directory, "threads.json"));
   let at = 0;
   // Each look at the clock moves it on 60ms, so the 100ms deadline is live at
@@ -367,7 +367,7 @@ test("a directory that cannot be written fails with the reason and throws nothin
 
   const outcomes = [
     listThreads(file),
-    openThread(file, "a.ts", { at: "file" }, reviewer, soon()),
+    openThread(file, { path: "a.ts", anchor: { at: "file" } }, reviewer, soon()),
     writeSummary(file, "summary", deadlineIn(LONG_MS)),
     writeFailure(file, "failure", deadlineIn(LONG_MS)),
   ];
@@ -380,7 +380,7 @@ test("a call whose deadline has nothing left is not made, and writes nothing", (
   const spent = { until: deadlineIn(-1) };
 
   const outcomes = [
-    openThread(directory, "a.ts", { at: "file" }, reviewer, spent),
+    openThread(directory, { path: "a.ts", anchor: { at: "file" } }, reviewer, spent),
     addReply(directory, "T1", agent, spent),
     setResolved(directory, "T1", true, spent),
     writeSummary(directory, "summary", spent.until),

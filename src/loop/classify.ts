@@ -66,10 +66,11 @@ export type ClassifiedThread = {
   // Null where the reviewer left the headline blank, which drops it from the comment.
   readonly headline: string | null;
   /**
-   * Where the thread sits: `file:line` for one anchored to a line, and the file
-   * alone for one anchored to a file.
+   * Where the thread sits: `file:line` for one anchored to a line, the file
+   * alone for one anchored to a file, and `undefined` for one about the change
+   * as a whole.
    */
-  readonly location: string;
+  readonly location: string | undefined;
   /**
    * True where the reviewer kept the thread open in the last round and its
    * reply giving the reason could not be posted. The thread then shows no reason,
@@ -126,8 +127,7 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
     // thread counted twice is a finding the summary reports twice.
     if (opened.threadId !== null && counted.has(opened.threadId)) continue;
     const location = openedLocation(opened);
-    // A threaded finding naming no file, which the router cannot produce: a
-    // finding with no file is reported general and no thread is opened for it.
+    // A thread on a file whose finding named none, which posting never makes.
     // There is nothing to print where it sits.
     if (location === null) continue;
     classified.push({
@@ -169,7 +169,7 @@ function threadsOpened(posted: PostedFindings): readonly Threaded[] {
  * A thread GitHub named no line for is given its file alone, which is the whole
  * of what there is to print for it, and it reads as a file-anchored thread does.
  */
-export function locationOf(thread: ReviewThread): string {
+export function locationOf(thread: ReviewThread): string | undefined {
   const { anchor } = thread;
   switch (anchor.at) {
     case "line":
@@ -178,10 +178,12 @@ export function locationOf(thread: ReviewThread): string {
       return thread.path;
     case "unnamed-line":
       return thread.path;
+    case "change":
+      return undefined;
     default: {
       // An anchor case none of the above names, which the summary has no
-      // rendering for. `anchor` is `never` only while those three are all there
-      // is, so a fourth stops this compiling.
+      // rendering for. `anchor` is `never` only while those four are all there
+      // is, so a fifth stops this compiling.
       const unhandled: never = anchor;
       return unhandled;
     }
@@ -189,16 +191,17 @@ export function locationOf(thread: ReviewThread): string {
 }
 
 /**
- * Where the thread this round opened sits, or `null` where its finding named no
- * file.
+ * Where the thread this round opened sits, `undefined` for one on the change as
+ * a whole, or `null` where it is on a file and its finding named none.
  *
  * Read off where the comment was placed rather than off the scope the reviewer
  * chose. A finding scoped to a line whose line the diff did not carry is a
  * thread on the file, and a later round is handed it with a file anchor: located
  * from the scope, the summary would move it between one episode and the next.
  */
-function openedLocation(opened: Threaded): string | null {
+function openedLocation(opened: Threaded): string | undefined | null {
   const { finding, placement } = opened;
+  if (placement === "change") return undefined;
   if (finding.file === undefined) return null;
   if (placement === "file" || finding.line === undefined) return finding.file;
   return `${finding.file}:${finding.line}`;

@@ -1,6 +1,10 @@
 /**
  * The router: where each finding's comment goes, a thread anchored to a changed
- * line, a thread on a file as a whole, or a line of text in the summary comment.
+ * line, a thread on a file as a whole, or general: on no file and no line.
+ *
+ * A general finding scoped to the change is a thread of its own, on the change
+ * as a whole. One that names a place the diff does not carry is a line of text
+ * in the summary comment.
  *
  * The pull request is the whole record of a review, so a finding that routes
  * nowhere leaves no trace anywhere at all. A thread is worth more than a line of
@@ -90,8 +94,7 @@ export type Routed = {
 };
 
 /**
- * Route each finding to an inline thread, to a thread on its file, or to the
- * summary comment.
+ * Route each finding to an inline thread, to a thread on its file, or general.
  *
  * `scope` is the reviewer's judgement about what the finding is about, and is
  * never overridden here. The one decision this makes is whether the diff carries
