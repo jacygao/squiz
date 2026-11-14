@@ -1,6 +1,7 @@
 /**
- * The handoff: what a fresh coding agent needs to work the threads a round left
- * open, once the agent whose work was reviewed may have ended.
+ * The handoff: what a fixer needs to work the threads a round left open, once
+ * the agent whose work was reviewed may have ended. The episode's first fixer
+ * starts on it, and a later round resumes that fixer on its update instead.
  *
  * It holds the open threads with every reply on them, the change's description,
  * each agent's final report and the path of its transcript, and the diff the
