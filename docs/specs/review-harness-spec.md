@@ -1587,7 +1587,10 @@ broken while it lives. The round host and `squiz reply` both take it.
 - **Ids count up.** Threads are `T1`, `T2`, … and comments are `C1`, `C2`, …
   across every thread, in the order they were written. The newest reply is the
   one with the highest number, and that is the state's latest activity (§ 3 The
-  state file).
+  state file). Every comment carries the same time, so where both a thread about
+  the change as a whole and another thread hold replies, the latest activity is
+  the newest reply on each, as `C3 C4`, which § 3 gives for two replies posted in
+  one second.
 - **A thread's anchor is the one the round asked for: a line, the file as a
   whole, or the change as a whole.** A line is always the head's, so the anchor
   holds no side. A thread about the change as a whole holds no `path`, and its
