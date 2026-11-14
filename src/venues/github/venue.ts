@@ -13,12 +13,14 @@ import { join } from "node:path";
 import { currentBranch } from "../../hook/branch.ts";
 import type { Deadline } from "../../reviewers/deadline.ts";
 import { runGit } from "../../worktree/git.ts";
-import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venue.ts";
+import type { Change, ChangeLookup, Failed, ThreadAction, ThreadPosting, Venue } from "../venue.ts";
+import { isGeneralId, listGeneralThreads, postGeneralThread, replyOnGeneralThread, setGeneralResolved } from "./general.ts";
+import type { GhCall } from "./gh.ts";
 import { postFileThread, postThread, type ThreadPosting as GitHubThreadPosting } from "./post-thread.ts";
 import { findPullRequestForBranch, findPullRequestNodeId, type PullRequest } from "./pull-request.ts";
 import { postIssueComment, postSummary } from "./summary.ts";
 import { reopenThread, replyInThread, resolveThread } from "./thread-actions.ts";
-import { listReviewThreads } from "./threads.ts";
+import { listReviewThreads, type ReviewThread } from "./threads.ts";
 
 /** A change this venue read, with what it read it from. */
 type PullRequestChange = Change & {
@@ -37,12 +39,20 @@ const EPISODES = ".squiz";
 // moves, or reach git as an option.
 const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
-/** The paragraph after the open threads, for pull request `number`. */
-export function followUpFor(number: number): string {
+/**
+ * The paragraph after the open threads, for pull request `number` checked out
+ * in `worktree`.
+ *
+ * The reply runs in `worktree` because a note can reach a session working in
+ * another one, and a `G` id names a thread only on the pull request of the
+ * directory the reply runs in.
+ */
+export function followUpFor(number: number, worktree: string): string {
+  const quoted = `'${worktree.replaceAll("'", `'\\''`)}'`;
   return [
-    "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
-    "what you changed or why you disagree. Commit and push what you changed, then run",
-    `\`squiz review ${number}\` again.`,
+    `Fix what applies in ${worktree}, and reply on each thread with`,
+    `\`(cd ${quoted} && squiz reply <id> <text>)\` to say what you changed or why`,
+    `you disagree. Commit and push what you changed, then run \`squiz review ${number}\` again.`,
   ].join("\n");
 }
 
@@ -73,15 +83,13 @@ export const githubVenue: Venue = {
     const number = numberIn(change.key);
     if (typeof number !== "number") return number;
     const call = { directory: worktreeOf(change), until };
-    let nodeId = "nodeId" in change && typeof change.nodeId === "string" ? change.nodeId : null;
-    if (nodeId === null) {
-      const found = findPullRequestNodeId(number, call);
-      if (found.outcome !== "found") return found;
-      nodeId = found.nodeId;
-    }
+    const nodeId = nodeIdOf(change, number, call);
+    if (typeof nodeId !== "string") return nodeId;
     const listed = listReviewThreads(nodeId, call);
     if (listed.outcome !== "listed") return failed(listed.reason);
-    return listed;
+    const general = listGeneralThreads(nodeId, call);
+    if (general.outcome !== "listed") return failed(general.reason);
+    return { outcome: "listed", threads: inOrderOpened(listed.threads, general.threads) };
   },
   openThread(change, anchor, body, until) {
     const number = numberIn(change.key);
@@ -97,10 +105,30 @@ export const githubVenue: Venue = {
       postFileThread({ pullRequest: number, headSha: change.head, body, path }, { directory: worktreeOf(change), until }),
     );
   },
-  // A thread's node id names its repository, so these run wherever squiz does.
-  reply: (threadId, body, until) => replyInThread(threadId, body, { directory: process.cwd(), until }),
-  resolve: (threadId, until) => resolveThread(threadId, { directory: process.cwd(), until }),
-  reopen: (threadId, until) => reopenThread(threadId, { directory: process.cwd(), until }),
+  openGeneralThread(change, body, until) {
+    const number = numberIn(change.key);
+    if (typeof number !== "number") return number;
+    const call = { directory: worktreeOf(change), until };
+    const nodeId = nodeIdOf(change, number, call);
+    if (typeof nodeId !== "string") return nodeId;
+    return postGeneralThread(number, nodeId, body, call);
+  },
+  // A review thread's node id names its repository, so those run wherever squiz
+  // does. A general thread's id is counted per pull request, so it names a
+  // thread only on the change handed in, or on the pull request the directory
+  // has checked out.
+  reply(threadId, body, until, change) {
+    if (!isGeneralId(threadId)) return replyInThread(threadId, body, { directory: process.cwd(), until });
+    return onGeneralThread(threadId, until, change, (number, nodeId, call) => replyOnGeneralThread(number, nodeId, threadId, body, call));
+  },
+  resolve(threadId, until, change) {
+    if (!isGeneralId(threadId)) return resolveThread(threadId, { directory: process.cwd(), until });
+    return onGeneralThread(threadId, until, change, (number, nodeId, call) => setGeneralResolved(number, nodeId, threadId, true, call));
+  },
+  reopen(threadId, until, change) {
+    if (!isGeneralId(threadId)) return reopenThread(threadId, { directory: process.cwd(), until });
+    return onGeneralThread(threadId, until, change, (number, nodeId, call) => setGeneralResolved(number, nodeId, threadId, false, call));
+  },
   postSummary(change, body, until) {
     const number = numberIn(change.key);
     if (typeof number !== "number") return number;
@@ -112,6 +140,59 @@ export const githubVenue: Venue = {
     return postIssueComment(number, body, { directory: worktreeOf(change), until }, "the failure");
   },
 };
+
+/** The `PR_` node id of the change's pull request: the one it was read with, or one looked up by its number. */
+function nodeIdOf(change: Change, number: number, call: GhCall): string | Failed {
+  if ("nodeId" in change && typeof change.nodeId === "string") return change.nodeId;
+  const found = findPullRequestNodeId(number, call);
+  return found.outcome === "found" ? found.nodeId : found;
+}
+
+/**
+ * The review threads and the general threads as one list, in the order each
+ * was opened. Each list is in that order already, so a general thread goes in
+ * by its first comment's time, after any review thread opened in the same
+ * second.
+ */
+function inOrderOpened(review: readonly ReviewThread[], general: readonly ReviewThread[]): readonly ReviewThread[] {
+  const opened = (thread: ReviewThread): number => Date.parse(thread.comments[0]?.createdAt ?? "") || 0;
+  const merged: ReviewThread[] = [];
+  const waiting = [...general];
+  for (const thread of review) {
+    while (waiting.length > 0 && opened(waiting[0] as ReviewThread) < opened(thread)) merged.push(waiting.shift() as ReviewThread);
+    merged.push(thread);
+  }
+  return [...merged, ...waiting];
+}
+
+/**
+ * Run `act` on the pull request of `change`, or where none is handed in, on
+ * the one whose head is the branch the process's directory has checked out.
+ */
+function onGeneralThread(
+  threadId: string,
+  until: Deadline,
+  change: Change | undefined,
+  act: (number: number, nodeId: string, call: GhCall) => ThreadAction,
+): ThreadAction {
+  if (change !== undefined) {
+    const number = numberIn(change.key);
+    if (typeof number !== "number") return number;
+    const call = { directory: worktreeOf(change), until };
+    const nodeId = nodeIdOf(change, number, call);
+    if (typeof nodeId !== "string") return nodeId;
+    return act(number, nodeId, call);
+  }
+  const directory = process.cwd();
+  const branch = currentBranch(directory, until);
+  if (branch.outcome === "failed") return failed(`the current branch could not be resolved: ${branch.reason}`);
+  if (branch.outcome === "detached") return failed(`HEAD is detached in ${JSON.stringify(directory)}, so no pull request holds ${threadId}`);
+  const named = JSON.stringify(branch.name);
+  const found = findPullRequestForBranch(branch.name, { directory, until });
+  if (found.outcome === "failed") return failed(`the pull request for ${named} could not be looked up: ${found.reason}`);
+  if (found.outcome === "none") return failed(`no open pull request has ${named} as its head, so none holds ${threadId}`);
+  return act(found.number, found.nodeId, { directory, until });
+}
 
 /**
  * The open pull request whose head is the branch `worktree` has checked out,
@@ -177,7 +258,7 @@ function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange
     name: `PR #${number}`,
     rerun: `squiz review ${number}`,
     summaryAt: "on the pull request",
-    followUp: followUpFor(number),
+    followUp: followUpFor(number, worktree),
     fixerFollowUp: FIXER_FOLLOW_UP,
     base: pullRequest.baseSha,
     head: pullRequest.headSha,

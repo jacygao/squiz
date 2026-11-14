@@ -189,7 +189,8 @@ function needsAPerson(threads: readonly ClassifiedThread[]): string {
 
 /** One unsettled finding: where it sits, what it is, and which of the two it is. */
 function unsettledLine(thread: ClassifiedThread): string {
-  return `- \`${thread.location}\` — ${named(thread.headline)} (${thread.status})`;
+  const where = thread.location === undefined ? "The change as a whole" : `\`${thread.location}\``;
+  return `- ${where} — ${named(thread.headline)} (${thread.status})`;
 }
 
 /**

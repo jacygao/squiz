@@ -434,7 +434,7 @@ function fakeGh(directory: string): string {
 }
 
 const emptyListing = answered({
-  data: { node: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] } } },
+  data: { node: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] }, comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } },
 });
 
 test("a listing GitHub answered unreadably is not printed as a pull request with nothing open", async () => {

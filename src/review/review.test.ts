@@ -197,6 +197,7 @@ function venueListing(listThreads: Venue["listThreads"]): Venue {
     listThreads,
     openThread: unreached,
     openFileThread: unreached,
+    openGeneralThread: unreached,
     reply: unreached,
     resolve: unreached,
     reopen: unreached,

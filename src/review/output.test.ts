@@ -86,7 +86,7 @@ function reviewed(overrides: Partial<ReviewResult> & { exit: 0 | 2 | 3 }): Revie
     newFindings: 0,
     threads: [],
     recorded: false,
-    ...(overrides.exit === 2 ? { followUp: followUpFor(41) } : {}),
+    ...(overrides.exit === 2 ? { followUp: followUpFor(41, "/work/squiz") } : {}),
     ...(overrides.exit === 3 ? { closedAt: "round cap" } : {}),
     ...overrides,
   } as ReviewResult;
@@ -126,9 +126,9 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 
   The server bounds skew at two seconds, and \`clock.ts:12\` already allows for it.
 
-Fix what applies, and reply on each thread with \`squiz reply <id> <text>\` to say
-what you changed or why you disagree. Commit and push what you changed, then run
-\`squiz review 41\` again.
+Fix what applies in /work/squiz, and reply on each thread with
+\`(cd '/work/squiz' && squiz reply <id> <text>)\` to say what you changed or why
+you disagree. Commit and push what you changed, then run \`squiz review 41\` again.
 `,
   );
 });

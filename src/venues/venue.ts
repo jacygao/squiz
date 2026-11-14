@@ -128,9 +128,18 @@ export interface Venue {
   ): { readonly outcome: "listed"; readonly threads: readonly ReviewThread[] } | Failed;
   openThread(change: Change, anchor: Anchor, body: string, until: Deadline): ThreadPosting;
   openFileThread(change: Change, path: string, body: string, until: Deadline): ThreadPosting;
-  reply(threadId: string, body: string, until: Deadline): ThreadAction;
-  resolve(threadId: string, until: Deadline): ThreadAction;
-  reopen(threadId: string, until: Deadline): ThreadAction;
+  /**
+   * Open a thread about the change as a whole, on no file and no line. No venue
+   * answers `anchor-refused` for one.
+   */
+  openGeneralThread(change: Change, body: string, until: Deadline): ThreadPosting;
+  /**
+   * The thread actions act on `change` where the caller holds it, as a round
+   * does, and otherwise on the change the process's directory has.
+   */
+  reply(threadId: string, body: string, until: Deadline, change?: Change): ThreadAction;
+  resolve(threadId: string, until: Deadline, change?: Change): ThreadAction;
+  reopen(threadId: string, until: Deadline, change?: Change): ThreadAction;
   postSummary(change: Change, body: string, until: Deadline): Posting;
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }

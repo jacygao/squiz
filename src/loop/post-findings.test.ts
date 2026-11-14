@@ -423,12 +423,34 @@ test("a finding on a line of a binary file hangs on the file", async () => {
   });
 });
 
-test("a finding about the change as a whole is noted for the summary and posts nothing", async () => {
-  await withFakeGh([], (gh) => {
+/** The three calls a general thread that posts takes: the node id, the conversation, the comment. */
+function postsGeneral(commentId: number): readonly Reply[] {
+  return [
+    { stdout: response(200, { node_id: "PR_80" }) },
+    { stdout: response(200, { data: { node: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } }) },
+    { stdout: response(201, { id: commentId, node_id: `IC_${commentId}`, html_url: `https://github.com/jacygao/squiz/pull/80#issuecomment-${commentId}` }) },
+  ];
+}
+
+test("#889: a finding about the change as a whole opens a general thread on the pull request", async () => {
+  await withFakeGh(postsGeneral(140), (gh) => {
     const outcome = only(post([aboutTheChange]));
 
-    assert.equal(gh.calls(), 0, "a general finding is a line of the summary, not a thread");
-    assert.deepEqual(outcome, { outcome: "noted", finding: aboutTheChange, location: undefined });
+    assert.deepEqual(outcome, {
+      outcome: "threaded",
+      finding: aboutTheChange,
+      placement: "change",
+      url: "https://github.com/jacygao/squiz/pull/80#issuecomment-140",
+      threadId: "G1",
+    });
+    assert.equal(gh.calls(), 3);
+  });
+});
+
+test("#889: a finding about the change as a whole whose comment cannot be posted fails, and no thread holds it", async () => {
+  await withFakeGh([...postsGeneral(140).slice(0, 2), SERVER_ERROR], () => {
+    const outcome = only(post([aboutTheChange]));
+    assert.equal(outcome.outcome, "failed", JSON.stringify(outcome));
   });
 });
 
@@ -566,6 +588,7 @@ test("every finding in produces exactly one outcome out", async () => {
     threadFound(999, "PRRT_somebodyElses"),
     anchorRefused("path"),
     SERVER_ERROR,
+    ...postsGeneral(140),
   ];
   await withFakeGh(replies, () => {
     const posted = post(findings);
@@ -583,21 +606,21 @@ test("every finding in produces exactly one outcome out", async () => {
       "in an untouched file: noted",
       "about a changed file: failed",
       "about an untouched file: noted",
-      "about the change as a whole: noted",
+      "about the change as a whole: threaded",
     ]);
   });
 });
 
-test("a diff that cannot be read notes every finding and posts nothing", async () => {
-  await withFakeGh([], (gh) => {
+test("a diff that cannot be read notes every finding naming a location, and posts only the one about the change as a whole", async () => {
+  await withFakeGh(postsGeneral(140), (gh) => {
     const posted = post([onAChangedLine, aboutAChangedFile, aboutTheChange], unreadableDiff);
 
-    assert.equal(gh.calls(), 0);
-    assert.deepEqual(posted.outcomes, [
+    assert.equal(gh.calls(), 3);
+    assert.deepEqual(posted.outcomes.slice(0, 2), [
       { outcome: "noted", finding: onAChangedLine, location: "src/ui/card.ts:88" },
       { outcome: "noted", finding: aboutAChangedFile, location: "src/ui/card.ts" },
-      { outcome: "noted", finding: aboutTheChange, location: undefined },
     ]);
+    assert.equal(posted.outcomes[2]?.outcome, "threaded");
     assert.ok(
       posted.unreadableDiff instanceof Error,
       "a diff that was read and carried nothing is a different fact",
@@ -621,7 +644,7 @@ test("a gh that cannot be run fails every finding a thread was to hold", async (
     assert.deepEqual(accountOf(posted), [
       "on a changed line: failed",
       "about a changed file: failed",
-      "about the change as a whole: noted",
+      "about the change as a whole: failed",
     ]);
   });
 });

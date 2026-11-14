@@ -1198,7 +1198,7 @@ type Posting = {
  * whether the reviewer's silence about a thread counts as a ruling on it.
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
-  const call = { venue: on.venue, until: on.reserve };
+  const call = { venue: on.venue, until: on.reserve, change: on.change };
   // A thread takes a second call where the round replies on it, and a finding
   // takes two, the thread and the read-back of its id.
   const replies = rulingsReplied(ruleOn, output.verdicts).length;
@@ -1630,19 +1630,20 @@ function threadsOpened(posted: PostedFindings): readonly ReviewThread[] {
  * One finding's new thread, as the open threads count it.
  *
  * `null` where nothing can be addressed to it: a comment whose thread id did not
- * come back, and a finding carrying no file, which is one no thread was opened
- * for at all.
+ * come back, and a thread on a file whose finding carries none, which posting
+ * never makes.
  */
 function asThread(outcome: Threaded): ReviewThread | null {
   const { finding, threadId } = outcome;
-  if (threadId === null || finding.file === undefined) return null;
+  if (threadId === null) return null;
+  if (finding.file === undefined && outcome.placement !== "change") return null;
   return {
     id: threadId,
     // The round just opened it, and only a verdict closes a thread.
     isResolved: false,
     // Nothing has moved under a thread opened against the head just read.
     isOutdated: false,
-    path: finding.file,
+    path: finding.file ?? "",
     anchor: anchorOf(outcome),
     // The round holds no read-back of the comment it wrote, and what reads this
     // reads the identifier.
@@ -1650,8 +1651,9 @@ function asThread(outcome: Threaded): ReviewThread | null {
   };
 }
 
-/** Where the comment went: the line the finding named, or the file as a whole. */
+/** Where the comment went: the line the finding named, the file as a whole, or the change as a whole. */
 function anchorOf(outcome: Threaded): ThreadAnchor {
+  if (outcome.placement === "change") return { at: "change" };
   if (outcome.placement === "file" || outcome.finding.line === undefined) return { at: "file" };
   return { at: "line", line: outcome.finding.line };
 }

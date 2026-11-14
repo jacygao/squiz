@@ -266,6 +266,36 @@ test("threads opened on the change are listed from threads.json, replied to, res
   );
 });
 
+test("#889: a thread about the change as a whole is held in threads.json with no file and no line, and is replied to and resolved by its id", (t) => {
+  const worktree = worktreeIn(t);
+  localVenue.recordStart(worktree, deadlineIn(30_000));
+  const change = changeIn(worktree);
+  const until = deadlineIn(30_000);
+
+  localVenue.openFileThread(change, "kept.txt", "**Squiz reviewer · low — B**", until);
+  const opened = localVenue.openGeneralThread(change, "**Squiz reviewer · high — The change duplicates the scheduler**", until);
+  assert.deepEqual(opened.outcome === "posted" ? [opened.threadId, opened.commentId] : opened, ["T2", "C2"]);
+
+  const stored = JSON.parse(readFileSync(join(worktree, ".squiz", "local", "threads.json"), "utf8")).threads[1];
+  assert.deepEqual(Object.keys(stored).toSorted(), ["anchor", "comments", "id", "isResolved"], "the thread names a file");
+  assert.deepEqual(stored.anchor, { at: "change" });
+
+  const previous = process.cwd();
+  process.chdir(worktree);
+  try {
+    assert.deepEqual(localVenue.reply("T2", "**Squiz coding agent**\n\nIt runs on the scheduler now.", until), { outcome: "acted" });
+    assert.deepEqual(localVenue.resolve("T2", until), { outcome: "acted" });
+  } finally {
+    process.chdir(previous);
+  }
+  const listed = localVenue.listThreads(change, until);
+  const thread = listed.outcome === "listed" ? listed.threads[1] : undefined;
+  assert.deepEqual(
+    thread === undefined ? listed : [thread.id, thread.path, thread.anchor, thread.isResolved, thread.comments.map((comment) => comment.id)],
+    ["T2", "", { at: "change" }, true, ["C2", "C3"]],
+  );
+});
+
 test("the summary and each failure are files in .squiz/local/", (t) => {
   const worktree = worktreeIn(t);
   localVenue.recordStart(worktree, deadlineIn(30_000));

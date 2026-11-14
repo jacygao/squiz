@@ -15,10 +15,14 @@ import { renderClosingReply, renderOpenReason, type RuledAt } from "../findings/
 import { defaultVerdict, type Verdict } from "../findings/status.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { shareOf, type Deadline } from "../reviewers/deadline.ts";
-import type { ThreadAction, Venue } from "../venues/venue.ts";
+import type { Change, ThreadAction, Venue } from "../venues/venue.ts";
 
-/** Where a round's calls go, the deadline they share, and each call's part of it where a caller sets one. */
-export type Sending = { readonly venue: Venue; readonly until: Deadline; readonly callMs?: number };
+/**
+ * Where a round's calls go, the deadline they share, each call's part of it
+ * where a caller sets one, and the change the threads are on where the caller
+ * holds it.
+ */
+export type Sending = { readonly venue: Venue; readonly until: Deadline; readonly callMs?: number; readonly change?: Change };
 
 /** The deadline one call runs under. */
 export function deadlineOf(call: Sending): Deadline {
@@ -193,9 +197,9 @@ function apply(
   if (!owesReply(thread, ruling)) return { ...named, ...setState(thread, ruling.verdict, call) };
   if (ruling.verdict === "open") {
     const state = setState(thread, ruling.verdict, call);
-    return { ...named, ...state, reply: call.venue.reply(thread.id, renderOpenReason(ruling.reason), deadlineOf(call)) };
+    return { ...named, ...state, reply: call.venue.reply(thread.id, renderOpenReason(ruling.reason), deadlineOf(call), call.change) };
   }
-  const reply = call.venue.reply(thread.id, renderClosingReply(ruling, at), deadlineOf(call));
+  const reply = call.venue.reply(thread.id, renderClosingReply(ruling, at), deadlineOf(call), call.change);
   return { ...named, ...setState(thread, ruling.verdict, call), reply };
 }
 
@@ -240,11 +244,11 @@ function setState(thread: HandedOverThread, verdict: Verdict, call: Sending): Ve
   switch (verdict) {
     case "fixed":
     case "withdrawn":
-      return outcomeOf(call.venue.resolve(thread.id, deadlineOf(call)), "closed");
+      return outcomeOf(call.venue.resolve(thread.id, deadlineOf(call), call.change), "closed");
     case "open":
       // A thread that is open is already in the state the verdict asks for.
       if (!thread.isResolved) return { outcome: "left-open" };
-      return outcomeOf(call.venue.reopen(thread.id, deadlineOf(call)), "reopened");
+      return outcomeOf(call.venue.reopen(thread.id, deadlineOf(call), call.change), "reopened");
   }
 }
 
