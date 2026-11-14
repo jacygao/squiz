@@ -39,10 +39,11 @@ import { updateState } from "../loop/state-update.ts";
 import { waitingNotes, type NoteFields } from "../sessions/notes.ts";
 import { squizStatus } from "../review/status.ts";
 import { standIn } from "../testing/stand-in.ts";
-import { githubVenue } from "../venues/github/venue.ts";
+import { FIXER_FOLLOW_UP, githubVenue } from "../venues/github/venue.ts";
 import { addReply, openThread } from "../venues/local/record.ts";
 import { LOCAL_KEY, localVenue } from "../venues/local/venue.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
+import { NO_REVIEW } from "./fixer.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 import { takeEpisodeHostLock } from "./lock.ts";
 
@@ -1546,7 +1547,7 @@ test("#802: a round that leaves threads open writes a handoff in its round's dir
   const short = ran.firstHead.slice(0, 7);
   for (const part of [
     `# Handoff for PR #${PULL_REQUEST} at ${short}, round 1`,
-    WORK_THE_THREADS,
+    `${FIXER_FOLLOW_UP}\n${NO_REVIEW}`,
     "## The description\n\nWhat this changes.",
     `PRRT_new ${TRACKED}:88 high — The name says nothing.`,
     "Won't fix, because the old name is read only by the migration.",
@@ -2100,6 +2101,7 @@ function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; reado
         rerun: `squiz review ${PULL_REQUEST}`,
         summaryAt: "on the pull request",
         followUp: "Fix it.",
+        fixerFollowUp: "Fix it.",
         base: commit("HEAD^"),
         head: commit("HEAD"),
         description: "What this changes.",
@@ -2349,7 +2351,7 @@ test("#802: under the local venue, a round that leaves a thread open writes the 
     const handoff = readFileSync(file, "utf8");
     for (const part of [
       `# Handoff for the working tree at ${read.change.head.slice(0, 7)}, round 1`,
-      read.change.followUp,
+      read.change.fixerFollowUp,
       "## The description\n\nRename the card's flag.",
       `T1 ${TRACKED}:88 high — The name says nothing.`,
       "Won't fix, because the old name is read only by the migration.",

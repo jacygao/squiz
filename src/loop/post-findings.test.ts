@@ -257,6 +257,7 @@ function post(findings: readonly Finding[], against = diff): PostedFindings {
       rerun: `squiz review ${PULL_REQUEST}`,
       summaryAt: "on the pull request",
       followUp: "",
+      fixerFollowUp: "",
       base: HEAD_SHA,
       head: HEAD_SHA,
       description: "",

@@ -3,9 +3,10 @@ import { test } from "node:test";
 
 import type { Owner, StateRecord } from "../loop/state-record.ts";
 import { printedThread } from "../review/output.ts";
-import { followUpFor } from "../venues/github/venue.ts";
+import { FIXER_FOLLOW_UP } from "../venues/github/venue.ts";
 import type { ReviewThread } from "../venues/venue.ts";
 import { threadLine } from "../findings/listing.ts";
+import { NO_REVIEW } from "./fixer.ts";
 import { handoffFor, updateFor } from "./handoff.ts";
 
 const HEAD = "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90";
@@ -17,7 +18,7 @@ const CHANGE = {
   name: "PR #41",
   head: HEAD,
   description: "Back off the sync queue's retries.",
-  followUp: followUpFor(41),
+  fixerFollowUp: FIXER_FOLLOW_UP,
 };
 const DIFF = [
   "diff --git a/src/sync/queue.ts b/src/sync/queue.ts",
@@ -80,7 +81,7 @@ test("#802: a handoff holds the open threads with every reply, the description, 
     [
       "# Handoff for PR #41 at 3f9c2e0, round 2",
       "Squiz reviewed PR #41 at 3f9c2e0 in round 2: 2 threads are open.",
-      followUpFor(41),
+      `${FIXER_FOLLOW_UP}\n${NO_REVIEW}`,
       "## The description",
       "Back off the sync queue's retries.",
       "## The open threads",
@@ -229,7 +230,7 @@ test("#876: an update holds only what changed since the fixer's last handoff: th
     [
       "# Update for PR #41 at 3f9c2e0, round 2",
       "Squiz reviewed PR #41 at 3f9c2e0 again in round 2: 3 threads are open. This holds only what changed since your last handoff.",
-      followUpFor(41),
+      `${FIXER_FOLLOW_UP}\n${NO_REVIEW}`,
       "## New threads",
       printedThread(PLAIN),
       "## New replies on threads still open",
@@ -285,4 +286,16 @@ test("#876: a handoff says which comments it showed and which threads were open,
   const record = reviewed(2, ["PRRT_a"]);
   const handoff = handoffFor(CHANGE, record, [DISPUTED, PLAIN], DIFF, [record]);
   assert.deepEqual(handoff.outcome === "composed" ? handoff.known : undefined, { shown: ["PRRT_a-c0", "PRRT_a-c1", "PRRT_a-c2"], open: ["PRRT_a"] });
+});
+
+test("#885: neither the handoff nor the update tells the fixer to run squiz review, which its prompt forbids", () => {
+  const record = reviewed(2, ["PRRT_a", "PRRT_b"]);
+  const handoff = composed(handoffFor(CHANGE, record, [DISPUTED, PLAIN], DIFF, [record]));
+  const update = composed(updateFor(CHANGE, record, [DISPUTED, PLAIN], { shown: [], open: ["PRRT_a"] }));
+
+  for (const [name, text] of [["handoff", handoff], ["update", update]] as const) {
+    assert.ok(!text.replaceAll(NO_REVIEW, "").includes("squiz review"), `the ${name} asks for squiz review:\n${text}`);
+    assert.ok(text.includes(NO_REVIEW), `the ${name} does not say to leave squiz review alone:\n${text}`);
+    assert.ok(text.includes("`squiz reply <id> <text>`"), `the ${name} does not say how to reply:\n${text}`);
+  }
 });

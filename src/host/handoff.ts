@@ -16,6 +16,7 @@ import { printedThread } from "../review/output.ts";
 import { longestBacktickRun } from "../reviewers/prompt.ts";
 import { threadLine } from "../findings/listing.ts";
 import type { Change, ReviewThread, ThreadComment } from "../venues/venue.ts";
+import { NO_REVIEW } from "./fixer.ts";
 import { threadsToPrint } from "./owner-note.ts";
 
 export type Handoff =
@@ -42,7 +43,7 @@ export type Known = { readonly shown: readonly string[]; readonly open: readonly
  * report.
  */
 export function handoffFor(
-  change: Pick<Change, "name" | "head" | "description" | "descriptionFrom" | "followUp">,
+  change: Pick<Change, "name" | "head" | "description" | "descriptionFrom" | "fixerFollowUp">,
   record: StateRecord,
   listed: readonly ReviewThread[],
   diff: string,
@@ -58,7 +59,7 @@ export function handoffFor(
   const text = [
     `# Handoff for ${at}, round ${round}`,
     `Squiz reviewed ${at} in round ${round}: ${open.length === 1 ? "1 thread is" : `${open.length} threads are`} open.`,
-    change.followUp,
+    nextStep(change),
     "## The description",
     ...(change.descriptionFrom === "prompt" && change.description.trim() !== ""
       ? ["Nobody wrote a description of this change, so this is the prompt the run was started with:"]
@@ -85,7 +86,7 @@ export function handoffFor(
  * by name.
  */
 export function updateFor(
-  change: Pick<Change, "name" | "followUp">,
+  change: Pick<Change, "name" | "fixerFollowUp">,
   record: StateRecord,
   listed: readonly ReviewThread[],
   known: Known,
@@ -111,7 +112,7 @@ export function updateFor(
   const text = [
     `# Update for ${at}, round ${round}`,
     `Squiz reviewed ${at} again in round ${round}: ${open.length === 1 ? "1 thread is" : `${open.length} threads are`} open. This holds only what changed since your last handoff.`,
-    change.followUp,
+    nextStep(change),
     ...section("## New threads", fresh, printedThread),
     ...section("## New replies on threads still open", replied, withNew),
     ...section("## Threads closed since", closed, withNew),
@@ -122,6 +123,11 @@ export function updateFor(
     text,
     known: { shown: [...new Set([...known.shown, ...commentsOf([...open, ...closed])])], open: open.map((thread) => thread.id) },
   };
+}
+
+/** What a fixer does next, as its prompt says it. */
+function nextStep(change: Pick<Change, "fixerFollowUp">): string {
+  return `${change.fixerFollowUp}\n${NO_REVIEW}`;
 }
 
 function commentsOf(threads: readonly ReviewThread[]): readonly string[] {

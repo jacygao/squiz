@@ -108,6 +108,14 @@ test("the change is the working tree against its base, named for the worktree, a
     ].join("\n"),
   );
   assert.doesNotMatch(change.followUp, /commit|push/iu);
+  assert.equal(
+    change.fixerFollowUp,
+    [
+      `Fix what applies in ${worktree}, and reply on each thread with`,
+      `\`(cd ${quoted} && squiz reply <id> <text>)\` to say what you changed or why`,
+      "you disagree. Nothing needs committing: squiz reviews the working tree as it stands.",
+    ].join("\n"),
+  );
   assert.equal(change.base, start);
   assert.notEqual(change.head, start);
   assert.equal(change.description, "Make the queue retry.\n");
@@ -128,8 +136,8 @@ test("#826: every command the change gives runs squiz in the worktree, and leave
   mkdirSync(bin);
   writeFileSync(join(bin, "squiz"), `#!/bin/sh\necho "squiz ran in $(pwd -P)"\n`, { mode: 0o755 });
 
-  const commands = [change.rerun, ...commandsIn(change.followUp)];
-  assert.equal(commands.length, 3, `the follow-up does not give its two commands:\n${change.followUp}`);
+  const commands = [change.rerun, ...commandsIn(change.followUp), ...commandsIn(change.fixerFollowUp)];
+  assert.equal(commands.length, 4, `the follow-ups do not give their three commands:\n${change.followUp}\n${change.fixerFollowUp}`);
   for (const shell of ["/bin/sh", "bash"]) {
     for (const command of commands) {
       const runnable = command.replace("<id> <text>", "T1 fixed");
