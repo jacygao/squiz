@@ -82,7 +82,7 @@ test("#876: the fixer's session comes back as written: its CLI, its id, the roun
   const state: EpisodeState = {
     rounds: [firstRound],
     spentOutsideRounds: unspent,
-    fixerSession: { agent: "copilot", id: "561adfe1-9888-48be-a97c-f4b6d9e081b3", round: 1, shown: ["C1", "C2"], open: ["T1"] },
+    fixerSession: { agent: "copilot", id: "561adfe1-9888-48be-a97c-f4b6d9e081b3", round: 1, shown: ["C1", "C2"], open: ["T1"], noted: ["About the change as a whole: The tests are missing"] },
   };
 
   assert.deepEqual(writeState(episode, state), { outcome: "written" });
@@ -326,6 +326,9 @@ const unreadableContents: readonly string[] = [
   `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "open": []}, ${NONE_OUTSIDE}}`,
   `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": [3], "open": []}, ${NONE_OUTSIDE}}`,
   `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": []}, ${NONE_OUTSIDE}}`,
+  // #882: the findings on no thread a fixer was handed, read wrongly, are handed again or never.
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": [], "open": [], "noted": "a note"}, ${NONE_OUTSIDE}}`,
+  `{"rounds": [], "fixerSession": {"agent": "claude", "id": "561adfe1", "round": 1, "shown": [], "open": [], "noted": [3]}, ${NONE_OUTSIDE}}`,
   // Two records for one state leave no telling which of them is true.
   `{"rounds": [], "records": [{"head": "3f9c2e0", "activity": null, "status": "queued"}, {"head": "3f9c2e0", "activity": null, "status": "failed", "reason": "r", "ownerNoted": true}], ${NONE_OUTSIDE}}`,
 ];

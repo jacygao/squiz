@@ -789,11 +789,37 @@ After that it holds:
 
 - the change's description;
 - each open thread, with every reply on it;
+- each finding of the round that no thread holds, as its Notes line (§ 6);
 - each agent's final report, as its stop recorded it (The hooks);
 - the diff the reviewer read.
 
 Where the threads cannot be listed, or the round kept no diff, the round writes
 no handoff, and `host.log` says why.
+
+**A finding no thread holds is answered in the fixer's final message.** A
+finding about the change as a whole, or one no thread could be opened for, has
+no thread to reply on. The handoff lists each under `## Findings on no thread`,
+after the open threads, and the count line names them. The fixer fixes what
+applies, and says in its final message what it changed for each or why it
+changed nothing. Its stop records that message as its report (The hooks), and
+the next round's reviewer reads the whole change again. Copilot's `Stop` carries
+no final message, so under Copilot the message is in the fixer's
+`events.jsonl`:
+
+```
+Squiz reviewed PR #41 at 3f9c2e0 in round 1: 5 threads are open, and 1 finding is on no thread.
+
+…
+
+## Findings on no thread
+
+No thread holds these, so there is nothing to reply on. Fix what applies, and say in your final message what you changed for each, or why you changed nothing.
+
+- About the change as a whole: All seven new exported helpers lack the required tests
+```
+
+A round with no such finding has no such section, and its count line names the
+threads alone.
 
 **The description is the run's prompt where nobody wrote one.** Under the local
 venue the description is `description.md`, else the first prompt the
@@ -907,8 +933,11 @@ thread that was not open at the session's last handoff, whole, so a reopened
 thread comes with its history; each comment posted since on a thread open then
 and open still, the reviewer's rulings among them; each thread open then that
 has closed, with its new comments where it has any, since a ruling whose reply
-failed to post still resolves its thread; and the open threads with nothing
-new, by name:
+failed to post still resolves its thread; the open threads with nothing new, by
+name; and, under `## New findings on no thread`, each finding of the round no
+thread holds that the session has not been handed, with the same line on how to
+answer one. A finding a later round raises again with the same Notes line is
+not handed a second time:
 
 ```
 # Update for PR #41 at 3f9c2e0, round 2
@@ -944,8 +973,9 @@ round 2: resuming the fixer's session 561adfe1-9888-48be-a97c-f4b6d9e081b3, whic
 
 **The episode records its fixer session as `fixerSession` in the state file**:
 the CLI, the session id, the round whose fixer started it, the node ids of the
-comments it has been shown, and those of the threads open at its last handoff.
-It never holds a prompt or a transcript. A fixer that started records the
+comments it has been shown, those of the threads open at its last handoff, and
+as `noted` the Notes line of each finding no thread holds that it has been
+handed, absent where there is none. It never holds a prompt or a transcript. A fixer that started records the
 session in the same update that records its start. One that did not start
 leaves the session as it was.
 
@@ -2598,7 +2628,9 @@ A finding's `scope`, which the reviewer sets, decides where its comment goes:
   the file, carrying no line.
 - **General**, for a finding scoped to `change`. It goes into the summary comment
   as a line of text, so nothing records whether it was fixed, and no later round
-  rules on it.
+  rules on it. A round that leaves the episode open hands it to a headless
+  fixer in its handoff (§ 3 The handoff), and `squiz review` prints it on
+  stderr (§ 7).
 
 A finding about code the change did not touch is still scoped to `line`, and
 anchored to the changed line that caused it, with the affected file and line
@@ -2643,7 +2675,7 @@ says on stderr that the episode closed before any round ran.
 superseded closes it without running a reviewer** (§ 3 The state file). The
 round host lists the episode's threads and posts the summary from them and from
 what the episode recorded, with the findings no thread holds that the clean
-round recorded.
+round and the rounds before it recorded, as Notes lists them below.
 
 **A close that runs no reviewer counts each thread by its resolved state and the
 last ruling the state file holds for it** (§ 3 The state file):
@@ -2724,13 +2756,25 @@ location and headline, and one that was not by the id the reviewer gave:
 - A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied
 ```
 
-**The findings that no thread holds are the last round's.** A round that leaves
-the episode open keeps each of its own as its Notes line (§ 3 The state file),
-and `squiz review` prints each on stderr (§ 7). A later round whose reviewer
-finished settles them, because it reads the whole change again. So only a close
-that ran no reviewer lists an earlier round's, those of the last round that
-reached a result, first in Notes. A failed round lists the findings it salvaged
-in its failure comment instead (§ 8 The failure comment).
+**Notes names every finding no thread holds that the episode raised.** A round
+that leaves the episode open keeps each of its own as its Notes line (§ 3 The
+state file), and `squiz review` prints each on stderr (§ 7). The summary lists
+the earlier rounds' first, then the closing round's. An earlier round's line
+that no later round raised again names the latest round that raised it, and
+says only that, since a round that does not raise a finding again has not said
+it was fixed:
+
+```markdown
+- Raised in round 1 and not raised again: About the change as a whole: All seven new exported helpers lack the required tests
+- About the change as a whole: The retry queue duplicates the scheduler
+```
+
+A line a later round raised again is listed once, as the later round's. A close
+that ran no reviewer gives the lines of the last round to reach a result as
+they are, after the earlier rounds' it did not raise again. A failed round lists
+the findings it salvaged in its failure comment instead (§ 8 The failure
+comment). Both venues write the same body, so `summary.md` lists them as the
+comment does.
 
 **A round whose finished review never read the diff of a changed file is a
 line of its own**, naming the files, the first ten of them where there are more.
@@ -3630,7 +3674,7 @@ The last column names the surfaces each path reaches.
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. A round that closes the episode lists each in its summary's Notes, and a round that fails lists each in its failure comment. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | The reviewer's reason cannot be posted | The verdict stands, and the thread stays in the state the reviewer ruled. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. A round that closes the episode names the thread in its summary's Notes, without GitHub's answer. Nothing is retried: the next round that keeps the thread open posts a reason of its own. | `squiz review` stderr, `squiz status`, summary's Notes |
 | The reply on a thread the round closes cannot be posted | The thread is resolved all the same, and the verdict stands. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. The round records the line in its entry of the state file, and the summary that closes the episode names it in Notes, without GitHub's answer, whichever round it was. A round that fails names it in its failure comment instead. Nothing is retried, because no later round closes the thread again. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
-| A round that leaves threads open has findings no thread holds | A finding about the change as a whole, one the harness could anchor to neither a line nor a file, and one whose comment could not be posted reach no thread, and a round that leaves threads open posts no summary. The round's record keeps each. `squiz review` prints each on stderr, and the summary that closes the episode lists each that no later round settled (§ 6). | `squiz review` stderr, summary's Notes |
+| A round that leaves threads open has findings no thread holds | A finding about the change as a whole, one the harness could anchor to neither a line nor a file, and one whose comment could not be posted reach no thread, and a round that leaves threads open posts no summary. The round's record keeps each. `squiz review` prints each on stderr, a headless fixer is handed each in its handoff (§ 3 The handoff), and the summary that closes the episode lists each, with the round that raised it where no later round raised it again (§ 6). | `squiz review` stderr, summary's Notes |
 | No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode. A new commit, a new reply or a run of `squiz review` retries it where a round remains, and closes the episode where none does, as The failure comment below says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. | `squiz review` stderr, `squiz status`, `host.log` |
 | The round's spend cannot be written | Exit 1, and nothing the reviewer found is posted. The failure comment and stderr say nothing was posted, and give the underlying error. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |

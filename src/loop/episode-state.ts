@@ -186,6 +186,8 @@ export type FixerSession = {
   readonly shown: readonly string[];
   /** The node ids of the threads that were open when it was last handed anything. */
   readonly open: readonly string[];
+  /** The Notes line of each finding no thread holds that it has been handed. Absent is none. */
+  readonly noted?: readonly string[];
 };
 
 /** A ruling by thread node id. */
@@ -457,7 +459,7 @@ function stateFrom(parsed: unknown, path: string): StateRead {
   const session = parsed["fixerSession"];
   // Read wrongly, a session is resumed under a CLI that did not make it.
   if (session !== undefined && !isFixerSession(session)) {
-    return unreadable(`${path}: "fixerSession" is ${render(session)} rather than a fixer's CLI, session id, round, shown comments and open threads`);
+    return unreadable(`${path}: "fixerSession" is ${render(session)} rather than a fixer's CLI, session id, round, shown comments, open threads and the findings on no thread it was handed`);
   }
 
   return {
@@ -469,14 +471,14 @@ function stateFrom(parsed: unknown, path: string): StateRead {
       ...(cleanClose === undefined ? {} : { cleanClose }),
       ...(kept.records === undefined ? {} : { records: kept.records }),
       ...(rulings === undefined ? {} : { rulings }),
-      ...(session === undefined ? {} : { fixerSession: { agent: session.agent, id: session.id, round: session.round, shown: session.shown, open: session.open } }),
+      ...(session === undefined ? {} : { fixerSession: { agent: session.agent, id: session.id, round: session.round, shown: session.shown, open: session.open, ...(session.noted === undefined ? {} : { noted: session.noted }) } }),
     },
   };
 }
 
 function isFixerSession(value: unknown): value is FixerSession {
   if (!isRecord(value)) return false;
-  const { agent, id, round, shown, open } = value;
+  const { agent, id, round, shown, open, noted } = value;
   const ids = (list: unknown): boolean => Array.isArray(list) && list.every((each) => typeof each === "string" && each !== "");
   return (
     (agent === "claude" || agent === "copilot") &&
@@ -486,7 +488,8 @@ function isFixerSession(value: unknown): value is FixerSession {
     Number.isInteger(round) &&
     round >= 1 &&
     ids(shown) &&
-    ids(open)
+    ids(open) &&
+    (noted === undefined || ids(noted))
   );
 }
 

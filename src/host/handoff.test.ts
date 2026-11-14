@@ -299,3 +299,62 @@ test("#885: neither the handoff nor the update tells the fixer to run squiz revi
     assert.ok(text.includes("`squiz reply <id> <text>`"), `the ${name} does not say how to reply:\n${text}`);
   }
 });
+
+const MISSING_TESTS = "About the change as a whole: All seven new exported helpers lack the required tests";
+const UNANCHORED = "`src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)";
+const ON_NO_THREAD =
+  "No thread holds these, so there is nothing to reply on. Fix what applies, and say in your final message what you changed for each, or why you changed nothing.";
+
+function withUnthreaded(record: StateRecord, unthreaded: readonly string[]): StateRecord {
+  return { ...record, unthreaded } as StateRecord;
+}
+
+// The shape #880's first round left: five threads, and one finding about the change as a whole.
+test("#882: a handoff lists the round's findings no thread holds after the open threads, and says how to answer one", () => {
+  const ids = ["T1", "T2", "T3", "T4", "T5"];
+  const threads = ids.map((id) => thread(id, `Finding ${id}`));
+  const record = withUnthreaded(reviewed(2, ids), [MISSING_TESTS]);
+
+  const handoff = handoffFor(CHANGE, record, threads, DIFF, [record]);
+  const text = composed(handoff);
+
+  assert.ok(
+    text.includes("Squiz reviewed PR #41 at 3f9c2e0 in round 2: 5 threads are open, and 1 finding is on no thread.\n"),
+    `the count does not name the finding on no thread:\n${text}`,
+  );
+  const section = text.slice(text.indexOf("## Findings on no thread"), text.indexOf("## The agents' final reports"));
+  assert.equal(
+    section,
+    ["## Findings on no thread", ON_NO_THREAD, `- ${MISSING_TESTS}`, ""].join("\n\n"),
+    `the finding on no thread is not listed after the open threads:\n${text}`,
+  );
+  assert.ok(
+    text.indexOf(printedThread(threads[4] as ReviewThread)) < text.indexOf("## Findings on no thread"),
+    "the findings on no thread come before the open threads",
+  );
+  assert.deepEqual(handoff.outcome === "composed" ? handoff.known.noted : undefined, [MISSING_TESTS]);
+});
+
+test("#882: a round that left nothing on no thread hands off no section for it", () => {
+  const record = reviewed(2, ["PRRT_b"]);
+  const text = composed(handoffFor(CHANGE, record, [PLAIN], DIFF, [record]));
+  assert.ok(!text.includes("on no thread"), text);
+});
+
+test("#882: an update hands a resumed fixer each finding no thread holds that it was not handed before, and one raised again not a second time", () => {
+  const record = withUnthreaded(reviewed(2, ["PRRT_b"]), [MISSING_TESTS, UNANCHORED]);
+  const known = { shown: ["PRRT_b-c0"], open: ["PRRT_b"], noted: [MISSING_TESTS] };
+
+  const update = updateFor(CHANGE, record, [PLAIN], known);
+  const text = composed(update);
+
+  assert.ok(
+    text.includes(`## New findings on no thread\n\n${ON_NO_THREAD}\n\n- ${UNANCHORED}\n`),
+    `the new finding on no thread is missing:\n${text}`,
+  );
+  assert.ok(!text.includes(MISSING_TESTS), `a finding the fixer was handed before is handed again:\n${text}`);
+  assert.deepEqual(update.outcome === "composed" ? update.known.noted : undefined, [MISSING_TESTS, UNANCHORED]);
+
+  const again = composed(updateFor(CHANGE, record, [PLAIN], { ...known, noted: [MISSING_TESTS, UNANCHORED] }));
+  assert.ok(!again.includes("on no thread"), `a section with nothing new in it is there:\n${again}`);
+});

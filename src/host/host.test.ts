@@ -1561,6 +1561,21 @@ test("#802: a round that leaves threads open writes a handoff in its round's dir
   assert.match(ran.log, /round 1: wrote the handoff to .*rounds\/1\/handoff\.md/u);
 });
 
+test("#882: a round that leaves threads open writes its finding about the change as a whole into the handoff, which no thread holds", async () => {
+  const ran = await host({
+    records: (fixture) => [queued(fixture.head(), null, REPORTING)],
+    findings: [[finding("The name says nothing."), aboutTheChange("All seven new exported helpers lack the required tests")]],
+    before: listOpenedThreadWithReply,
+  });
+
+  const handoff = ran.handoffs["1"] ?? "";
+  assert.match(
+    handoff,
+    /## Findings on no thread\n\n.*\n\n- About the change as a whole: All seven new exported helpers lack the required tests\n\n## The agents' final reports/u,
+    `the handoff does not hand the fixer the finding on no thread:\n${handoff}`,
+  );
+});
+
 test("#802: a round that closes the episode, with nothing open or with threads open, writes no handoff", async () => {
   const clean = await host({ records: (fixture) => [queued(fixture.head(), null, REPORTING)] });
   const capped = await host({

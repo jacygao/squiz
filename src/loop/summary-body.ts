@@ -26,6 +26,7 @@ import { mutated, type AppliedVerdicts } from "./verdicts.ts";
 import { renderReviewerLine } from "./reviewer-line.ts";
 import { renderSpendLine } from "./spend-line.ts";
 import type { ReviewThread } from "../venues/venue.ts";
+import type { StateRecord } from "./state-record.ts";
 
 /** What the episode came to, which is everything the comment is written from. */
 export type ClosedEpisode = {
@@ -41,10 +42,7 @@ export type ClosedEpisode = {
    * thread holds are.
    */
   readonly findings: PostedFindings;
-  /**
-   * The Notes lines of an earlier round's findings that no thread holds, which
-   * no round after it settled.
-   */
+  /** The Notes lines of the earlier rounds' findings that no thread holds. */
   readonly earlier: readonly string[];
   /** The Notes lines of the last round's rulings that could not be applied. */
   readonly unapplied: readonly string[];
@@ -314,6 +312,45 @@ function cutShort(rounds: readonly RoundRecord[]): readonly string[] {
 /** The findings of the last round that no thread on the pull request holds. */
 function unthreaded(findings: PostedFindings): readonly (Noted | Failed)[] {
   return findings.outcomes.filter((outcome) => outcome.outcome !== "threaded");
+}
+
+/**
+ * The Notes lines of the findings no thread holds that a round of `records`
+ * raised and none after it raised again, each from the latest round that raised
+ * it, in the order those rounds ran. `again` is what a later round raised itself,
+ * which Notes lists as that round's.
+ *
+ * A round not raising a finding again does not say it was fixed, so each line
+ * says only that.
+ */
+export function notRaisedAgain(records: readonly StateRecord[], again: readonly string[]): readonly string[] {
+  const latest = new Map<string, number>();
+  const reviewed = records
+    .filter((record) => record.status === "reviewed")
+    .toSorted((one, other) => one.round.number - other.round.number);
+  for (const record of reviewed) {
+    for (const note of record.unthreaded ?? []) {
+      // Set again after a delete, so that the order is that of the latest round to raise it.
+      latest.delete(note);
+      latest.set(note, record.round.number);
+    }
+  }
+  const raised = new Set(again);
+  return [...latest]
+    .filter(([note]) => !raised.has(note))
+    .map(([note, round]) => `Raised in round ${round} and not raised again: ${note}`);
+}
+
+/**
+ * What a close that ran no reviewer lists of the findings no thread holds: those
+ * `last`, the last round to reach its end, raised, and before them each earlier
+ * round's that it did not raise again.
+ */
+export function leftByTheLastReview(records: readonly StateRecord[], last: StateRecord | undefined): readonly string[] {
+  if (last?.status !== "reviewed") return [];
+  const its = last.unthreaded ?? [];
+  const before = records.filter((record) => record.status === "reviewed" && record.round.number < last.round.number);
+  return [...notRaisedAgain(before, its), ...its];
 }
 
 /**

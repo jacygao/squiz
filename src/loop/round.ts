@@ -30,7 +30,7 @@ import { latestActivity } from "../findings/activity.ts";
 import type { RuledAt } from "../findings/comment.ts";
 import { readThread } from "../findings/thread.ts";
 import type { ClosedBy } from "./failure-body.ts";
-import { unappliedNotes, unpostedReplyNotes } from "./summary-body.ts";
+import { leftByTheLastReview, notRaisedAgain, unappliedNotes, unpostedReplyNotes, unthreadedNotes } from "./summary-body.ts";
 import type {
   Change,
   Posting as CommentPosting,
@@ -1301,9 +1301,8 @@ function closeAfterReview(
       handedOver,
       verdicts: account.verdicts,
       findings: account.findings,
-      // This round's reviewer read the whole change again, which settles every
-      // earlier round's findings: what it still found, it raised itself.
-      earlier: [],
+      // What this round raised again is its own, and listed with its findings.
+      earlier: notRaisedAgain(state.records ?? [], unthreadedNotes(account.findings)),
       because,
       leftNotReviewed,
     },
@@ -1365,9 +1364,7 @@ function closeBeforeReview(
               handedOver: threads,
               verdicts: standing(threads, state.rulings),
               findings: account.findings,
-              // No reviewer ran, so nothing settled what the last round to reach
-              // its end left on no thread.
-              earlier: lastReviewedRecord(state.records ?? [])?.unthreaded ?? [],
+              earlier: leftByTheLastReview(state.records ?? [], lastReviewedRecord(state.records ?? [])),
               // The bound closed the episode either way, and the Notes name it
               // through the states it left not reviewed.
               because: openThreads.length === 0 ? "nothing-open" : bound,
@@ -1431,8 +1428,7 @@ function supersededBy(
         handedOver: threads,
         verdicts: standing(threads, state.rulings),
         findings: nothingDone(key).findings,
-        // No reviewer ran after the clean round, so nothing settled what it left on no thread.
-        earlier: closing.unthreaded ?? [],
+        earlier: leftByTheLastReview(state.records ?? [], closing),
         because: "nothing-open",
         leftNotReviewed: null,
       },
