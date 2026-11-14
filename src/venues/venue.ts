@@ -31,6 +31,12 @@ export type Change = {
    * output: what to fix, how to reply, and what to run next.
    */
   readonly followUp: string;
+  /**
+   * The paragraph after the open threads in a fixer's handoff and update: what
+   * to fix, how to reply, and what makes the fix part of the change. It never
+   * asks for `squiz review`, which the fixer must not run.
+   */
+  readonly fixerFollowUp: string;
   /** Full shas. */
   readonly base: string;
   readonly head: string;

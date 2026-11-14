@@ -41,13 +41,7 @@ export type FixerSpec = {
   readonly resume?: { readonly update: string; readonly exitPath: string };
 };
 
-/**
- * What the fixer is asked to do.
- *
- * The handoff ends with the venue's follow-up, which asks for `squiz review`.
- * A fixer that ran it would wait on a round it then works itself, beside the
- * fixer that round's host starts, so the prompt rules it out.
- */
+/** What the fixer is asked to do. */
 export function fixerPrompt(handoff: string): string {
   return [
     `Squiz reviewed this change and left threads open. ${handoff} holds them, each with every reply on it, with the change's description, the agents' final reports and the diff the reviewer read.`,
@@ -65,8 +59,14 @@ export function resumePrompt(update: string, handoff: string): string {
   ].join("\n\n");
 }
 
-const WORK =
-  "Work the threads as it says: fix what applies, and reply on each one to say what you changed or why you disagree. Do not run `squiz review`: squiz reviews your work again when you finish.";
+/**
+ * Said in the prompt and again at the end of the handoff and the update. A
+ * fixer that ran `squiz review` would wait on a round it then works itself,
+ * beside the fixer that round's host starts.
+ */
+export const NO_REVIEW = "Do not run `squiz review`: squiz reviews your work again when you finish.";
+
+const WORK = `Work the threads as it says: fix what applies, and reply on each one to say what you changed or why you disagree. ${NO_REVIEW}`;
 
 const FIX_RULES = [
   "- Before changing code, check that the finding holds. Where it does not, change nothing for it, and say why in your reply.",

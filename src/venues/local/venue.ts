@@ -109,6 +109,11 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
       `\`${inWorktree(root, "squiz reply <id> <text>")}\` to say what you changed or why`,
       `you disagree. Then run \`${rerun}\` again.`,
     ].join("\n"),
+    fixerFollowUp: [
+      `Fix what applies in ${root}, and reply on each thread with`,
+      `\`${inWorktree(root, "squiz reply <id> <text>")}\` to say what you changed or why`,
+      "you disagree. Nothing needs committing: squiz reviews the working tree as it stands.",
+    ].join("\n"),
     base: base.base,
     head: built.head,
     ...description,

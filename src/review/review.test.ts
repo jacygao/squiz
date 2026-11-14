@@ -22,7 +22,7 @@ import { githubEpisode } from "../testing/episode.ts";
 import type { StateKey, StateRecord } from "../loop/state-record.ts";
 import type { TriggerDecision } from "../loop/trigger-decision.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
-import { githubVenue } from "../venues/github/venue.ts";
+import { FIXER_FOLLOW_UP, githubVenue } from "../venues/github/venue.ts";
 import { LOCAL_KEY, localVenue } from "../venues/local/venue.ts";
 import type { Printed } from "./output.ts";
 import { runReview, type ReviewRequest } from "./review.ts";
@@ -84,6 +84,7 @@ const CHANGE: Change = {
     "what you changed or why you disagree. Commit and push what you changed, then run",
     `\`squiz review ${NUMBER}\` again.`,
   ].join("\n"),
+  fixerFollowUp: FIXER_FOLLOW_UP,
   base: "7c1e0d3f2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9",
   head: OWN.head,
   description: "",
@@ -1265,6 +1266,7 @@ const WORKING_TREE: Change = {
   rerun: "(cd '/work/squiz-a' && squiz review)",
   summaryAt: "in /work/squiz-a/.squiz/local/summary.md",
   followUp: "Fix what applies in /work/squiz-a, then run `(cd '/work/squiz-a' && squiz review)` again.",
+  fixerFollowUp: "Fix what applies in /work/squiz-a.",
   base: CHANGE.base,
   head: OWN.head,
   description: "",

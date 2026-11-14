@@ -769,8 +769,23 @@ experimental features off, had nothing to wake, and gets no line.
 
 **A round that leaves threads open with a round remaining writes
 `rounds/<k>/handoff.md`**, in any run, and a headless run's fixer starts on it.
-After a heading, a line counting the open threads and the venue's `followUp`,
-it holds:
+In an interactive run nothing reads it: the session that owns the work is woken
+with its note, which ends with the venue's `followUp` (The report). The handoff
+opens with a heading, a line counting the open threads, and what the fixer does
+next. That is the venue's `fixerFollowUp` and the line the fixer's prompt also
+gives (The fixer), so the handoff never asks for `squiz review`:
+
+```
+# Handoff for PR #41 at 3f9c2e0, round 1
+
+Squiz reviewed PR #41 at 3f9c2e0 in round 1: 2 threads are open.
+
+Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say
+what you changed or why you disagree. Commit and push what you changed.
+Do not run `squiz review`: squiz reviews your work again when you finish.
+```
+
+After that it holds:
 
 - the change's description;
 - each open thread, with every reply on it;
@@ -900,7 +915,9 @@ new, by name:
 
 Squiz reviewed PR #41 at 3f9c2e0 again in round 2: 1 thread is open. This holds only what changed since your last handoff.
 
-…the venue's follow-up…
+Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say
+what you changed or why you disagree. Commit and push what you changed.
+Do not run `squiz review`: squiz reviews your work again when you finish.
 
 ## New replies on threads still open
 
@@ -1182,6 +1199,12 @@ type Change = {
    * output: what to fix, how to reply, and what to run next.
    */
   readonly followUp: string;
+  /**
+   * The paragraph after the open threads in a fixer's handoff and update: what
+   * to fix, how to reply, and what makes the fix part of the change. It never
+   * asks for `squiz review`, which the fixer must not run.
+   */
+  readonly fixerFollowUp: string;
   /** Full shas. */
   readonly base: string;
   readonly head: string;
@@ -1306,6 +1329,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 |---|---|
 | `key`, `name`, `rerun`, `summaryAt` | The pull request's number, `PR #41`, `squiz review 41`, `on the pull request` |
 | `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
+| `fixerFollowUp` | The paragraph § 3 The handoff shows, which asks for a commit and a push |
 | `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
 | `recordPrompt` | Does nothing, and returns `done`. The pull request carries its own description, and the run's prompt never stands in for it. |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
@@ -1334,7 +1358,7 @@ writes becomes part of the change.
 | `squiz review <number>` | `squiz review`, which takes no number and reviews the worktree it is run in. `readChange` is `none` for any `asked` key but `local`. |
 | A draft, and a branch that is not the pull request's | No such case. `readChange` is never `held`. |
 | The owner's note and its wake | As § 3 sets out. The note is written in `.squiz/local/notes/`. |
-| The paragraph after the open threads | `followUp`, below |
+| The paragraph after the open threads | `followUp` and `fixerFollowUp`, below |
 
 **`followUp` names the worktree, and asks for no commit or push.** The local
 venue builds its head from the working tree, so an edit is the whole of a fix.
@@ -1347,6 +1371,15 @@ directory and its own stops review its own tree:
 Fix what applies in /work/squiz-a, and reply on each thread with
 `(cd '/work/squiz-a' && squiz reply <id> <text>)` to say what you changed or why
 you disagree. Then run `(cd '/work/squiz-a' && squiz review)` again.
+```
+
+`fixerFollowUp`, which ends a fixer's handoff and update, gives the same reply
+command and runs nothing else:
+
+```
+Fix what applies in /work/squiz-a, and reply on each thread with
+`(cd '/work/squiz-a' && squiz reply <id> <text>)` to say what you changed or why
+you disagree. Nothing needs committing: squiz reviews the working tree as it stands.
 ```
 
 #### The base
