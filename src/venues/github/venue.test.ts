@@ -815,6 +815,16 @@ test("#889: resolving a G id hides its finding's comment as resolved, and re-ope
   });
 });
 
+// A round holds its change, and CI checks out a detached HEAD on which no pull request is found.
+test("#889: a G id acted on with the change handed in uses that pull request, and looks nothing up from the directory", async () => {
+  const hidden = api(200, { data: { minimizeComment: { minimizedComment: { isMinimized: true } } } });
+  await withFakeGh([api(200, { node_id: NODE_ID }), conversation([conversationComment(2, G1_POSTED)]), hidden], (gh) => {
+    assert.deepEqual(githubVenue.resolve("G1", deadlineIn(10_000), foreign), { outcome: "acted" });
+    assert.ok(gh.argumentsAt(1).includes("repos/{owner}/{repo}/pulls/142"), `asked ${gh.argumentsAt(1).join(" ")}`);
+    assert.equal(JSON.parse(gh.stdinAt(2)).variables.node, NODE_ID);
+  });
+});
+
 test("#889: resolving a G id whose comment GitHub will not hide fails, with GitHub's reason", async () => {
   await withRepository(async (worktree) => {
     const refused = api(200, { data: { minimizeComment: null }, errors: [{ type: "NOT_FOUND", message: "Could not resolve to a node with the global id of 'IC_2'." }] });

@@ -1198,7 +1198,7 @@ type Posting = {
  * whether the reviewer's silence about a thread counts as a ruling on it.
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
-  const call = { venue: on.venue, until: on.reserve };
+  const call = { venue: on.venue, until: on.reserve, change: on.change };
   // A thread takes a second call where the round replies on it, and a finding
   // takes two, the thread and the read-back of its id.
   const replies = rulingsReplied(ruleOn, output.verdicts).length;

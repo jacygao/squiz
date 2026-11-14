@@ -1191,6 +1191,7 @@ test("#889: a general thread whose comment GitHub will not hide keeps its ruling
 
   assert.equal(ran.conclusion.outcome, "block", `concluded ${JSON.stringify(ran.conclusion)}`);
   assert.ok(ran.conclusion.outcome === "block");
+  assert.ok(ran.kinds.includes("minimize"), `GitHub was never asked to hide the comment: ${ran.kinds.join(", ")}`);
   assert.deepEqual(ran.state?.rulings, { G1: "fixed" }, "the ruling was not kept");
   assert.deepEqual(ran.conclusion.unappliedNotes, [
     "About the change as a whole: The retry queue duplicates the scheduler (ruled fixed, and the thread could not be resolved)",

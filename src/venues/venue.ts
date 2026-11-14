@@ -133,9 +133,13 @@ export interface Venue {
    * answers `anchor-refused` for one.
    */
   openGeneralThread(change: Change, body: string, until: Deadline): ThreadPosting;
-  reply(threadId: string, body: string, until: Deadline): ThreadAction;
-  resolve(threadId: string, until: Deadline): ThreadAction;
-  reopen(threadId: string, until: Deadline): ThreadAction;
+  /**
+   * The thread actions act on `change` where the caller holds it, as a round
+   * does, and otherwise on the change the process's directory has.
+   */
+  reply(threadId: string, body: string, until: Deadline, change?: Change): ThreadAction;
+  resolve(threadId: string, until: Deadline, change?: Change): ThreadAction;
+  reopen(threadId: string, until: Deadline, change?: Change): ThreadAction;
   postSummary(change: Change, body: string, until: Deadline): Posting;
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }

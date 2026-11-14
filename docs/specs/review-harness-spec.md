@@ -1305,9 +1305,9 @@ interface Venue {
   openFileThread(change: Change, path: string, body: string, until: Deadline): ThreadPosting;
   /** A thread about the change as a whole, on no file and no line. */
   openGeneralThread(change: Change, body: string, until: Deadline): ThreadPosting;
-  reply(threadId: string, body: string, until: Deadline): ThreadAction;
-  resolve(threadId: string, until: Deadline): ThreadAction;
-  reopen(threadId: string, until: Deadline): ThreadAction;
+  reply(threadId: string, body: string, until: Deadline, change?: Change): ThreadAction;
+  resolve(threadId: string, until: Deadline, change?: Change): ThreadAction;
+  reopen(threadId: string, until: Deadline, change?: Change): ThreadAction;
   postSummary(change: Change, body: string, until: Deadline): Posting;
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }
@@ -1341,13 +1341,16 @@ function venueAt(directory: string, until?: Deadline):
   `posted-without-thread-id` only where the comment landed and its thread's id
   could not be read back. The caller falls back as § 5 Pull request comments
   sets out. `openGeneralThread` returns neither.
-- **Act on a thread in the worktree the process runs in.** `reply`, `resolve`
-  and `reopen` are handed no change, so they act from the process's directory.
-  The GitHub venue runs `gh` there: a `PRRT_` id names its own repository, and
-  a `G` id names a thread on the open pull request whose head is the branch
-  checked out there. The local venue uses the `.squiz/local/` of the worktree
-  that `git rev-parse --show-toplevel` names for it. The round host runs in the
-  worktree it serves, and `squiz reply` in the one it is run in.
+- **Act on a thread of the change handed in, else in the worktree the process
+  runs in.** A round hands `reply`, `resolve` and `reopen` the change it
+  reviewed, and `squiz reply` the change it read where it was run. The GitHub
+  venue runs `gh` from the process's directory: a `PRRT_` id names its own
+  repository, and a `G` id names a thread on the change's pull request, or with
+  no change handed in, on the open pull request whose head is the branch checked
+  out there. The local venue uses the `.squiz/local/` of the worktree that
+  `git rev-parse --show-toplevel` names for the process's directory. The round
+  host runs in the worktree it serves, and `squiz reply` in the one it is run
+  in.
 
 The renderers stay outside the venue. A summary or a failure comment is
 composed once, as markdown, whichever venue takes it.

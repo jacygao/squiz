@@ -115,18 +115,19 @@ export const githubVenue: Venue = {
   },
   // A review thread's node id names its repository, so those run wherever squiz
   // does. A general thread's id is counted per pull request, so it names a
-  // thread only on the pull request the directory has checked out.
-  reply(threadId, body, until) {
+  // thread only on the change handed in, or on the pull request the directory
+  // has checked out.
+  reply(threadId, body, until, change) {
     if (!isGeneralId(threadId)) return replyInThread(threadId, body, { directory: process.cwd(), until });
-    return onGeneralThread(threadId, until, (number, nodeId, call) => replyOnGeneralThread(number, nodeId, threadId, body, call));
+    return onGeneralThread(threadId, until, change, (number, nodeId, call) => replyOnGeneralThread(number, nodeId, threadId, body, call));
   },
-  resolve(threadId, until) {
+  resolve(threadId, until, change) {
     if (!isGeneralId(threadId)) return resolveThread(threadId, { directory: process.cwd(), until });
-    return onGeneralThread(threadId, until, (number, nodeId, call) => setGeneralResolved(number, nodeId, threadId, true, call));
+    return onGeneralThread(threadId, until, change, (number, nodeId, call) => setGeneralResolved(number, nodeId, threadId, true, call));
   },
-  reopen(threadId, until) {
+  reopen(threadId, until, change) {
     if (!isGeneralId(threadId)) return reopenThread(threadId, { directory: process.cwd(), until });
-    return onGeneralThread(threadId, until, (number, nodeId, call) => setGeneralResolved(number, nodeId, threadId, false, call));
+    return onGeneralThread(threadId, until, change, (number, nodeId, call) => setGeneralResolved(number, nodeId, threadId, false, call));
   },
   postSummary(change, body, until) {
     const number = numberIn(change.key);
@@ -164,12 +165,24 @@ function inOrderOpened(review: readonly ReviewThread[], general: readonly Review
   return [...merged, ...waiting];
 }
 
-/** Run `act` on the pull request whose head is the branch the process's directory has checked out. */
+/**
+ * Run `act` on the pull request of `change`, or where none is handed in, on
+ * the one whose head is the branch the process's directory has checked out.
+ */
 function onGeneralThread(
   threadId: string,
   until: Deadline,
+  change: Change | undefined,
   act: (number: number, nodeId: string, call: GhCall) => ThreadAction,
 ): ThreadAction {
+  if (change !== undefined) {
+    const number = numberIn(change.key);
+    if (typeof number !== "number") return number;
+    const call = { directory: worktreeOf(change), until };
+    const nodeId = nodeIdOf(change, number, call);
+    if (typeof nodeId !== "string") return nodeId;
+    return act(number, nodeId, call);
+  }
   const directory = process.cwd();
   const branch = currentBranch(directory, until);
   if (branch.outcome === "failed") return failed(`the current branch could not be resolved: ${branch.reason}`);
