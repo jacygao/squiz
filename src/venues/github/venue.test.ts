@@ -164,7 +164,15 @@ test("readChange finds the open pull request whose head the worktree has checked
       assert.equal(change.key, "142");
       assert.equal(change.name, "PR #142");
       assert.equal(change.rerun, "squiz review 142");
-      assert.equal(change.followUp, followUp);
+      // A note can reach a session in another worktree, and a G id names a thread only on this worktree's pull request (#889).
+      assert.equal(
+        change.followUp,
+        [
+          `Fix what applies in ${worktree}, and reply on each thread with`,
+          `\`(cd '${worktree}' && squiz reply <id> <text>)\` to say what you changed or why`,
+          "you disagree. Commit and push what you changed, then run `squiz review 142` again.",
+        ].join("\n"),
+      );
       assert.equal(change.fixerFollowUp, FIXER_FOLLOW_UP);
       assert.equal(change.base, BASE);
       assert.equal(change.head, HEAD);

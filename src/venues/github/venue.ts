@@ -39,12 +39,20 @@ const EPISODES = ".squiz";
 // moves, or reach git as an option.
 const FULL_COMMIT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
-/** The paragraph after the open threads, for pull request `number`. */
-export function followUpFor(number: number): string {
+/**
+ * The paragraph after the open threads, for pull request `number` checked out
+ * in `worktree`.
+ *
+ * The reply runs in `worktree` because a note can reach a session working in
+ * another one, and a `G` id names a thread only on the pull request of the
+ * directory the reply runs in.
+ */
+export function followUpFor(number: number, worktree: string): string {
+  const quoted = `'${worktree.replaceAll("'", `'\\''`)}'`;
   return [
-    "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
-    "what you changed or why you disagree. Commit and push what you changed, then run",
-    `\`squiz review ${number}\` again.`,
+    `Fix what applies in ${worktree}, and reply on each thread with`,
+    `\`(cd ${quoted} && squiz reply <id> <text>)\` to say what you changed or why`,
+    `you disagree. Commit and push what you changed, then run \`squiz review ${number}\` again.`,
   ].join("\n");
 }
 
@@ -237,7 +245,7 @@ function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange
     name: `PR #${number}`,
     rerun: `squiz review ${number}`,
     summaryAt: "on the pull request",
-    followUp: followUpFor(number),
+    followUp: followUpFor(number, worktree),
     fixerFollowUp: FIXER_FOLLOW_UP,
     base: pullRequest.baseSha,
     head: pullRequest.headSha,

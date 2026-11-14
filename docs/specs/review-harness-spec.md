@@ -688,9 +688,9 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 
   **Suggested fix:** allow the skew the server documents before reading a token as expired.
 
-Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say
-what you changed or why you disagree. Commit and push what you changed, then run
-`squiz review 41` again.
+Fix what applies in /work/squiz, and reply on each thread with
+`(cd '/work/squiz' && squiz reply <id> <text>)` to say what you changed or why
+you disagree. Commit and push what you changed, then run `squiz review 41` again.
 ```
 
 Where the episode closed with threads open, the first line reads `the episode has
@@ -1376,7 +1376,7 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | Member | In the GitHub venue |
 |---|---|
 | `key`, `name`, `rerun`, `summaryAt` | The pull request's number, `PR #41`, `squiz review 41`, `on the pull request` |
-| `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push |
+| `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push. Its reply command runs in the pull request's worktree, inside a subshell, because a note can reach a session working in another worktree and a `G` id names a thread only on the pull request checked out where the reply runs. |
 | `fixerFollowUp` | The paragraph § 3 The handoff shows, which asks for a commit and a push |
 | `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
 | `recordPrompt` | Does nothing, and returns `done`. The pull request carries its own description, and the run's prompt never stands in for it. |
@@ -3159,9 +3159,9 @@ PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is r
 
   `isExpired()` still compares against the local clock with no margin: `clock.ts:12` allows for skew in `now()`, which this path does not call. Call `now()` here, or show where the margin is applied.
 
-Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say
-what you changed or why you disagree. Commit and push what you changed, then run
-`squiz review 41` again.
+Fix what applies in /work/squiz, and reply on each thread with
+`(cd '/work/squiz' && squiz reply <id> <text>)` to say what you changed or why
+you disagree. Commit and push what you changed, then run `squiz review 41` again.
 ```
 
 A run handed a result it did not produce says so in the line after the path, and

@@ -97,6 +97,8 @@ type Hosted = {
   readonly firstHead: string;
   /** Whether the worktree's directory is there once the host has exited. */
   readonly worktreeLeft: boolean;
+  /** The worktree the host served. */
+  readonly worktree: string;
   /** What the run beside the summary request printed, empty where none ran. */
   readonly summaryHook: string;
   /** The notes waiting in the episode's notes/, by session id. */
@@ -273,6 +275,7 @@ async function host(arranged: Arrangement): Promise<Hosted> {
       reviewedCommits,
       firstHead,
       worktreeLeft: existsSync(worktree),
+      worktree,
       summaryHook: existsSync(join(binaries, "on-summary.out")) ? readFileSync(join(binaries, "on-summary.out"), "utf8") : "",
       notes: notesIn(episode),
       delivered: deliveredIn(episode),
@@ -1138,11 +1141,14 @@ const OPENED_THREAD = [
   "  **Suggested fix:** Rename it.",
 ].join("\n");
 
-const WORK_THE_THREADS = [
-  "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
-  "what you changed or why you disagree. Commit and push what you changed, then run",
-  `\`squiz review ${PULL_REQUEST}\` again.`,
-].join("\n");
+/** The paragraph a note ends with, for threads open in `worktree`. */
+function workTheThreads(worktree: string): string {
+  return [
+    `Fix what applies in ${worktree}, and reply on each thread with`,
+    `\`(cd '${worktree}' && squiz reply <id> <text>)\` to say what you changed or why`,
+    `you disagree. Commit and push what you changed, then run \`squiz review ${PULL_REQUEST}\` again.`,
+  ].join("\n");
+}
 
 test("a host that finds the cap spent posts the summary, and records the close on the state it took and the rest not reviewed", async () => {
   let head = "";
@@ -1540,7 +1546,7 @@ test("a round that leaves threads open writes its owner a note naming the pull r
     text: [
       `Squiz reviewed PR #${PULL_REQUEST} at ${short}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open:`,
       OPENED_THREAD,
-      WORK_THE_THREADS,
+      workTheThreads(ran.worktree),
     ].join("\n\n"),
   });
 });
@@ -2022,7 +2028,7 @@ test("a subagent's note is posted to the socket its hook recorded, the parent's,
     const text = [
       `Squiz reviewed PR #${PULL_REQUEST} at ${ran.firstHead.slice(0, 7)}, the work of subagent a402ef8f56c1b2ed1: 1 thread is open:`,
       OPENED_THREAD,
-      WORK_THE_THREADS,
+      workTheThreads(ran.worktree),
     ].join("\n\n");
     assert.deepEqual(socket.received(), [`${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`]);
     assert.deepEqual(ran.notes[PARENT.sessionId], [], `notes/ holds ${JSON.stringify(ran.notes)}`);
