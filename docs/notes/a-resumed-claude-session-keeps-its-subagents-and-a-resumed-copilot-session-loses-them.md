@@ -3,7 +3,7 @@ settles: "§ 3 — what a fixer gets by resuming a headless run's session after 
 issue: 800
 recorded: 2026-11-13
 versions: { claude: 2.1.321, copilot: 1.0.109, claude-model: claude-opus-5-5, copilot-model: gpt-6.1-sol }
-recheck-when: Claude Code or Copilot CLI change what `--resume` restores, Copilot marks a subagent `resumable`, either changes its prompt-cache lifetime, or squiz considers resuming a session instead of starting a fresh fixer
+recheck-when: Claude Code or Copilot CLI change what `--resume` restores, Copilot marks a subagent `resumable`, either changes its prompt-cache lifetime, or squiz considers resuming the coding agent's own session instead of starting a fixer in a session of its own
 ---
 
 # A resumed Claude session keeps its subagents, and a resumed Copilot session loses them
@@ -19,9 +19,11 @@ recheck-when: Claude Code or Copilot CLI change what `--resume` restores, Copilo
 
 ## Decisions
 
-- **Keep the fresh fixer as the headless handoff, for both agents.** A resume
-  restores only the parent in Copilot, so it cannot be the common route, and a
-  cold resume costs about what the original run did.
+- **Hand the headless run's findings to a fixer in a session of its own, for
+  both agents, and never resume the coding agent's session.** A resume restores
+  only the parent in Copilot, so it cannot be the common route, and a cold
+  resume costs about what the original run did. Each later round of the
+  episode then resumes the fixer's own session.
 - **Never continue a Claude subagent whose worktree is gone.** It resumes in
   the parent's directory instead, so a fix it makes lands in the wrong tree,
   and nothing reports the move.

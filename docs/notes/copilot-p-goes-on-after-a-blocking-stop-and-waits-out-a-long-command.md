@@ -21,8 +21,9 @@ recheck-when: Copilot CLI upgrades past 1.0.105, or changes how a Stop hook's de
 
 - **Hold a local run with a blocking `Stop`, and let the agent wait in its
   shell.** Superseded on 2026-11-07: a headless run hands its findings to a
-  fresh fixer instead, and nothing holds it. The fact below stands. The
-  reason arrived as the agent's next message and the run went on.
+  fixer in a session of its own instead, resumed across the episode's rounds,
+  and nothing holds it. The fact below stands. The reason arrived as the
+  agent's next message and the run went on.
   The next `Stop` carried `"stop_hook_active":true`, and returning nothing then
   let the run exit 0.
 - **Choose the local venue with `"venue": "local"` in `.squiz.json`.**
