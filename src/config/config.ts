@@ -54,6 +54,12 @@ export type Config = {
    * alone and with any arguments. Empty where the file names none.
    */
   fixerCommands: readonly string[];
+  /**
+   * The absolute path of a file holding the token the reviewer's and the
+   * fixer's Copilot sign in with. `null` where the file names none, which
+   * leaves Copilot to find its own login.
+   */
+  copilotTokenFile: string | null;
 };
 
 // Every setting has a default, so a project that writes no file still runs.
@@ -69,6 +75,7 @@ export const defaultConfig: Readonly<Config> = Object.freeze({
   model: null,
   fixer: null,
   fixerCommands: [],
+  copilotTokenFile: null,
 });
 
 /**
@@ -85,7 +92,7 @@ export class ConfigError extends Error {
   }
 }
 
-const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer", "fixerCommands"] as const;
+const settingNames = ["venue", "reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer", "fixerCommands", "copilotTokenFile"] as const;
 
 const settingList = `${settingNames.slice(0, -1).map((name) => `"${name}"`).join(", ")} and "${settingNames.at(-1)}"`;
 
@@ -230,6 +237,7 @@ function parse(source: string, path: string): Config {
     model: has(raw, "model") ? modelOf(path, raw["model"]) : defaultConfig.model,
     fixer: has(raw, "fixer") ? fixerOf(path, raw["fixer"]) : defaultConfig.fixer,
     fixerCommands: has(raw, "fixerCommands") ? fixerCommandsOf(path, raw["fixerCommands"]) : defaultConfig.fixerCommands,
+    copilotTokenFile: has(raw, "copilotTokenFile") ? tokenFileOf(path, raw["copilotTokenFile"]) : defaultConfig.copilotTokenFile,
   };
   if (config.fixer === null && config.fixerCommands.length > 0) {
     throw new ConfigError(`${path}: "fixerCommands" names commands for a fixer, but "fixer" names none`);
@@ -305,6 +313,22 @@ function fixerCommandsOf(path: string, value: unknown): readonly string[] {
       value,
       `a list of 1 to 16 different command names, each up to 64 letters, digits and . _ + -, starting with a letter or a digit; leave "fixerCommands" out for none`,
     ),
+  );
+}
+
+/**
+ * An absolute path with no control character. Relative to nothing, because
+ * the hook, the round host and a command typed by hand each run in a directory
+ * of their own.
+ *
+ * A refusal leaves the value out, unlike every other setting's, because the
+ * value most likely to be written here by mistake is the token itself.
+ */
+function tokenFileOf(path: string, value: unknown): string {
+  // A control character is refused because the path reaches a pane's shell line, where it would be a key.
+  if (typeof value === "string" && value.startsWith("/") && value.length <= 4096 && !/[\u0000-\u001f\u007f]/u.test(value)) return value;
+  throw new ConfigError(
+    `${path}: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for Copilot's own login`,
   );
 }
 

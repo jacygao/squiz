@@ -194,6 +194,7 @@ function standInTree(t: TestContext): { readonly tree: string; readonly bin: str
     [
       "#!/bin/sh",
       'printf "%s\\0" "$@" > "$STAND_IN_ARGS"',
+      'printf "%s" "${COPILOT_GITHUB_TOKEN-unset}" > "$STAND_IN_ARGS.token"',
       'usage=""',
       'while [ $# -gt 0 ]; do [ "$1" = --usage-output-file ] && usage=$2; shift; done',
       '[ -n "$STAND_IN_STDERR" ] && printf "%s\\n" "$STAND_IN_STDERR" >&2',
@@ -330,6 +331,34 @@ test("with no model configured, the user's default in COPILOT_MODEL reaches Copi
     assert.equal(unset.status, 0);
     assert.ok(!(unset.args ?? []).includes("--model"), `COPILOT_MODEL ${variable === undefined ? "unset" : "empty"} put --model on the line`);
   }
+});
+
+test("#895: the token in copilotTokenFile reaches Copilot's environment over the host's, and no argument of the line", (t) => {
+  const { tree, bin } = standInTree(t);
+  const tokenFile = join(tree, "..", "it's a token");
+  writeFileSync(tokenFile, "gho_madeup123\n");
+  const line = argv({ ...invocation, copilotTokenFile: tokenFile, directory: tree, sessionDirectory: join(tree, ".squiz/7/rounds/1/session"), promptFile: join(tree, ".squiz/7/rounds/1/prompt.md"), reportsFile: join(tree, ".squiz/7/rounds/1/reports.jsonl") });
+  writeFileSync(join(tree, ".squiz/7/rounds/1/prompt.md"), AWKWARD_PROMPT);
+  assert.ok(!line.args.some((arg) => arg.includes("gho_madeup123")), "the token is on the line");
+  assert.deepEqual(line.environment, {});
+  const result = spawnSync(line.command, line.args, {
+    cwd: line.directory,
+    env: { ...environmentFor(bin, tree, "0"), COPILOT_GITHUB_TOKEN: "gho_thehosts" },
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0);
+  assert.equal(readFileSync(join(tree, "args.token"), "utf8"), "gho_madeup123");
+  assert.equal(ranIn(tree, result.status).args?.[1], AWKWARD_PROMPT);
+});
+
+test("#895: Copilot is not started where copilotTokenFile cannot be read", (t) => {
+  const { tree, bin } = standInTree(t);
+  const line = argv({ ...invocation, copilotTokenFile: join(tree, "missing"), directory: tree, sessionDirectory: join(tree, ".squiz/7/rounds/1/session"), promptFile: join(tree, ".squiz/7/rounds/1/prompt.md"), reportsFile: join(tree, ".squiz/7/rounds/1/reports.jsonl") });
+  writeFileSync(join(tree, ".squiz/7/rounds/1/prompt.md"), AWKWARD_PROMPT);
+  const result = spawnSync(line.command, line.args, { cwd: line.directory, env: environmentFor(bin, tree, "0"), stdio: "ignore", timeout: 10_000 });
+  assert.notEqual(result.status, 0);
+  assert.equal(ranIn(tree, result.status).args, undefined, "Copilot ran with no token");
 });
 
 test("Copilot is not started where the prompt file cannot be read", (t) => {

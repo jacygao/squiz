@@ -360,7 +360,7 @@ async function hostRounds(setup: HostSetup, episode: Episode, lock: HostLock, lo
         const handoffs = read === undefined ? new Map<StateRecord, Handed>() : handOff(thisRound, written, records, read, diff);
         if (agent !== null) {
           const environment = setup.environment ?? process.env;
-          startFixers(episode, thisRound, written, recorded.state, handoffs, read, { agent, commands: setup.round.config.fixerCommands, environment }, write);
+          startFixers(episode, thisRound, written, recorded.state, handoffs, read, { agent, commands: setup.round.config.fixerCommands, environment, ...tokenFileOf(setup.round.config) }, write);
           const close = written.map(({ record }) => closeOf(record)).find((each) => each !== undefined);
           if (close !== undefined) writeClose(episode, close, thisRound);
         }
@@ -538,7 +538,16 @@ function startFixers(
 /** The path of a round's `handoff.md`, and what a fixer handed it knows. */
 type Handed = { readonly path: string; readonly known: Known };
 
-type FixerSetup = { readonly agent: FixerAgent; readonly commands: readonly string[]; readonly environment: NodeJS.ProcessEnv };
+type FixerSetup = {
+  readonly agent: FixerAgent;
+  readonly commands: readonly string[];
+  readonly environment: NodeJS.ProcessEnv;
+  readonly copilotTokenFile?: string;
+};
+
+function tokenFileOf(config: Config): { readonly copilotTokenFile?: string } {
+  return config.copilotTokenFile === null ? {} : { copilotTokenFile: config.copilotTokenFile };
+}
 
 type Write = (change: (state: EpisodeState) => EpisodeState) => StateUpdate;
 
@@ -575,7 +584,7 @@ function startFixerOn(
   record: StateRecord,
   handoff: Handed,
   resume: Resume | undefined,
-  { agent, commands, environment }: FixerSetup,
+  { agent, commands, environment, copilotTokenFile }: FixerSetup,
   write: Write,
 ): string | undefined {
   const logPath = join(directory, "fixer.log");
@@ -598,6 +607,7 @@ function startFixerOn(
       worktree: episode.worktree,
       logPath,
       environment,
+      ...(copilotTokenFile === undefined ? {} : { copilotTokenFile }),
     },
     FIXER_START_MS,
   );
@@ -723,7 +733,7 @@ async function awaitFixers(
       // A resume starts only on a written handoff, so the round has one. The
       // resume recorded the round's open threads, which the handoff gives whole.
       const { agent: _agent, id: _id, round: _round, ...known } = read.state.fixerSession ?? { agent, id: "", round: 0, shown: [], open: [] };
-      const setupOf = { agent, commands: setup.round.config.fixerCommands, environment: setup.environment ?? process.env };
+      const setupOf = { agent, commands: setup.round.config.fixerCommands, environment: setup.environment ?? process.env, ...tokenFileOf(setup.round.config) };
       const refused = startFixerOn(episode, round, failed.record, { path: join(round.directory, "handoff.md"), known }, undefined, setupOf, update);
       // The failed resume is still the last state's fixer, so looking again would retry it for good.
       if (refused !== undefined) return { outcome: "state unwritable", reason: refused };

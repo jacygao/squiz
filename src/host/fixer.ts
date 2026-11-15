@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { FixerAgent } from "../config/config.ts";
-import { COPILOT_QUIET_FLAGS } from "../sessions/copilot-settings.ts";
+import { COPILOT_QUIET_FLAGS, copilotToken } from "../sessions/copilot-settings.ts";
 import { startDetached, type Detached } from "../sessions/detach.ts";
 
 // The checkout or installed copy this module runs from: the plugin whose hooks start the next round.
@@ -35,6 +35,8 @@ export type FixerSpec = {
   readonly logPath: string;
   /** The environment `fixerEnvironment` makes the fixer's from: the round host's own. */
   readonly environment: NodeJS.ProcessEnv;
+  /** `.squiz.json`'s `copilotTokenFile`, where it names one. A Copilot fixer signs in with its token. */
+  readonly copilotTokenFile?: string;
   /** The session it starts, or resumes where `resume` is given. */
   readonly session: string;
   /** For a resume: the round's update, and where the CLI's exit status goes. */
@@ -168,7 +170,10 @@ export function fixerEnvironment(environment: NodeJS.ProcessEnv): NodeJS.Process
 export function startFixer(spec: FixerSpec, boundMs: number): Detached {
   const prompt = spec.resume === undefined ? fixerPrompt(spec.handoff) : resumePrompt(spec.resume.update, spec.handoff);
   const { command, args } = fixerCommand(spec.agent, prompt, PLUGIN_ROOT, spec.commands, { id: spec.session, resume: spec.resume !== undefined });
-  const env = fixerEnvironment(spec.environment);
+  const signedIn = spec.agent === "copilot" && spec.copilotTokenFile !== undefined ? copilotToken(spec.copilotTokenFile) : undefined;
+  if (signedIn !== undefined && "problem" in signedIn) return { outcome: "failed", reason: signedIn.problem };
+  // The token travels in the environment, which the start hands on through a pipe and never on a command line.
+  const env = { ...fixerEnvironment(spec.environment), ...(signedIn === undefined ? {} : { COPILOT_GITHUB_TOKEN: signedIn.token }) };
   if (spec.resume === undefined) return startDetached({ command, args, cwd: spec.worktree, logPath: spec.logPath, env }, boundMs);
   const wrapped = ["-c", '"$@"; printf "%s\\n" "$?" > "$0"', spec.resume.exitPath, command, ...args];
   return startDetached({ command: "/bin/sh", args: wrapped, cwd: spec.worktree, logPath: spec.logPath, env }, boundMs);

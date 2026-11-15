@@ -919,7 +919,11 @@ runs, so naming `node` lets the fixer run any program `node` can. Without
 
 Its environment is the round host's, less `CLAUDE_CODE_MESSAGING_SOCKET`, which
 names the session whose hook started the host, and with `SQUIZ_FIXER=1`, which
-keeps the fixer's prompt from being recorded as the run's (The hooks).
+keeps the fixer's prompt from being recorded as the run's (The hooks). A
+Copilot fixer also has `COPILOT_GITHUB_TOKEN` set from `copilotTokenFile`, where
+`.squiz.json` names one, over the round host's. A file that cannot be read, or
+holds anything but one token, starts no fixer, and the state's record gives the reason,
+which names the file (§ 5 Tools).
 
 **The prompt that starts the session names the handoff:**
 
@@ -2050,16 +2054,31 @@ shell has (The reviewer session). A `gh` that the reviewer's CLI or a tool
 starts finds no login.
 
 The credential each CLI needs for its model is left alone: `pi`'s provider key,
-such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot signs in from one of
-three places:
+such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot signs in from the first
+of these it finds:
 
-- `COPILOT_GITHUB_TOKEN`, which is left set where the round host has it.
+- `COPILOT_GITHUB_TOKEN`. Where `.squiz.json` names a `copilotTokenFile`, the
+  line sets it from that file, over any value the round host has. Otherwise it
+  is left set where the round host has it.
 - A login of its own, from `copilot login` or `/login`. Its token is in the
   system's credential store. Copilot finds it through `loggedInUsers` and
   `lastLoggedInUser` in `<COPILOT_HOME>/config.json`, so the adapter copies
   those two fields of the user's own `config.json` into the round's
   `COPILOT_HOME` (The Copilot adapter). Tested on Copilot 1.0.109.
 - `gh`'s login, which Copilot reads by running `gh auth token`.
+
+**A Copilot run's hooks never see `COPILOT_GITHUB_TOKEN`.** Copilot leaves it and
+`GITHUB_TOKEN` out of the environment it gives its hooks, so a round host that a
+Copilot run's hook started does not have it, and nor does anything the round
+host starts. `copilotTokenFile` is how a token reaches the reviewer and the
+fixer there. Tested on Copilot 1.0.112.
+
+**The token is read into the environment of the Copilot it signs in, and
+nowhere else.** The reviewer's line reads the file in its shell, so a pane's
+line carries the file's path and never the token. The round's setup reads it
+first, and a file that cannot be read, or holds anything but one token, fails
+the round at setup with a reason naming the file. The fixer's environment reaches
+it through a pipe (The fixer). No log, record or reason holds the token.
 
 A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
 model credential in the round, and nothing here handles that.
@@ -3687,7 +3706,9 @@ Where the model is unknown, the prompt carries no `--model` and runs on whatever
 Copilot falls back to, as the round does. It runs with the variables a round
 gives a Copilot reviewer, under a `COPILOT_HOME` given who the user is signed in
 as, as a round's is, and with `COPILOT_MODEL` set empty, so it passes wherever a
-round could start. It is bounded at 60 seconds. A model the account cannot use
+round could start. Where `.squiz.json` names a `copilotTokenFile`, the prompt
+signs in with its token, and a file that cannot be read fails the row without
+running Copilot. It is bounded at 60 seconds. A model the account cannot use
 fails it, with the reason Copilot prints:
 
 ```
@@ -4206,6 +4227,7 @@ worktree is a configuration that cannot be read.
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 5 Adapters) |
 | `fixer` | none | The coding-agent CLI squiz starts, headless, to work the threads a round leaves open, `claude` or `copilot`. Naming one declares every run in the repository headless (§ 3 Headless runs). None wakes the session that owns the work instead (§ 3 The report) |
 | `fixerCommands` | none | The commands the fixer may run beyond `squiz` and `git`, such as `["node"]`, each by its name and with any arguments (§ 3 Headless runs) |
+| `copilotTokenFile` | none | The absolute path of a file holding the token that the reviewer's and the fixer's Copilot sign in with, such as `/run/secrets/copilot`. None leaves Copilot to find its own login (§ 5 Tools) |
 
 `fixer` is per repository, as every setting is, so a repository whose runs are
 headless names it, and one worked in interactive sessions leaves it out. A
@@ -4216,6 +4238,18 @@ letters, digits and `.` `_` `+` `-`, starting with a letter or a digit. A path,
 a space, a wildcard or a CLI's own grant, such as `node *` or `shell(node)`, is
 refused, so each entry grants one command and nothing wider. An empty list is
 refused rather than read as none, and so is `fixerCommands` without `fixer`.
+
+`copilotTokenFile` is an absolute path of up to 4,096 characters, none of them a
+control character. The file holds the token alone, of letters, digits and `_`,
+and spaces, tabs and line ends around it are dropped. It is read where a Copilot reviewer or fixer starts, and `squiz doctor`
+signs in with it, so it must be readable by the user squiz runs as. It belongs
+outside the repository, where the reviewer cannot read it. A value that is not
+such a path is refused with an error that leaves the value out, since a token
+written there by mistake would otherwise be printed:
+
+```
+/work/squiz/.squiz.json: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for Copilot's own login
+```
 
 `model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
 with a letter, a digit or `@`. An empty string is refused rather than read as

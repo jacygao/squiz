@@ -667,6 +667,7 @@ async function reviewOn(
       githubConfigDirectory: join(ownDirectory, "gh"),
       thinking: config.thinking,
       model: config.model,
+      ...(config.copilotTokenFile === null ? {} : { copilotTokenFile: config.copilotTokenFile }),
       // Whatever this says, each attempt asks the adapter for a line for every
       // place the reviewer may run.
       terminal: "none",

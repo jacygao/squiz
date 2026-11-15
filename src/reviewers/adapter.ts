@@ -55,6 +55,11 @@ export type Invocation = {
    */
   readonly model: string | null;
   /**
+   * The file `.squiz.json`'s `copilotTokenFile` names, where it names one. The
+   * Copilot adapter signs in with the token in it, and every other ignores it.
+   */
+  readonly copilotTokenFile?: string;
+  /**
    * Where the reviewer runs: in a pane a person can watch and type into, or
    * with no terminal at all. The round host decides it, and the adapter builds
    * the command line for it.

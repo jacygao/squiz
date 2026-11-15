@@ -185,3 +185,31 @@ test("a user's configuration naming no login leaves COPILOT_HOME with no config.
   environmentOf(confine(invocation, { HOME: home }));
   assert.deepEqual(readdirSync(session), ["agents"]);
 });
+
+test("#895: a copilotTokenFile that cannot be read, or is empty, fails the confinement naming the file and no token", (t) => {
+  const { invocation, home } = fixture(t);
+  const missing = confine({ ...invocation, copilotTokenFile: join(home, "missing") }, { HOME: home });
+  assert.equal(missing.outcome, "failed");
+  assert.match(missing.outcome === "failed" ? missing.reason : "", /^the Copilot token file .*missing could not be read: /u);
+  writeFileSync(join(home, "empty"), " \n");
+  const empty = confine({ ...invocation, copilotTokenFile: join(home, "empty") }, { HOME: home });
+  assert.equal(empty.outcome === "failed" ? empty.reason : "", `the Copilot token file ${join(home, "empty")} is empty`);
+});
+
+test("#895: a readable copilotTokenFile prepares the round with no token in the environment it hands over", (t) => {
+  const { invocation, home } = fixture(t);
+  writeFileSync(join(home, "token"), "gho_madeup123\n");
+  const environment = environmentOf(confine({ ...invocation, copilotTokenFile: join(home, "token") }, { HOME: home }));
+  assert.ok(!Object.values(environment).some((value) => value.includes("gho_madeup123")), JSON.stringify(environment));
+});
+
+test("#895: a copilotTokenFile holding anything but one token, a byte-order mark or inner whitespace among it, fails the confinement without repeating it", (t) => {
+  const { invocation, home } = fixture(t);
+  for (const text of ["\ufeffgho_madeup123\n", "gho_made up123\n", "gho_madeup123\n\fgho_other\n", "\u00a0gho_madeup123"]) {
+    writeFileSync(join(home, "token"), text);
+    const confinement = confine({ ...invocation, copilotTokenFile: join(home, "token") }, { HOME: home });
+    assert.equal(confinement.outcome === "failed" ? confinement.reason : "", `the Copilot token file ${join(home, "token")} holds something other than one token of letters, digits and _`, JSON.stringify(text));
+  }
+  writeFileSync(join(home, "token"), " \t gho_madeup123\r\n\n");
+  assert.equal(confine({ ...invocation, copilotTokenFile: join(home, "token") }, { HOME: home }).outcome, "prepared");
+});
