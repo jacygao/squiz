@@ -46,7 +46,9 @@ The hook's environment also carries `COPILOT_HOOK_DIR`, `COPILOT_PLUGIN_ROOT`,
 
 ## Limits
 
-- Only `SessionStart` was probed. `squiz`'s `Stop` hook is assumed to get the
-  same environment (unverified).
-- SWE-drill saw the same failure on Copilot 1.0.107 on Linux, which is
-  consistent with this, but its hook environment was not dumped.
+- Only `SessionStart`'s environment was dumped. The `Stop` hook's lacks the
+  token too: on 0.3.1, a token-only `copilot -p` run under the local venue
+  failed its first round with `the reviewer is not signed in to Copilot`, and
+  with `copilotTokenFile` the reviewer and the fixer both signed in.
+- Linux was not run here. SWE-drill saw the same failure on Copilot 1.0.107 on
+  Linux, but its hook environment was not dumped.
