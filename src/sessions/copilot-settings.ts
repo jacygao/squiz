@@ -70,14 +70,18 @@ export function carryLogins(home: string, environment: NodeJS.ProcessEnv): strin
 }
 
 /**
- * The token in `file`, which `.squiz.json`'s `copilotTokenFile` names, without
- * the whitespace around it.
+ * The token in `file`, which `.squiz.json`'s `copilotTokenFile` names, with the
+ * spaces, tabs and line ends around it dropped.
  *
  * Copilot leaves `COPILOT_GITHUB_TOKEN` out of the environment it gives its
  * hooks, so a round host that a Copilot run's hook started never has it. The
  * file is how a token reaches the Copilot processes squiz starts there. The
  * token goes into their environment and nowhere else: never into an
  * argument, a log or a problem.
+ *
+ * Anything but letters, digits and `_` is refused. The reviewer's shell line
+ * reads the file again, deleting those four characters, so only a file that
+ * passes here reads the same in both.
  */
 export function copilotToken(file: string): { readonly token: string } | { readonly problem: string } {
   let text: string;
@@ -86,8 +90,9 @@ export function copilotToken(file: string): { readonly token: string } | { reado
   } catch (cause) {
     return { problem: `the Copilot token file ${file} could not be read: ${reasonFor(cause)}` };
   }
-  const token = text.trim();
+  const token = text.replace(/^[ \t\r\n]+|[ \t\r\n]+$/gu, "");
   if (token === "") return { problem: `the Copilot token file ${file} is empty` };
+  if (!/^\w+$/u.test(token)) return { problem: `the Copilot token file ${file} holds something other than one token of letters, digits and _` };
   return { token };
 }
 

@@ -922,7 +922,7 @@ names the session whose hook started the host, and with `SQUIZ_FIXER=1`, which
 keeps the fixer's prompt from being recorded as the run's (The hooks). A
 Copilot fixer also has `COPILOT_GITHUB_TOKEN` set from `copilotTokenFile`, where
 `.squiz.json` names one, over the round host's. A file that cannot be read, or
-holds only whitespace, starts no fixer, and the state's record gives the reason,
+holds anything but one token, starts no fixer, and the state's record gives the reason,
 which names the file (§ 5 Tools).
 
 **The prompt that starts the session names the handoff:**
@@ -2076,8 +2076,8 @@ fixer there. Tested on Copilot 1.0.112.
 **The token is read into the environment of the Copilot it signs in, and
 nowhere else.** The reviewer's line reads the file in its shell, so a pane's
 line carries the file's path and never the token. The round's setup reads it
-first, and a file that cannot be read, or holds only whitespace, fails the
-round at setup with a reason naming the file. The fixer's environment reaches
+first, and a file that cannot be read, or holds anything but one token, fails
+the round at setup with a reason naming the file. The fixer's environment reaches
 it through a pipe (The fixer). No log, record or reason holds the token.
 
 A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
@@ -4240,8 +4240,8 @@ refused, so each entry grants one command and nothing wider. An empty list is
 refused rather than read as none, and so is `fixerCommands` without `fixer`.
 
 `copilotTokenFile` is an absolute path of up to 4,096 characters, none of them a
-control character. The file holds the token alone, and whitespace around it is
-dropped. It is read where a Copilot reviewer or fixer starts, and `squiz doctor`
+control character. The file holds the token alone, of letters, digits and `_`,
+and spaces, tabs and line ends around it are dropped. It is read where a Copilot reviewer or fixer starts, and `squiz doctor`
 signs in with it, so it must be readable by the user squiz runs as. It belongs
 outside the repository, where the reviewer cannot read it. A value that is not
 such a path is refused with an error that leaves the value out, since a token
