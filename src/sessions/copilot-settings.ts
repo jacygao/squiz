@@ -1,7 +1,7 @@
 /**
  * The user's own Copilot directory and the settings Copilot keeps in it, which
  * every Copilot session of that user starts with, and the flags every Copilot
- * session squiz starts carries.
+ * session squiz starts carries, and the token `.squiz.json` can name for them.
  *
  * Nothing here throws. Every outcome is a value the caller reads.
  */
@@ -67,6 +67,28 @@ export function carryLogins(home: string, environment: NodeJS.ProcessEnv): strin
     return `who the user is signed in to Copilot as could not be written to ${file}: ${reasonFor(cause)}`;
   }
   return undefined;
+}
+
+/**
+ * The token in `file`, which `.squiz.json`'s `copilotTokenFile` names, without
+ * the whitespace around it.
+ *
+ * Copilot leaves `COPILOT_GITHUB_TOKEN` out of the environment it gives its
+ * hooks, so a round host that a Copilot run's hook started never has it. The
+ * file is how a token reaches the Copilot processes squiz starts there. The
+ * token goes into their environment and nowhere else: never into an
+ * argument, a log or a problem.
+ */
+export function copilotToken(file: string): { readonly token: string } | { readonly problem: string } {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (cause) {
+    return { problem: `the Copilot token file ${file} could not be read: ${reasonFor(cause)}` };
+  }
+  const token = text.trim();
+  if (token === "") return { problem: `the Copilot token file ${file} is empty` };
+  return { token };
 }
 
 function objectIn(file: string, what: string, are: "are" | "is"): UserSettings {

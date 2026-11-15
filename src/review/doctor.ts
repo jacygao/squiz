@@ -24,7 +24,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
-import { carryLogins, copilotHome, userSettings } from "../sessions/copilot-settings.ts";
+import { carryLogins, copilotHome, copilotToken, userSettings } from "../sessions/copilot-settings.ts";
 import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
@@ -527,9 +527,9 @@ const reviewer: Check = (context) => {
   if (found.outcome === "absent") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: not found` };
   if (found.outcome === "failed") return { level: "failed", line: `Reviewer ${config.reviewer}${from}: could not be run: ${found.reason}` };
   const installed = `Reviewer ${config.reviewer} ${found.version}${from}`;
-  const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, undefined, context) : { level: "present", line });
+  const usable = (line: string): Row => (config.reviewer === "copilot" ? copilotSignIn(line, undefined, config, context) : { level: "present", line });
   const onModel = (line: string, model: string): Row =>
-    config.reviewer === "copilot" ? copilotSignIn(line, model, context) : withThinking(line, config, context);
+    config.reviewer === "copilot" ? copilotSignIn(line, model, config, context) : withThinking(line, config, context);
 
   if (config.model !== null) return onModel(`${installed}, model ${config.model}, from ${configFileName}`, config.model);
   const cli = config.reviewer === "pi" ? "pi" : "Copilot";
@@ -567,9 +567,12 @@ function withThinking(line: string, config: Config, context: DoctorContext): Row
  * wherever a round could start. With no `model` it names
  * none, and runs on whatever Copilot falls back to, as the round would. It runs
  * in that temporary directory rather than the repository, so no project file
- * reaches Copilot, and the directory is removed afterwards.
+ * reaches Copilot, and the directory is removed afterwards. Where `.squiz.json`
+ * names a `copilotTokenFile`, it signs in with that token, as a round does.
  */
-function copilotSignIn(line: string, model: string | undefined, context: DoctorContext): Row {
+function copilotSignIn(line: string, model: string | undefined, config: Config, context: DoctorContext): Row {
+  const signedIn = config.copilotTokenFile === null ? undefined : copilotToken(config.copilotTokenFile);
+  if (signedIn !== undefined && "problem" in signedIn) return { level: "failed", line: `${line}. Its sign-in could not be checked: ${signedIn.problem}` };
   let scratch: string;
   try {
     scratch = mkdtempSync(join(tmpdir(), "squiz-doctor-"));
@@ -588,6 +591,7 @@ function copilotSignIn(line: string, model: string | undefined, context: DoctorC
       ...absolutePath(context),
       // The model goes on --model or nowhere. A whitespace COPILOT_MODEL names no model to squiz, and must name none to Copilot.
       ...variablesOf(github, { COPILOT_HOME: home, COPILOT_ALLOW_ALL: "", COPILOT_MODEL: "" }),
+      ...(signedIn === undefined ? {} : { COPILOT_GITHUB_TOKEN: signedIn.token }),
     };
     const asked = probe(
       "copilot",

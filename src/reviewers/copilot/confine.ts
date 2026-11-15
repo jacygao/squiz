@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { Confinement, Invocation } from "../adapter.ts";
-import { carryLogins, userSettings } from "../../sessions/copilot-settings.ts";
+import { carryLogins, copilotToken, userSettings } from "../../sessions/copilot-settings.ts";
 import { AGENT_NAME } from "./argv.ts";
 
 /**
@@ -49,6 +49,11 @@ export function confine(invocation: Invocation, environment: NodeJS.ProcessEnv =
   }
   const logins = carryLogins(home, environment);
   if (logins !== undefined) return { outcome: "failed", reason: logins };
+  // Read here only to fail at setup, naming the file. The line reads it again, so the token is in no variable a pane's line carries.
+  if (invocation.copilotTokenFile !== undefined) {
+    const read = copilotToken(invocation.copilotTokenFile);
+    if ("problem" in read) return { outcome: "failed", reason: read.problem };
+  }
 
   return {
     outcome: "prepared",

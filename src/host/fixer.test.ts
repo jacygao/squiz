@@ -181,6 +181,40 @@ test("#803: a fixer starts detached in the worktree, with the plugin directory o
   }
 });
 
+test("#895: a Copilot fixer signs in with the token in copilotTokenFile, over the host's, and a Claude Code fixer is not handed it", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "squiz-fixer-")));
+  try {
+    const binaries = join(root, "bin");
+    const worktree = join(root, "tree");
+    for (const directory of [binaries, worktree]) mkdirSync(directory);
+    const tokenFile = join(root, "token");
+    writeFileSync(tokenFile, "gho_madeup123\n");
+    for (const agent of ["copilot", "claude"] as const) {
+      standIn(binaries, agent, `printf "%s" "$COPILOT_GITHUB_TOKEN" > "$(dirname "$0")/${agent}.token"; printf "%s\\n" "$@" > "$(dirname "$0")/${agent}.argv"`);
+      const environment = { PATH: `${binaries}:/usr/bin:/bin`, COPILOT_GITHUB_TOKEN: "gho_thehosts" };
+      const started = startFixer({ agent, commands: [], handoff: HANDOFF, session: SESSION, worktree, logPath: join(root, "fixer.log"), environment, copilotTokenFile: tokenFile }, 5_000);
+      assert.ok(started.outcome === "started" || started.outcome === "exited", `started as ${JSON.stringify(started)}`);
+      const argv = join(binaries, `${agent}.argv`);
+      for (let waited = 0; !existsSync(argv) && waited < 5_000; waited += 50) await sleep(50);
+      assert.equal(readFileSync(join(binaries, `${agent}.token`), "utf8"), agent === "copilot" ? "gho_madeup123" : "gho_thehosts");
+      assert.ok(!readFileSync(argv, "utf8").includes("gho_madeup123"), "the token is on the fixer's command line");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#895: a Copilot fixer whose copilotTokenFile cannot be read is not started, and the reason names the file", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "squiz-fixer-")));
+  try {
+    const started = startFixer({ agent: "copilot", commands: [], handoff: HANDOFF, session: SESSION, worktree: root, logPath: join(root, "fixer.log"), environment: { PATH: "/usr/bin:/bin" }, copilotTokenFile: join(root, "missing") }, 5_000);
+    assert.equal(started.outcome, "failed");
+    assert.match(started.outcome === "failed" ? started.reason : "", /^the Copilot token file .*missing could not be read: /u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("#876: a resumed fixer starts detached in the worktree as a fresh one does, resuming its session with this checkout's plugin directory and SQUIZ_FIXER set, and its exit status is written where the host reads it", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "squiz-fixer-")));
   try {

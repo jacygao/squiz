@@ -600,6 +600,7 @@ const ROUND_VARIABLES = [
   "GITHUB_ENTERPRISE_TOKEN",
   "GH_CONFIG_DIR",
   "COPILOT_MODEL",
+  "COPILOT_GITHUB_TOKEN",
 ] as const;
 
 /**
@@ -694,6 +695,19 @@ test("a Copilot that answers the prompt is signed in, and the line says the chec
 
   assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-6-astra`);
   assert.equal(row.exit, 0);
+});
+
+test("#895: the sign-in check signs in with the token in copilotTokenFile, and fails naming the file where it cannot be read", () => {
+  const tokenFile = join(scratch, "copilot-token");
+  writeFileSync(tokenFile, "gho_madeup123\n");
+  const row = signInRow("echo OK", {}, JSON.stringify({ reviewer: "copilot", model: "gpt-6-astra", copilotTokenFile: tokenFile }));
+  assert.equal(valueOf(row.started, "COPILOT_GITHUB_TOKEN"), "gho_madeup123");
+  assert.ok(!row.line.includes("gho_madeup123"), row.line);
+
+  const missing = signInRow("echo OK", {}, JSON.stringify({ reviewer: "copilot", model: "gpt-6-astra", copilotTokenFile: join(scratch, "no-token") }));
+  assert.match(missing.line, /\. Its sign-in could not be checked: the Copilot token file .*no-token could not be read: /u);
+  assert.equal(missing.exit, 1);
+  assert.deepEqual(missing.started, [], "Copilot was asked with no token");
 });
 
 test("the sign-in is checked with one prompt on the model .squiz.json configures (#771)", () => {

@@ -82,6 +82,10 @@ export function argv(invocation: Invocation): CommandLine {
     },
   };
   const script = [
+    // Read by the shell, so the token is in Copilot's environment and in no argument of the line.
+    ...(invocation.copilotTokenFile === undefined
+      ? []
+      : [`COPILOT_GITHUB_TOKEN=$(tr -d ' \\t\\r\\n' < ${quoted(invocation.copilotTokenFile)}) && export COPILOT_GITHUB_TOKEN &&`]),
     // The `.` keeps the prompt's trailing newlines, which `$(…)` would drop, and
     // `cat` failing leaves Copilot unstarted rather than run with no prompt.
     `prompt=$(cat ${prompt} && printf .)`,

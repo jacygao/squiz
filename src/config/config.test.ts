@@ -48,7 +48,7 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the nine defaults", () => {
+test("an absent .squiz.json is not an error, and yields the ten defaults", () => {
   assert.deepEqual(load(null), {
     venue: "github",
     reviewer: "pi",
@@ -59,10 +59,11 @@ test("an absent .squiz.json is not an error, and yields the nine defaults", () =
     model: null,
     fixer: null,
     fixerCommands: [],
+    copilotTokenFile: null,
   });
 });
 
-test("a .squiz.json with no keys yields the same nine defaults", () => {
+test("a .squiz.json with no keys yields the same ten defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -75,7 +76,7 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini", "fixer": "copilot", "fixerCommands": ["node"]}`,
+      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini", "fixer": "copilot", "fixerCommands": ["node"], "copilotTokenFile": "/run/secrets/copilot"}`,
     ),
     {
       venue: "local",
@@ -87,6 +88,7 @@ test("every setting the file names is read", () => {
       model: "gpt-5-mini",
       fixer: "copilot",
       fixerCommands: ["node"],
+      copilotTokenFile: "/run/secrets/copilot",
     },
   );
 });
@@ -96,6 +98,16 @@ test("venue accepts github and local, and refuses anything else, naming the valu
   assert.equal(load(`{"venue": "local"}`).venue, "local");
   for (const contents of [`{"venue": "lcoal"}`, `{"venue": ""}`, `{"venue": "GitHub"}`, `{"venue": null}`, `{"venue": 1}`]) {
     assert.match(rejection(contents).message, /: "venue" is .*, but it must be "github" or "local"$/u, contents);
+  }
+});
+
+test("#895: copilotTokenFile reads an absolute path, and refuses anything else without repeating it", () => {
+  assert.equal(load(`{}`).copilotTokenFile, null);
+  assert.equal(load(`{"copilotTokenFile": "/run/secrets/copilot token"}`).copilotTokenFile, "/run/secrets/copilot token");
+  for (const contents of [`{"copilotTokenFile": "gho_madeup123"}`, `{"copilotTokenFile": "secrets/copilot"}`, `{"copilotTokenFile": ""}`, `{"copilotTokenFile": null}`, `{"copilotTokenFile": "/a\\nb"}`, `{"copilotTokenFile": 1}`]) {
+    const message = rejection(contents).message;
+    assert.match(message, /: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for Copilot's own login$/u, contents);
+    assert.doesNotMatch(message, /gho_|secrets/u, `the refusal repeats what was written: ${message}`);
   }
 });
 
@@ -365,7 +377,7 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer" and "fixerCommands"/);
+  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer", "fixerCommands" and "copilotTokenFile"/);
 });
 
 test("a .squiz.json that is there and cannot be read is not read as absent", () => {

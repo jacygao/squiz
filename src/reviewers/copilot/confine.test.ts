@@ -185,3 +185,20 @@ test("a user's configuration naming no login leaves COPILOT_HOME with no config.
   environmentOf(confine(invocation, { HOME: home }));
   assert.deepEqual(readdirSync(session), ["agents"]);
 });
+
+test("#895: a copilotTokenFile that cannot be read, or is empty, fails the confinement naming the file and no token", (t) => {
+  const { invocation, home } = fixture(t);
+  const missing = confine({ ...invocation, copilotTokenFile: join(home, "missing") }, { HOME: home });
+  assert.equal(missing.outcome, "failed");
+  assert.match(missing.outcome === "failed" ? missing.reason : "", /^the Copilot token file .*missing could not be read: /u);
+  writeFileSync(join(home, "empty"), " \n");
+  const empty = confine({ ...invocation, copilotTokenFile: join(home, "empty") }, { HOME: home });
+  assert.equal(empty.outcome === "failed" ? empty.reason : "", `the Copilot token file ${join(home, "empty")} is empty`);
+});
+
+test("#895: a readable copilotTokenFile prepares the round with no token in the environment it hands over", (t) => {
+  const { invocation, home } = fixture(t);
+  writeFileSync(join(home, "token"), "gho_madeup123\n");
+  const environment = environmentOf(confine({ ...invocation, copilotTokenFile: join(home, "token") }, { HOME: home }));
+  assert.ok(!Object.values(environment).some((value) => value.includes("gho_madeup123")), JSON.stringify(environment));
+});
