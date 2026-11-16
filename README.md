@@ -100,6 +100,7 @@ its own:
 | `tokens` | 10,000,000 | Tokens one round may spend, 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `openai/gpt-5-mini` for `pi`, `gpt-5-mini` for Copilot. Up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting with a letter, a digit or `@`. None runs it on the CLI's own default |
+| `copilotTokenFile` | none | The absolute path of a file holding the token that the Copilot reviewer and fixer sign in with, such as `/run/secrets/copilot`. None leaves Copilot to find its own login |
 
 This one reviews with Copilot on a chosen model:
 
