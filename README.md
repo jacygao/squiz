@@ -1,6 +1,6 @@
 # Squiz
 
-![squiz init: cross-harness, cross-model code review, fully automated. Squiz, drawn as a tawny frogmouth, sits between the coding agent and the reviewer, takes the coding agent's replies and the reviewer's findings, and posts both as review threads on the pull request. Below, the three ways a review ends: summary posted with nothing needing you, open threads listed under Needs a person, or the round cap reached and you take it from here.](assets/banner.png)
+![squiz: peer review between coding agents. On a pull request's review thread, the reviewer finds that parseConfig() can return nil, Claude Code adds a nil check and a test, the reviewer confirms, and the thread is resolved.](assets/banner.png)
 
 Squiz is a fully automated code review. When your coding agent finishes its
 work, a reviewer on a different harness and a different model reviews the pull
@@ -16,14 +16,11 @@ plugin for Claude Code and for the GitHub Copilot CLI.
 
 ## Prerequisites
 
-- `git`, and a repository with a GitHub remote.
-- `gh`, signed in (`gh auth login`).
 - Node 24 or later.
-- Claude Code or the Copilot CLI, to run the coding agent.
-- [`pi`](https://github.com/earendil-works/pi#readme) or the Copilot CLI, to run
-  the reviewer.
-- Optionally tmux or Herdr, to watch each review in a pane of its own. Without
-  either, a review runs in the background and writes a log.
+- `git`, with `gh` signed in (`gh auth login`) for reviews on GitHub.
+- Your coding agent: Claude Code or the GitHub Copilot CLI.
+- Your reviewer: the GitHub Copilot CLI or
+  [`pi`](https://github.com/earendil-works/pi#readme).
 
 ## Install
 
