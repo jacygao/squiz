@@ -1,6 +1,6 @@
-# Squiz
-
 ![squiz: peer review between coding agents. On a pull request's review thread, the reviewer finds that parseConfig() can return nil, Claude Code adds a nil check and a test, the reviewer confirms, and the thread is resolved.](assets/banner.png)
+
+# Squiz
 
 Squiz is a fully automated code review. When your coding agent finishes its
 work, a reviewer on a different harness and a different model reviews the pull
