@@ -82,6 +82,23 @@ test("a lock left by a writer killed while holding it is taken over, and the upd
   assert.deepEqual(readdirSync(episode.directory), ["state.json"], "the update left something behind beside the state file");
 });
 
+test("#899: a lock taken as its deadline runs out is used, and the update is written", (t) => {
+  const episode = episodeIn(t);
+  holdLock(episode, goneIdentity());
+  const clock = fakeClock();
+  // A ps on a loaded machine, answering at the last moment its bound allows.
+  const slow = (_identity: ProcessIdentity, boundMs: number): Presence => {
+    clock.advance(boundMs);
+    return { outcome: "gone" };
+  };
+
+  const updated = updateState(episode, queue("B"), { until: deadlineIn(2_000, clock.now), self: ownIdentity(), presence: slow });
+
+  assert.equal(updated.outcome, "written", JSON.stringify(updated));
+  assert.deepEqual(headsIn(episode), ["B"]);
+  assert.deepEqual(readdirSync(episode.directory), ["state.json"], "the update left its lock behind");
+});
+
 test("a holder that cannot be told running or gone keeps its lock, and the update reports it could not be made", (t) => {
   const episode = episodeIn(t);
   const lock = holdLock(episode, goneIdentity());

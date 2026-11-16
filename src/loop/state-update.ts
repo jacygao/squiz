@@ -125,7 +125,8 @@ export type Locked<T> =
  *
  * A lock held by a live process, or by one `ps` cannot tell running or gone, is
  * waited on until `options.until` passes, and the call then fails naming the
- * holder. A lock naming a process that has gone is taken over.
+ * holder. A lock naming a process that has gone is taken over. A lock taken is
+ * used, even where `options.until` passed while it was being taken.
  *
  * `lastAttemptOnly` gives a deadline that had passed before the caller began
  * one attempt, with `ps` given its floor. Without it, a deadline that has
@@ -162,12 +163,9 @@ export function holdingLock<T>(
   for (;;) {
     cutShort = false;
     const taking = takeLock(directory, name, { boundMs: boundMs(), self, presence });
-    if (taking.outcome === "taken") {
-      if (!expired()) return { outcome: "held", value: runHolding(act, taking.lock) };
-      // The caller's time for this write has gone, so the lock goes back unused.
-      taking.lock.release();
-      return notHeld("its lock was taken only after the deadline had passed");
-    }
+    // Used even where the deadline passed while it was taken. The deadline bounds
+    // the wait for another holder, and a lock in hand is the end of that wait.
+    if (taking.outcome === "taken") return { outcome: "held", value: runHolding(act, taking.lock) };
     if (!cutShort || found === undefined) found = taking;
     if (until.passed()) return notHeld(whyNotTaken(found));
     pause(Math.min(until.remaining(), PAUSE_MS + Math.random() * JITTER_MS));
