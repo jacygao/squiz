@@ -16,14 +16,10 @@ plugin for Claude Code and for the GitHub Copilot CLI.
 
 ## Prerequisites
 
-- `git`, and a repository with a GitHub remote.
-- `gh`, signed in (`gh auth login`).
 - Node 24 or later.
-- Claude Code or the Copilot CLI, to run the coding agent.
-- [`pi`](https://github.com/earendil-works/pi#readme) or the Copilot CLI, to run
-  the reviewer.
-- Optionally tmux or Herdr, to watch each review in a pane of its own. Without
-  either, a review runs in the background and writes a log.
+- Your coding agent: Claude Code or the GitHub Copilot CLI.
+- Your reviewer: the GitHub Copilot CLI or
+  [`pi`](https://github.com/earendil-works/pi#readme).
 
 ## Install
 
