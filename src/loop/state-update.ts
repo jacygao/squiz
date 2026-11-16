@@ -125,7 +125,9 @@ export type Locked<T> =
  *
  * A lock held by a live process, or by one `ps` cannot tell running or gone, is
  * waited on until `options.until` passes, and the call then fails naming the
- * holder. A lock naming a process that has gone is taken over.
+ * holder. A lock naming a process that has gone is taken over. A deadline that
+ * has passed before the call asks for the lock fails it at once, and a lock
+ * taken is used, even where `options.until` passed while it was being taken.
  *
  * `lastAttemptOnly` gives a deadline that had passed before the caller began
  * one attempt, with `ps` given its floor. Without it, a deadline that has
@@ -146,6 +148,8 @@ export function holdingLock<T>(
   const boundMs = (): number => (lastAttemptOnly ? PS_FLOOR_MS : Math.max(1, until.remaining()));
   const expired = (): boolean => !lastAttemptOnly && until.passed();
 
+  // Asked before anything runs, so the time this call spends cannot fail it here.
+  if (expired()) return notHeld("the deadline had passed before its lock was asked for");
   const self = options.self ?? ownIdentity(boundMs(), options.identify);
   if ("reason" in self) return notHeld(self.reason);
   const ask = options.presence ?? stillRunning;
@@ -162,12 +166,9 @@ export function holdingLock<T>(
   for (;;) {
     cutShort = false;
     const taking = takeLock(directory, name, { boundMs: boundMs(), self, presence });
-    if (taking.outcome === "taken") {
-      if (!expired()) return { outcome: "held", value: runHolding(act, taking.lock) };
-      // The caller's time for this write has gone, so the lock goes back unused.
-      taking.lock.release();
-      return notHeld("its lock was taken only after the deadline had passed");
-    }
+    // Used even where the deadline passed while it was taken. The deadline bounds
+    // the wait for another holder, and a lock in hand is the end of that wait.
+    if (taking.outcome === "taken") return { outcome: "held", value: runHolding(act, taking.lock) };
     if (!cutShort || found === undefined) found = taking;
     if (until.passed()) return notHeld(whyNotTaken(found));
     pause(Math.min(until.remaining(), PAUSE_MS + Math.random() * JITTER_MS));

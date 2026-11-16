@@ -137,7 +137,10 @@ lock is held for one update and never across a review. It names its holder's pid
 and start time, and a lock whose holder has gone is taken over. A writer that
 finds the lock held by a live process, or by one that cannot be told running or
 gone, waits up to a deadline of its own and never breaks the lock. A wait that
-runs out is a state file that cannot be written (§ 8). Readers take no lock.
+runs out is a state file that cannot be written (§ 8). The deadline bounds only
+the wait: a lock taken is used, even where the deadline passed while it was
+being taken, as it can on a loaded machine whose `ps` is slow. Readers take no
+lock.
 
 **The state file also holds one record for each state of the pull request the
 episode has reviewed.** A state is two things, read when a trigger starts:
