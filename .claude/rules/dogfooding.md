@@ -32,4 +32,4 @@ Name the issue number. Not being able to is the answer.
 ## Reference
 
 The `skills:writing-issues` skill owns what goes in the body. `AGENTS.md`, under
-Releases, says what the milestones and the priority labels mean.
+Issues and releases, says what the milestones and the priority labels mean.
