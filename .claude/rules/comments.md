@@ -49,49 +49,19 @@ The code says what it does. A comment adds what it is for, and why.
   understands every comment in the repository without any of them pointing at
   anything.
 
-## Reference: what belongs at each level
+## Reference: one comment, bad and good
 
-- **Class or module**: why it exists, and the constraints it must obey.
+A comment on a branch says why it does what it does, never what it does. A
+branch that looks unreachable or removable is the case that most needs one.
 
-  ```ts
-  /**
-   * Every failure path here exits 0. The harness may fail in any way except by
-   * preventing the coding agent from finishing, so a throw that escapes this
-   * module is the one bug it cannot have.
-   */
-  ```
+```ts
+// Bad: restates the code.
+// Loop over the threads
+for (const thread of threads) {
+```
 
-- **Method**: the contract. Any failure mode or constraint the caller must know.
-
-  ```ts
-  /**
-   * Post the finding as a thread on the changed line it was anchored to.
-   *
-   * Resolves false when GitHub refuses the anchor, which it does for any line
-   * outside the diff. The caller reports the finding as general instead.
-   * Not an error.
-   */
-  ```
-
-- **Variable**: only a surprising value, or a constraint on it. A variable that
-  needs a summary has a bad name. Rename, do not comment.
-
-  ```ts
-  // Under the runtime's hook timeout, which kills the round with nothing posted.
-  const REVIEW_BUDGET_SECONDS = 420;
-  ```
-
-- **Code logic**: why this branch does what it does, never what it does. A
-  branch that looks unreachable or removable is the case that most needs one.
-
-  ```ts
-  // Bad: restates the code.
-  // Loop over the threads
-  for (const thread of threads) {
-  ```
-
-  ```ts
-  // Good: the why, and what it obeys.
-  // A thread the reviewer returned no verdict for is treated as open.
-  for (const thread of threads) {
-  ```
+```ts
+// Good: the why, and what it obeys.
+// A thread the reviewer returned no verdict for is treated as open.
+for (const thread of threads) {
+```
