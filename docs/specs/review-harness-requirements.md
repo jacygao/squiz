@@ -81,7 +81,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R3.2.33** Where the archive cannot be written, the closed episode is left as it was, and the state taken is recorded failed with the reason. (L363–364)
 - **R3.2.34** `host.log` names where the closed episode went: `2026-11-08T09:14:02.511Z a new episode starts on a state the clean close never recorded: the closed one is in /work/squiz/.squiz/41/episodes/1`. (L366–370)
 - **R3.2.35** A `squiz review` whose state's record or close moved into an archive before it read it reads it there. (L372–373)
-- **R3.2.36** The latest activity is the GitHub identifier of the newest reply on the pull request, or none; where the newest reply on a general thread and the newest on any other thread were posted in the same second, it is both identifiers, the other thread's first, separated by a space. (L153–161; also L1597–1603)
+- **R3.2.36** The latest activity is the GitHub identifier of the newest reply on the pull request, or none; where the newest reply on a general thread and the newest on any other thread were posted in the same second, it is both identifiers, the other thread's first, separated by a space. (L153–161; also L1596–1603, R4.4.31)
 
 ### 3.3 A round, step by step
 
@@ -166,7 +166,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R3.9.18** The resume's prompt names `update.md` first and `handoff.md` second, then gives the same instructions and rules as the starting prompt. (L978–983)
 - **R3.9.19** `host.log` says whether the round started or resumed the fixer, naming the session id and, for a resume, the round that started it and the path of the update written. (L985–991)
 - **R3.9.20** A round starts a fresh fixer on its whole handoff instead of resuming when `.squiz.json` now names another CLI, when the state it hands back was queued by another session than the fixer's, or when `update.md` could not be written; `host.log` says which. (L1001–1014)
-- **R3.9.21** A resume that fails (exits non-zero) is run again as a fresh fixer on that round's `handoff.md` in a new session, with a `host.log` line naming the session and exit status; a fixer started fresh this way is not resumed again in the same round. (L1016–1029)
+- **R3.9.21** Where no fixer is running, nothing is queued, and the last state's resumed fixer failed (exited non-zero), it is run again as a fresh fixer on that round's `handoff.md` in a new session, with a `host.log` line naming the session and exit status; a fixer started fresh this way is not resumed again in the same round. (L1016–1029)
 - **R3.9.22** The fixer's own stop starts the next round, as any stop does. (L1035–1036)
 - **R3.9.23** A cap of R runs the fixer at most R−1 times in an episode (each a start or resume); the closing round starts no fixer; the fresh rerun of a failed resume is the one extra run a round can add. (L1040–1045; also L431–432)
 - **R3.9.24** No fixer starts while one an earlier round of the episode started is running or cannot be told running or gone, nor in a round with no handoff; the round's record says why. (L1047–1050)
@@ -232,7 +232,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R4.4.4** Under local there is no draft or wrong-branch case: the working tree is never held. (L1418)
 - **R4.4.5** The local `followUp` names the worktree, asks for no commit or push, and gives every command as a subshell in the reviewed worktree: "Fix what applies in /work/squiz-a, and reply on each thread with `(cd '/work/squiz-a' && squiz reply <id> <text>)` to say what you changed or why you disagree. Then run `(cd '/work/squiz-a' && squiz review)` again." (L1422–1433)
 - **R4.4.6** The local `fixerFollowUp` gives the same reply command and runs nothing else, ending "Nothing needs committing: squiz reviews the working tree as it stands." (L1435–1442)
-- **R4.4.7** The first session or subagent to start in a worktree records the base in `.squiz/local/base.json`. An existing record is kept, so a resumed session, a second session or a subagent sharing its parent's directory keeps the first one. A person never sets the base. (L1446–1450; also L1622)
+- **R4.4.7** The first session or subagent to start in a worktree records the base in `.squiz/local/base.json`: the worktree's `HEAD` then, and the branches, local and remote-tracking, that point at that commit then, the checked-out one included. An existing record is kept, so a resumed session, a second session or a subagent sharing its parent's directory keeps the first one. A person never sets the base. (L1446–1450, L1459–1461; also L1622)
 - **R4.4.8** The base is the newest of the recorded commit and the merge-base of `HEAD` with each recorded branch as it stands now. It leaves out the checked-out branch and its same-named remote-tracking branches (an upstream with another name is kept), branches that no longer exist, and branches whose merge-base does not descend from the recorded commit. Of what remains, the base is the one every other is an ancestor of, else the recorded commit. A worktree rebased onto a moved branch gets that branch's commit as its base. (L1463–1478)
 - **R4.4.9** With no `base.json`, or a recorded commit the repository lacks, there is nothing to review: `squiz: no review ran: /work/squiz has no recorded base, which squiz records when a session or subagent starts there`, or `squiz: no review ran: the recorded base <sha> is not a commit in /work/squiz`. (L1480–1486)
 - **R4.4.10** The head is a commit built from the working tree on every trigger, before the state is read, holding what `git add --all` in the worktree would take: every tracked file, including a tracked file that `.gitignore` names, and every untracked file that `.gitignore` does not exclude. (L1490–1506)
@@ -256,6 +256,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R4.4.28** `squiz review` takes no pull request number under local. Given one, it exits 1 with `squiz: no review ran: the local venue reviews the working tree, and takes no pull request number`. Any key except `local` is not reviewable. (L1417, L1652–1657; also L3082, L3116–3117, L3117–3118)
 - **R4.4.29** `squiz reply <id> <text>` adds the coding agent's reply to the thread in that worktree's `threads.json`, and refuses an id it does not hold: `squiz: nothing replied in T9: threads.json holds no thread "T9"`. (L1660–1662)
 - **R4.4.30** Under local, `squiz doctor` does not require `gh`: a missing `gh` is reported present, as `gh: not found. Not required under the local venue`, and a `gh` that cannot be used is a warning. (L1665–1672; also L3649)
+- **R4.4.31** Every local comment carries the same time, so where both a thread about the change as a whole and another thread hold replies, the latest activity is the newest reply on each, as `C3 C4`, whenever they were written. (L1596–1603)
 
 ## 5. The reviewer
 
@@ -359,10 +360,11 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R5.8.16** A Copilot run with a finish is reviewed; with no finish and a usage line counting at least one request, it stopped without finishing; with neither, or with nothing written, it completed no message, and the reason adds what Copilot said on stderr. (L2427–2436; also L3789, L3791)
 - **R5.8.17** A Copilot round records a cost and names a model only where Copilot ended by itself with token counts; that cost is never a floor. A round the time bound stopped, and any other, records no cost and names no model. (L2438–2442; also L2349–2350)
 - **R5.8.18** A Copilot round's `resume.txt` holds the command that resumes its session: `COPILOT_HOME=.squiz/41/rounds/2/session copilot --resume=<session id>`. (L2448–2452; also L1821, L3450, L3463)
+- **R5.8.19** The reporting server goes on answering while a history tool runs; a `notifications/cancelled` naming a running history tool stops its `git` and that call is not answered; the server exits when its standard input closes, and on `SIGTERM` and `SIGHUP`. (L2405–2408)
 
 ### 5.9 Charter
 
-- **R5.9.1** The charter the reviewer runs under carries the standing rules: take the intent and declared scope from the pull request description; report correctness bugs, convention violations, security problems and tests that assert nothing, and not formatting, naming, import order, compiler errors or speculation; verify with the tools before reporting; treat what `AGENTS.md` names as authoritative; report each finding as soon as it is confirmed; finish once, even with nothing to report; give one verdict per handed thread from the code as it now stands, with a reason on `open` and `withdrawn`; rule on the defect, not the suggested fix; and choose `line`, `file` or `change` scope as R5.12.1–R5.12.2 set out, reporting one rule broken in many places as one finding. (L2456–2498)
+- **R5.9.1** The charter the reviewer runs under carries the standing rules: take the intent and declared scope from the pull request description; report correctness bugs, convention violations, security problems and tests that assert nothing, and not formatting, naming, import order, compiler errors or speculation; verify with the tools before reporting; treat what `AGENTS.md` names as authoritative; report each finding as soon as it is confirmed; finish once, even with nothing to report; give one verdict per handed thread from the code as it now stands, with a reason on `open` and `withdrawn`; rule on the defect, not the suggested fix; scope a finding to `line` where a single line owns the defect, anchored to a changed line (for a defect where the change did not touch, the changed line that caused it, naming the other location in the body); to `file` only where no single line owns it or the change left no line in the file to anchor to; to `change` only where no single file owns it; and report one rule broken in several places as one finding, at the place a reader would point at, naming every other place in the body. (L2456–2498)
 
 ### 5.10 Findings
 
@@ -632,7 +634,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R8.3.12** No GitHub call may take more than 30 seconds, not configurable; a call reaching either bound is GitHub unreachable: exit 1, landed comments stay. (L3955–3957)
 - **R8.3.13** The token bound is per round; the episode's ceiling is cap × bound (30,000,000 at defaults, 80,000,000 at the largest cap). (L3959–3963)
 - **R8.3.14** An attempt's tokens count against the bound whether or not it was a round. (L3965–3966)
-- **R8.3.15** A reviewer that ran is charged what its report file says however its attempt ended, as a floor, zero where it reports none; a Copilot usage line is kept as Copilot's total. (L3968–3981)
+- **R8.3.15** A reviewer that ran is charged what its report file says however its attempt ended. Where the attempt was a start that failed after the reviewer may have run (a tmux window or an unidentified child; a failed Herdr start spends nothing), or one the harness threw out of after the reviewer started, what the file says is a floor, and zero where it reports none; a Copilot usage line is kept as Copilot's total. (L3968–3981)
 - **R8.3.16** The token bound is checked before a round and when a round records its spend; it stops the next round, never the running one. (L3983–3986)
 - **R8.3.17** A Copilot round with a cost is counted against the token bound as a `pi` one is; one with no cost counts nothing; dollars and AI credits bound nothing. (L3988–3990)
 
@@ -856,7 +858,7 @@ The default rule settles what it can (see Settled by the default rule below). Wh
 ### Requirement, or something else?
 
 - L1743–1746 (R5.1.7): "no stage selects or budgets files for the reviewer". An observable property, or a statement of what squiz does not do?
-- L2456–2498 (R5.9.1): the charter's rules. One "what the prompt must carry" requirement, or does its scope choice stand as requirements of its own, given R5.12.1 and R5.12.2 restate it?
+- L2456–2498 (R5.9.1): the charter's rules, scope choice included, are one "what the prompt must carry" requirement. Should the scope rules be requirements of their own?
 - L2749–2753 (R5.12.10): what happens when a person deletes or edits a general finding. A requirement, or a case for #819's list under § 11?
 - L3017–3019, L3038–3039 (R6.2.5): a round figure "given as unknown". What is printed? There is no example.
 - L3893–3894: "a line is a pointer rather than a report". Requirement or rationale?
@@ -884,6 +886,7 @@ A detail is a requirement if a command prints it, or a person or the coding agen
 
 - L157–161: the latest activity's two-identifier form. `squiz status` prints the latest activity. Now R3.2.36; the Replies display of it stays Doubtful.
 - L1065–1069: the round's reservation of the fixer as `unknown`. The field is in the state file and is dropped, but what a person sees, that no later fixer starts, is now R3.9.33.
+- L1596–1603: the local venue's latest activity. `squiz status` prints it, and every local comment sharing one time makes it both identifiers whenever both kinds of thread hold replies. Now R4.4.31.
 - L2955–3004: the per-round record. Its fields are dropped, and the counting rules for `raised` and `ruled`, which define what the summary's Rounds line prints, are now R6.1.15.
 
 ### Already stated, and kept
@@ -909,8 +912,7 @@ A detail is a requirement if a command prints it, or a person or the coding agen
 - L923–925 (R3.9.14): `SQUIZ_FIXER` and the dropped `CLAUDE_CODE_MESSAGING_SOCKET`. Their effects stay.
 - L993–999: `fixerSession` in the state file.
 - L1029–1033: how a failed resume is detected.
-- L1452–1461: `base.json`'s fields.
-- L1597–1603: the local venue's ordering of comments by id. What it decides is R3.2.36.
+- L1452–1461: `base.json`'s field names and format. What the record holds is in R4.4.7.
 - L1347–1350: `anchor-refused` and `posted-without-thread-id`. R5.12.3 keeps the fallback.
 - L1332–1334: venue calls never throw. R8.3.11 keeps the deadline.
 - L2046–2057 (R5.4.6): the GitHub variables' names. R5.0.1 keeps "the reviewer has no GitHub login".
