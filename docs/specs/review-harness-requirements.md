@@ -813,6 +813,7 @@ No requirement.
 - **PQ3, resuming one fixer across rounds: cut with PQ1.**
 - **PQ5, the `closed.json` and `stopped.json` markers: cut with PQ1.** A caller reads `squiz review`'s exit status instead. #910 removes all three.
 - **PQ6, recording the first prompt as a local change's description: kept.** Under the local venue the reviewer has no pull request to read intent from, and the first prompt the coding agent was given is that intent. R3.7.6–R3.7.8, R4.4.17 and R4.4.18 stay, without R3.7.7's `SQUIZ_FIXER` clause, which goes with #910.
+- **PQ7, closing on a clean state after the state behind it is superseded back to it: cut.** It handles a person deleting a reply mid-review, which § 11 leaves to #819's list. B is recorded superseded, and the episode stays open for the next commit or reply.
 - **PQ-A1, the local venue: kept.** A user chooses whether a review's record is kept on GitHub or in local files. Consolidating it with the GitHub venue is left for later.
 
 ## Not a requirement but needs a home
