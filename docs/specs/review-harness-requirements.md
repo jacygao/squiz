@@ -812,6 +812,7 @@ No requirement.
 - **PQ1, squiz starts and drives a headless fixer: cut.** A caller with no live session, such as SWE-drill, runs the loop itself: it runs `squiz review`, starts its own fixer on the threads it prints when it exits 2, and stops at 0 or 3. That is the same loop a coding agent runs on the GitHub venue, so squiz keeps one way of working, and never starts an agent. Headless Runs' requirements leave the list, apart from what an interactive run also uses. SWE-drill moves to its own loop before squiz removes the code.
 - **PQ3, resuming one fixer across rounds: cut with PQ1.**
 - **PQ5, the `closed.json` and `stopped.json` markers: cut with PQ1.** A caller reads `squiz review`'s exit status instead. #910 removes all three.
+- **PQ6, recording the first prompt as a local change's description: kept.** Under the local venue the reviewer has no pull request to read intent from, and the first prompt the coding agent was given is that intent. R3.7.6–R3.7.8, R4.4.17 and R4.4.18 stay, without R3.7.7's `SQUIZ_FIXER` clause, which goes with #910.
 - **PQ-A1, the local venue: kept.** A user chooses whether a review's record is kept on GitHub or in local files. Consolidating it with the GitHub venue is left for later.
 
 ## Not a requirement but needs a home
