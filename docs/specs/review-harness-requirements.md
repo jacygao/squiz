@@ -81,6 +81,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R3.2.33** Where the archive cannot be written, the closed episode is left as it was, and the state taken is recorded failed with the reason. (L363–364)
 - **R3.2.34** `host.log` names where the closed episode went: `2026-11-08T09:14:02.511Z a new episode starts on a state the clean close never recorded: the closed one is in /work/squiz/.squiz/41/episodes/1`. (L366–370)
 - **R3.2.35** A `squiz review` whose state's record or close moved into an archive before it read it reads it there. (L372–373)
+- **R3.2.36** The latest activity is the GitHub identifier of the newest reply on the pull request, or none; where the newest reply on a general thread and the newest on any other thread were posted in the same second, it is both identifiers, the other thread's first, separated by a space. (L153–161; also L1597–1603)
 
 ### 3.3 A round, step by step
 
@@ -122,7 +123,6 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R3.7.8** A `UserPromptSubmit` with no or an empty `prompt` records nothing and says so on stderr; one whose recording fails writes `no prompt was recorded:` and the reason on stderr; neither line carries the prompt. (L586–589)
 - **R3.7.9** The owner a stop records is, for `Stop`, the session itself (`session_id`) with its `CLAUDE_CODE_MESSAGING_SOCKET` where the environment has one, and for `SubagentStop`, the dispatching session (`session_id`) with that socket, plus the subagent (`agent_id`). (L595–598)
 - **R3.7.10** A firing is Copilot's where the environment has a non-empty `COPILOT_CLI`. Under Copilot the owner's socket is `squiz.sock` in the directory of the owner's transcript, `<COPILOT_HOME>/session-state/<session id>/events.jsonl`, recorded only where it accepts a connection, and `CLAUDE_CODE_MESSAGING_SOCKET` is never recorded; without an accepted socket the owner is recorded by session id alone. (L600–617)
-- **R3.7.11** A stop records, for the headless handoff, the agent's final message (`last_assistant_message`) and transcript (`transcript_path` on `Stop`, `agent_transcript_path` on `SubagentStop`), leaving out any field that is not a non-empty string and any transcript path that is not absolute; a `SubagentStop` with no `agent_transcript_path` records `transcript_path` as the parent's transcript where it is a Copilot transcript of `session_id`. (L619–634)
 - **R3.7.12** A `SubagentStop` whose `agent_type` is empty does nothing: resolves nothing, records no owner, queues nothing. (L640–643)
 - **R3.7.13** A `Stop` whose `session_id` is not the session its Copilot `transcript_path` names does nothing; a Claude Code `Stop` is never dropped by this rule. (L645–650)
 
@@ -178,6 +178,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R3.9.30** `host.log` records the stop written (`wrote the stop to <path>/stopped.json: fixer queued nothing`), or why it could not be written. (L1134–1141)
 - **R3.9.31** `closed.json` and `stopped.json` are never present together: the trigger that next queues a state removes `stopped.json` in the same update; a trigger that cannot remove it queues nothing and fails naming the file; a hook on a failed state leaves it; `stopped.json` never moves into `episodes/<n>/`. (L1143–1150)
 - **R3.9.32** A headless episode is left open with neither marker while a fixer whose start could not be told is on its records, when the round host dies or cannot write the state file, and when the last state names no stop (e.g. superseded unreviewed), the last with a `host.log` line `marked no stop: <why>`. (L1152–1162)
+- **R3.9.33** Where how a fixer's start went cannot be recorded, no later round of the episode starts a fixer, as after an `unknown` outcome. (L1065–1069)
 
 ### 3.10 Parallel coding agents
 
@@ -431,6 +432,7 @@ No requirement of its own after merging. Its lines are cited under R3.5.1, R7.2.
 - **R6.1.12** A round whose finished review never read a changed file's diff gets one Notes line naming the files, the first ten then "and N more"; each name is one code span with control characters escaped, a line break as `\n`, and a fence one backtick longer than any backtick run in the name. A round cut short by the time bound gets no such line. Example: ``- The reviewer finished round 1 without reading the diff of 2 changed files: `src/queue.ts`, `docs/a file.md` ``. (L2896–2907; also L1743–1746)
 - **R6.1.13** A round the time bound cut short gets the line `- The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then`. (L2909–2914)
 - **R6.1.14** A cap or bound that left queued states not reviewed is one Notes line naming the bound and each state (short commit, plus "with different replies" where needed), in place of the bound's own line: `- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f or 8d21a4f with different replies`. (L2916–2923; also L232, L293–299)
+- **R6.1.15** A round's findings raised are those the reviewer reported, whether or not their comments were posted; its rulings count, by verdict, each `fixed` or `withdrawn` verdict on a thread open when it was handed over and every `open` verdict, and leave out a verdict on a thread not handed over and a second verdict on one thread. (L2989–2993)
 
 ### 6.2 The format
 
@@ -743,6 +745,8 @@ No requirement.
 - L3893 calls a stderr line a pointer rather than a report, yet L3800–3803 put GitHub's answer on stderr and leave it out of the comment. Is the failure comment the fuller surface for those rows?
 - L94–96 and L3913–3915 (R3.1.4, R8.3.3) say a failed round closes nothing and the episode stays live; L3841–3854 (R8.1.3) has the failure comment of a last-round failure say "The review is closed", while L3856 says the next run closes it. Is the episode closed when that comment is posted, or only at the next run?
 
+## Decisions
+
 ## Not a requirement but needs a home
 
 ### To docs/notes
@@ -823,65 +827,31 @@ No requirement.
 
 ## Doubtful
 
+The default rule settles what it can (see Settled by the default rule below). What is left here is what the rule does not decide: a guarantee, a bound or a name that no file or printed field carries, or what the reviewer alone sees.
+
 ### Requirement, or how the code works?
 
 - L26: "squiz does not check it", of the reviewer's model. A stated exclusion that is a requirement, or rationale?
 - L72–73: a marker is matched up to and including the character after the name, so `**Squiz review` never matches a reviewer comment. Observable, or how the matching is done? (R2.2.2)
-- L110–124 (R3.2.2, R3.2.3): of the episode directory's files, the merge kept those a person or the fixer reads, and dropped the report file and `fixer.exit`. `closed.json`, `stopped.json`, `update.md` and the state file itself may also be internal. Which stay?
-- L157–161: the latest activity holds two identifiers separated by a space when the newest of each thread kind share a second, and it surfaces in `squiz status`'s Replies column (L3423, R7.3.3). Observable, or internal?
-- L168–173: a Reviewing record names the host, session and snapshot, and every started record holds what `squiz status` prints. Internal, or the source of the `squiz status` columns § 7 already states?
-- L177–180: the list of fields whose absence makes the state file unreadable was dropped, keeping only the message (R3.2.7). Right?
-- L302–303: the rulings `fixed`, `withdrawn` and `open` kept by thread node id. Internal storage, though § 6 counts threads by them (R6.0.9).
-- L317–318, L332–333: a clean close records how many records are the closed episode's. Internal; the observable effects are R3.2.26–R3.2.29.
+- L120–124 (R3.2.3): `closed.json` and `stopped.json` in a headless run. Does a person or the coding agent read either, or only squiz?
+- L157–161 (R3.2.36): `squiz status` prints the latest activity as the last six characters of its identifier (R7.3.3). What does Replies print when the latest activity is two identifiers?
 - L283–286 (R3.2.24): no state queued while the summary is posted is stopped by a close it arrived before. An observable guarantee, or race handling that belongs in the code?
 - L424–427 (R3.3.3): "The coding agent … never closes one." A requirement on squiz (no command resolves a thread), or guidance to the coding agent?
 - L469–471 (R3.6.2): the round host takes the oldest queued state and exits when nothing is queued or the worktree is gone. Observable, or how the code works?
-- L480–482 (R3.6.3): `.squiz/<number>/host.lock` naming the pid and start time is internal, though L3377 names it in a stderr line a user reads. Requirement?
-- L489–499 (R3.6.5): the recovery's steps (process group, then pane; confirming by pid, start time and backend) were dropped and the outcome kept. Right?
-- L595–598, L607–617 (R3.7.9, R3.7.10): what the owner record holds. Only who is woken is observable; is the record's content a requirement? The one-second wait for the socket was dropped as a threshold no person sets.
-- L619–634 (R3.7.11): the final message and transcript recorded for the handoff. Observable only through the handoff (R3.9.8); a requirement here, or only there?
-- L658–671 (R3.8.2): the note file's `key=value` format and escaping were dropped as internal. Does a person read the note file (L757 implies an owner may)?
 - L732–733 (R3.8.10): the JSON line posted to the socket is Claude Code's messaging-socket contract. A requirement, or a dependency's behaviour for a note?
 - L748: "the note goes back to wait for a pull". Nothing defines a pull.
-- L923–925 (R3.9.14): are the variable names (`SQUIZ_FIXER`, dropping `CLAUDE_CODE_MESSAGING_SOCKET`) requirements, or only their effects (the fixer's prompt is not recorded, the fixer wakes no session)?
-- L993–999: `fixerSession` in the state file (CLI, session id, starting round, comment and thread ids shown, `noted`; never a prompt or transcript). A format a person reads, or internal? Not listed.
-- L1052–1063 (R3.9.25): the reviewed record's `fixer` field was dropped and its `host.log` line kept. Does `squiz status` show the field?
-- L1065–1069: the round reserves the fixer as `unknown`, with the reason `its start was never recorded`, before starting it, and a refused result keeps the reservation. Observable through R3.9.25's `unknown`, or how the code works? Not listed.
-- L1029–1033: a fixer that wrote no status was killed and is treated as one that exited; where the state file refuses to reserve the fresh start, the host exits. Requirements, or how a failed resume is detected? Not listed.
-- L1047–1048, L1072–1073 (R3.9.24, R3.9.26): fixers are told running or gone by pid and start time, and the pid appears in `host.log`. Is the method a requirement?
-- L1413: the snapshot's `<digest>-local` and the pane name `squiz-local-r2`. A person can see a tmux pane name; a requirement?
-- L1417: is `squiz review local`, with the key given, a supported command? The round host's rerun (L1379) prints it.
-- L1452–1461: `base.json`'s fields (`commit`, `branches`) were dropped as a file only squiz reads; R4.4.8 states the base's observable rule. Right?
-- L1520–1523: the built head's author and committer `squiz <squiz@localhost>`, dated 1970-01-01. The reviewer can see it in the snapshot; a requirement, or the code's means to R4.4.13?
-- L1597–1603: all local comments carry one time, so the latest activity is computed by the highest comment id ("C3 C4"). Seen in the state file only; requirement or internal?
-- L1347–1350: the `anchor-refused` and `posted-without-thread-id` fallbacks. Is anything here a requirement beyond R5.12.3?
-- L1332–1334: venue calls never throw, and no call is made once the deadline has passed. Internal, apart from what R8.3.11 already says?
-- L1572–1573, L3573–3575 (R4.4.18, R7.4.16): `prompt.md` and `settings.json` are written beside and moved into place, so a reader never sees a partial file. Is "appears whole" the requirement and the rename the code?
+- L1520–1523: the built head's author and committer `squiz <squiz@localhost>`, dated 1970-01-01. Only the reviewer sees it, in the snapshot. A requirement, or the code's means to R4.4.13?
+- L1572–1573, L3573–3575 (R4.4.18, R7.4.16): the write-and-rename is the code's. Is "a reader never sees a partial `prompt.md` or `settings.json`" a requirement?
 - L1794–1796: the start fails when the reviewer's command is not on the shell's path, or the reviewer has not started 15 seconds after the line was typed. A bound a user sees, or a threshold the code picked?
 - L1873–1878: the base is named `refs/squiz/base` in the snapshot, which the reviewer could see through `git_show`. A requirement?
-- L1917–1931 (R5.3.7): the snapshot's path, with `<digest>` the first 16 hex digits of the SHA-256 of the worktree path. A person sees the path in `host.log` and the pane; is the digest's form a requirement or how the code works?
-- L2046–2057 (R5.4.6): the GitHub variables emptied and `GH_CONFIG_DIR` pointed at an empty directory are the means to R5.0.1. Are the names a requirement, or only "the reviewer has no GitHub login"?
-- L2037–2044: each changed file `git_diff` shows is recorded in the report file as `{"type":"read","path":…}`, and a refused read counts as unread. A format, or only the mechanism behind R6.1.12?
-- L2135–2142: the adapter interface (`argv`, `confine`, `read`, `grants`), and "a further reviewer means writing a further adapter and changing nothing else". How the code works, or a requirement on extending squiz?
 - L2179–2183: an adapter may ship files its CLI runs (the `pi` extension, the Copilot server). A requirement, or layout that belongs with § 9?
-- L2211–2219: how each adapter tells the history tools where the snapshot is (`SQUIZ_SNAPSHOT` for Copilot), and that a tool finding none answers with an error. How the code works?
-- L2256–2266: `.squiz/<number>/rounds/<k>/reports.jsonl`, named by `SQUIZ_REPORTS`, and its line kinds. Dropped as internal; right?
-- L2351 (R5.8.10): Copilot's stderr kept in `stderr.txt` in the session directory. A file a person reads, or internal?
 - L2227–2233, L2317–2318 (R5.7.3, R5.8.4): the exact tool grants and "no other extension runs". Requirements (a user's extensions do not run), or Confinement's mechanism?
-- L2399–2403 (R5.8.14): the MCP error text, and a report recording what the model sent, which differs from `pi`'s converted reports (L2267–2268). Observable only by the reviewer model; a requirement?
-- L2612: "the round still sends the resolve" on an already-resolved thread. How the code works, or observable?
-- L2836–2838 (R6.1.6): the Rounds list is "read from the state file, never from the pull request". Only the observable consequence was kept.
-- L2955–3004: the per-round record and its fields (`reviewer`, `dollars`, `tokens`, `messages`, `credits`, `models`, `elapsedSeconds`, `cutShortAtSeconds`, `postingSeconds`, `floor`, `head`, `raised`, `ruled`, `unpostedReplies`, `unread`) were dropped as internal. `ruled`'s counting rule (L2989–2993) may be the real definition of the Rounds line's rulings, and should then move into R6.1.5.
-- L3002–3004: a field missing or of the wrong kind makes the file unreadable. Requirement, or how the code works?
-- L3087: a start or prompt hands its `cwd` to the venue's `recordStart` or `recordPrompt`. Dropped as internal; is there anything observable beyond R3.7.5 and R3.7.6?
-- L3376–3378, L3780 (R7.2.22): the 10-second wait for a live process to hold `host.lock`. Dropped as a threshold no person sets, but it shapes when exit 1 appears. Keep the number?
+- L2399–2403 (R5.8.14): the MCP error text, and a report recording what the model sent, which differs from `pi`'s converted reports (L2267–2268). Only the reviewer model sees it. A requirement?
+- L3376–3378, L3780 (R7.2.22): the 10-second wait for a live process to hold `host.lock`. A threshold no person sets, but it shapes when exit 1 appears. Keep the number?
 - L3404–3405 (R7.2.24): output "computed from what the round read back from the pull request". Observable, or how the code works?
 - L3639, L3714 (R7.6.4, R7.6.18): doctor's 15-second version bound and 60-second Copilot prompt bound. Bounds a person sees, or thresholds the code picked?
-- L3767–3769 (R8.0.8): a `gh` body read to its end. A requirement, or how the code reads `gh`?
 - L3869–3871 (R8.1.7): "a run ending at the gate". Nothing in the requirements defines the gate. Requirement, or a term of the code?
-- L3905–3906 (R5.7.8): a `pi` cost read at the moment of the kill. Observable only through the token ledger; a requirement?
-- L3952–3953 (R8.3.11): a part timed as one deadline. A requirement, or how the code times calls?
-- L3994, L4031–4062 (R9.0.1, R9.2.2, R9.2.3): repository and module organisation. `CLAUDE.md` says § 9 fixes the layout; are these spec requirements or project rules?
+- L3994, L4031–4062 (R9.0.1, R9.2.2, R9.2.3): repository and module organisation. `CLAUDE.md` says § 9 fixes the layout. Are these spec requirements or project rules?
 
 ### Requirement, or something else?
 
@@ -905,3 +875,53 @@ No requirement.
 - R7.6.11 (doctor's Node row requires 24 or later) against R9.1.4 (squiz needs Node 24 or later). Kept both: one is the check, the other the requirement it checks.
 - R3.2.7 (the unreadable-state-file message) against R8.0.15 (what each reader does when the state file is unreadable) and R7.3.16 (`squiz status`'s line for it).
 - R5.0.1 (the reviewer has no GitHub access and reports through calls) against R5.10.1 (results come only through three calls).
+
+## Settled by the default rule
+
+A detail is a requirement if a command prints it, or a person or the coding agent reads the file or field it is in. If only squiz's own code reads it, it is how the code works and is dropped. Ids are not renumbered, so a removed id leaves a gap.
+
+### Moved into the requirements
+
+- L157–161: the latest activity's two-identifier form. `squiz status` prints the latest activity. Now R3.2.36; the Replies display of it stays Doubtful.
+- L1065–1069: the round's reservation of the fixer as `unknown`. The field is in the state file and is dropped, but what a person sees, that no later fixer starts, is now R3.9.33.
+- L2955–3004: the per-round record. Its fields are dropped, and the counting rules for `raised` and `ruled`, which define what the summary's Rounds line prints, are now R6.1.15.
+
+### Already stated, and kept
+
+- L110–124 (R3.2.2): `update.md` is what a resumed fixer reads, so it stays in R3.2.2. The state file's own fields are dropped: `squiz status` prints what a person needs from it (§ 7.3).
+- L619–634 (R3.7.11): the coding agent reads the handoff, which R3.9.8 already states, final message and transcript included. R3.7.11, the stop's payload fields, is removed.
+- L1052–1063, L1047–1048, L1072–1073 (R3.9.24–R3.9.26): `host.log` names the fixer's outcome and pid, and a person reads it, so R3.9.25 and R3.9.26 stand. The record's `fixer` field and the pid-and-start-time method are dropped.
+- L1413: the snapshot's `<digest>-local` and the pane `squiz-local-r2`. A person sees both; R4.4.2 with R5.2.1 and R5.3.7 states them.
+- L1917–1931 (R5.3.7): a person sees the snapshot's path in `host.log` and the pane, so the digest's form stays in R5.3.7.
+- L3905–3906 (R5.7.8): a `pi` cost read at the kill reaches the summary's cost, which R5.7.8 states.
+- L1417: `squiz review local`. The round host prints it, but L1417 says local `squiz review` takes no number; the contradiction on L1375–1379 decides it, and nothing is added here.
+
+### Dropped as how the code works
+
+- L168–173: the Reviewing record's fields. `squiz status` prints the columns (§ 7.3).
+- L177–180: the fields whose absence makes the state file unreadable. R3.2.7 keeps the message.
+- L302–303: the rulings stored by thread node id.
+- L317–318, L332–333: the count of a closed episode's records.
+- L480–482 (R3.6.3): `host.lock`'s pid and start time. The stderr line at L3377 names `host.log` and `squiz status`, not the lock's contents.
+- L489–499 (R3.6.5): the orphan recovery's steps.
+- L595–598, L607–617 (R3.7.9, R3.7.10): the owner record's content, and the one-second socket wait.
+- L658–671 (R3.8.2): the note file's `key=value` format. The owner learns the result from `squiz review` or `squiz status` (L757–759), not from the file.
+- L923–925 (R3.9.14): `SQUIZ_FIXER` and the dropped `CLAUDE_CODE_MESSAGING_SOCKET`. Their effects stay.
+- L993–999: `fixerSession` in the state file.
+- L1029–1033: how a failed resume is detected.
+- L1452–1461: `base.json`'s fields.
+- L1597–1603: the local venue's ordering of comments by id. What it decides is R3.2.36.
+- L1347–1350: `anchor-refused` and `posted-without-thread-id`. R5.12.3 keeps the fallback.
+- L1332–1334: venue calls never throw. R8.3.11 keeps the deadline.
+- L2046–2057 (R5.4.6): the GitHub variables' names. R5.0.1 keeps "the reviewer has no GitHub login".
+- L2037–2044: the report file's `read` lines. R6.1.12 keeps what the summary says.
+- L2135–2142: the adapter interface.
+- L2211–2219: how each adapter tells the history tools where the snapshot is.
+- L2256–2266: `reports.jsonl` and its line kinds.
+- L2351 (R5.8.10): `stderr.txt`. R5.8.10 keeps that Copilot's stderr reaches the round's.
+- L2612: the resolve sent on an already-resolved thread.
+- L2836–2838 (R6.1.6): the Rounds list read from the state file. Its consequence stays.
+- L3002–3004: a missing or ill-typed field in the per-round record.
+- L3087: the `cwd` a start or prompt hands to the venue.
+- L3767–3769 (R8.0.8): a `gh` body read to its end.
+- L3952–3953 (R8.3.11): a part timed as one deadline.
