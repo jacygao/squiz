@@ -409,6 +409,9 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord, h
   if (state.closeReported === true) {
     const closing = closingRecord(records);
     if (closing !== undefined) return compose((threads) => roundResult(following, state, closing, threads));
+    // The queue ended on a round that failed and closed the episode.
+    const failed = failedClose(records);
+    if (failed !== undefined) return compose((threads) => closedUnreviewed(following, records, failed, threads));
     return closed(following, state);
   }
   if (records.some((record) => record.status === "queued" || record.status === "reviewing")) return undefined;
@@ -583,7 +586,8 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
     outcome: "closed",
     key: context.key,
     name: context.name, rerun: context.rerun, summaryAt: context.summaryAt,
-    exit: unreviewed !== undefined || (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) !== 0 ? 3 : 0,
+    // A close a failed round reached is never clean, whatever is open.
+    exit: unreviewed !== undefined || first !== undefined || (closing?.exitStatus ?? (open.length === 0 ? 0 : 3)) !== 0 ? 3 : 0,
     ...(head === undefined ? {} : { commit: head.slice(0, 7) }),
     ...(unreviewed === undefined ? {} : { unreviewed }),
     reopens: state.cleanClose !== undefined,

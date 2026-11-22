@@ -80,6 +80,7 @@ import {
   type StoppingBound,
 } from "./round-end.ts";
 import {
+  putRecord,
   sameState,
   type ReviewerPlace,
   type ReviewerSession,
@@ -1233,9 +1234,9 @@ function closeAfterReview(
  * The close of an episode whose last round failed, with the episode's summary
  * comment on the pull request.
  *
- * The close is written first, with every state queued behind the one the round
- * took recorded not reviewed, and the summary is posted after it, as at any
- * close. The summary is composed from the rounds that ran and the threads as the
+ * The close is written first, in one update with every state queued behind the
+ * one the round took recorded not reviewed and the round's refused closing
+ * replies on its entry, and the summary is posted after it, as at any close. The summary is composed from the rounds that ran and the threads as the
  * round left them, and a thread the round gave no verdict is counted by the last
  * ruling on record.
  *
@@ -1256,7 +1257,10 @@ function closeOnFailure(
     episode,
     (current) => {
       left = leftBehind(current, by.bound, taken);
-      return { ...current, closeReported: true };
+      const states: readonly StateRecord[] = left?.states ?? [];
+      // A round that was no round has no entry for its refused replies to go on.
+      const kept = on.stopwatch.round === undefined ? current : recordUnpostedReplies(current, on.stopwatch.round, account.unpostedReplyNotes);
+      return { ...kept, closeReported: true, records: states.reduce(putRecord, kept.records ?? []) };
     },
     { until: lockWait() },
   );

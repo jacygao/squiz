@@ -446,6 +446,21 @@ test("a state reviewed clean with the episode open returns the close the queue e
   });
 });
 
+test("#915: a state reviewed clean whose queue ends on a failed round that closed the review is handed that close at exit 3", async () => {
+  await withWorktree(async (fixture) => {
+    const reason = "the reviewer was killed at its 900-second bound, and the round recorded no findings";
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) },
+      { ...LATER, status: "failed", reason, ownerNoted: false, closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
+
+    assert.equal(printed.exit, 3, `exit 0 is the merge signal, and the round the queue ended on failed: ${printed.stdout}`);
+    assert.equal(printed.stdout.split("\n")[1], `Squiz did not review PR #41 at 8d21a4f: ${reason}.`);
+  });
+});
+
 test("a state reviewed clean whose wait runs out before the close exits 4, naming the state under review", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [{ ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) }, reviewing(LATER)]);

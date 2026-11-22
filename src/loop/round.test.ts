@@ -2279,6 +2279,46 @@ test("#915: a failed round that spends the last of the round cap closes the revi
 });
 
 /**
+ * The close and the states it leaves not reviewed are one update, so a round
+ * host that stops after it leaves no state queued on a closed episode.
+ */
+test("#915: a failed round's close records the state queued behind it not reviewed in the same update", async () => {
+  const queued = { head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", activity: null, status: "queued" };
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 2 },
+    stateSource: JSON.stringify({ rounds: [EARLIER_ROUND], spentOutsideRounds: unspent, records: [queued] }),
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed" && ran.conclusion.closed !== undefined, `concluded ${JSON.stringify(ran.conclusion)}`);
+  assert.equal(ran.state?.closeReported, true);
+  assert.deepEqual(ran.state?.records, [
+    { head: queued.head, activity: null, status: "not reviewed", reason: "the episode closed at the round cap before a round took this state" },
+  ]);
+});
+
+/**
+ * A failed round's salvaged `fixed` verdict whose reply GitHub refused is named
+ * by the summary that round posts, as any closing round's is.
+ */
+test("#915: a failed round that closes the review names the closing reply it could not post", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 2 },
+    rounds: [EARLIER_ROUND],
+    answers: { ...FAILING, threads: listed([{ id: "PRRT_mended", isResolved: false }]), resolve: RESOLVED },
+    reviewer: hangs(ANSWER_COST, { verdicts: [{ thread: "PRRT_mended", verdict: "fixed" }] }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed" && ran.conclusion.closed !== undefined, `concluded ${JSON.stringify(ran.conclusion)}`);
+  const body = summaryBody(ran);
+  assert.ok(
+    body.includes("- `src/ui/card.ts:88` — The name says nothing. (ruled fixed, and the reviewer's reply could not be posted on its thread)"),
+    `the summary does not name the refused reply: ${body}`,
+  );
+});
+
+/**
  * A round the time bound killed records its floor, and a floor at the token
  * bound closes the review in that round, with the summary naming the bound and
  * the cut.
