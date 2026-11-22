@@ -23,8 +23,8 @@ import type { Change, ReviewThread } from "../venues/venue.ts";
  * with no owner gets no note, and nor does one reviewed clean with the episode
  * open, because the episode is still under way and nothing waits on that state.
  *
- * `closed` is the bound that leaves no round after a failed one. Without it, the
- * note for a failed state promises a retry.
+ * `closed` is the close a failed round reached, and where its summary is where
+ * it was posted. Without it, the note for a failed state promises a retry.
  *
  * `listed` is the review threads on the pull request as they stand. A note for
  * open threads prints those of them the round left open and that are still
@@ -36,7 +36,7 @@ export function ownerNote(
   record: StateRecord,
   name: string,
   followUp: Change["followUp"],
-  closed?: ClosedBy,
+  closed?: FailedNoteClose,
   listed?: readonly ReviewThread[],
 ): OwnerNote | undefined {
   const { owner } = record;
@@ -56,6 +56,9 @@ export function ownerNote(
 
 export type OwnerNote = { readonly sessionId: string; readonly fields: NoteFields };
 
+/** The close a failed round reached: the bound it spent, and where the summary is, absent where it was not posted. */
+export type FailedNoteClose = { readonly by: ClosedBy; readonly summaryAt?: string };
+
 // The wake carries the note whole, and no runtime has said how much text it takes.
 const PRINTED_THREADS = 10;
 
@@ -64,7 +67,7 @@ function textOf(
   record: StateRecord,
   at: string,
   followUp: string,
-  closed: ClosedBy | undefined,
+  closed: FailedNoteClose | undefined,
   listed: readonly ReviewThread[] | undefined,
 ): string | undefined {
   const review = `\`${change.rerun}\``;
@@ -95,7 +98,7 @@ function textOf(
       const next =
         closed === undefined
           ? [`A new commit, or running ${review} once, retries it.`]
-          : closedLines(closed, `A new commit, or running ${review}, posts its summary.`);
+          : closedLines(closed.by, closed.summaryAt);
       return [`Squiz could not review ${change.name} at ${at}: ${sentence(record.reason)} \`squiz status\` lists it.`, ...next].join(" ");
     }
     case "not reviewed":

@@ -45,15 +45,6 @@ export type EpisodeAtClose = {
 };
 
 /**
- * What the summary counts a thread as: its status, or `resolved` for a resolved
- * thread with no ruling to count it by.
- *
- * Only a close that ran no reviewer has such a thread. A round that reviewed
- * rules on every thread it handed over.
- */
-export type CountedStatus = ThreadStatus | "resolved";
-
-/**
  * One thread of this review, as the summary names it.
  *
  * Only what the summary has of it: the counts read the status, and the
@@ -62,7 +53,7 @@ export type CountedStatus = ThreadStatus | "resolved";
  * episode is over.
  */
 export type ClassifiedThread = {
-  readonly status: CountedStatus;
+  readonly status: ThreadStatus;
   // Null where the reviewer left the headline blank, which drops it from the comment.
   readonly headline: string | null;
   // Where the thread sits: `file:line` for one anchored to a line, and the file alone otherwise.
@@ -105,12 +96,9 @@ export function classifyAtClose(closing: EpisodeAtClose): readonly ClassifiedThr
     if (reading.raised !== "finding") continue;
     const verdict = ruled.get(thread.id);
     classified.push({
-      // A resolved thread with no entry is one no ruling on record closed. The
-      // default verdict would count it open, and it is not.
-      status:
-        verdict === undefined && thread.isResolved
-          ? "resolved"
-          : statusOf({ verdict: verdict ?? null, codingAgentReplied: reading.codingAgentReplied }),
+      // A thread with no entry is one no ruling on record closed, and the
+      // default verdict counts it, resolved or not.
+      status: statusOf({ verdict: verdict ?? null, codingAgentReplied: reading.codingAgentReplied }),
       headline: reading.headline,
       location: locationOf(thread),
       ...(unposted.has(thread.id) ? { reasonUnposted: true } : {}),

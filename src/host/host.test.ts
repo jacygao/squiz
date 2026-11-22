@@ -1126,11 +1126,18 @@ function workTheThreads(worktree: string): string {
   ].join("\n");
 }
 
-test("a host that finds the cap spent posts the summary, and records the close on the state it took and the rest not reviewed", async () => {
+/**
+ * The failed round that spends the last of the cap closes the episode. Its own
+ * state is recorded failed with the close, and the state queued behind it not
+ * reviewed. The hook queues nothing on a failed state, so a close any later
+ * trigger had to find would never come.
+ */
+test("#915: a host whose failed round spends the last of the cap records the close on its state, and the rest not reviewed", async () => {
   let head = "";
   const ran = await host({
     rounds: [EARLIER_ROUND],
-    config: { rounds: 1 },
+    config: { rounds: 2 },
+    unparsedFrom: 0,
     records: (fixture) => {
       head = fixture.head();
       return [queued(head, null, MAIN), queued(head, "PRRC_reply", PARENT)];
@@ -1138,37 +1145,21 @@ test("a host that finds the cap spent posts the summary, and records the close o
     before: (fixture) => writeFileSync(join(fixture.binaries, "answer-threads"), ONE_OPEN_THREAD, "utf8"),
   });
 
-  assert.equal(ran.started, 0, "a cap already spent starts no reviewer");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
+  assert.ok(ran.kinds.includes("summary"), `gh was asked for ${ran.kinds.join(", ")}`);
+  assert.equal(ran.state?.closeReported, true, "the failed round closed nothing");
   const reason = "the episode closed at the round cap before a round took this state";
   const [taken, behind] = recordsOf(ran.state);
-  assert.deepEqual(taken, {
-    head,
-    activity: null,
-    owner: MAIN,
-    status: "not reviewed",
-    reason,
-    closed: { exitStatus: 3, openThreads: ["PRRT_open"], closedAt: "round cap" },
-  });
+  assert.ok(taken?.status === "failed", `recorded as ${JSON.stringify(taken)}`);
+  assert.deepEqual(taken.closed, { exitStatus: 3, openThreads: ["PRRT_open"], closedAt: "round cap" });
   assert.deepEqual(behind, { head, activity: "PRRC_reply", owner: PARENT, status: "not reviewed", reason });
+  assert.match(
+    onlyNote(ran, MAIN).text ?? "",
+    /The review is closed: it has run 2 rounds, and the round cap allows 2\. No round runs again\. Its summary is on the pull request\.$/u,
+  );
   assert.equal(
     onlyNote(ran, PARENT).text,
     `Squiz did not review PR #${PULL_REQUEST} at ${head.slice(0, 7)} with different replies, the work of subagent ${PARENT.subagent}: ${reason}.`,
   );
-});
-
-test("#844: a host that finds the bound spent before any round ran, with no thread of the reviewer's, records the close at exit 3 with its missing summary", async () => {
-  const ran = await host({ records: atHead, config: { tokens: 1000 }, before: (fixture) => spendOutsideRounds(fixture.episode, 1000) });
-
-  assert.deepEqual(ran.kinds, ["prlist", "threads"]);
-  const [taken] = recordsOf(ran.state);
-  assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
-  assert.deepEqual(taken.closed, {
-    exitStatus: 3,
-    openThreads: [],
-    closedAt: "token bound",
-    problems: [`the review of PR #${PULL_REQUEST} closed without its summary: the episode closed before any round ran`],
-  });
 });
 
 test("#414: a last round whose summary GitHub refuses keeps the reason on its record, in host.log and in squiz status", async () => {
@@ -1246,10 +1237,11 @@ test("#416: a clean round closes nothing when a state is superseded by it after 
   assert.notEqual(ran.state?.closeReported, true, "the episode closed on a clean round a later round followed");
 });
 
-test("#414: a close before any review whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
+test("#414: a failed round's close whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
   const ran = await host({
     rounds: [EARLIER_ROUND],
-    config: { rounds: 1 },
+    config: { rounds: 2 },
+    unparsedFrom: 0,
     records: atHead,
     before: (fixture) => {
       writeFileSync(join(fixture.binaries, "answer-threads"), ONE_OPEN_THREAD, "utf8");
@@ -1258,9 +1250,9 @@ test("#414: a close before any review whose summary GitHub refuses keeps the rea
   });
 
   const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
+  assert.ok(ran.kinds.includes("summary"), `gh was asked for ${ran.kinds.join(", ")}`);
   const [taken] = recordsOf(ran.state);
-  assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
+  assert.ok(taken?.status === "failed", `recorded as ${JSON.stringify(taken)}`);
   assert.deepEqual(taken.closed?.problems, [line]);
   assert.match(ran.log, new RegExp(`round 2: ${escaped(line)}\n`, "u"));
 });
@@ -1272,16 +1264,6 @@ function refuseSummary(fixture: Fixture): void {
 
 function escaped(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-/** Record `tokens` spent by attempts that were no round, as a setup problem records them. */
-function spendOutsideRounds(episode: Episode, tokens: number): void {
-  const written = updateState(
-    episode,
-    (state) => ({ ...state, spentOutsideRounds: { dollars: 0, tokens, messages: 1 } }),
-    { until: deadlineIn(5_000) },
-  );
-  assert.equal(written.outcome, "written", `the fixture could not record the spend: ${JSON.stringify(written)}`);
 }
 
 test("a reviewed round's record counts the threads its findings opened", async () => {
@@ -1625,7 +1607,7 @@ test("#622: a failed round that was the last the round cap allows tells its owne
     onlyNote(ran, MAIN)["text"],
     `Squiz could not review PR #${PULL_REQUEST} at ${short}: round 1 found 1 finding and could not post it to PR #${PULL_REQUEST}. ` +
       "`squiz status` lists it. The review is closed: it has run 1 round, and the round cap allows 1. No round runs again. " +
-      `A new commit, or running \`squiz review ${PULL_REQUEST}\`, posts its summary.`,
+      "Its summary is on the pull request.",
   );
 });
 
@@ -1637,11 +1619,11 @@ test("#622: a failed round that reached the token bound tells its owner the revi
     onlyNote(ran, MAIN)["text"],
     `Squiz could not review PR #${PULL_REQUEST} at ${short}: round 1 found 1 finding and could not post it to PR #${PULL_REQUEST}. ` +
       "`squiz status` lists it. The review is closed: it reached the token bound of 1,000 tokens. No round runs again. " +
-      `A new commit, or running \`squiz review ${PULL_REQUEST}\`, posts its summary.`,
+      "Its summary is on the pull request.",
   );
 });
 
-test("#622: a failed attempt that reached the token bound before any round ran promises its owner no summary", async () => {
+test("#622: a failed attempt that reached the token bound before any round ran tells its owner where the summary is", async () => {
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, MAIN)],
     config: { tokens: 1_000 },
@@ -1654,7 +1636,7 @@ test("#622: a failed attempt that reached the token bound before any round ran p
   assert.equal(
     onlyNote(ran, MAIN)["text"],
     `Squiz could not review PR #${PULL_REQUEST} at ${short}: ${record.reason}. \`squiz status\` lists it. ` +
-      "The review is closed: it reached the token bound of 1,000 tokens. No round runs again.",
+      "The review is closed: it reached the token bound of 1,000 tokens. No round runs again. Its summary is on the pull request.",
   );
 });
 

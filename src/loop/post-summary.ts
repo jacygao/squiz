@@ -29,17 +29,11 @@ import type { AppliedVerdicts } from "./verdicts.ts";
 /**
  * What became of the episode's summary comment, which every close says.
  *
- * Three answers and no fourth. A close that could say nothing about its summary is
- * a close that reports no comment and no reason for there being none, and exit 0
- * then reads as a review that ended clean.
+ * Every close composes one and tries to post it. A close that could say nothing
+ * about its summary is a close that reports no comment and no reason for there
+ * being none, and exit 0 then reads as a review that ended clean.
  */
-export type EpisodeSummary =
-  | Posting
-  /**
-   * Nothing was composed and nothing ever will be, so the episode ends with no
-   * summary on the pull request at all. `reason` is the one line that says so.
-   */
-  | { readonly outcome: "never-composed"; readonly reason: string };
+export type EpisodeSummary = Posting;
 
 /** What the round that closed the episode holds of it, which is the whole of it. */
 export type EpisodeClose = {
@@ -65,17 +59,17 @@ export type EpisodeClose = {
   readonly findings: PostedFindings;
   /**
    * The Notes lines of the findings no thread holds that earlier rounds raised
-   * and this one did not raise again. Where this round ran no reviewer, the last
-   * round to reach its end gives its own unchanged.
+   * and this one did not raise again. Where this round ran no reviewer, the
+   * round it closes on gives its own unchanged.
    */
   readonly earlier: readonly string[];
   /**
-   * Which of the three reasons closed the episode.
-   *
-   * Always one of them. A round the reviewer failed reached no decision and posts
-   * no summary at all, so nothing here is composed without a closing reason.
+   * Which of the three reasons closed the episode. A failed round that closes it
+   * spent the last of the round cap or the token bound, and names that bound.
    */
   readonly because: ClosingReason;
+  /** True where the round that closed the episode failed. Absent where it reviewed. */
+  readonly failed?: boolean;
   /**
    * The queued states the close recorded not reviewed, and the bound that
    * stopped them, as the round's end decided. `null` where nothing was queued.
@@ -98,19 +92,8 @@ export function postEpisodeSummary(closing: EpisodeClose, venue: Venue, until: D
     earlier: closing.earlier,
     unapplied: unappliedNotes(closing.handedOver, closing.verdicts),
     because: closing.because,
+    ...(closing.failed === undefined ? {} : { failed: closing.failed }),
     leftNotReviewed: closing.leftNotReviewed,
   });
   return venue.postSummary(closing.change, body, until);
 }
-
-/**
- * What became of the summary of an episode that closed before any round ran,
- * with none of the reviewer's threads on the pull request.
- *
- * There is nothing for a comment to report, so none is composed. The close still
- * says why there is none, where silence reads as a summary that was posted.
- */
-export const closedBeforeAnyRound: EpisodeSummary = {
-  outcome: "never-composed",
-  reason: "the episode closed before any round ran",
-};

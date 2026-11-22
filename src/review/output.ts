@@ -105,8 +105,8 @@ type AlreadyClosed = Named & {
 };
 
 /**
- * A run whose own state the episode's spent cap or token bound stopped before a
- * round took it, handed the close. No round reviewed the state, so it exits 3
+ * A run whose own state's round failed and spent the last of the round cap or
+ * the token bound, handed the close. No round reviewed the state, so it exits 3
  * whatever is open.
  */
 type ClosedUnreviewed = Named & {

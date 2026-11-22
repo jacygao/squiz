@@ -164,7 +164,8 @@ export type EpisodeState = {
    * node id. A thread a finished review gave no verdict is held as `open`.
    *
    * GitHub's resolved state does not say whether `fixed` or `withdrawn` closed a
-   * thread, and a close that runs no reviewer reads it here. Absent is none.
+   * thread, so a close whose round gave a thread no verdict reads it here.
+   * Absent is none.
    */
   readonly rulings?: Rulings;
 };

@@ -37,7 +37,7 @@ import { episodeOver, readState, type EpisodeState } from "../loop/episode-state
 import { archivedEpisodes } from "../loop/archive.ts";
 import { episodeAt, type Episode } from "../loop/episode.ts";
 import { lastReviewed, namedStates } from "../loop/round-end.ts";
-import { recordFor, sameState, type ClosedBeforeReview, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
+import { recordFor, sameState, type ClosedOnFailure, type ClosingBound, type StateKey, type StateRecord } from "../loop/state-record.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { lockHolder } from "../sessions/lock-file.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
@@ -381,6 +381,12 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
     case "reviewing":
       return undefined;
     case "failed":
+      // A failed round that spent the last of the bounds closed the episode, which
+      // a person takes from here, so its state is answered with the close.
+      if (record.closed !== undefined) {
+        const closing: ClosedFirst = { ...record, closed: record.closed };
+        return compose((threads) => closedUnreviewed(waiting, state.records ?? [], closing, threads));
+      }
       return {
         kind: "result",
         result: { outcome: "failed", key: waiting.key, name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt, reason: record.reason, items: record.lines ?? [] },
@@ -415,8 +421,8 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord, h
 
 /**
  * A state no round took. One a later state superseded follows that state, or is
- * `undefined` until a trigger has queued it. One the close stopped is handed the
- * close, and one queued after the close is handed the close alone.
+ * `undefined` until a trigger has queued it. One a close stopped, or one queued
+ * after the close, is handed the close.
  */
 function notReviewed(
   waiting: Waiting,
@@ -431,10 +437,6 @@ function notReviewed(
     const newer = record.supersededBy === undefined ? undefined : recordFor(records, record.supersededBy);
     if (newer === undefined) return undefined;
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
-  }
-  const before = records.find((held): held is ClosedFirst => held.status === "not reviewed" && held.closed !== undefined);
-  if (state.closeReported === true && before !== undefined && record.reason === before.reason) {
-    return compose((threads) => closedUnreviewed(waiting, records, before, record, threads));
   }
   const closing = closingRecord(records);
   const stopped = STOPPED_BY_THE_CLOSE.exec(record.reason);
@@ -455,23 +457,27 @@ type NotReviewed = Extract<StateRecord, { readonly status: "not reviewed" }>;
 /** The reason of a state a round's close at a bound left queued behind it, capturing the bound. */
 const STOPPED_BY_THE_CLOSE = /^the episode closed at the (round cap|token bound), after reviewing /u;
 
-/** The state a close before the review was reached on, which carries the close. */
-type ClosedFirst = NotReviewed & { readonly closed: ClosedBeforeReview };
+type Failed = Extract<StateRecord, { readonly status: "failed" }>;
+
+/** The state whose failed round closed the episode, which carries the close. */
+type ClosedFirst = Failed & { readonly closed: ClosedOnFailure };
+
+/** The record of the failed round that closed the episode, where one did. */
+function failedClose(records: readonly StateRecord[]): ClosedFirst | undefined {
+  return records.find((held): held is ClosedFirst => held.status === "failed" && held.closed !== undefined);
+}
 
 /**
- * The close before the review, for `record`: the state that close was reached
- * on, or one queued behind it. Each is named as the close named them, after the
- * last state the episode reviewed.
+ * The close a failed round reached, for the run waiting on that round's state.
+ * The state is named after the last state the episode reviewed, and its reason
+ * is why the round failed.
  */
 function closedUnreviewed(
   waiting: Waiting,
   records: readonly StateRecord[],
   first: ClosedFirst,
-  record: NotReviewed,
   threads: readonly ReviewThread[],
 ): ReviewResult {
-  const left = records.filter((held) => held.status === "not reviewed" && held.reason === first.reason);
-  const names = namedStates(lastReviewed(records), left);
   const { closed } = first;
   const problems = closed.problems ?? [];
   return {
@@ -479,13 +485,14 @@ function closedUnreviewed(
     key: waiting.key,
     name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt,
     exit: 3,
-    state: names[left.findIndex((held) => sameState(held, record))] ?? record.head.slice(0, 7),
-    reason: record.reason,
+    state: namedStates(lastReviewed(records), [first])[0] ?? first.head.slice(0, 7),
+    reason: first.reason,
     closedAt: closed.closedAt,
     threads: threads.filter((thread) => closed.openThreads.includes(thread.id)),
     // The close records a problem only where its summary is not on the pull request.
     summarised: problems.length === 0,
-    problems,
+    // Where the failure comment went follows what the close left failing.
+    problems: [...problems, ...(first.lines ?? [])],
   };
 }
 
@@ -562,8 +569,8 @@ function roundResult(
 function closedResult(context: Context, state: EpisodeState, threads: readonly ReviewThread[]): ReviewResult {
   const records = state.records ?? [];
   const closing = closingRecord(records);
-  const first = records.find((held): held is ClosedFirst => held.status === "not reviewed" && held.closed !== undefined);
-  // An episode closed before a round took its last state has no last round, and its threads are all the reviewer opened.
+  const first = failedClose(records);
+  // An episode a failed round closed has no closing round to read them from, so its threads are all the reviewer opened.
   const left =
     closing === undefined
       ? threads.filter((thread) => readComment(thread.comments[0]?.body ?? "").by === "reviewer")
@@ -607,10 +614,14 @@ function unreviewedBy(
     own = newer;
   }
   if (own?.status === "reviewed") return undefined;
+  if (own?.status === "failed" && own.closed !== undefined) {
+    return { state: namedStates(lastReviewed(records), [own])[0] ?? own.head.slice(0, 7), reason: own.reason };
+  }
   if (own?.status === "not reviewed" && supersededName(own) === undefined) {
     const { reason } = own;
     const left = records.filter((held) => held.status === "not reviewed" && held.reason === reason);
-    const name = namedStates(lastReviewed(records), left)[left.findIndex((held) => own !== undefined && sameState(held, own))];
+    // A failed round's close named the states it left after the state that round took.
+    const name = namedStates(first ?? lastReviewed(records), left)[left.findIndex((held) => own !== undefined && sameState(held, own))];
     return { state: name ?? own.head.slice(0, 7), reason };
   }
   const name = namedStates(null, [...records, context.own]).at(-1) ?? context.own.head.slice(0, 7);

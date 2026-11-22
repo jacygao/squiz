@@ -39,16 +39,18 @@ export type StoppingBound = Exclude<ClosingReason, "nothing-open">;
 export type LeftNotReviewed = {
   readonly bound: StoppingBound;
   /**
-   * The state reviewed before them, which `namedStates` names the others after.
-   * `null` where the episode reviewed no state at all.
+   * The state before them, which `namedStates` names the others after: the one
+   * the closing round reviewed, or where it failed, the one it took. `null`
+   * where there is none.
    */
   readonly after: StateKey | null;
   readonly states: readonly NotReviewedRecord[];
 };
 
 /**
- * The last state the episode reviewed, which a close before the review names the
- * states it left not reviewed after, or `null` where it reviewed none.
+ * The last state the episode reviewed, which a close names the states it left
+ * not reviewed after where no state of its own comes later, or `null` where it
+ * reviewed none.
  *
  * Read off the round's number rather than the record's place. A state that
  * `squiz review` retried keeps its place, so the last record reviewed need not

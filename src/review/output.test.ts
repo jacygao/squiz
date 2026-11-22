@@ -439,18 +439,18 @@ is on the pull request. A person takes it from here, so do not run
   );
 });
 
-test("#844: a close before any round ran, with no summary, says so on stderr and claims no summary on stdout, exit 3", () => {
+test("#915: a failed attempt's close with no summary says so on stderr and claims no summary on stdout, exit 3", () => {
   const printed = composeReview(
     {
       outcome: "closed unreviewed",
       key: "41", name: "PR #41", rerun: "squiz review 41", summaryAt: "on the pull request",
       exit: 3,
       state: "3f9c2e0",
-      reason: "the episode closed at the token bound before a round took this state",
+      reason: "the reviewer could not run: the provider refused the credential",
       closedAt: "token bound",
       threads: [],
       summarised: false,
-      problems: ["the review of PR #41 closed without its summary: the episode closed before any round ran"],
+      problems: ["the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway"],
     },
     PATH,
   );
@@ -459,13 +459,13 @@ test("#844: a close before any round ran, with no summary, says so on stderr and
   assert.equal(
     printed.stdout,
     `Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz did not review PR #41 at 3f9c2e0: the episode closed at the token bound before a round took this state.
+Squiz did not review PR #41 at 3f9c2e0: the reviewer could not run: the provider refused the credential.
 
 The token bound is reached. The review is closed with nothing open. A person takes
 it from here, so do not run \`squiz review 41\` again.
 `,
   );
-  assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: the episode closed before any round ran\n");
+  assert.equal(printed.stderr, "squiz: the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway\n");
 });
 
 test("a state the close left unreviewed adds the line saying why", () => {

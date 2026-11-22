@@ -961,7 +961,6 @@ function sent(stdin: string): string {
 function summaryReason(summary: EpisodeSummary): string {
   switch (summary.outcome) {
     case "failed":
-    case "never-composed":
       return summary.reason;
     case "posted":
       return "";
@@ -1431,29 +1430,6 @@ test("a summary gh refused does not turn the close into a failed round", async (
     ran.conclusion.verdicts.threads.map((applied) => applied.outcome),
     ["closed"],
     "what the round put on the pull request stands, whatever became of the summary",
-  );
-});
-
-/**
- * A round the reviewer failed posts no summary.
- *
- * The cap is 1 here, so a clean round of this shape would close the episode. The
- * round reached no decision about the episode, and counts taken from a review that
- * did not finish would read as counts from one that did.
- */
-test("a round the reviewer failed posts no summary", async () => {
-  const ran = await runInFixture({
-    config: { timeout: 1, rounds: 1 },
-    answers: POSTING,
-    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "timed-out");
-  assert.deepEqual(
-    ran.kinds.filter((kind) => kind === "summary"),
-    [],
-    "a failed round is reported by its failure comment, not as a summary of a review that did not finish",
   );
 });
 
@@ -2246,91 +2222,127 @@ function paging(cursor: string): string {
   );
 }
 
-test("a cap already spent closes the episode before a reviewer is started", async () => {
+/**
+ * A failed round with rounds and tokens left closes nothing. The failure comment
+ * promises a retry, and no summary goes up.
+ */
+test("#915: a failed round with budget left closes nothing", async () => {
   const ran = await runInFixture({
-    config: { rounds: 3 },
-    // Three rounds recorded and the episode firing again, which is what an
-    // interruption after a round recorded its cost leaves behind.
-    rounds: [EARLIER_ROUND, EARLIER_ROUND, EARLIER_ROUND],
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+    config: { timeout: 1, rounds: 3 },
+    rounds: [EARLIER_ROUND],
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
   });
 
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "round-cap");
+  assert.ok(ran.conclusion.outcome === "failed", `the round concluded ${JSON.stringify(ran.conclusion)}`);
+  assert.equal(ran.conclusion.closed, undefined, "a round remains, so this round closed nothing");
+  assert.notEqual(ran.state?.closeReported, true, "a failed round with rounds left recorded a close");
+  assert.ok(!ran.kinds.includes("summary"), "a failed round with rounds left posted a summary");
   assert.equal(
-    ran.invocations.length,
-    0,
-    "a cap read only after the reviewer has run is not a bound: it bills for the round it was there to stop",
+    failureBody(ran).split("\n\n")[1],
+    "The finding is posted as a thread. The review is still open. A new commit or reply, or running `squiz review` again, retries it.",
   );
-  // The state file this fixture wrote records no close, which is what an
-  // interruption between the cost and the close leaves. The round lists the
-  // threads and posts the summary the close owes.
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
-  assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
-  assert.equal(ran.state?.rounds.length, 3, "and no fourth round is appended to the count");
 });
 
 /**
- * A cap lowered between firings closes the episode with its summary.
- *
- * The first firing reviews under a cap of 3, posts its finding and blocks, so
- * nothing has closed the episode and nothing has reported it. The cap is 1 by the
- * next firing, which finds the bound already spent. It starts no review, and it
- * lists the episode's threads and posts the summary from them. A close that
- * posted nothing here would leave findings on the pull request with no comment
- * reporting them.
+ * The round that spends the last of the cap closes the review, though it failed.
+ * A later firing finds the close and starts no reviewer, so nothing closes the
+ * review without a round.
  */
-test("a cap lowered after a round blocked lists the threads and posts the summary, naming the cap", async () => {
-  const blocked = await runInFixture({
-    config: { rounds: 3 },
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+test("#915: a failed round that spends the last of the round cap closes the review with its summary", async () => {
+  const ran = await runInFixture({
+    config: { timeout: 1, rounds: 2 },
+    rounds: [EARLIER_ROUND],
+    answers: FAILING,
+    reviewer: hangs(ANSWER_COST, { findings: [finding("The flag is never read")] }),
+    andThen: [{ reviewer: reviews({ findings: [finding("The card renders twice")] }) }],
   });
 
-  assert.ok(blocked.conclusion.outcome === "block");
-  assert.notEqual(
-    blocked.state?.closeReported,
-    true,
-    "a round that blocked closed no episode, so it has reported no close",
+  const [failed, after] = ran.conclusions;
+  assert.ok(failed?.outcome === "failed", `the round concluded ${JSON.stringify(failed)}`);
+  assert.equal(failed.failure, "timed-out");
+  assert.deepEqual(failed.closed?.by, { bound: "round-cap", roundsRun: 2, cap: 2 });
+  assert.deepEqual(failed.closed?.summary, { outcome: "posted" });
+  assert.deepEqual(failed.closed?.openThreads, ["PRRT_new"]);
+  assert.equal(ran.state?.closeReported, true, "the close is recorded");
+  assert.deepEqual(
+    ran.kinds.filter((kind) => kind === "summary" || kind === "failure"),
+    ["summary", "failure"],
+    "the round that closes the review posts its summary, then its failure comment",
   );
-
-  const closed = await runInFixture({
-    config: { rounds: 1 },
-    rounds: blocked.state?.rounds ?? [],
-    answers: { ...POSTING, threads: listed([{ id: "PRRT_new", isResolved: false }]) },
-    reviewer: reviews({}),
-  });
-
-  assert.ok(closed.conclusion.outcome === "close");
-  assert.equal(closed.conclusion.because, "round-cap");
-  assert.equal(closed.invocations.length, 0, "a cap already spent starts no reviewer");
-  assert.deepEqual(closed.kinds, ["prlist", "threads", "summary"]);
-  assert.deepEqual(closed.conclusion.summary, { outcome: "posted" });
-  assert.deepEqual(closed.conclusion.beforeReview?.openThreads, ["PRRT_new"]);
-  assert.equal(closed.state?.closeReported, true);
-  const body = summaryBody(closed);
-  assert.match(body, /^\*\*Squiz review — 1 round, 1 finding\*\*/u);
-  assert.match(body, /Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0/u);
-  assert.match(body, /- `src\/ui\/card\.ts:88` — The name says nothing\. \(open\)/u);
-  assert.match(
-    body,
-    /\*\*Notes\*\*\n\n- The episode ended at its round cap rather than with nothing left open/u,
-    `the summary did not name the cap that closed the episode: ${body}`,
-  );
+  const body = summaryBody(ran);
+  assert.match(body, /^\*\*Squiz review — 2 rounds, 1 finding\*\*/u);
+  assert.match(body, /Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0\n/u);
+  assert.ok(body.endsWith("- The budget ran out before the review could be completed: the last attempt failed, and spent the last of the round cap. A person needs to look at this change."), `the summary does not say the budget ran out: ${body}`);
+  assert.deepEqual(after, { outcome: "episode-over" }, "a firing after the close runs nothing");
+  assert.equal(ran.invocations.length, 1, "a reviewer ran after the cap was spent");
 });
+
+/**
+ * A round the time bound killed records its floor, and a floor at the token
+ * bound closes the review in that round, with the summary naming the bound and
+ * the cut.
+ */
+test("#915: a killed round whose floor reaches the token bound closes the review itself, with its summary", async () => {
+  const clock = stoppedClock();
+  const ran = await runInFixture({
+    clock,
+    config: { timeout: 900, tokens: ANSWER_COST.tokens },
+    answers: FAILING,
+    reviewer: hangsUntil(clock, 900_000, [finding("The flag is never read")]),
+    andThen: [{ reviewer: reviews({}) }],
+  });
+
+  const [killed, after] = ran.conclusions;
+  assert.ok(killed?.outcome === "failed", `the round concluded ${JSON.stringify(killed)}`);
+  assert.equal(killed.failure, "timed-out");
+  assert.deepEqual(killed.closed?.by, { bound: "token-bound", tokens: ANSWER_COST.tokens, roundsRun: 1 });
+  assert.deepEqual(killed.closed?.summary, { outcome: "posted" });
+  assert.deepEqual(after, { outcome: "episode-over" });
+  assert.equal(ran.invocations.length, 1, "a reviewer ran after the token bound was reached");
+  const body = summaryBody(ran);
+  assert.match(body, /Open 1/u);
+  assert.match(body, /- The review was cut short by the 900-second time bound in round 1/u);
+  assert.ok(body.endsWith("- The budget ran out before the review could be completed: the last attempt failed, and spent the last of the token bound. A person needs to look at this change."), `the summary does not say the budget ran out: ${body}`);
+});
+
+/**
+ * An attempt that was no round spends no round of the cap, and its tokens count
+ * all the same. The one that reaches the bound closes the review, with a summary
+ * of no rounds.
+ */
+test("#915: an attempt that was no round and spent the last of the token bound closes the review", async () => {
+  const ran = await runInFixture({
+    config: { rounds: 8, tokens: 400_000 },
+    answers: FAILING,
+    reviewer: attempts({ cost: { dollars: 0.04, tokens: 410_000, messages: 1 }, result: { kind: "unparsed", reason: "the review was not finished" } }),
+    sessionBackends: startsThenFails(),
+  });
+
+  assert.ok(ran.conclusion.outcome === "failed", `the round concluded ${JSON.stringify(ran.conclusion)}`);
+  assert.equal(ran.conclusion.failure, "setup");
+  assert.deepEqual(ran.conclusion.closed?.by, { bound: "token-bound", tokens: 400_000, roundsRun: 0 });
+  assert.deepEqual(ran.conclusion.closed?.summary, { outcome: "posted" });
+  assert.deepEqual(ran.state?.rounds, [], "a start that failed spends no round");
+  assert.deepEqual(ran.state?.spentOutsideRounds, { dollars: 0.04, tokens: 410_000, messages: 1, floor: true });
+  assert.equal(ran.state?.closeReported, true);
+  const body = summaryBody(ran);
+  assert.match(body, /^\*\*Squiz review — 0 rounds, 0 findings\*\*/u);
+  assert.ok(body.endsWith("- The budget ran out before the review could be completed: the last attempt failed, and spent the last of the token bound. A person needs to look at this change."), `the summary does not say the budget ran out: ${body}`);
+});
+
 
 /**
  * The last round to reach its end left the episode open with a finding no thread
- * holds, and the round after it failed. Nothing has settled that finding, and
- * the close before the review is the episode's only comment.
+ * holds, and the round that closes the review failed. Nothing has settled that
+ * finding, and the summary is the episode's only comment.
  */
-test("#606: a close before the review names the findings no thread holds that the last round reaching its end left", async () => {
+test("#606: a failed round that closes the review names the finding no thread holds that an earlier round raised", async () => {
   const left = "About the change as a whole: The retry queue duplicates the scheduler";
   const ran = await runInFixture({
-    config: { rounds: 2 },
+    config: { timeout: 1, rounds: 2 },
     stateSource: JSON.stringify({
-      rounds: [EARLIER_ROUND, EARLIER_ROUND],
+      rounds: [EARLIER_ROUND],
       spentOutsideRounds: unspent,
       records: [
         {
@@ -2344,56 +2356,18 @@ test("#606: a close before the review names the findings no thread holds that th
           newFindings: 0,
           unthreaded: [left],
         },
-        {
-          head: "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6",
-          activity: null,
-          status: "failed",
-          reason: "the reviewer was stopped at the time bound",
-          ownerNoted: false,
-          round: { number: 2, startedAt: 3, endedAt: 4 },
-        },
       ],
     }),
-    answers: { ...POSTING, threads: listed([{ id: "PRRT_new", isResolved: false }]) },
-    reviewer: reviews({}),
+    answers: { ...FAILING, threads: listed([{ id: "PRRT_new", isResolved: false }]) },
+    reviewer: hangs(ANSWER_COST),
   });
 
-  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
+  assert.ok(ran.conclusion.outcome === "failed" && ran.conclusion.closed !== undefined, `concluded ${JSON.stringify(ran.conclusion)}`);
   const body = summaryBody(ran);
   assert.match(body, /^\*\*Squiz review — 2 rounds, 2 findings\*\*/u);
-  assert.ok(body.includes(`**Notes**\n\n- ${left}\n`), `the summary did not name the earlier finding: ${body}`);
-});
-
-test("#882: a close before the review names a finding no thread holds that the last round reaching its end did not raise again, with the round that raised it", async () => {
-  const first = "About the change as a whole: The helpers lack the required tests";
-  const last = "About the change as a whole: The retry queue duplicates the scheduler";
-  const left = (number: number, head: string, unthreaded: readonly string[]) => ({
-    head,
-    activity: null,
-    status: "reviewed",
-    result: "exited",
-    exitStatus: 2,
-    openThreads: ["PRRT_new"],
-    round: { number, startedAt: number, endedAt: number + 1, reviewer: { backend: "detached" } },
-    newFindings: 0,
-    unthreaded,
-  });
-  const ran = await runInFixture({
-    config: { rounds: 2 },
-    stateSource: JSON.stringify({
-      rounds: [EARLIER_ROUND, EARLIER_ROUND],
-      spentOutsideRounds: unspent,
-      records: [left(1, "3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90", [first]), left(2, "8d21a4f0c3b2e1d4a5f6b7c8d9e0f1a2b3c4d5e6", [last])],
-    }),
-    answers: { ...POSTING, threads: listed([{ id: "PRRT_new", isResolved: false }]) },
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
-  const body = summaryBody(ran);
   assert.ok(
-    body.includes(`**Notes**\n\n- Raised in round 1 and not raised again: ${first}\n- ${last}\n`),
-    `the summary does not name both rounds' findings on no thread: ${body}`,
+    body.includes(`**Notes**\n\n- Raised in round 1 and not raised again: ${left}\n`),
+    `the summary did not name the earlier finding: ${body}`,
   );
 });
 
@@ -2470,10 +2444,11 @@ test("#882: a finding no thread holds that the closing round raised again is nam
 
 /**
  * The round that rules a thread withdrawn records the ruling, and a later close
- * that runs no reviewer counts the thread by it. Every resolved thread once
- * counted fixed, so a fixed thread alone passes against that code.
+ * whose round did not rule on the thread counts it by that ruling. Every
+ * resolved thread once counted fixed, so a fixed thread alone passes against
+ * that code.
  */
-test("#627: a close before the review counts a thread an earlier round withdrew as withdrawn", async () => {
+test("#627: a failed round that closes the review counts a thread an earlier round withdrew as withdrawn", async () => {
   const ruled = await runInFixture({
     config: { rounds: 3 },
     answers: {
@@ -2497,21 +2472,20 @@ test("#627: a close before the review counts a thread an earlier round withdrew 
   assert.deepEqual(ruled.state?.rulings, { PRRT_argued: "withdrawn", PRRT_mended: "fixed" });
 
   const closed = await runInFixture({
-    config: { rounds: 1 },
+    config: { timeout: 1, rounds: 2 },
     stateSource: ruled.stateSource ?? "",
     answers: {
-      ...POSTING,
+      ...FAILING,
       threads: listed([
         { id: "PRRT_argued", isResolved: true },
         { id: "PRRT_mended", isResolved: true },
         { id: "PRRT_new", isResolved: false },
       ]),
     },
-    reviewer: reviews({}),
+    reviewer: hangs(ANSWER_COST),
   });
 
-  assert.ok(closed.conclusion.outcome === "close", `concluded ${JSON.stringify(closed.conclusion)}`);
-  assert.equal(closed.invocations.length, 0, "a cap already spent starts no reviewer");
+  assert.ok(closed.conclusion.outcome === "failed" && closed.conclusion.closed !== undefined, `concluded ${JSON.stringify(closed.conclusion)}`);
   assert.match(summaryBody(closed), /Fixed 1 · Withdrawn 1 · Open 1 · Disputed 0\n/u);
 });
 
@@ -2534,130 +2508,6 @@ test("#627: a round's rulings are on record before its verdicts reach the pull r
 
   assert.ok(ran.kinds.includes("resolve"), `the withdrawal was never sent: ${ran.kinds.join(", ")}`);
   assert.deepEqual(ran.state?.rulings, { PRRT_argued: "withdrawn" });
-});
-
-/**
- * A resolved thread the state holds no ruling for was resolved by a person, or
- * in an episode whose state this worktree does not have. Neither says it was
- * fixed. A thread last ruled open and resolved since is the same.
- */
-test("#627: a close before the review counts a resolved thread with no fixed or withdrawn ruling on record apart", async () => {
-  const ran = await runInFixture({
-    config: { rounds: 1 },
-    stateSource: JSON.stringify({ rounds: [EARLIER_ROUND], spentOutsideRounds: unspent, rulings: { PRRT_kept: "open" } }),
-    answers: {
-      ...POSTING,
-      threads: listed([
-        { id: "PRRT_done", isResolved: true },
-        { id: "PRRT_kept", isResolved: true },
-        { id: "PRRT_left", isResolved: false },
-        { id: "PRRT_person", isResolved: false, opening: PERSON_WROTE },
-      ]),
-    },
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.deepEqual(ran.conclusion.beforeReview?.openThreads, ["PRRT_left"], "a person's thread is no finding of the review");
-  const body = summaryBody(ran);
-  assert.match(body, /^\*\*Squiz review — 1 round, 3 findings\*\*/u);
-  assert.match(body, /Fixed 0 · Withdrawn 0 · Open 1 · Disputed 0 · Resolved, ruling unknown 2\n/u);
-  assert.doesNotMatch(body, /src\/ui\/card\.ts:88` — .*\(resolved/u, "a resolved thread needs no person");
-});
-
-/**
- * A round the time bound killed records its floor, and a floor at the token
- * bound closes the episode at the next firing. That firing runs no reviewer, and
- * posts the summary naming the bound and the round the bound cut short.
- */
-test("a killed round whose floor reached the token bound closes the episode at the next firing, with its summary", async () => {
-  const clock = stoppedClock();
-  const ran = await runInFixture({
-    clock,
-    config: { timeout: 900, tokens: ANSWER_COST.tokens },
-    answers: FAILING,
-    sequences: THREADS_OF_TWO_ROUNDS,
-    reviewer: hangsUntil(clock, 900_000, [finding("The flag is never read")]),
-    andThen: [{ reviewer: reviews({}) }],
-  });
-
-  const [killed, closed] = ran.conclusions;
-  assert.ok(killed?.outcome === "failed");
-  assert.equal(killed.failure, "timed-out");
-  assert.ok(closed?.outcome === "close", `the second firing concluded ${JSON.stringify(closed)}`);
-  assert.equal(closed.because, "token-bound");
-  assert.equal(ran.invocations.length, 1, "the firing after the bound was reached started a reviewer");
-  assert.deepEqual(closed.summary, { outcome: "posted" });
-  const body = summaryBody(ran);
-  assert.match(body, /Open 1/u);
-  assert.match(body, /- The review was cut short by the 900-second time bound in round 1/u);
-  assert.match(body, /- The episode ended at the token bound rather than with nothing left open/u);
-});
-
-/**
- * An episode whose failed attempts spent the token bound before any round ran,
- * and left none of the reviewer's threads, closes with no summary. There is
- * nothing for one to report, and the close says why there is none.
- */
-test("a bound spent before any round ran, with no thread of the reviewer's, closes with no summary and says so", async () => {
-  const ran = await runInFixture({
-    config: { tokens: 1000 },
-    rounds: [],
-    outsideRounds: { dollars: 0, tokens: 1000, messages: 1 },
-    answers: { ...POSTING, threads: listed([{ id: "PRRT_person", isResolved: false, opening: PERSON_WROTE }]) },
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "token-bound");
-  assert.deepEqual(ran.kinds, ["prlist", "threads"], "a summary was posted for an episode with nothing to report");
-  assert.deepEqual(ran.conclusion.summary, {
-    outcome: "never-composed",
-    reason: "the episode closed before any round ran",
-  });
-  assert.equal(ran.state?.closeReported, true);
-});
-
-/**
- * An attempt that was no round can still have posted the findings it salvaged.
- * An episode whose bound such attempts spent closes with the summary of them.
- */
-test("a bound spent before any round ran, with a thread of the reviewer's, posts the summary", async () => {
-  const ran = await runInFixture({
-    config: { tokens: 1000 },
-    rounds: [],
-    outsideRounds: { dollars: 0, tokens: 1000, messages: 1 },
-    answers: { ...POSTING, threads: listed([{ id: "PRRT_salvaged", isResolved: false }]) },
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
-  assert.deepEqual(ran.conclusion.beforeReview?.openThreads, ["PRRT_salvaged"]);
-  const body = summaryBody(ran);
-  assert.match(body, /^\*\*Squiz review — 0 rounds, 1 finding\*\*/u);
-  assert.match(body, /- The episode ended at the token bound rather than with nothing left open/u);
-});
-
-/**
- * A close before the review whose threads cannot be listed records no close and
- * posts nothing. A summary composed from part of the threads would report the
- * rest as never raised, so the round fails, and a run of `squiz review` retries
- * it.
- */
-test("a cap already spent whose threads cannot be listed fails, and records no close", async () => {
-  const ran = await runInFixture({
-    config: { rounds: 1 },
-    rounds: [EARLIER_ROUND],
-    answers: { ...POSTING, threads: "not a response" },
-    postsFailure: false,
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.match(ran.conclusion.reason, /^no review ran: the threads on PR #142 could not be listed: /u);
-  assert.deepEqual(ran.kinds, ["prlist", "threads"]);
-  assert.notEqual(ran.state?.closeReported, true);
 });
 
 /**
@@ -2788,38 +2638,6 @@ test("a firing after an episode closed below its cap reviews nothing, whatever t
 });
 
 /**
- * A close before the review records itself, so its summary is posted once.
- *
- * The first firing finds its cap already spent and posts the summary. The second
- * is an episode that is over, and a summary posted again on every firing would
- * put a second comment on one episode.
- */
-test("a close before the review records itself, and its summary is not posted twice", async () => {
-  const first = await runInFixture({
-    config: { rounds: 1 },
-    rounds: [EARLIER_ROUND],
-    answers: POSTING,
-    reviewer: reviews({}),
-  });
-
-  assert.ok(first.conclusion.outcome === "close");
-  assert.equal(first.conclusion.because, "round-cap");
-  assert.deepEqual(first.conclusion.summary, { outcome: "posted" });
-  assert.equal(first.state?.closeReported, true, "a close that ends the episode records it");
-
-  const again = await runInFixture({
-    config: { rounds: 1 },
-    rounds: first.state?.rounds ?? [],
-    closeReported: first.state?.closeReported,
-    answers: POSTING,
-    reviewer: reviews({}),
-  });
-
-  assert.deepEqual(again.conclusion, { outcome: "episode-over" });
-  assert.deepEqual(again.kinds, ["prlist"]);
-});
-
-/**
  * A close whose record could not be written posts no summary, and is a failed
  * round rather than a close.
  *
@@ -2829,7 +2647,7 @@ test("a close before the review records itself, and its summary is not posted tw
  * close nothing recorded would be followed by a second one from the next firing,
  * which reads the episode as open.
  */
-test("a close that could not record itself posts no summary, and the next firing closes it", async () => {
+test("a close that could not record itself posts no summary, and the next round closes it", async () => {
   const ran = await runInFixture({
     config: { rounds: 2 },
     rounds: [EARLIER_ROUND],
@@ -2849,8 +2667,8 @@ test("a close that could not record itself posts no summary, and the next firing
   assert.ok(!ran.kinds.includes("summary"), "no summary goes up for a close nothing recorded");
   assert.notEqual(ran.state?.closeReported, true);
 
-  // The next firing of that episode, its directory writable again. The cap is
-  // spent, so it closes before a reviewer starts and records the close.
+  // The next firing of that episode, its directory writable again. No close is
+  // recorded, so it reviews, and that round closes the episode.
   const again = await runInFixture({
     config: { rounds: 2 },
     rounds: ran.state?.rounds ?? [],
@@ -2858,96 +2676,21 @@ test("a close that could not record itself posts no summary, and the next firing
     reviewer: reviews({}),
   });
 
-  assert.ok(again.conclusion.outcome === "close");
-  assert.equal(again.conclusion.because, "round-cap");
-  assert.deepEqual(again.invocations, [], "a round the cap has spent runs no reviewer");
+  assert.ok(again.conclusion.outcome === "close", `concluded ${JSON.stringify(again.conclusion)}`);
   assert.equal(again.state?.closeReported, true);
-});
-
-/**
- * A close taken before a reviewer starts, whose record could not be written,
- * is a failed round that posts nothing, and the next firing closes the episode
- * again (#495).
- *
- * The episode's directory stops taking writes once the threads are listed, which
- * is before the close is recorded. The host lock is already held, as the round
- * host holds it, so the round has no lock of its own to take there.
- */
-test("a cap already spent whose close could not be recorded posts nothing, and the next firing closes it (#495)", async () => {
-  const ran = await runInFixture({
-    config: { rounds: 1 },
-    rounds: [EARLIER_ROUND],
-    answers: POSTING,
-    lockStateAfter: "threads",
-    heldByHost: true,
-    postsFailure: false,
-    reviewer: reviews({}),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "harness");
-  assert.match(ran.conclusion.reason, /^the episode's close could not be recorded: .*could not be written/u);
-  assert.deepEqual(ran.kinds, ["prlist", "threads"], "nothing is posted after a close that was not recorded");
-  assert.notEqual(ran.state?.closeReported, true);
-
-  const again = await runInFixture({
-    config: { rounds: 1 },
-    rounds: ran.state?.rounds ?? [],
-    answers: POSTING,
-    reviewer: reviews({}),
-  });
-
-  assert.ok(again.conclusion.outcome === "close");
-  assert.deepEqual(again.conclusion.summary, { outcome: "posted" });
-  assert.deepEqual(again.invocations, [], "a round the cap has spent runs no reviewer");
-  assert.equal(again.state?.closeReported, true);
-});
-
-test("an exhausted cap whose last recorded round failed closes the episode too", async () => {
-  const killed: RoundRecord = { ...EARLIER_ROUND, dollars: 0, tokens: 0, messages: 0 };
-  const ran = await runInFixture({
-    config: { rounds: 2 },
-    rounds: [EARLIER_ROUND, killed],
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "round-cap");
-  assert.equal(
-    ran.invocations.length,
-    0,
-    "a round the reviewer failed is a round that ran, and it counts against the cap like any other",
-  );
-});
-
-test("a recorded round that reached the token bound closes the episode before a reviewer is started", async () => {
-  const ran = await runInFixture({
-    config: { rounds: 8, tokens: 400_000 },
-    rounds: [EARLIER_ROUND, { ...EARLIER_ROUND, dollars: 0.5, tokens: 400_000, messages: 40 }],
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(ran.conclusion.outcome === "close");
-  assert.equal(ran.conclusion.because, "token-bound");
-  assert.equal(ran.invocations.length, 0, "the bound stops the next round, so it is read before it");
 });
 
 // A model no price catalogue covers reports its tokens against no dollars, which
 // is the configuration a dollar bound could not see at all.
 test("a round priced at nothing is bounded by its tokens all the same", async () => {
-  const unpriced: RoundRecord = { ...EARLIER_ROUND, dollars: 0, tokens: 400_000, messages: 40 };
   const ran = await runInFixture({
     config: { rounds: 8, tokens: 400_000 },
-    rounds: [unpriced],
     answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
+    reviewer: reviews({ cost: { dollars: 0, tokens: 400_000, messages: 40 }, findings: [finding("The flag is never read")] }),
   });
 
-  assert.ok(ran.conclusion.outcome === "close");
+  assert.ok(ran.conclusion.outcome === "close", `concluded ${JSON.stringify(ran.conclusion)}`);
   assert.equal(ran.conclusion.because, "token-bound");
-  assert.equal(ran.invocations.length, 0);
 });
 
 test("a read-back that pages is stopped by its call's deadline, not by its own page limit", async () => {
@@ -2985,13 +2728,13 @@ test("a read-back that pages is stopped by its call's deadline, not by its own p
 
 /**
  * A paid attempt whose round ended as a setup problem: what it spent is kept
- * even though the round is not, and the next invocation is refused by the bound
- * those tokens reach.
+ * even though the round is not, and the bound those tokens reach closes the
+ * review.
  *
  * The exemption is about the round cap, which a setup problem must not spend. It
  * is not about the tokens, which are spent whatever the attempt came to.
  */
-test("a paid attempt that ended as a setup problem is what stops the next round", async () => {
+test("a paid attempt that ended as a setup problem spends the tokens that close the review", async () => {
   const paid: RoundCost = { dollars: 0.04, tokens: 410_000, messages: 1 };
   const bounds = { rounds: 8, tokens: 400_000 };
 
@@ -3012,59 +2755,15 @@ test("a paid attempt that ended as a setup problem is what stops the next round"
     paid,
     "the attempt completed a paid response before it failed, and those tokens are spent",
   );
-
-  // The next firing of the same episode, against the state the first one left.
-  const next = await runInFixture({
-    config: bounds,
-    rounds: first.state?.rounds ?? [],
-    ...(first.state === null ? {} : { outsideRounds: first.state.spentOutsideRounds }),
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(next.conclusion.outcome === "close");
-  assert.equal(next.conclusion.because, "token-bound");
   assert.equal(
-    next.invocations.length,
-    0,
-    "410,000 tokens against a 400,000-token bound buys no further reviewer, and forgetting them is what buys a reviewer that burned the bound and reported nothing another try at it",
+    first.conclusion.closed?.by.bound,
+    "token-bound",
+    "410,000 tokens against a 400,000-token bound leave no further reviewer, and forgetting them is what buys a reviewer that burned the bound and reported nothing another try at it",
   );
+  assert.equal(first.state?.closeReported, true);
 });
 
-test("a reviewer that ran before its start failed spends the tokens that stop the next round", async () => {
-  const paid: RoundCost = { dollars: 0.04, tokens: 410_000, messages: 1 };
-  const bounds = { rounds: 8, tokens: 400_000 };
-
-  const first = await runInFixture({
-    config: bounds,
-    answers: { prlist: PR_LIST, threads: listed([]) },
-    reviewer: attempts({ cost: paid, result: { kind: "unparsed", reason: "the review was not finished" } }),
-    sessionBackends: startsThenFails(),
-  });
-
-  assert.ok(first.conclusion.outcome === "failed");
-  assert.equal(first.conclusion.failure, "setup");
-  assert.deepEqual(first.state?.rounds, [], "a start that failed spends no round");
-  assert.deepEqual(
-    first.state?.spentOutsideRounds,
-    { ...paid, floor: true },
-    "the reviewer completed a paid response before its start was given up on",
-  );
-
-  const next = await runInFixture({
-    config: bounds,
-    rounds: first.state?.rounds ?? [],
-    ...(first.state === null ? {} : { outsideRounds: first.state.spentOutsideRounds }),
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(next.conclusion.outcome === "close");
-  assert.equal(next.conclusion.because, "token-bound");
-  assert.equal(next.invocations.length, 0, "the tokens the failed start spent buy no further reviewer");
-});
-
-test("an attempt the harness threw out of spends the tokens that stop the next round", async () => {
+test("an attempt the harness threw out of spends the tokens that close the review", async () => {
   const paid: RoundCost = { dollars: 0.04, tokens: 410_000, messages: 1 };
   const bounds = { rounds: 8, tokens: 400_000 };
 
@@ -3079,18 +2778,8 @@ test("an attempt the harness threw out of spends the tokens that stop the next r
   assert.equal(first.conclusion.failure, "setup");
   assert.deepEqual(first.state?.rounds, [], "an attempt the harness threw out of spends no round");
   assert.deepEqual(first.state?.spentOutsideRounds, { ...paid, floor: true });
-
-  const next = await runInFixture({
-    config: bounds,
-    rounds: first.state?.rounds ?? [],
-    ...(first.state === null ? {} : { outsideRounds: first.state.spentOutsideRounds }),
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(next.conclusion.outcome === "close");
-  assert.equal(next.conclusion.because, "token-bound");
-  assert.equal(next.invocations.length, 0, "the tokens the thrown attempt spent buy no further reviewer");
+  assert.equal(first.conclusion.closed?.by.bound, "token-bound", "the tokens the thrown attempt spent leave no further reviewer");
+  assert.equal(first.state?.closeReported, true);
 });
 
 test("a reviewer that ran before its start failed and reported no cost leaves its spend marked unknown", async () => {
@@ -3456,7 +3145,7 @@ test("#544: a failed round that was the last the cap allows says the review clos
   assert.equal(
     failureBody(ran).split("\n\n")[1],
     "The finding is posted as a thread. The review is closed: it has run 2 rounds, and the round cap allows 2. " +
-      "No round runs again. A new commit or reply, or running `squiz review`, posts its summary.",
+      "No round runs again. Its summary is on the pull request.",
   );
 });
 
@@ -3471,7 +3160,7 @@ test("#544: a failed round that reached the token bound says the review closed",
   assert.equal(
     failureBody(ran).split("\n\n")[1],
     "The finding is posted as a thread. The review is closed: it reached the token bound of 1,000 tokens. " +
-      "No round runs again. A new commit or reply, or running `squiz review`, posts its summary.",
+      "No round runs again. Its summary is on the pull request.",
   );
 });
 
