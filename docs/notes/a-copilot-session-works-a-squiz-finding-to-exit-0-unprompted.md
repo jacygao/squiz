@@ -66,8 +66,8 @@ showed something the successful one did not.
 ## Needs your input
 
 - **Whether run 7 is enough, given that its reviewer ran the coding agent's
-  model.** § 2 requires the reviewer to run a different model from the coding
-  agent. Both ran `gpt-6-astra`, the user's default, which the Copilot adapter
+  model.** A review is meant to come from a model other than the coding
+  agent's. Both ran `gpt-6-astra`, the user's default, which the Copilot adapter
   takes for the reviewer. Run 7 shows the loop the session ran, not a review
   by a second model. Recommended: accept it for M13, whose criterion is about
   what the coding agent does, and record that nothing makes a Copilot reviewer
@@ -193,7 +193,7 @@ ends only when it is signalled. `SIGTERM` while it was idle made it write
   runs at `medium` had no finding to work, so whether a session at `medium`
   works one was not seen.
 - **The reviewer and the coding agent shared a model in every run on
-  `gpt-6-astra`**, against § 2. Only runs 5 and 6 had two models, and in
+  `gpt-6-astra`**. Only runs 5 and 6 had two models, and in
   those no session worked the threads.
 - **Exit 3, and a disputed thread, were not reached.** The one thread worked was
   `low`, and the session took its suggested fix.

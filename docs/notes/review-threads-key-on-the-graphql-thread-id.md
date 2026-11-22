@@ -207,7 +207,7 @@ A reply is recognised in a read-back by `in_reply_to_id` being non-null.
 
 ### Resolving and re-opening
 
-Both are GraphQL, as § 2 of the spec says. There is no REST equivalent, and this
+Both are GraphQL. There is no REST equivalent, and this
 was checked rather than assumed: no field on `GET /pulls/{n}/comments` mentions
 resolution.
 
