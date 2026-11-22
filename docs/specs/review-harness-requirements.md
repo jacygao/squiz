@@ -818,6 +818,7 @@ No requirement.
 - **PQ4, general threads built from conversation comments: cut.** A `change` finding goes on a file-level review thread of the changed file it most concerns, so it still counts as open and blocks the close (#889), and squiz keeps one kind of thread (#913). R5.12's general-thread requirements leave the list.
 - **PQ8, signing Copilot in from `copilotTokenFile`: kept, with a default.** The reviewer signs in from it where Copilot drops `COPILOT_GITHUB_TOKEN` from its hooks, as SWE-drill's does. With the setting unset, squiz reads `~/.config/squiz/copilot-token` where it exists, and is silent where it does not (#914).
 - **PQ-A2, closing without a round when a bound is found already spent: cut.** The round that spends the last of the round cap or the token bound closes the review, a failed round included, and its summary says the budget ran out before the review could be completed (#915). A person lowering a bound mid-review is on #819's list. The "resolved, ruling unknown" count and the summary rebuilt from GitHub's thread state leave the list.
+- **PQ-B1, the pre-review and posting time budgets: cut.** A round keeps the reviewer's time bound and the 30-second cap on each GitHub call, and posts every finding however long posting takes (#916). R8.0.31, R8.3.7, R8.3.11 and R8.3.5's parts leave the list.
 - **PQ-A1, the local venue: kept.** A user chooses whether a review's record is kept on GitHub or in local files. Consolidating it with the GitHub venue is left for later.
 
 ## Not a requirement but needs a home
