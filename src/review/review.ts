@@ -178,12 +178,22 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     if (found.outcome === "unreadable") return found.reason;
     return found.outcome === "read" ? found.state : { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 } };
   };
-  // A failed close the round wrote before posting is replaced by its round host's
-  // record, unless that host has stopped, in which case nothing ever replaces it.
-  const observe = (state: EpisodeState): void => {
-    if (!provisionalClose(state.records ?? [])) return;
-    const boundMs = Math.max(1, Math.min(HOST_CHECK_MS, until.remaining()));
-    context = { ...context, hostGone: !hostRunning(episode.directory, request.presence ?? stillRunning, boundMs) };
+  /**
+   * `state`, or the state read again where it held a failed close its round
+   * host stopped before recording. Nothing ever replaces such a close.
+   *
+   * The host can record the close and exit between the read and the check, so
+   * a host found gone is followed by a second read, which is the one printed.
+   */
+  const observe = (state: EpisodeState, reread: () => EpisodeState | string): EpisodeState | string => {
+    if (!provisionalClose(state.records ?? [])) return state;
+    const gone = hostGone(episode.directory, request.presence ?? stillRunning);
+    context = { ...context, hostGone: gone };
+    return gone ? reread() : state;
+  };
+  const readHolding = (): EpisodeState | string => {
+    const live = read();
+    return typeof live === "string" ? live : holding(episode, live, context.own);
   };
   const finish = (settled: Settled, threads: readonly ReviewThread[]): Printed =>
     print(settled.kind === "result" ? settled.result : settled.compose(threads));
@@ -200,9 +210,10 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
       case "closed": {
         // The close the trigger decided from, which a new head may have archived
         // and a later episode replaced since.
-        const state = triggered.read ?? read();
+        const decidedFrom = triggered.read ?? read();
+        if (typeof decidedFrom === "string") return notRun(decidedFrom);
+        const state = observe(decidedFrom, read);
         if (typeof state === "string") return notRun(state);
-        observe(state);
         // A failed close still posting its summary is waited on, so its problems reach this run.
         if (closePosting(state.records ?? [], context)) return undefined;
         return print(closedResult(context, state, threads));
@@ -220,11 +231,10 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
           items: [],
         });
       case "result": {
-        const live = read();
-        if (typeof live === "string") return notRun(live);
-        const state = holding(episode, live, context.own);
+        const held = readHolding();
+        if (typeof held === "string") return notRun(held);
+        const state = observe(held, readHolding);
         if (typeof state === "string") return notRun(state);
-        observe(state);
         const settled = settle({ ...context, recorded: true }, state);
         return settled === undefined ? undefined : finish(settled, threads);
       }
@@ -235,9 +245,10 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         if (host.outcome === "failed") return notRun(`the round host could not be started: ${host.reason}`);
         // A queue another writer's close stopped leaves the state's old record.
         if (decision.outcome === "queue" && !triggered.queued) {
-          const state = read();
+          const live = read();
+          if (typeof live === "string") return notRun(live);
+          const state = observe(live, read);
           if (typeof state === "string") return notRun(state);
-          observe(state);
           if (episodeOver(state, context.own) && !closePosting(state.records ?? [], context)) return print(closedResult(context, state, threads));
         }
         return undefined;
@@ -250,11 +261,10 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
   let startUnknown = triggered.host.outcome === "unknown" ? triggered.host.reason : undefined;
   let startBy = deadlineIn(request.hostStartMs ?? HOST_START_MS);
   for (;;) {
-    const live = read();
-    if (typeof live === "string") return notRun(live);
-    const state = holding(episode, live, context.own);
+    const held = readHolding();
+    if (typeof held === "string") return notRun(held);
+    const state = observe(held, readHolding);
     if (typeof state === "string") return notRun(state);
-    observe(state);
     const settled = settle({ ...context, recorded: false }, state);
     if (settled !== undefined) {
       if (settled.kind === "result") return print(settled.result);
@@ -351,6 +361,20 @@ function hostRunning(
   return holder.outcome === "named" && presence(holder.holder, Math.max(1, boundMs)).outcome === "running";
 }
 
+/**
+ * Whether the episode's round host is known to have stopped: no host lock, or a
+ * lock whose holder is gone. A lock that cannot be read, and a holder `ps`
+ * cannot tell running or gone, are not.
+ */
+function hostGone(
+  directory: string,
+  presence: (identity: ProcessIdentity, boundMs: number) => Presence,
+): boolean {
+  const holder = lockHolder(directory, "host.lock");
+  if (holder.outcome === "absent") return true;
+  return holder.outcome === "named" && presence(holder.holder, HOST_CHECK_MS).outcome === "gone";
+}
+
 /** GitHub did not report the worktree's push in time. */
 type NotReported = { readonly outcome: "not reported"; readonly reason: string };
 
@@ -365,8 +389,8 @@ type Context = {
   readonly own: StateKey;
   readonly followUp: Change["followUp"];
   /**
-   * True where no live process held the episode's host lock when the run last
-   * read a failed close its round host had not yet recorded.
+   * True where the episode's round host was known to have stopped when the run
+   * last read a failed close that host had not yet recorded.
    */
   readonly hostGone?: boolean;
 };

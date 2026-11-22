@@ -797,6 +797,65 @@ test("#915: a run whose queue a failed close raced prints the summary's problem 
   });
 });
 
+const NOT_KNOWN = "whether its summary was posted is not known";
+
+test("#915: a failed close whose host cannot be told running or gone is waited on, and the run says the summary is still posting", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
+    liveHost(fixture);
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 5) }),
+      presence: () => ({ outcome: "unknown", reason: "ps did not answer within 5000ms" }),
+    });
+
+    assert.equal(printed.exit, 4, `a host nobody could tell gone was read as gone: ${printed.stdout}${printed.stderr}`);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz has closed the review of PR #41 and is still posting its summary. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
+test("#915: the last poll before the deadline gives ps its whole bound, and never reads a running host as stopped", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
+    liveHost(fixture);
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 5) }),
+      // A ps given less than a second times out, as a loaded machine's does.
+      presence: (identity, boundMs) =>
+        boundMs < 1_000 ? { outcome: "unknown", reason: `ps did not answer within ${boundMs}ms` } : identity.pid === 4242 ? { outcome: "running" } : { outcome: "gone" },
+    });
+
+    assert.equal(printed.exit, 4, `${printed.stdout}${printed.stderr}`);
+    assert.ok(!printed.stderr.includes(NOT_KNOWN), `a running host was read as stopped: ${printed.stderr}`);
+  });
+});
+
+test("#915: a host that records the close and exits between the run's read and its check has its record printed", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
+    liveHost(fixture);
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 100) }),
+      // The host writes its record and exits while the run looks for it.
+      presence: () => {
+        records(fixture, [
+          { ...POSTING_CLOSE, round: ran(3), closed: { exitStatus: 3, openThreads: [], closedAt: "round cap", problems: [REFUSED_SUMMARY] } },
+        ], CLOSED_EPISODE);
+        return { outcome: "gone" };
+      },
+    });
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${REFUSED_SUMMARY}\n`), `the host's record was lost to the state read before it: ${printed.stderr}`);
+    assert.ok(!printed.stderr.includes(NOT_KNOWN), printed.stderr);
+  });
+});
+
 test("#915: a failed close whose round host stopped before recording it is printed at once, saying the summary's outcome is unknown", async () => {
   await withWorktree(async (fixture) => {
     // No process holds the host lock, so nothing will replace the close the round wrote.
