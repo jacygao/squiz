@@ -9,13 +9,20 @@ method; this file holds what is specific to squiz, and they read it from here.
 **Load the `skills:writing-specs` skill before writing or editing anything under
 `docs/specs/`.** Every time, without being asked.
 
-`docs/specs/review-harness-spec.md` is the specification. Its § 9, The project,
-fixes the language rules and the `src/` layout: erasable syntax only, and no
-directory the layout does not have.
+`docs/specs/review-harness-spec.md` is the specification. It says what squiz
+does, and fixes no file layout: where code goes in `src/` is a choice each change
+makes.
 
 **A spec's version number changes once a release.** The pull request that sets
 the release's version bumps it. Every other pull request leaves it alone, so
 that two of them never conflict on the version line.
+
+## Language
+
+**Write erasable TypeScript only:** no `enum`, no parameter properties, no
+namespaces. A union of string literals stands where an enum would. Node strips
+the types and runs the `.ts` files as they are, and it cannot strip those.
+`tsconfig.json` sets `erasableSyntaxOnly`, so `npm run typecheck` refuses them.
 
 ## Configuration
 
