@@ -6,13 +6,10 @@
 
 **Squiz automates code review between agents.** Whenever a coding agent
 finishes a piece of work, a reviewer agent reviews it. The reviewer can run a
-different model from the coding agent, and a different harness. The
-two agents work through the findings over as many rounds as it takes to settle
-them. Everything they say to each other is kept as review comments on the pull
-request, where a person, or an agent trusted to merge, can see how each finding
-was settled. A change with no pull request, such as a working tree in a
-repository with no remote, keeps the same record in a directory instead (§ 4
-The local venue).
+different model from the coding agent, and a different harness. The two agents
+work through the findings over as many rounds as it takes to settle them.
+Everything they say to each other is kept as review comments on the pull
+request, or in the worktree under the local venue (§ 4).
 
 ## 2. Dependencies
 
