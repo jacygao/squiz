@@ -1856,7 +1856,7 @@ contract sets out. The exit status says what happened:
 | 0 | A round reviewed this state and nothing is open. The episode is closed, and its summary is posted. Or the pull request is a draft. |
 | 1 | The review could not run. |
 | 2 | Threads are open, and rounds remain. |
-| 3 | The round cap or the token bound closed the episode with threads open. Or it closed the episode without a round reviewing this state, whatever is open. |
+| 3 | The round cap or the token bound closed the episode with threads open. Or it closed the episode without a round reviewing this state, whatever is open. Or a failed round closed it after this state's round left threads open. |
 | 4 | The review goes on in the round host, and the run's wait ended first. |
 
 These are the only statuses `squiz review` gives. A caller reads any other, such
@@ -1940,7 +1940,11 @@ output, so the line saying why it failed is the heading, as `Squiz did not
 review PR #41 at 3f9c2e0: the reviewer was killed at its 900-second bound, and
 the round recorded no findings.`, and stderr says where its failure comment
 went. Where the close has no summary on the pull request, the paragraph does not
-claim one.
+claim one. A run whose own state a round reviewed and left threads open before
+the failed round closed the episode is handed the same close, rather than its
+own exit 2, because nothing reviews a push after the cap. Its stderr carries the
+closing round's summary problems, where its failure comment went, and the "not
+known" line below where that round's host stopped before recording them.
 
 Still reviewing, exit 4: the run prints one of these lines after the path.
 

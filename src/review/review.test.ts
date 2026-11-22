@@ -702,7 +702,7 @@ test("#915: a state queued behind a failed round that closed at the cap, with no
 });
 
 /** The close a failed round wrote before posting its summary: no round yet, and no problems. */
-const POSTING_CLOSE: Extract<StateRecord, { readonly status: "failed" }> = {
+const POSTING_CLOSE: Extract<StateRecord, { readonly status: "failed" }> & { readonly closed: NonNullable<Extract<StateRecord, { readonly status: "failed" }>["closed"]> } = {
   ...OWN,
   activity: "PRRC_older",
   status: "failed",
@@ -753,6 +753,43 @@ test("#915: a run on an earlier state with its own result waits while a later fa
     const printed = await runReview({ ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD], until: deadlineIn(POLL_MS * 5) }), ...liveHost(fixture) });
 
     assert.equal(printed.exit, 4, `the run read its own result while the episode's close was still posting: ${printed.stdout}${printed.stderr}`);
+  });
+});
+
+/** A state that left threads open, reviewed before the failed round that closed the episode. */
+const LEFT_OPEN: StateRecord = { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(2) };
+
+test("#915: a run on an earlier state that left threads open is handed a later failed close, with its refused summary", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [LEFT_OPEN, { ...POSTING_CLOSE, round: ran(3), closed: { ...POSTING_CLOSE.closed, problems: [REFUSED_SUMMARY] } }], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
+
+    assert.equal(printed.exit, 3, `nothing reviews a push after the cap, so the run is handed the close: ${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${REFUSED_SUMMARY}\n`), printed.stderr);
+  });
+});
+
+test("#915: a run on an earlier state that left threads open is handed a later failed close, with where its failure comment went", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [LEFT_OPEN, { ...POSTING_CLOSE, round: ran(3), lines: ["the failure could not be posted on PR #41: gh: HTTP 502 Bad Gateway"] }], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD] }));
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes("squiz: the failure could not be posted on PR #41: gh: HTTP 502 Bad Gateway\n"), printed.stderr);
+  });
+});
+
+test("#915: a run on an earlier state that left threads open is handed a later failed close whose host stopped before recording it", async () => {
+  await withWorktree(async (fixture) => {
+    // No process holds the host lock.
+    records(fixture, [LEFT_OPEN, POSTING_CLOSE], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD], until: deadlineIn(POLL_MS * 100) }));
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(NOT_KNOWN), printed.stderr);
   });
 });
 

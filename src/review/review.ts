@@ -461,9 +461,14 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
         kind: "result",
         result: { outcome: "failed", key: waiting.key, name: waiting.name, rerun: waiting.rerun, summaryAt: waiting.summaryAt, reason: record.reason, items: record.lines ?? [] },
       };
-    case "reviewed":
+    case "reviewed": {
+      // A state that left threads open, which a later failed round's close then
+      // ended, is handed that close: nothing reviews a push after the cap.
+      const ended = record.result === "exited" && record.exitStatus === 2 ? failedClose(state.records ?? []) : undefined;
+      if (ended !== undefined) return compose((threads) => closedUnreviewed(waiting, state.records ?? [], ended, threads));
       if (record.result === "exited") return compose((threads) => roundResult(waiting, state, record, threads));
       return afterClean(waiting, state, record, hops);
+    }
     case "not reviewed":
       return notReviewed(waiting, state, record, hops);
   }
