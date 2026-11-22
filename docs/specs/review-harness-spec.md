@@ -2255,9 +2255,10 @@ be anchored. A finding scoped to `file` whose file the diff does not carry goes
 to Notes the same way. A round that leaves the episode open keeps each such
 finding on its record, and `squiz review` prints it on stderr (§ 7).
 
-**A finding scoped to `change` whose file the diff does not carry is posted on
-the first file the diff carries**, in the diff's order, with the file it named
-written in the text:
+**A finding scoped to `change` goes on any file the diff names**, a deleted
+file and a rename that changed nothing included, since a thread on a file needs
+no line. One whose file the diff does not name is posted on the first file the
+diff names, in the diff's order, with the file it named written in the text:
 
 ```markdown
 **Squiz reviewer · high — All seven new exported helpers lack the required tests**
@@ -2269,7 +2270,7 @@ written in the text:
 **Where:** the change as a whole. The reviewer named `src/sync/helpers.md`, which the diff does not carry.
 ```
 
-Only a diff that carries no file at all, or one that cannot be read, leaves such
+Only a diff that names no file at all, or one that cannot be read, leaves such
 a finding on no thread. Notes then names it as about the change as a whole:
 
 ```markdown

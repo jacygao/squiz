@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type ChangedLines, DiffParseError, parseDiff, touchesFile, touchesLine } from "./diff.ts";
+import { type ChangedLines, DiffParseError, filesNamed, parseDiff, touchesFile, touchesLine } from "./diff.ts";
 
 /**
  * Every fixture below is `git diff` output, copied from a scratch repository
@@ -633,4 +633,13 @@ Binary files a/pic.png and b/pic.png differ
     "a hunk under a binary file entry",
   );
   assert.match(afterBinary.message, /before any file/);
+});
+
+test("#913: every file the diff names is listed in its order, a deletion and a rename that changed nothing included", () => {
+  assert.deepEqual(filesNamed(deletedFile + pureRename + renameWithEdits + newFile), ["doomed.txt", "renamed-to.txt", "new-name.txt", "added.txt"]);
+});
+
+test("#913: a line inside a hunk that reads like a header names no file", () => {
+  const lookalike = "diff --git a/x.txt b/x.txt\nindex 1..2 100644\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n--- a/y.txt\n+++ b/z.txt\n";
+  assert.deepEqual(filesNamed(lookalike), ["x.txt"]);
 });

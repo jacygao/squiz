@@ -8,7 +8,7 @@
  * takes the summary only when the diff carries nowhere to hang a thread.
  */
 
-import { type ChangedLines, DiffParseError, parseDiff, touchesFile, touchesLine } from "./diff.ts";
+import { type ChangedLines, DiffParseError, filesNamed, parseDiff, touchesFile, touchesLine } from "./diff.ts";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "./finding.ts";
 
 /** A finding that becomes a review comment thread on the line it names. */
@@ -49,8 +49,8 @@ export type DegradedRouting = {
 };
 
 /**
- * A finding about the change as a whole whose file the diff does not carry, on
- * the first file the diff does carry.
+ * A finding about the change as a whole whose file the diff does not name, on
+ * the first file the diff does name.
  *
  * The finding's `file` is the one the thread hangs on, and `namedFile` the one
  * the reviewer named, which the comment writes into its body so that a reader
@@ -133,19 +133,23 @@ export function routeFindings(findings: readonly Finding[], diff: string): Route
     // parser that threw something else still failed to read the diff.
     return { routings: findings.map(noted), unreadableDiff: asError(error) };
   }
-  return { routings: findings.map((finding) => routeOne(finding, changed)) };
+  // A file thread needs no line, so a deleted file and an unaltered rename hold
+  // one too, though neither has a line to anchor to.
+  const named = [...new Set([...filesNamed(diff), ...changed.keys()])];
+  return { routings: findings.map((finding) => routeOne(finding, changed, named)) };
 }
 
-function routeOne(finding: Finding, changed: ChangedLines): Routing {
+function routeOne(finding: Finding, changed: ChangedLines, named: readonly string[]): Routing {
   if (finding.scope === "change") {
-    if (touchesFile(changed, finding.file)) return { placement: "file", finding };
+    if (named.includes(finding.file)) return { placement: "file", finding };
     // A finding about the change as a whole is about every file of it, so any
-    // file the diff carries holds it. Only a thread keeps it open for a later
+    // file the diff names holds it. Only a thread keeps it open for a later
     // round to rule on.
-    const [first] = changed.keys();
+    const [first] = named;
     if (first === undefined) return noted(finding);
     return { placement: "file", finding: { ...finding, file: first }, namedFile: finding.file };
   }
+
 
   if (finding.scope === "file") {
     if (touchesFile(changed, finding.file)) return { placement: "file", finding };

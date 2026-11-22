@@ -202,6 +202,16 @@ test("#913: a finding scoped to the change whose file the diff does not carry ro
   assert.equal(elsewhere.file, "src/sync/queue.ts", "the finding handed in was changed");
 });
 
+test("#913: a finding scoped to the change, on a diff that only deletes or renames files, routes to a file the diff names", () => {
+  const deletion = "diff --git a/src/old.ts b/src/old.ts\ndeleted file mode 100644\nindex 814f4a4..0000000\n--- a/src/old.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n";
+  const rename = "diff --git a/src/from.ts b/src/to.ts\nsimilarity index 100%\nrename from src/from.ts\nrename to src/to.ts\n";
+
+  const deleted = fileOnly(routeFindings([changeFinding("about a deletion", "src/old.ts")], deletion));
+  assert.deepEqual([deleted.finding.file, deleted.namedFile], ["src/old.ts", undefined]);
+  const renamed = fileOnly(routeFindings([changeFinding("about a rename", "src/elsewhere.ts")], rename));
+  assert.deepEqual([renamed.finding.file, renamed.namedFile], ["src/to.ts", "src/elsewhere.ts"]);
+});
+
 test("#913: a finding scoped to the change, on a diff that carries no file, is noted about the change as a whole", () => {
   const routing = notedOnly(routeFindings([aboutTheChange], ""));
   assert.equal(routing.finding, aboutTheChange);

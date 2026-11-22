@@ -470,7 +470,7 @@ function line(location: string | undefined, headline: string | null, what?: stri
  * was posted for: nothing placed it anywhere.
  */
 function where(finding: Finding): string | undefined {
-  if (finding.file === undefined) return undefined;
+  if (finding.scope === "change") return undefined;
   if (finding.line === undefined) return finding.file;
   return `${finding.file}:${finding.line}`;
 }

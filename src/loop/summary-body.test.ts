@@ -14,7 +14,7 @@ import type { ClassifiedThread } from "./classify.ts";
 import type { RoundRecord, RoundWork, Timings } from "./episode-state.ts";
 import type { FindingOutcome, PostedFindings } from "./post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
-import { renderSummary, unappliedNotes, unpostedReplyNotes, type ClosedEpisode } from "./summary-body.ts";
+import { renderSummary, unappliedNotes, unpostedReplyNotes, unthreadedNotes, type ClosedEpisode } from "./summary-body.ts";
 import type { ReviewThread } from "../venues/venue.ts";
 
 /** A round of `pi` on one model, which is what most tests here need and none is about. */
@@ -581,6 +581,11 @@ test("an episode closed by no bound at all notes none", () => {
  * left it out would read as a review that found nothing there. The summary
  * carries the failure because GitHub was reachable: it posted this comment.
  */
+test("#913: a finding about the change as a whole whose comment could not be posted is named as about the change, not by its file", () => {
+  const notes = unthreadedNotes(posted({ outcome: "failed", finding: onTheChange("The retry queue duplicates the scheduler"), reason: "gh answered HTTP 502" }));
+  assert.deepEqual(notes, ["About the change as a whole: The retry queue duplicates the scheduler (raised, and its comment could not be posted)"]);
+});
+
 test("a finding whose comment could not be posted is counted and named in Notes", () => {
   const comment = renderSummary({
     ...quiet,
