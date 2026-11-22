@@ -53,587 +53,277 @@ A comment that carries none of these markers is read as written by a person.
 
 ## 3. The loop
 
-The loop runs the review from end to end. A coding agent finishes its work on a
-pull request, or runs `squiz review <number>`, and a round starts: a reviewer
-reads the change in a session of its own, and its findings go onto the pull
-request as threads. The session that owns the work is told the result. It works
-the threads, replies and pushes, and the next round starts, until nothing is
-open or the round cap is reached.
+A trigger queues a state of the pull request, a round host reviews it in a round,
+and the session that owns the work is told the result. That session works the
+threads, and the next trigger queues the next state, until the episode closes.
 
 ### Terminology
 
 | Term | What it is |
 |---|---|
-| **Episode** | One review of one pull request in one worktree, from its first round to its close. A worktree holds one live episode at a time, and keeps the episodes before it. |
-| **Round** | One turn of an episode: one review of the pull request as it stands. |
+| **Episode** | One review of one pull request in one worktree, from its first round to its close. A worktree holds one live episode per pull request at a time, and keeps the episodes before it. |
+| **Round** | One review of one state of the pull request (The state file). |
 
-An episode is **live** until its close is recorded. Nothing else makes it live
-or over: not whether a round is running, and not how long ago anything
-happened. It closes for one of three reasons: nothing is left open for another
-round to work, the round cap is spent, or a round reached the token bound. A
-round that failed posts a failure comment under § 8, and the episode stays live
-unless that round spent the last of the round cap or the token bound. Then the
-failed round closes it, as The round cap sets out.
-
-A close is **clean** where the round that closed it left nothing open and no
-state behind it not reviewed. A state the clean-closed episode never recorded,
-on a head other than the one the close reviewed, starts a new episode in the
-same worktree, as The state file sets out. Every other close is at the round cap
-or the token bound, and stays closed.
+An episode closes for one of three reasons: a round leaves nothing open, the
+round cap is spent, or a round reaches the token bound (§ 8 The review budget).
+A close is **clean** where its
+round left nothing open and no state behind it not reviewed. Every other close is
+at the round cap or the token bound, and stays closed.
 
 ### The state file
 
-**An episode is keyed by the number of its pull request.** Its state lives in
-`.squiz/<number>/` inside the worktree. The directory holds the state file, which
-the rest of this section describes, and:
+**An episode's state lives in `.squiz/<number>/` inside the worktree, keyed by
+the pull request's number:**
 
-- `rounds/<k>/`, for each round: `prompt.md`, the task prompt the reviewer is
-  handed, the report file the reviewer reports into, the reviewer's session,
-  `resume.txt`, the command that resumes that session, and `gh/`, the empty `gh`
-  configuration the reviewer runs with (§ 5 Tools). The snapshot the reviewer
-  reads is in the temporary directory instead (§ 5 The snapshot).
-- `notes/`, the notes for the sessions that own the work, under The report.
-- `host.log`, the round host's output.
-- `state.lock`, held while the state file is changed.
-- `episodes/<n>/`, for each closed episode a later one replaced, numbered from 1
-  in the order they closed: its state file, its `rounds/` and the local venue's
-  `summary.md` (§ 4 The record), moved there when a new head starts a new
-  episode, as set out below.
+```
+.squiz/
+  .gitignore              *
+  41/
+    state.json            the state file: one record for each state
+    host.log              the round host's output (The round host)
+    notes/<session id>/   the owner's notes (The report)
+    rounds/<k>/           each round's reviewer session (§ 5 The reviewer session)
+    episodes/<n>/         each closed episode a later one replaced, from 1
+```
 
-**`.squiz/` keeps itself out of git.** Wherever squiz makes an episode's
-directory and `.squiz/.gitignore` is missing, it writes one holding `*`. One that
-exists is left as it is.
+Wherever squiz makes an episode directory and `.squiz/.gitignore` is missing, it
+writes one holding `*`. An existing one is left as it is.
 
-**Every change to the state file is made under `state.lock`.** A writer takes the
-lock, reads the file, changes it, writes it whole, and releases the lock. The
-lock is held for one update and never across a review. It names its holder's pid
-and start time, and a lock whose holder has gone is taken over. A writer that
-finds the lock held by a live process, or by one that cannot be told running or
-gone, waits up to a deadline of its own and never breaks the lock. A wait that
-runs out is a state file that cannot be written (§ 8). The deadline bounds only
-the wait: a lock taken is used, even where the deadline passed while it was
-being taken, as it can on a loaded machine whose `ps` is slow. Readers take no
-lock.
+**A state of the pull request is two things:**
 
-**The state file also holds one record for each state of the pull request the
-episode has reviewed.** A state is two things, read when a trigger starts:
+- **The head commit.**
+- **The latest activity on the reviewer's threads:** the newest reply, by anyone
+  other than the reviewer, on a thread the reviewer opened. Replies on a thread a
+  person opened are no activity. Editing a reply changes nothing. Deleting one can
+  change which reply is newest, and that is a change like any other.
 
-- **The head commit**, as GitHub reports it for the pull request.
-- **The latest activity on the reviewer's threads.** Activity is a reply from
-  anyone other than the reviewer, on a thread the reviewer opened: a comment after
-  the first in that thread, carrying no `**Squiz reviewer · ` marker. The coding
-  agent's replies are activity, and so is a person's. A thread a person opened
-  holds no activity, whatever is said on it. The latest activity is the GitHub
-  identifier of the newest such reply on the pull request, or none. An edited
-  reply keeps its identifier and changes nothing. A deleted one can change which
-  reply is newest, and that is a change like any other.
-
-Each record has one of five statuses:
+Each state's record has one of five statuses:
 
 | Status | What it records |
 |---|---|
-| Queued | A trigger asked for a review of this state, and no round has started it. |
-| Reviewing | A round host is running the round. The record names the host, and once the reviewer starts, the reviewer's session and snapshot, so that a recovery can find and stop them. |
-| Reviewed | The round's result: its exit status and the threads it left open. A round that left nothing open while a later state was queued behind it records *reviewed clean, episode open* instead, with no exit status. That record gets exit status 0 where it later closes the episode, when the state behind it is superseded by it. A round that left the episode open also records each finding no thread holds, as § 6's Notes would give it. |
-| Failed | Why the round failed, and whether its owner has had a note about it. |
+| Queued | A trigger asked for a review of this state, and no round has taken it. |
+| Reviewing | A round host is running its round, and the record names the host. |
+| Reviewed | The round's exit status and the threads it left open. A round that left nothing open while a later state was queued records *reviewed clean, episode open*, with no exit status. |
+| Failed | Why the round failed. |
 | Not reviewed | Why no round reviewed it: the episode closed first, or a later state superseded it. |
 
-A record of a round that started also holds what `squiz status` prints for it
-(§ 7).
+**A trigger acts on the record of the pull request's current state:**
 
-**A state file missing a field its writer always writes cannot be read**, and is
-treated as any state file that cannot be read is (§ 8). Those fields are
-`spentOutsideRounds`; each round's `reviewer`, `elapsedSeconds`, `head`, `raised`
-and `ruled` (§ 6); the number of a reviewing record's round; and a reviewed
-record's round and its count of new findings. The reason names the field:
-
-```
-/work/squiz/.squiz/41/state.json: round 1 has "raised" as undefined
-```
-
-**A trigger reads the record for the pull request's state before it queues
-anything.** It has looked up the pull request and listed its threads by then,
-because the state is read from them.
-
-- **No record:** the trigger queues the state, and starts a round host where
-  none is running.
-- **Failed:** a hook queues nothing. `squiz review` queues the state again,
-  because running the command is the request to retry it.
-- **Reviewing**, by a round host that has gone: the trigger recovers the round, as
-  The round host sets out, which records it failed. It then does what it does for
-  a failed state.
-- **Queued:** the trigger queues nothing, and starts a round host where none is
-  running.
-- **Reviewing**, by a round host that is running: the trigger queues nothing.
-- **Reviewing**, by a round host no one can tell running or gone: the trigger
-  recovers nothing, queues nothing and starts nothing, because recovering a round
-  whose host may be alive would stop a live reviewer and remove its snapshot.
-  `squiz review` exits 1 naming the host it could not check, and a hook returns.
-  The next trigger checks again.
-- **Reviewed, or not reviewed:** the trigger queues nothing. `squiz review`
-  returns that result, with the threads read from the pull request as they stand
-  now.
-
-`squiz review` then waits, as § 8 sets out, and the hooks return at once.
-
-**A failed state is retried only when someone runs `squiz review`.** A hook
-firing on it queues nothing, so a turn spent reading a failure note does not
-bring the failure back. The retry queues the state behind every state already
-queued or recorded, as a state queued for the first time is, so the records
-stay in the order their rounds ran. A retry that fails again posts its failure comment,
-exits 1 and writes no second note, and its stderr tells the coding agent not to
-run the command again (§ 7 `squiz review`). A new commit or reply is a new state, and is queued like any other.
-
-**One state gets one review.** A trigger for a state already queued or under
-review queues nothing, so two firings for one commit and the same replies post
-one set of threads and at most one summary. An episode runs one round at a time,
-oldest queued state first.
-
-**A state accepted into the queue is never dropped.** It is reviewed, or it is
-given a result of its own. Say state A is under review and state B, a later
-commit, is queued behind it:
-
-| A's round ends with | What happens to B |
+| Record | What the trigger does |
 |---|---|
-| Threads open, rounds remaining | B is reviewed next, as usual. |
-| Nothing open, rounds remaining | The episode does not close. A is recorded as *reviewed clean, episode open*: no exit status, no summary, and no note for its owner. B is reviewed next, and the episode closes from the last round with nothing queued behind it. Where B is superseded by A, A is that round, as below. A run of `squiz review` waiting on A goes on waiting, for the state the queue ends on, and returns that state's result: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
-| The round cap reached, or the token bound | The episode closes, as it must, and posts its summary. Its Notes name the cap or the bound and each state left not reviewed, whether A left threads open or nothing. B is recorded as not reviewed, with the reason. A run of `squiz review` waiting on B is handed the close with a line saying why B was not reviewed, and exits 3, whether A left threads open or nothing. B's owner gets a note saying the same. |
-| A failure that spent the last of the round cap or the token bound | The episode closes as in the row above, and A is recorded failed, carrying the close. B is recorded as not reviewed with the reason "the episode closed at the round cap before a round took this state", or "at the token bound". A run of `squiz review` waiting on A or on B is handed the close, and exits 3. |
+| None | Queues the state, and starts a round host where none runs. |
+| Queued | Starts a round host where none runs. |
+| Reviewing, by a host that is running | Nothing. |
+| Reviewing, by a host that has gone | Nothing. The round is killed (The round host). |
+| Reviewing, by a host that cannot be told running or gone | Nothing. `squiz review` exits 1 naming the host it could not check, and a hook returns. |
+| Failed | A hook queues nothing. `squiz review` queues the state again. |
+| Reviewed, or not reviewed | Nothing. `squiz review` returns that result, with the threads as they stand now. |
 
-The line comes right after the heading of the close the run is handed:
+**Only `squiz review` retries a failed state, never a hook.** The retry is queued
+behind every state already queued or recorded. A retry that fails again posts its
+failure comment and exits 1, writes no second note to the owner, and its stderr
+tells the coding agent not to run the command again (§ 7 `squiz review`).
+
+**Each state gets at most one review.** Repeated triggers for a state already
+queued or under review post one set of threads and at most one summary. An
+episode runs one round at a time, oldest queued state first. Only a trigger
+queues a state, never the round host, and every queued state ends reviewed or
+with a result of its own.
+
+**A round closes the episode only when nothing is queued behind it, except at the
+round cap or the token bound.** Say state A's round ends and state B is queued:
+
+| A's round ends with | What happens |
+|---|---|
+| Threads open, rounds remaining | B is reviewed next. |
+| Nothing open, rounds remaining | A is recorded *reviewed clean, episode open*: no exit status, no summary and no note for its owner. B is reviewed next. A `squiz review` waiting on A returns the result of the state the queue ends on: 0 or 3 with the close, or 2 where B left threads open. It exits 4 where its wait runs out first. |
+| The round cap or the token bound reached, by a review or by a failure (§ 6) | The episode closes. The summary's Notes name the bound and each state left not reviewed, and B is recorded not reviewed. A `squiz review` waiting on B exits 3 with a line saying why, and B's owner gets a note saying the same. |
+
+A state left not reviewed is named by its short head commit, followed by "with
+different replies" where the state the closing round reviewed, or one queued
+ahead of it, has the same commit:
 
 ```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz reviewed PR #41 at 3f9c2e0: round 3 of 3, no new findings.
-Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.
+Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.
 ```
 
-Where the token bound closed the episode, its reason reads "the episode closed at
-the token bound, after reviewing 3f9c2e0".
-
-**A round reviews the pull request's newest state, and only that.** When the
-round starts, the round host checks that its state still has the pull request's
-head commit and latest activity. A state the pull request has moved past is
-superseded: no review runs, nothing is posted, and it is recorded not reviewed,
-naming the state that superseded it as § 6's Notes do:
+**A round reviews only the pull request's newest state.** A state the pull
+request has moved past by the time its round starts is superseded: nothing is
+reviewed or posted for it, and it is recorded not reviewed, naming the state that
+superseded it:
 
 ```
 superseded by 8d21a4f
 superseded by 3f9c2e0 with different replies
 ```
 
-The record also holds that state's head commit and latest activity, because
-other states can share its short commit. The round host queues nothing. A
-trigger queues the newer state, and since a hook does not wait, a state
-superseded after a hook queued it is queued by the next trigger. A run of
-`squiz review` waiting on a superseded state follows the state that superseded
-it and returns that state's result. Where that state has no record, the run
-reads the pull request afresh and acts on its record as any trigger does. It
-exits 4 where its wait runs out first, as § 7 shows.
+A `squiz review` waiting on a superseded state returns the superseding state's
+result. Where that state has no record, the run reads the pull request afresh and
+acts on its record as any trigger does. It exits 4 where its wait runs out first.
 
-**A state reviewed clean can close the episode when the state behind it is
-superseded by it.** Say A was reviewed clean with B, a reply, queued behind it,
-and the reply is deleted before B's round starts. The pull request is at A again,
-so B is superseded by A. A closes the episode where all of these hold:
-
-- no round has run since A's, whether it reviewed or failed;
-- none of the reviewer's threads is open on the pull request;
-- nothing else is queued.
-
-A is then the last round with nothing queued behind it. Otherwise B is recorded
-superseded, and the episode stays open for the next commit or reply. No reviewer
-runs for a close on A, and nothing is spent against the round cap. The close is
-recorded first, as for any round. The summary is then posted
-as § 6 sets out for a close on a state reviewed clean. A's record then becomes a
-reviewed result with exit status 0 and no threads open, carrying the summary's
-problem where it was not posted, and A's owner gets the note of any close. A
-run of `squiz review` waiting on A or on B returns A's close.
-
-**A round decides its close and records it in one step.** It reads the queue
-under `state.lock`, decides from it as the table above sets out, and writes the
-close in that same update, before it posts the summary. A clean close also
-records, in that update, the state its round reviewed. A trigger that comes
-after the close reads it before it queues anything, so no state queued while
-the summary is posted is stopped by a close it arrived before. A failed round
-that closes the episode (The round cap) also writes the close before it posts
-the summary. The same update records the state the round took as failed,
-carrying the close, and every state queued behind it as not reviewed, so a run
-that reads the state while the summary is posted is handed the close. That
-close is never clean.
-
-**A state left not reviewed is named by its short head commit, followed by "with
-different replies" where an earlier state has the same commit.** The earlier
-states are the one the round that closed the episode reviewed, or took where it
-failed, and those queued ahead of it:
-
-```
-Squiz did not review PR #41 at 3f9c2e0 with different replies: the episode closed at the round cap, after reviewing 3f9c2e0.
-```
-
-**The state file keeps the reviewer's last ruling on each thread**, by the
-thread's node id: `fixed`, `withdrawn` or `open`. A close whose round gave the
-thread no verdict counts it by that ruling (§ 6). A round writes its rulings in the update that
-records its cost, before it posts anything, so no verdict reaches a thread unless
-its ruling is on record. A state file that will not take that update fails the
-round with nothing posted. A thread a finished review gave no verdict is kept as
-`open`. A failed round writes the rulings it salvaged, and leaves every other
-thread's alone. A ruling is kept whether or not GitHub then takes it.
+Where A was reviewed clean with B queued, and B is then superseded by A, as when
+the reply that made B is deleted, B is recorded superseded and the episode stays
+open for the next commit or reply.
 
 **A close at the round cap or the token bound stays closed in its worktree.** A
-new commit or reply queues nothing, and `squiz review` prints the close (§ 7).
-A second episode on the same pull request starts in another worktree on the same
-branch, which holds no state for it.
+new commit or reply queues nothing, and `squiz review` prints the close. A second
+episode on that pull request needs another worktree on the same branch.
 
-**A clean close stays closed for the head it reviewed, and for every state it
-recorded.** The clean close records how many of the state file's records are the
-closed episode's. A trigger acts on any other state as follows:
+**After a clean close, a trigger acts on each state as follows:**
 
-- **No record, on a head other than the one the close reviewed:** the trigger
-  queues the state after the closed episode's records, for a new episode, and
-  starts a round host where none is running. A run of `squiz review` waits on it,
-  as on any other state.
-- **A record the closed episode wrote, on another head**, as a force-push back to
-  a head it reviewed leaves the pull request: the trigger queues nothing, and
-  `squiz review` returns that record's result, which names its own head.
-- **A record queued after the close:** the trigger acts on it as on any record. A
-  hook leaves a failed one failed, and `squiz review` queues it again.
-- **New replies on the head the close reviewed**, and a failed record the closed
-  episode wrote: the trigger queues nothing, and `squiz review` prints the close.
+- **No record, on a head other than the one the close reviewed:** the state starts
+  a new episode in the same worktree, and `squiz review` waits on it as on any
+  state.
+- **A record the closed episode wrote, on another head:** `squiz review` answers
+  from that record, naming its own head.
+- **New replies on the head the close reviewed, and a failed record the closed
+  episode wrote:** nothing is queued, and `squiz review` prints the close.
+- **A record queued after the close:** the trigger acts on it as on any record.
 
-No trigger queues a state the closed episode recorded, so its records keep their
-places, and every record after them is the next episode's.
-
-**The round host starts the new episode in the update that takes its first
-state.** Under `state.lock`, it finds the close clean and a state queued after
-the closed episode's records. In that one update it:
-
-1. Writes the closed episode's state file, holding the closed episode's records
-   in their order, to the next `episodes/<n>/state.json`.
-2. Moves `rounds/` to `episodes/<n>/rounds/`, and rewrites each round's
-   `resume.txt` to name the session where it now is. It moves the local venue's
-   `summary.md` to `episodes/<n>/summary.md`.
-3. Writes a fresh state file in its place: no rounds, nothing spent outside them,
-   the reviewer's rulings carried over, and every record after the closed
-   episode's, in their order. It takes the oldest queued one as round 1.
-
-A round host that finds a round of the closed episode still recorded under
-review starts no new episode, because that round's reviewer may still run and
-its snapshot stands at the path the new round of that number takes. It records
-each state queued after the close failed, and `squiz review` retries it as any
-failed state:
-
-```
-no review ran: round 1 of the closed episode is still recorded under review by round host 4242
-```
-
-The new episode has its own round cap and token bound, and posts its own summary
-when it closes. It reads the reviewer's threads from the change as any episode
-does, so the closed episode's threads, and the rulings on them, are part of it.
-Everything else in the directory belongs to the worktree and stays where it is:
-`notes/`, `host.log`, the locks, and the local venue's files other than
-`summary.md`. Where the archive cannot be written, the closed episode is left as
-it was, and the round host records the state it took failed with the reason.
-
-`host.log` says where the closed episode went:
+The new episode has its own round cap and token bound, and posts its own summary.
+The reviewer's rulings carry over, and the closed episode's threads are part of
+it. The closed episode moves to `episodes/<n>/`, numbered from 1 in the order the
+episodes closed, and `host.log` says where:
 
 ```
 2026-11-08T09:14:02.511Z a new episode starts on a state the clean close never recorded: the closed one is in /work/squiz/.squiz/41/episodes/1
 ```
 
-A run of `squiz review` whose state's record, or whose close, moved into an
-archive before it read it reads it there.
+Where a round of the closed episode is still recorded under review, no new
+episode starts. Each state queued after the close is recorded failed, and
+`squiz review` retries it as any failed state:
+
+```
+no review ran: round 1 of the closed episode is still recorded under review by round host 4242
+```
 
 ### A round, step by step
 
-1. **Gate on the pull request.** The trigger checks that pull request `<number>`
-   is open, that it is not a draft, and that its head branch is checked out in
-   the directory it was run in, not another branch or a detached HEAD. The round
-   host checks again when the round starts that the pull request is open and
-   checked out. Where a check fails, no review runs, nothing is posted, and
-   nothing is written to `.squiz/`.
-
-   Where the pull request is not open or not checked out, `squiz review` exits 1,
-   and stderr names what it found:
+1. **Gate on the pull request.** A trigger reviews pull request `<number>` only
+   where it is open, is not a draft, and has its head branch checked out in the
+   directory the trigger ran in, not another branch and not a detached HEAD. The
+   round host checks again that it is open and checked out when the round
+   starts. Where a check fails, no review runs, nothing is posted and nothing is
+   written to `.squiz/`. Where the pull request is not open or not checked out,
+   `squiz review` exits 1, and stderr names what it found:
 
    ```
    squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
    ```
 
-   Where it is a draft, `squiz review` exits 0 and prints one line on stdout
-   saying so (§ 7 `squiz review`), and the hooks say nothing. Once it is marked
-   ready for review, the next trigger queues its state as it would any other.
-2. **Gate on the episode.** An episode that has reported its close is over:
-   `squiz review` prints the close, naming the head it was about, whatever the
-   round cap or the token bound would now allow. It exits as the close did for
-   the state a round reviewed, and 3 for a state no round reviewed, as § 7
-   `squiz review` sets out. After a clean close, a state on another head is the
-   exception, and is queued or reported from its record as The state file sets
-   out. Otherwise the record for the pull request's state decides whether it is
-   queued.
-3. **Run the reviewer.** The round host starts the reviewer in a session of its
-   own (§ 5). It hands the reviewer the pull request and the threads the reviewer
-   opened on it, in a snapshot of the state's head commit.
-4. **Post the findings, and act on the verdicts.** Each new finding opens a
-   thread, anchored to a file and a line or to a file as a whole (§ 5 Pull
-   request comments). `fixed` and `withdrawn` reply on their thread and close
-   it. `open` re-opens the thread or
-   leaves it open, and replies with the reviewer's reason. § 5 Findings gives
-   each reply.
-5. **Record the open threads.** Where threads are open and the round cap is not
-   reached, the round records the result and tells the session that owns the
-   work (The report). A run of `squiz review` waiting on it prints the open
-   threads and exits 2 (§ 7). A thread a person opened is never counted, so it
-   never keeps the loop going.
-6. **Close the episode.** Otherwise the round closes the episode, unless nothing
-   is open and a later state is queued behind it, as The state file sets out. It
-   records the close in the same update that read the queue, then posts one
-   summary comment. `squiz review` exits 0 for the state the round reviewed
-   where nothing is open. It exits 3 where the cap or the token bound closed the
-   episode with threads open, and for a state the close left not reviewed,
-   whatever is open.
+   § 7 `squiz review` gives what a draft prints.
+2. **Gate on the episode.** The record of the state decides whether it is queued,
+   as The state file sets out.
+3. **Run the reviewer** on a snapshot of the state's head commit (§ 5).
+4. **Post the findings and apply the verdicts** (§ 5 Findings).
+5. **Hand back the open threads**, where rounds remain, to the session that owns
+   the work (The report).
+6. **Or close the episode**, and post the summary (§ 6).
 
-The coding agent replies on a thread to say what it changed, to disagree, or to
-ask a question, and never closes one. Only the reviewer's verdict closes a
-thread, so a closed thread means the reviewer read the code as it now stands and
-accepted it.
+Only a reviewer's verdict resolves a thread. The coding agent replies on a
+thread, to say what it changed, to disagree or to ask, and never resolves one.
 
 ### The round cap
 
-The cap defaults to 3 and is settable from 1 to 8. A cap of R hands open threads
-back to the coding agent at most R−1 times.
+**A round cap (`rounds`, § 10 Configuration) of R allows R rounds**, so open
+threads go back to the coding agent at most R−1 times. Every round counts against
+it, whether a commit or a reply started it, a failed round included. A run that
+returns a recorded result is no round and spends nothing.
 
-**A reply is ruled on even where no commit follows it.** A coding agent that
-disputes a finding and pushes nothing asks for a review again on a new state, and
-the round reads its reply and rules on the thread: `withdrawn` where the argument
-holds, `open` where it does not. A reply posted while a round runs is not in that
-round's state, so the next run reviews again.
+**The round that spends the last of the round cap or the token bound closes the
+episode, whether it reviewed or failed.** Any other failed round closes nothing.
+§ 6 says what a failed round's close posts.
 
-**Every round counts against the round cap, whatever started it.** A round that a
-reply started is a round, exactly as one a commit started. A coding agent that
-answers every finding with a dispute spends the cap doing so, and the episode
-closes at the cap with the disputes for a person. A run that returns a recorded
-result is no round and spends nothing.
+**A reply with no commit after it is ruled on.** A reply on a reviewer's thread
+starts a round on a new state, which rules on the thread: `withdrawn` where the
+argument holds, `open` where it does not.
 
 **Round R is the closing round.** It reviews as any round does, then closes the
-episode whatever is still open: it posts the summary and hands nothing back to
-the coding agent. With a cap of 1, the first round is the closing round. Where
-it leaves threads open, a new commit or reply after it queues nothing, and
-whatever is left open is a person's. Where it leaves nothing open and nothing
-behind it not reviewed, its close is clean, and a new head starts a new episode.
-
-**The round that spends the last of the cap or the token bound closes the
-episode, whether it reviewed or failed.** A failed round counts against the cap
-as any round does, and every attempt's tokens count against the token bound,
-whether or not it was a round (§ 8 The review budget). A failure that leaves no
-round to run records the close, posts the summary (§ 6), and then posts its
-failure comment (§ 8). A failure that leaves a round to run closes nothing. No
-trigger closes an episode: one that comes after a close finds it, and runs
-nothing.
+episode whatever is open, posts the summary and hands nothing back. With a cap of
+1 the first round is the closing round.
 
 ### What starts a round
 
-**A round starts when a trigger queues a state and the round host takes it.**
-The triggers are the plugin's `Stop` and `SubagentStop` hooks, under Claude Code
-and Copilot alike, and `squiz review <number>`, which a coordinator or a CI job
-can also run from a checkout of the pull request's branch. In a runtime with no
-hook, only `squiz review` starts a round.
+**A round starts only from a trigger:** the plugin's `Stop` and `SubagentStop`
+hooks, under Claude Code and Copilot alike, or `squiz review <number>`, which a
+coordinator or a CI job can run from a checkout of the pull request's branch. In
+a runtime with no hook, only `squiz review` starts one.
 
 ### The round host
 
-**The round host runs the rounds of one episode, one at a time, outside every
-trigger's process.** It is `squiz host <number>`. A trigger that queues a state
-starts one where none is running, detached so that it outlives the shell call or
-hook that started it: a double fork with `setsid` between the forks, standard
-input on `/dev/null`, and output in `.squiz/<number>/host.log`.
+**The rounds of one episode run one at a time in a round host, `squiz host
+<number>`, outside every trigger's process.** Its output is in
+`.squiz/<number>/host.log`. A trigger that queues a state starts one where none
+runs, detached so that it outlives the shell call or hook that started it. A
+person never starts one. At most one runs per episode. It exits when nothing is
+left queued or its worktree is gone, and after it dies the next trigger starts a
+host for any queued state.
 
-It takes the oldest queued state, writes the reviewing record naming itself, and
-runs the round as the steps above set out. It exits when nothing is left queued,
-and when the worktree it serves is gone.
-
-**A host that finds nothing queued reads the queue again once its lock is
-released.** A trigger that queued a state before the release saw the host
-running and started none. A state found on that second read is taken by taking
-the lock again, and where another host holds the lock by then, the state is left
-to that host.
-
-**One round host runs per episode.** It holds `.squiz/<number>/host.lock`, which
-names its pid and start time. A host that finds the lock held by a live process
-exits at once, so two triggers that each start one leave one running.
-
-**A host that died is found by its pid and start time.** The next trigger starts
-a host for any queued state. A reviewing record whose host has gone is a killed
-round, and its reviewer may still be running, because a reviewer is not the
-host's child.
-
-**Recovery stops the orphaned reviewer before anything replaces it.** Every
-trigger, and every round host as it starts, recovers each killed round it finds:
-
-1. It reads the reviewer's session from the reviewing record: its backend, its
-   pane or window, its pid and start time.
-2. Where that reviewer is still running, it stops it as a round host stops a
-   reviewer at its bound: the reviewer's process group, then the pane. It does so
-   whether or not the reviewer's time bound has passed, so an orphan past its
-   bound is always stopped by the first recovery to find it.
-3. It confirms that the reviewer is gone, by pid and start time and by asking
-   the backend for the pane.
-4. Only then does it remove the snapshot and record the round as failed, with
-   the reason "the round host died". No failure comment is posted.
-
-A recovery that cannot confirm the reviewer is gone leaves the snapshot and the
-record as they are, and starts nothing for that state. `squiz review` exits 1
-naming the process it could not stop, and the next recovery tries again.
-
-**Nothing stops an orphan before a recovery runs.** While no host is alive, the
-reviewer's time bound is enforced when the next trigger or `squiz review` runs,
-and not before.
+**A round whose round host died is not recovered.** Nothing its reviewer reported
+is posted, and its reviewer and its snapshot are left as they are. Its record
+stays under review, `squiz status` shows it `killed`, and `squiz review` exits 1
+saying the round host stopped before its round ended (#327).
 
 ### The hooks
 
-**Squiz registers `squiz hook` on Claude Code's `Stop` and `SubagentStop`, on
-its `SessionStart` and `SubagentStart`, and on its `UserPromptSubmit`.** `Stop` fires when a regular
-session's turn ends, and `SubagentStop` when a subagent's does. Each stop
-firing resolves the pull request whose head is the branch checked out in the
-payload's `cwd`, records the session that owns the work, queues the state as The
-state file sets out, and returns. It never runs a round
-and never blocks the agent: it exits 0 whatever it found. Where it finds no pull
-request it writes the line under step 1 naming the branch and the directory.
-Where it finds a draft it writes nothing.
-
-**The worktree comes from the payload's `cwd`, never from the directory the hook
-process runs in.** Under Claude Code the two are the same directory. Copilot runs
-a plugin's hook in the plugin root, so the hook's own directory is the plugin
-checkout. A payload with no `cwd`, or with one that is not an absolute path,
-queues nothing, and the hook says so on stderr. So does a `cwd` that is in no git
-worktree.
+**`hooks/hooks.json` registers `squiz hook` on `Stop`, `SubagentStop`,
+`SessionStart`, `SubagentStart` and `UserPromptSubmit`.** The plugin root is
+quoted, so a path with a space stays one word under `/bin/sh` and `/bin/bash`.
+Every event has the same entry:
 
 ```json
 "Stop": [
   { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
-],
-"SubagentStop": [
-  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
-],
-"SessionStart": [
-  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
-],
-"SubagentStart": [
-  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
-],
-"UserPromptSubmit": [
-  { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" } ] }
 ]
 ```
 
-**`SessionStart` and `SubagentStart` hand the worktree to the venue's
-`recordStart` (§ 4 The base), and do nothing else.** They resolve no pull
-request, record no owner and queue nothing. The GitHub venue records nothing at
-a start, so under it these two firings change nothing. Claude Code and Copilot
-both fire them from the plugin, each with a `cwd`, before the session or the
-subagent does any work. A start hook takes its worktree from the payload's `cwd`,
-as the stop hooks do. A start whose `cwd` is in no git repository records nothing
-and writes nothing on stderr, because both runtimes fire it for every session,
-wherever it is opened.
+Only the two stop firings, and `squiz review`, start a round. `SessionStart` and
+`SubagentStart` record the base under the local venue (§ 4 The base).
 
-**`UserPromptSubmit` hands the payload's `prompt` and its worktree to the
-venue's `recordPrompt` (§ 4 The record), and does nothing else.** It takes
-the worktree from the payload's `cwd`, as the other hooks do, and prints nothing
-on stdout, where Claude Code would add it to the session's context. Under the
-GitHub venue it changes nothing. Both runtimes fire it from the plugin before the
-session works on the prompt. Claude Code 2.1.321 fires it under that name alone.
-Copilot 1.0.110 fires it from the plugin's `hooks.json` as well as its own
-`userPromptSubmitted`, which squiz does not register. Each sends the prompt in
-`prompt` and the directory in `cwd`:
+**Every hook takes its worktree from the payload's `cwd`**, never from its own
+directory. A stop whose payload has no `cwd`, a relative one, or one in no git
+worktree queues nothing and says so on stderr.
 
-```json
-{"hook_event_name":"UserPromptSubmit","session_id":"51445ba2-2e4c-4c6b-943f-5ee4107e1dd9","timestamp":"2026-11-13T13:14:57.072Z","cwd":"/work/suss-task","prompt":"Add backoff. The first retry is immediate."}
-```
+**A stop firing resolves the pull request whose head is the branch checked out in
+`cwd`, records the session that owns the work, queues the state, and returns at
+once.** It never runs a round or blocks the agent, and exits 0 whatever it found,
+an unreadable payload included. A stop that finds no pull request writes the line
+step 1 gives, naming the branch and the directory.
 
-Two prompts are not handed on:
-
-- **A subagent's brief.** Copilot fires `UserPromptSubmit` for the prompt a
-  session gives its subagent, with the subagent's `agent_id`, in the parent's
-  `cwd`. A payload carrying a non-empty `agent_id` records nothing and says
-  nothing. Claude Code 2.1.321 fires none for a subagent.
-- **A prompt in no git repository.** It records nothing and says nothing, as a
-  start does.
-
-A payload with no `prompt`, or with an empty one, queues and records nothing,
-and the hook says so on stderr. A `recordPrompt` that fails says
-`no prompt was recorded:` and the reason, on stderr. Neither line carries the
-prompt. The reviewer loads no squiz plugin, so no squiz hook fires in its
-session.
-
-**The plugin root is quoted in the command, so a root with a space in its path
-stays one word.** Claude Code runs the command under `/bin/sh` and Copilot under
-`/bin/bash`, and the registration has to hold under both.
-
-| Event | The owner of the work it records |
+| Event | The owner of the work |
 |---|---|
-| `Stop` | The session itself, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one |
-| `SubagentStop` | The session that dispatched the subagent, from the payload's `session_id`, and its `CLAUDE_CODE_MESSAGING_SOCKET` where the hook's environment carries one; and the subagent, from its `agent_id` |
+| `Stop` | The session itself |
+| `SubagentStop` | The session that dispatched the subagent, with the subagent's `agent_id` |
 
-**GitHub Copilot CLI runs the same registrations from the plugin, and the
-socket the hook records under it is the plugin's extension's.** Copilot fires the
-plugin's `Stop` and `SubagentStop` with Claude Code's payload fields, and the
-owner and the subagent come from the same fields as in the table. A firing is
-Copilot's where the hook's environment carries `COPILOT_CLI` with any value but
-the empty string.
+**A stop that is not the coding agent's work queues nothing:**
 
-- **The socket is `squiz.sock` beside the owner's transcript.** The payload's
-  `transcript_path` is `<COPILOT_HOME>/session-state/<session id>/events.jsonl`,
-  and the extension listens in that directory. The hook takes the socket from
-  there only where the transcript's session is the payload's `session_id`.
-- **The hook records it only once a connection to it is accepted, within one
-  second.** It connects and closes without writing. A session started without
-  experimental features has no extension, and a socket file left by a killed
-  extension refuses the connection. Either way the hook records no socket, and
-  the owner is recorded with its session id alone.
-- **A `CLAUDE_CODE_MESSAGING_SOCKET` in the hook's environment is never
-  recorded.** Copilot puts no socket there.
+- a `SubagentStop` whose `agent_type` is empty;
+- a Copilot `Stop` whose `session_id` is not the session its `transcript_path`
+  names. A Claude Code `Stop` is never dropped by this rule.
 
-Both hooks return as soon as they have queued, under Claude Code and Copilot
-alike. The result reaches the owner later, through the wake The report sets out.
+**`UserPromptSubmit` hands the payload's `prompt` to the venue, and does nothing
+else.** The GitHub venue does nothing with it, and the local venue records it as
+the change's description (§ 4 The record). It prints nothing on stdout.
 
-**A `SubagentStop` firing whose `agent_type` is empty is no subagent's work.** In
-an interactive session, Claude Code fires several of them after a turn ends, each
-with a new `agent_id`, the parent's `session_id`, and no transcript. The hook
-does nothing for one: it resolves nothing, records no owner and queues nothing.
+- A payload with a non-empty `agent_id`, or whose `cwd` is in no git repository,
+  records nothing and says nothing.
+- A payload with no `prompt`, or an empty one, records nothing and says so on
+  stderr.
+- A recording that fails writes `no prompt was recorded:` and the reason on
+  stderr.
 
-**A `Stop` firing whose `session_id` is not the session its `transcript_path`
-names is a subagent's turn.** Copilot fires one just before that subagent's
-`SubagentStop`, carrying the subagent's id and the parent's transcript. The hook
-does nothing for one, and the `SubagentStop` that follows queues the work. Only
-a Copilot transcript path, `<COPILOT_HOME>/session-state/<session id>/events.jsonl`,
-names a session, so a Claude Code `Stop` is never dropped by this rule.
+Neither stderr line carries the prompt.
 
 ### The report
 
-**The result goes to the session that owns the work and is still alive.** For a
-regular session's work that is the session itself. For a subagent's work it is
-the session that dispatched it.
+**When a round records its result, the round host writes one note for the
+session that owns the work and is still alive**, as a file in
+`.squiz/<number>/notes/<session id>/`. A subagent's work is reported to the
+session that dispatched it. A failed state gets one note however many times it
+fails, a state not reviewed gets one saying why, and a state with no recorded
+owner gets none.
 
-When a round records its result, the round host writes a note for the owner
-recorded on the state, in `.squiz/<number>/notes/<session id>/`, one file per
-note. Each field is one `key=value` line, and a backslash, line feed or carriage
-return in a value is written as `\\`, `\n` or `\r`:
-
-```
-to=60517e1f-e1dc-49b1-8e39-6fcbe686f3fb
-pr=41
-head=3f9c2e07b1d4a8c6e5f0923b7a1d6c4e8b2f5a90
-subagent=a402ef8f56c1b2ed1
-text=Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2 threads are open:\n\nPRRT_kwDOL7tYbc5abcd1 packages/sync/src/queue.ts:134 high — Retry backoff resets on every enqueue\n  - `enqueue()` calls …
-```
-
-`subagent` is there only where a subagent did the work. A failed state gets one
-note, however many times it fails, and a state not reviewed gets one saying why.
-A state no hook recorded an owner for gets no note.
-
-**A note for open threads carries them.** Just before it writes the note, the
-round host lists the review threads on the pull request. The note prints those
-the round left open that are still open, each as `squiz review` prints it (§ 7),
-in the order GitHub lists them. Where threads remain open with rounds left, the
-text, decoded, reads:
+**A note for open threads gives them, each as `squiz review` prints it (§ 7):**
 
 ```
 Squiz reviewed PR #41 at 3f9c2e0, the work of subagent a402ef8f56c1b2ed1: 2 threads are open:
@@ -653,113 +343,53 @@ Fix what applies in /work/squiz, and reply on each thread with
 you disagree. Commit and push what you changed, then run `squiz review 41` again.
 ```
 
-Where the episode closed with threads open, the first line reads `the episode has
-closed with 2 threads open:`, and the threads end the text, with no paragraph
-after them.
+- **The episode closed with threads open:** the first line ends `the episode has
+  closed with 2 threads open:`, and the threads end the note.
+- **The episode closed with nothing open:** the note says so.
+- **The round failed:** the note gives the reason and names `squiz status`. It
+  says whether a new commit, or running `squiz review` once, retries the state,
+  or which bound closed the review.
+- **More than 10 threads:** the note prints the first 10, then
+  ``3 more threads are open. `squiz review 41` prints them all.``
+- **The threads cannot be listed, or the listing holds none the round left
+  open:** the note counts them and points to `squiz review`, as
+  ``Squiz reviewed PR #41 at 3f9c2e0: 2 threads are open. Run `squiz review 41` to read them.``
+  `host.log` says which case it was, and for a failed listing, why.
 
-- **At most 10 threads.** Where more are open, the note prints the first 10 and
-  ends with a line counting the rest: ``3 more threads are open. `squiz review 41` prints them all.``
-- **A listing that fails leaves a pointer.** Where the threads cannot be listed,
-  or the listing holds none of those the round left open, the note counts them
-  and points to `squiz review` instead. `host.log` says which of the two it
-  was, and for a failed listing, why it failed:
+**Squiz wakes an idle owner with its note.**
 
-  ```
-  text=Squiz reviewed PR #41 at 3f9c2e0: 2 threads are open. Run `squiz review 41` to read them.
-  ```
+- **Claude Code:** where the hook recorded the session's messaging socket, the
+  round host moves the note into `delivered/` and posts its text to the socket as
+  one line, and an idle session starts a turn with it.
+- **Copilot:** the plugin ships `extensions/squiz-wake/extension.mjs`, which
+  Copilot starts in each session. It listens on `squiz.sock` in the session's
+  state directory, which the hook records, and turns each post into a turn.
 
-A round that closed the episode with nothing open says so and points to
-`squiz review` for the close.
+A post that finds nothing listening fails, and is not retried. The note goes back
+to `.squiz/<number>/notes/<session id>/`, where it was written, or stays in
+`delivered/` where that move fails, and `host.log` gives both reasons.
 
-For a round that failed, the text gives the reason and names `squiz status`.
-Where a round remains under the round cap and the token bound, it says that a new
-commit, or running `squiz review` once, retries it:
-
-```
-text=Squiz could not review PR #41 at 3f9c2e0: the reviewer could not run: the provider refused the credential. `squiz status` lists it. A new commit, or running `squiz review 41` once, retries it.
-```
-
-Where no round remains, the text ends as the failure comment does, saying the
-review is closed and which bound closed it (§ 8 The failure comment).
-
-**Then it wakes a Claude Code owner through its messaging socket.** Where the
-hook recorded a socket for the owner, the round host moves the note into
-`delivered/` beside it and posts the text to the socket, and an idle session
-starts a turn with it. The post is one JSON line,
-`{"type":"user","message":{"role":"user","content":"<text>"}}`, on a connection
-the host ends, and nothing is read back.
-
-**A Copilot owner is woken through the plugin's extension.** Copilot loads
-extensions only with its experimental features on, so squiz's Copilot support
-is experimental as a whole, and § 10 has the user turn them on. Copilot starts
-`extensions/squiz-wake/extension.mjs` in each session. It listens on
-`squiz.sock` in the session's state directory, reads the posts the round host
-makes to a Claude Code socket, and turns each one into a turn with
-`session.send()`, as a system message carrying the note's text. The hook
-records that socket as The hooks sets out, and the round host posts
-to it exactly as it posts to Claude Code's.
-
-- **One socket per session.** The extension removes any file at the path before
-  it listens, and removes the socket when the session shuts down and when
-  Copilot stops the extension.
-- **A post that finds nothing listening fails.** The note goes back to wait for
-  a pull, and nothing posts it again.
-
-**A Copilot owner with no socket is woken by nothing.** That is a session
-started without experimental features, which squiz does not support, or one
-whose socket path is too long for the extension (§ 10). Its reviews still run.
-It learns the result from its own `squiz review`, and one it ran in the
-background wakes it when it exits.
-
-**A note no wake reached stays where it was written.** The owner learns the
-result by running `squiz review` or `squiz status`, and the pull request holds it
-in any case.
-
-**A run whose session has ended is woken by nothing.** Under `claude -p` or
-`copilot -p` the run exits once its turn ends, and its review runs after it. The
-round host writes the note all the same, and a socket the stop recorded has
-nothing listening by then, so the note stays waiting. Squiz starts no coding
-agent of its own. A caller with no live session runs the fix loop itself around
-`squiz review`, which waits for the round and prints the threads it left open
-(§ 7), as a coding agent working a pull request does. It hands the threads on
-at exit 2, runs the command again at exit 4, stops at 0 and 3, and stops with
-the status on any other. The output goes outside the worktree, where the local
-venue would review it as part of the change:
-
-```bash
-out=$(mktemp)
-while :; do
-  squiz review 41 > "$out"; code=$?
-  case $code in
-    0|3) break ;;
-    2) claude -p --resume "$SESSION" "$(cat "$out")" || exit ;;
-    4) ;;
-    *) exit "$code" ;;
-  esac
-done
-```
-
-Under the local venue the command is `squiz review`, with no number.
-
+**An owner no wake reaches learns the result from `squiz review` or `squiz
+status`.** That includes a Copilot owner with no socket. One `squiz review` run
+in the background wakes a Copilot owner when it exits. `host.log` says when no
+wake reached the owner, or a note could not be written.
 
 ### Parallel coding agents
 
 **Each worktree is reviewed on its own.** `squiz review` resolves the worktree
-with `git rev-parse --show-toplevel` from the directory it is run in, and the
-hook from the payload's `cwd`, which for a subagent is fixed when it is
-dispatched. One worktree, one branch, one pull request, one live episode.
+with `git rev-parse --show-toplevel` from the directory it runs in, and the hook
+from the payload's `cwd`, which for a subagent is fixed when it is dispatched.
+One worktree, one branch, one pull request, one live episode per pull request.
 
-**The harness does not remove a worktree.** The coding agent is still in it when
-the command returns. Whatever created the worktree removes it. The episode's
-state goes with the worktree.
+**Squiz never removes a worktree.** Whatever created it removes it, and the
+episode's state goes with it.
 
-**A tree two episodes share keeps them apart.** One tree holds two pull
-requests' episodes when its `HEAD` moved to another branch while the first
-episode was live. Each keeps its state under its own number, and each reviewer
-reads a snapshot of its own pull request's head commit.
+**Where a tree's `HEAD` moved to another branch while an episode was live, each
+pull request's episode keeps its state under its own number**, and each reviewer
+reads a snapshot of its own pull request's head.
 
-**Two coding agents on one branch in one tree share one episode, and nothing tells
-them apart.** They spend one round cap between them. Nothing detects this.
+**Two coding agents on one branch in one tree share one episode and one round
+cap**, and nothing detects it (#924).
 
 ## 4. The venue
 
