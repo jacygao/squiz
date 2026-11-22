@@ -1538,9 +1538,10 @@ Four blocks, in this order.
 4. **Notes.** What the threads do not show, one line each, in this order:
    - each finding no thread holds, the earlier rounds' first and then the closing
      round's;
-   - each thread kept open whose reason could not be posted;
-   - each thread closed whose reply could not be posted, with the ruling;
-   - each ruling that could not be applied;
+   - each thread the closing round kept open whose reason could not be posted;
+   - each thread any round closed whose reply could not be posted, with the
+     ruling;
+   - each ruling of the closing round that could not be applied;
    - each round whose finished review never read the diff of a changed file;
    - each round the time bound cut short;
    - the cap or the bound, where one ended the episode, with each queued state it
@@ -1635,8 +1636,8 @@ subscription adds no dollars.
   floor round's own figure, and every total of an episode holding one.
 - **A round that completed no assistant message reads "unknown"** in place of its
   tokens, never zero. A floor round among them still marks the totals. Where no
-  round with a cost completed one, the line reads "No spend was reported over 2
-  rounds".
+  round with a cost completed one, the line reads "No spend was reported"
+  followed by the rounds it covers, as "No spend was reported over 2 rounds".
 - **A round with no cost has no figure.** The line covers the rounds that have
   one, says how many those are, and names no round's own figure:
   `18,200 tokens over 1 of 2 rounds · 0.36 AI credits`. Where no round has a
