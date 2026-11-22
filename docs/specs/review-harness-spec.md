@@ -2875,8 +2875,8 @@ squiz: allowed Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *)
 ```
 
 Its exit status is the link's alone: 0 where the link is in place afterwards,
-and 1 otherwise, with the link's line on stderr. A settings line saying nothing
-was allowed goes on stderr too, and leaves the exit as the link set it.
+and 1 otherwise, with the link's line on stderr. A settings file it could not
+change puts its line on stderr too, and leaves the exit as the link set it.
 
 **The link** goes in `~/.local/bin`, or else `~/bin`: the first of the two that
 is on `PATH` and is a writable directory. No directory is created and no shell
