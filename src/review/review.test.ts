@@ -856,6 +856,43 @@ test("#915: a host that records the close and exits between the run's read and i
   });
 });
 
+test("#915: a run waiting on a failed round whose host stopped before recording its close claims no summary", async () => {
+  await withWorktree(async (fixture) => {
+    // The run's own state is the failed one, and no process holds the host lock.
+    records(fixture, [{ ...POSTING_CLOSE, activity: null }], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 100) }));
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(NOT_KNOWN), printed.stderr);
+    assert.doesNotMatch(printed.stdout, /its summary\s+is on the pull request/u, "the run claimed a summary nobody recorded posting");
+  });
+});
+
+const COMMENT_REFUSED = "the failure could not be posted on PR #41: gh: HTTP 502 Bad Gateway";
+
+test("#915: a later run on an episode a failed round closed prints where its failure comment went", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...POSTING_CLOSE, round: ran(3), lines: [COMMENT_REFUSED] }], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }) }));
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${COMMENT_REFUSED}\n`), `the failure comment's outcome did not reach a later run: ${printed.stderr}`);
+  });
+});
+
+test("#915: a state queued behind a failed round prints where that round's failure comment went", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...POSTING_CLOSE, round: ran(3), lines: [COMMENT_REFUSED] }, LEFT_BY_THE_CLOSE], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${COMMENT_REFUSED}\n`), `the failure comment's outcome did not reach the queued state's run: ${printed.stderr}`);
+  });
+});
+
 test("#915: a failed close whose round host stopped before recording it is printed at once, saying the summary's outcome is unknown", async () => {
   await withWorktree(async (fixture) => {
     // No process holds the host lock, so nothing will replace the close the round wrote.

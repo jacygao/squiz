@@ -564,8 +564,9 @@ function closedUnreviewed(
     reason: first.reason,
     closedAt: closed.closedAt,
     threads: threads.filter((thread) => closed.openThreads.includes(thread.id)),
-    // The close records a problem only where its summary is not on the pull request.
-    summarised: problems.length === 0,
+    // The close records a problem only where its summary is not on the pull request,
+    // and one its round host never recorded may not be on it either.
+    summarised: problems.length === 0 && first.round !== undefined,
     // Where the failure comment went follows what the close left failing.
     problems: [...problems, ...(first.round === undefined ? [unrecordedSummary(waiting)] : []), ...(first.lines ?? [])],
   };
@@ -669,6 +670,8 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
       ...((closing === undefined ? first?.closed.problems : closing.problems) ?? []),
       // Printed only once the run found the round host gone, since one that runs is waited on.
       ...(closing === undefined && first !== undefined && first.round === undefined ? [unrecordedSummary(context)] : []),
+      // Where the failed round's comment went, as the run that waited on it printed.
+      ...(closing === undefined ? (first?.lines ?? []) : []),
     ],
   };
 }
