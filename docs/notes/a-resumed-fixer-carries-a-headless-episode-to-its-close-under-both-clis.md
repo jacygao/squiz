@@ -8,6 +8,10 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` restores a sessio
 
 # A resumed fixer carries a headless episode to its close under both CLIs
 
+**2026-11-22:** squiz no longer starts a fixer, and § 3 no longer has its
+headless runs, handoff or markers. What follows records them as they stood
+when this was measured.
+
 Each CLI ran as both the coding agent and the fixer, once, in a scratch
 repository with one base commit and no remote. Squiz was loaded from this
 repository's checkout with `--plugin-dir`. `.squiz.json` named the local venue,

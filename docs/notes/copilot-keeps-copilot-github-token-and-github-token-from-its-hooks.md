@@ -1,5 +1,5 @@
 ---
-settles: "§ 5 — how a Copilot reviewer started from a Copilot run's hook signs in; § 3 — how a Copilot fixer signs in; § 10 — copilotTokenFile"
+settles: "§ 5 — how a Copilot reviewer started from a Copilot run's hook signs in; § 10 — copilotTokenFile"
 issue: 895
 recorded: 2026-11-15
 versions: { copilot: 1.0.112, node: 24.15.0, macos: 26.6.2 }
@@ -7,6 +7,10 @@ recheck-when: Copilot CLI changes the environment it gives its hooks
 ---
 
 # Copilot keeps `COPILOT_GITHUB_TOKEN` and `GITHUB_TOKEN` from its hooks
+
+**2026-11-22:** squiz no longer starts a fixer. The reviewer's sign-in below
+still holds, and what it says of the fixer records the fixer as it stood
+when this was measured.
 
 ## Intent
 

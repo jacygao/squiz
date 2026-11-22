@@ -111,11 +111,6 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
       `\`${inWorktree(root, "squiz reply <id> <text>")}\` to say what you changed or why`,
       `you disagree. Then run \`${rerun}\` again.`,
     ].join("\n"),
-    fixerFollowUp: [
-      `Fix what applies in ${root}, and reply on each thread with`,
-      `\`${inWorktree(root, "squiz reply <id> <text>")}\` to say what you changed or why`,
-      "you disagree. Nothing needs committing: squiz reviews the working tree as it stands.",
-    ].join("\n"),
     base: base.base,
     head: built.head,
     ...description,
@@ -128,7 +123,7 @@ function readChange(directory: string, asked: string | null, until: Deadline): C
  * `description.md`, written by whoever started the run, else the run's prompt,
  * else none. A `description.md` that exists wins, even an empty one.
  */
-function descriptionIn(worktree: string): Pick<Change, "description" | "descriptionFrom"> | Failed {
+function descriptionIn(worktree: string): Pick<Change, "description"> | Failed {
   const path = join(localDirectory(worktree), DESCRIPTION_FILE);
   try {
     return { description: readFileSync(path, "utf8") };
@@ -140,7 +135,7 @@ function descriptionIn(worktree: string): Pick<Change, "description" | "descript
   const prompt = readPrompt(worktree);
   if (prompt === null) return { description: "" };
   if (typeof prompt !== "string") return prompt;
-  return { description: prompt, descriptionFrom: "prompt" };
+  return { description: prompt };
 }
 
 function rootOf(directory: string, until: Deadline): string | Failed {

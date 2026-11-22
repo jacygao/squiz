@@ -56,30 +56,8 @@ export type Firing =
   | { readonly event: "SessionStart"; readonly directory: string }
   | { readonly event: "SubagentStart"; readonly directory: string }
   | { readonly event: "UserPromptSubmit"; readonly directory: string; readonly prompt: string }
-  | {
-      readonly event: "Stop";
-      readonly directory: string;
-      readonly owner: Owner;
-      /** The session's final message. Absent where the payload carries none, as Copilot's never does. */
-      readonly lastMessage?: string;
-      /** The absolute path of the session's transcript. Absent where the payload carries none. */
-      readonly transcript?: string;
-    }
-  | {
-      readonly event: "SubagentStop";
-      readonly directory: string;
-      readonly owner: Owner;
-      readonly subagent: string;
-      /** The subagent's final message, as its parent received it. Absent where the payload carries none. */
-      readonly lastMessage?: string;
-      /** The absolute path of the subagent's own transcript. Absent where the payload carries none. */
-      readonly transcript?: string;
-      /**
-       * The parent's Copilot transcript, which holds the subagent's events, where
-       * the payload names no transcript of the subagent's own. Absent otherwise.
-       */
-      readonly parentTranscript?: string;
-    };
+  | { readonly event: "Stop"; readonly directory: string; readonly owner: Owner }
+  | { readonly event: "SubagentStop"; readonly directory: string; readonly owner: Owner; readonly subagent: string };
 
 export type FiringRead =
   | { readonly outcome: "read"; readonly firing: Firing }
@@ -139,30 +117,13 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
 
   const directory = absoluteCwd(payload);
   if (directory === undefined) return unreadable(NO_CWD);
-  // None of the report's fields is needed to queue the work, so a payload
-  // without one, or with one in a shape this does not know, is read without it.
-  const lastMessage = lastMessageIn(payload["last_assistant_message"]);
-  if (event === "Stop") {
-    const transcript = transcriptIn(payload["transcript_path"]);
-    return { outcome: "read", firing: { event, directory, owner, ...lastMessage, ...transcript } };
-  }
+  if (event === "Stop") return { outcome: "read", firing: { event, directory, owner } };
 
   const agentId = payload["agent_id"];
   if (typeof agentId !== "string" || agentId === "") {
     return unreadable('the payload carries no "agent_id", which names the subagent');
   }
-  const transcript = transcriptIn(payload["agent_transcript_path"]);
-  // Copilot keeps a subagent's events in its parent's transcript, and names no
-  // transcript of the subagent's own.
-  const parent = transcriptIn(payload["transcript_path"]).transcript;
-  const parentTranscript =
-    transcript.transcript === undefined && parent !== undefined && transcriptSession(parent) === sessionId
-      ? { parentTranscript: parent }
-      : {};
-  return {
-    outcome: "read",
-    firing: { event, directory, owner, subagent: agentId, ...lastMessage, ...transcript, ...parentTranscript },
-  };
+  return { outcome: "read", firing: { event, directory, owner, subagent: agentId } };
 }
 
 function promptFiring(payload: Readonly<Record<string, unknown>>): FiringRead {
@@ -173,14 +134,6 @@ function promptFiring(payload: Readonly<Record<string, unknown>>): FiringRead {
   const directory = absoluteCwd(payload);
   if (directory === undefined) return unreadable(NO_CWD);
   return { outcome: "read", firing: { event: "UserPromptSubmit", directory, prompt } };
-}
-
-function lastMessageIn(value: unknown): { readonly lastMessage?: string } {
-  return typeof value === "string" && value !== "" ? { lastMessage: value } : {};
-}
-
-function transcriptIn(value: unknown): { readonly transcript?: string } {
-  return typeof value === "string" && isAbsolute(value) ? { transcript: value } : {};
 }
 
 /**

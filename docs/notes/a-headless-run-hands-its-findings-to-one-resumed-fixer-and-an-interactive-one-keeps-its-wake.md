@@ -8,6 +8,10 @@ recheck-when: Claude Code or Copilot CLI change how `--resume` or `--session-id`
 
 # A headless run hands its findings to one resumed fixer, and an interactive one keeps its wake
 
+**2026-11-22:** squiz no longer starts a fixer, and § 3 no longer has its
+headless runs, handoff or markers. What follows records them as they stood
+when this was measured.
+
 ## Intent
 
 - Whether a headless run (`claude -p`, `copilot -p`) should wait for its review

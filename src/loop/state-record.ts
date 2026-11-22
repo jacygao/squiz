@@ -10,7 +10,6 @@
  * Nothing here touches the filesystem or decides anything from a record.
  */
 
-import type { FixerAgent } from "../config/config.ts";
 import { isHerdrWorkspace } from "../sessions/herdr.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 
@@ -33,12 +32,6 @@ export type Owner = {
   readonly subagent?: string;
   /** Present only where the hook found one. */
   readonly messagingSocket?: string;
-  /** The final message of the agent that stopped, present only where its stop's payload carried one. */
-  readonly lastMessage?: string;
-  /** The path of that agent's own transcript, present only where its stop's payload carried one. */
-  readonly transcript?: string;
-  /** The parent's transcript, which holds a subagent's events where the subagent has no transcript of its own. */
-  readonly parentTranscript?: string;
 };
 
 export type Backend = "herdr" | "tmux" | "detached";
@@ -79,23 +72,6 @@ export type ReviewedRound = FinishedRound & { readonly reviewer: ReviewerPlace }
 
 /** A `squiz review` exit status a round can end on. */
 export type ReviewedExit = 0 | 2 | 3;
-
-/**
- * How the fixer a round started to work its open threads went, as the round
- * host's start of it saw.
- */
-export type FixerStart =
-  | { readonly outcome: "started"; readonly agent: FixerAgent; readonly process: ProcessIdentity; readonly session?: StartedSession }
-  /** It started, and had ended before its identity could be read. */
-  | { readonly outcome: "exited"; readonly agent: FixerAgent; readonly pid: number; readonly session?: StartedSession }
-  | { readonly outcome: "failed"; readonly agent: FixerAgent; readonly reason: string }
-  /** It may have started, and nothing could say so, or what it is. */
-  | { readonly outcome: "unknown"; readonly agent: FixerAgent; readonly reason: string }
-  /** No start was tried, for the reason given. */
-  | { readonly outcome: "not started"; readonly reason: string };
-
-/** The session a fixer ran in, and whether it resumed it rather than starting it. */
-export type StartedSession = { readonly id: string; readonly resumed: boolean };
 
 /** What closed an episode with threads still open. */
 export type ClosingBound = "round cap" | "token bound";
@@ -145,8 +121,6 @@ export type StateRecord = Shared &
             readonly openThreads: readonly string[];
             /** The bound that closed the episode with threads open, on a round that exited 3. */
             readonly closedAt?: ClosingBound;
-            /** The fixer started on the round's open threads, where `.squiz.json` names one. */
-            readonly fixer?: FixerStart;
           }
         | {
             // Nothing was left open, and a later state was queued behind this one,
@@ -298,25 +272,11 @@ function ownerFrom(found: unknown): ReadOwner {
   if (socket !== undefined && !isText(socket)) {
     return { problem: `has "owner.messagingSocket" as ${render(socket)}` };
   }
-  const lastMessage = found["lastMessage"];
-  // Not rendered: it is the agent's own words, of any length.
-  if (lastMessage !== undefined && !isText(lastMessage)) return { problem: `has an "owner.lastMessage" that is not text` };
-  const transcript = found["transcript"];
-  if (transcript !== undefined && !isText(transcript)) {
-    return { problem: `has "owner.transcript" as ${render(transcript)}` };
-  }
-  const parentTranscript = found["parentTranscript"];
-  if (parentTranscript !== undefined && !isText(parentTranscript)) {
-    return { problem: `has "owner.parentTranscript" as ${render(parentTranscript)}` };
-  }
   return {
     owner: {
       sessionId,
       ...(subagent === undefined ? {} : { subagent }),
       ...(socket === undefined ? {} : { messagingSocket: socket }),
-      ...(lastMessage === undefined ? {} : { lastMessage }),
-      ...(transcript === undefined ? {} : { transcript }),
-      ...(parentTranscript === undefined ? {} : { parentTranscript }),
     },
   };
 }
@@ -430,38 +390,7 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
     return { problem: `has "closedAt" as ${render(closedAt)} rather than "round cap" or "token bound"` };
   }
   const bound: { closedAt?: ClosingBound } = closedAt === undefined ? {} : { closedAt };
-  const found = entry["fixer"];
-  if (found === undefined) return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
-  const fixer = fixerFrom(found);
-  if (fixer === undefined) return { problem: `has "fixer" as ${render(found)}` };
-  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, fixer, ...kept } };
-}
-
-function fixerFrom(found: unknown): FixerStart | undefined {
-  if (!isObject(found)) return undefined;
-  const outcome = found["outcome"];
-  const agent = found["agent"];
-  const reason = found["reason"];
-  if (outcome === "not started") return isText(reason) ? { outcome, reason } : undefined;
-  if (agent !== "claude" && agent !== "copilot") return undefined;
-  if (outcome === "failed" || outcome === "unknown") return isText(reason) ? { outcome, agent, reason } : undefined;
-  const session = found["session"];
-  const read = session === undefined ? undefined : sessionFrom(session);
-  if (session !== undefined && read === undefined) return undefined;
-  const kept = read === undefined ? {} : { session: read };
-  if (outcome === "started") {
-    const identity = identityFrom(found["process"]);
-    return identity === undefined ? undefined : { outcome, agent, process: identity, ...kept };
-  }
-  const pid = found["pid"];
-  if (outcome !== "exited" || typeof pid !== "number" || !Number.isInteger(pid) || pid < 1) return undefined;
-  return { outcome, agent, pid, ...kept };
-}
-
-function sessionFrom(found: unknown): StartedSession | undefined {
-  if (!isObject(found)) return undefined;
-  const { id, resumed } = found;
-  return isText(id) && typeof resumed === "boolean" ? { id, resumed } : undefined;
+  return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
 }
 
 function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {

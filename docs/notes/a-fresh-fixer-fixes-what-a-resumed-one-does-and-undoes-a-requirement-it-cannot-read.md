@@ -8,6 +8,10 @@ recheck-when: squiz hands the fixer the run's prompt or transcript (#859, #870),
 
 # A fresh fixer fixes what a resumed one does, and undoes a requirement it cannot read
 
+**2026-11-22:** squiz no longer starts a fixer, and § 3 no longer has its
+headless runs, handoff or markers. What follows records them as they stood
+when this was measured.
+
 ## Intent
 
 - Given the same findings, does a fresh fixer handed `rounds/<k>/handoff.md`

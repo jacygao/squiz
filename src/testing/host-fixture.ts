@@ -16,7 +16,6 @@ import { runHost } from "../host/host.ts";
 import type { Adapter, ParsedRun, ThreadVerdict } from "../reviewers/adapter.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { githubVenue } from "../venues/github/venue.ts";
-import { localVenue } from "../venues/local/venue.ts";
 
 /** What one reviewer start reports, and how long it runs before it does. */
 export type PlannedStart = {
@@ -34,23 +33,8 @@ export type Plan = {
    * The round cap and token bound, where a test sets them. Every host reads the
    * plan afresh, so a test can lower one between runs.
    */
-  readonly config?: Partial<Pick<Config, "rounds" | "tokens" | "fixer">>;
-  /** The venue every host reviews in. The GitHub venue where not given. */
-  readonly venue?: "local";
-  /** What each run of `fixer-stand-in.ts` does, in order. A run past the end changes the tree and stops once. */
-  readonly fixes?: readonly PlannedFix[];
+  readonly config?: Partial<Pick<Config, "rounds" | "tokens">>;
 };
-
-/**
- * What one fixer run does:
- *
- * - `changes`: change the tree and stop.
- * - `changes nothing`: stop having changed nothing.
- * - `stops twice`: change the tree, stop, wait for that change's review, and stop again.
- * - `cannot resume`: exit 1 at once where it was asked to resume a session, and change and stop otherwise.
- * - `stops as another session`: change the tree, and stop carrying a session id other than its own.
- */
-export type PlannedFix = "changes" | "changes nothing" | "stops twice" | "cannot resume" | "stops as another session";
 
 const [number = "", planFile = ""] = process.argv.slice(2);
 const plan = JSON.parse(readFileSync(planFile, "utf8")) as Plan;
@@ -90,5 +74,5 @@ const adapter: Adapter = {
 await runHost({
   worktree: process.cwd(),
   key: number,
-  round: { venue: plan.venue === "local" ? localVenue : githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
+  round: { venue: githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
 });

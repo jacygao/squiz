@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,9 @@ import { standIn } from "../testing/stand-in.ts";
 import type { Plan, PlannedStart } from "../testing/host-fixture.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
+import { runHook } from "../hook/hook.ts";
+import { trigger } from "../host/trigger.ts";
+import { waitingNotes } from "../sessions/notes.ts";
 import { githubVenue } from "../venues/github/venue.ts";
 import { runReview } from "./review.ts";
 import { squizStatus } from "./status.ts";
@@ -1077,6 +1081,30 @@ test("#852: a run straight after a push, which GitHub still answers with the clo
     );
     assert.equal(second.exit, 0);
     assert.equal(started(fixture), 2, "no round ran on the pushed commit");
+  });
+});
+
+// The hook exits 0 on every path, so only the state it queued and the note the round wrote tell a working Stop from one that did nothing.
+test("#910: a Stop under the GitHub venue queues its state, a round reviews it, and its owner gets a note carrying the thread the round opened", async () => {
+  await withPullRequest([{ findings: [FINDING], verdicts: [] }], async (fixture) => {
+    const owner = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
+    const payload = JSON.stringify({ session_id: owner, cwd: fixture.worktree, hook_event_name: "Stop", stop_hook_active: false });
+    await runHook({
+      stdin: Readable.from([payload]),
+      environment: {},
+      trigger: (request) => trigger({ ...request, host: (key) => ({ command: process.execPath, args: [hostFixture, key, fixture.planFile] }) }),
+    });
+
+    const lock = join(fixture.episode.directory, "host.lock");
+    for (let waited = 0; waited < 300 && (existsSync(lock) || !(stateOf(fixture.episode).records ?? []).some((record) => record.status === "reviewed")); waited += 1) await sleep(100);
+    const [record] = stateOf(fixture.episode).records ?? [];
+    assert.ok(record?.status === "reviewed" && record.result === "exited" && record.exitStatus === 2, `the Stop's state was recorded as ${JSON.stringify(record)}\n${hostLog(fixture.episode)}`);
+    assert.equal(record.owner?.sessionId, owner, "the state was not recorded as the Stop's session's");
+    const listed = waitingNotes(join(fixture.episode.directory, "notes"), owner);
+    assert.ok(listed.outcome === "listed", `the notes were not listed: ${JSON.stringify(listed)}`);
+    const [note] = listed.notes;
+    assert.ok(listed.notes.length === 1 && note?.outcome === "read", `the owner has notes ${JSON.stringify(listed.notes)}\n${hostLog(fixture.episode)}`);
+    assert.match(note.fields["text"] ?? "", /^Squiz reviewed PR #41 at [0-9a-f]{7}: 1 thread is open:\n\nPRRT_1 src\/ui\/card\.ts:2 high — The new line says nothing/u);
   });
 });
 

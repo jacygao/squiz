@@ -31,21 +31,10 @@ export type Change = {
    * output: what to fix, how to reply, and what to run next.
    */
   readonly followUp: string;
-  /**
-   * The paragraph after the open threads in a fixer's handoff and update: what
-   * to fix, how to reply, and what makes the fix part of the change. It never
-   * asks for `squiz review`, which the fixer must not run.
-   */
-  readonly fixerFollowUp: string;
   /** Full shas. */
   readonly base: string;
   readonly head: string;
   readonly description: string;
-  /**
-   * `prompt` where nobody wrote a description, and the description is the
-   * prompt the run was started with. Absent where someone wrote it.
-   */
-  readonly descriptionFrom?: "prompt";
   /**
    * The commit this worktree pushed to the change that the venue does not yet
    * report as its head, as GitHub does for a few seconds after a push. Absent

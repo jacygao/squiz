@@ -70,7 +70,6 @@ function oneKeyVenue(tree: string, head: string, asked: { key: string; worktree:
     rerun: "squiz review k41",
     summaryAt: "on the pull request",
     followUp: "Fix it.",
-    fixerFollowUp: "Fix it.",
     base: head,
     head,
     description: "",

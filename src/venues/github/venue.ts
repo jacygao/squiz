@@ -56,12 +56,6 @@ export function followUpFor(number: number, worktree: string): string {
   ].join("\n");
 }
 
-/** The paragraph after the open threads in a fixer's handoff. */
-export const FIXER_FOLLOW_UP = [
-  "Fix what applies, and reply on each thread with `squiz reply <id> <text>` to say",
-  "what you changed or why you disagree. Commit and push what you changed.",
-].join("\n");
-
 /** The one line `squiz review` prints for a draft. */
 export function draftLine(number: number): string {
   return `PR #${number} is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.`;
@@ -259,7 +253,6 @@ function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange
     rerun: `squiz review ${number}`,
     summaryAt: "on the pull request",
     followUp: followUpFor(number, worktree),
-    fixerFollowUp: FIXER_FOLLOW_UP,
     base: pullRequest.baseSha,
     head: pullRequest.headSha,
     description: pullRequest.description,
