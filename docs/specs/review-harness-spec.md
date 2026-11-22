@@ -16,46 +16,34 @@ The local venue).
 
 ## 2. Dependencies
 
-Squiz runs on the developer's machine, and needs all three of these. The local
-venue needs `git` in place of the GitHub repository, and no `gh` (§ 4).
+Squiz runs on the developer's machine. The GitHub venue needs all three of
+these. The local venue needs `git` in place of the GitHub repository (§ 4).
 
 | Dependency | Supported | Needed for |
 |---|---|---|
-| GitHub repository | `git`, and `gh` signed in | The pull request is where the review happens and is recorded. |
-| Runtime | Claude Code / GitHub Copilot CLI | Runs the coding agent, and starts a review when the agent finishes its work. Copilot support is experimental (§ 3 The report). |
-| Reviewer | `pi` / GitHub Copilot CLI | Reviews the change. It should run a different model from the coding agent, so that no model reviews its own work, but that is the user's choice, and squiz does not check it. Only the one `reviewer` names has to be installed. |
-
-A terminal multiplexer is optional. Where tmux or Herdr is running, each
-reviewer runs in a pane of it, where a person can watch it. Where neither is,
-the reviewer runs detached, and a log holds its progress.
+| GitHub repository | `git`, and `gh` signed in | Holds the pull request the review is recorded on. |
+| Runtime | Claude Code / GitHub Copilot CLI | Runs the coding agent, and starts a review when the agent finishes its work. |
+| Reviewer | `pi` / GitHub Copilot CLI | Reviews the change. Only the one the `reviewer` setting names has to be installed. |
 
 ### GitHub access
 
-The harness must be able to:
+Squiz does all of this through `gh`:
 
-- Read a pull request: its description, its base and head refs, and the
-  commit each names
-- List the existing review threads and whether each one is resolved
-- Create a review comment anchored to a file and a line
-- Create a review comment on a file as a whole, carrying no line
-- Reply inside an existing review comment thread
+- Read a pull request: its description, its base and head refs, and the commit
+  each names
+- List its review threads, and whether each one is resolved
+- Post a review comment anchored to a file and a line, or to a file with no line
+- Reply inside a review thread
 - Resolve a review thread, and re-open one
 - Post an issue-level comment on the pull request, for the summary and for a
   round that failed
 
-`gh pr comment` and `gh pr review` take a body only, so every anchored comment
-goes through `gh api`. Resolving and re-opening a thread go through GraphQL,
-since REST has neither.
-
 ### Identity
 
-Every comment is posted with the credentials `gh` holds, so all of them appear
-under the account that authenticated it. The reviewer, the coding agent and the
-harness share one GitHub identity.
+Every comment is posted with the credentials `gh` holds. The reviewer, the
+coding agent and the harness all post as the one account `gh` authenticated.
 
-Each comment names its own author at the start of its first line, inside that
-line's bold span. What follows the marker differs from comment to comment, so
-the marker is the opening of the span rather than the whole of it.
+Each comment's first line opens a bold span with its author's marker:
 
 | Written by | Begins |
 |---|---|
@@ -64,10 +52,7 @@ the marker is the opening of the span rather than the whole of it.
 | The harness, at close | `**Squiz review — ` |
 | The harness, when a round fails | `**Squiz review failed — ` |
 
-A comment without one of those markers was written by a person.
-
-`**Squiz review` is a prefix of `**Squiz reviewer`, so a marker is matched up to
-and including the character after the name.
+A comment that carries none of these markers is read as written by a person.
 
 ## 3. The loop
 
