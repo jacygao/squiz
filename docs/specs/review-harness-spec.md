@@ -1591,9 +1591,9 @@ with different replies".
 ### The format
 
 ```markdown
-**Squiz review — 3 rounds, 9 findings**
+**Squiz review — 3 rounds, 10 findings**
 
-Fixed 2 · Withdrawn 1 · Open 3 · Disputed 1
+Fixed 2 · Withdrawn 1 · Open 4 · Disputed 1
 At least 48,200 tokens over 3 rounds: 20,100, at least 16,400, 11,700 · at least $0.0105 · at least 0.84 AI credits
 Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3
 
@@ -1603,12 +1603,13 @@ Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `
 - `src/session.ts:57` — Clock skew is read as token expiry (disputed)
 - `src/retry.ts` — Every path here is dead once the queue lands (open)
 - `src/queue.ts:140` — The cap is never read (open)
+- `src/queue.ts:88` — The retry limit is read before it is set (open)
 
 **Rounds**
 
 - Round 1 at 3f9c2e0: raised 6 findings
 - Round 2 at 1b86987: raised 2 findings, and ruled 2 fixed, 1 withdrawn and 2 open
-- Round 3 at 8d21a4f: raised 1 finding, and ruled 1 fixed and 2 open
+- Round 3 at 8d21a4f: raised 2 findings, and ruled 1 fixed and 2 open
 
 **Notes**
 
