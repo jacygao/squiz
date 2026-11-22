@@ -2466,195 +2466,97 @@ Squiz runs on macOS and Linux, and on Windows under WSL.
 
 ### Installing
 
-Squiz is a plugin for Claude Code and for Copilot, and this repository is its
-marketplace for both. `.claude-plugin/marketplace.json` names the marketplace
-`squiz` and lists one plugin, squiz, whose source is the repository's own root.
+This repository is squiz's marketplace for both Claude Code and Copilot.
+`.claude-plugin/marketplace.json` names the marketplace `squiz` and lists one
+plugin, squiz, whose source is the repository's root, at the version
+`plugin.json` carries. Each runtime adds the marketplace as `jacygao/squiz` and
+installs the plugin as `squiz@squiz`, with the commands the README gives under
+Install.
 
-Into Claude Code:
-
-```
-/plugin marketplace add jacygao/squiz
-/plugin install squiz@squiz
-```
-
-Into Copilot:
-
-```
-copilot plugin marketplace add jacygao/squiz
-copilot plugin install squiz@squiz
-```
-
-Each runtime keeps a copy of its own, and runs the hooks from it:
-
-- **Claude Code** copies the repository into
-  `plugins/cache/squiz/squiz/<version>/` under its configuration directory,
-  where the version is the one `plugin.json` carries. The marketplace entry
-  carries the same version.
-- **Copilot** copies it into `<COPILOT_HOME>/installed-plugins/squiz/squiz/`,
-  and runs the extension from there too. `copilot plugin update squiz` replaces
-  the copy in place, so the path does not change.
-
-A person who installs squiz into both updates both, so that the two copies are
-one version. `squiz doctor` warns where they are not (§ 7 The setup check).
-
-**After updating squiz in Claude Code, run `squiz init` again,** by typing
-`! squiz init` in a Claude Code session started after the update. Claude Code
-copies a new version beside the old one and deletes the old one 14 days later,
-so until then the link `squiz init` made names the old version, and after that it
-names nothing. `! squiz doctor` warns about the link until `squiz init` moves it.
-
-`/plugin uninstall squiz` removes squiz from Claude Code, and
-`copilot plugin uninstall squiz` from Copilot.
-
-A Copilot session can also load a checkout with `copilot --plugin-dir
-<checkout>`, which loads the same hooks and extension from the checkout
-itself.
-
-### Getting started
-
-Two things, the second one optional. Nothing goes in the project's
-`.gitignore`: squiz keeps `.squiz/`, where it writes each episode's state, out
-of git itself (§ 3 The state file).
-
-1. Allow the coding agent's three `squiz` commands, so it is not prompted every
-   time it starts a round or works a thread. For Claude Code, `squiz init` has
-   already done this, once for every project, in the user's settings in
-   `$CLAUDE_CONFIG_DIR` or `~/.claude` (§ 7 `squiz init`). A Copilot session is
-   started with `squiz` allowed. Copilot matches a `shell(...)` rule on the
-   command's name alone, so the one rule allows every `squiz` subcommand:
-
-   ```
-   copilot --allow-tool='shell(squiz)'
-   ```
-
-2. **Optional.** `.squiz.json` in the host project's main worktree, to change any of the
-   settings below. Every one has a working default, so a project that writes
-   none still runs.
-
-Then check the setup with `squiz doctor` (§ 7 The setup check), from the
-repository. In a Claude Code session, type it after `!`:
-
-```
-! squiz doctor
-```
-
-Elsewhere, run `squiz doctor` in a shell once `squiz init` has linked it.
-
-**A Claude Code or Copilot coding agent needs no instruction to start a review.**
-The plugin's hooks start one each time the agent finishes its work, and the
-session that owns the work is woken with the result, which names
-`squiz review` (§ 3 The report). Nothing goes in the project's `AGENTS.md` for
-this.
-
-**Every Copilot session of a user who installed squiz loads it,** with its
-hooks, and with its extension where experimental features are on.
-
-**Squiz's Copilot support is experimental, because it relies on Copilot's
-experimental features.** Squiz wakes an idle Copilot session through an
-extension the plugin ships, and Copilot loads extensions only with experimental
-features on. Setting up Copilot includes turning them on once, for the user, by
-either of:
-
-```
-copilot --experimental
-```
-
-```
-/experimental on
-```
-
-Each writes `"experimental": true` to `<COPILOT_HOME>/settings.json`, which turns
-them on for every later session of that user. A Copilot session without them is
-unsupported: its reviews still run, and it learns the result only from a
-`squiz review` it runs itself.
-
-The socket's path, `<COPILOT_HOME>/session-state/<session id>/squiz.sock`, must
-fit in the 104 bytes macOS allows a socket path, and the 108 Linux allows. Under
-a `COPILOT_HOME` too long for it, the extension cannot listen, and says so in the
-session as a warning.
-
-**Every coding agent but Claude Code reaches `squiz` through a link
-`squiz init` makes**, Copilot included. Run `squiz init` once on each machine. Where Claude Code has squiz
-enabled, type `! squiz init` in a Claude Code session, so that every agent runs
-the squiz Claude Code uses. Where only Copilot has it, run it by path from
-Copilot's copy:
+Every coding agent but Claude Code runs `squiz` through the link `squiz init`
+makes (§ 7 `squiz init`), which is made once per machine. Where Claude Code has
+squiz enabled, the user types `! squiz init` in a Claude Code session. Where only
+Copilot has it, the user runs it from Copilot's copy:
 
 ```
 <COPILOT_HOME>/installed-plugins/squiz/squiz/bin/squiz init
 ```
 
-It links `~/.local/bin/squiz`, or `~/bin/squiz`, to that plugin's `bin/squiz`,
-and makes no link where a `squiz` that is not this one is already on `PATH`
-(§ 7 `squiz init`). A Copilot session then runs `squiz` by name.
+After updating squiz in Claude Code, the user types `! squiz init` again, in a
+session started after the update. Until then, `! squiz doctor` warns about the
+link.
 
-The reviewer reads `AGENTS.md` for the conventions it cannot derive from the
-code, and for whatever else the project treats as authoritative. Without it the
-review reports no convention violations.
+### Getting started
 
-A project that runs coding agents in parallel gives each one its own worktree on
-its own branch. Squiz does not create them, and does not remove them.
+**A Claude Code or Copilot coding agent needs no instruction to be reviewed,**
+and nothing in the project's `AGENTS.md`. The plugin's hooks start a review each
+time the agent finishes its work (§ 3 What starts a round).
+
+The coding agent runs three `squiz` commands without being prompted. Claude Code
+needs nothing per project for them, because `squiz init` allowed them in the
+user's settings. A Copilot session is started with
+`copilot --allow-tool='shell(squiz)'`.
+
+**Squiz's Copilot support is experimental.** The user turns on Copilot's
+experimental features once, with `copilot --experimental` or `/experimental on`.
+Every Copilot session of a user who installed squiz then loads squiz's hooks and
+its wake extension. Where the session's socket path,
+`<COPILOT_HOME>/session-state/<session id>/squiz.sock`, is longer than 104 bytes
+on macOS or 108 on Linux, the extension cannot listen, and says so in the session
+as a warning.
 
 ### Configuration
 
-`.squiz.json`, at the root of the repository's main worktree: the worktree the
-common `.git` belongs to, which `git worktree list --porcelain` names first. It is read
-from there whichever worktree is under review, and never from the reviewed
-worktree itself. Every worktree of a repository therefore reviews with the same
-settings, which are per repository on the machine rather than per branch. A
-branch that changes `.squiz.json` has its change applied once the change reaches
-the main worktree.
+Every squiz process reads one optional `.squiz.json`, at the root of the main
+worktree of the worktree it acts on. The main worktree is the one
+`git worktree list --porcelain` names first. Squiz never reads the reviewed
+worktree's own `.squiz.json`, so every worktree of a repository has one
+configuration.
 
-Where the main worktree holds no `.squiz.json`, every setting takes its default.
-`squiz review` then writes one line on stderr naming the main worktree, and its
-outcome and exit status are unchanged. A round host started without one writes
-the same line in `host.log`:
+Every setting has a working default. Where the main worktree holds no
+`.squiz.json`, the first line `squiz review` writes on stderr says so, whatever
+the outcome, and the outcome is the same as with the file. A round host writes
+the same line to `host.log`:
 
 ```
 squiz: no .squiz.json was found in the main worktree, /work/squiz, so the defaults are in use
 ```
 
-A bare repository has no main worktree, so a review in one of its linked
-worktrees has no `.squiz.json` to read, and its line says so. A git that cannot name the main
+A bare repository has no main worktree, so in one of its linked worktrees there
+is no `.squiz.json`, and the line says so. A git that cannot name the main
 worktree is a configuration that cannot be read.
 
 | Setting | Default | |
 |---|---|---|
 | `venue` | `github` | Where reviews happen, `github` or `local` (§ 4 Choosing the venue) |
-| `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot` |
+| `reviewer` | `pi` | The reviewer CLI, `pi` or `copilot`. It chooses the adapter and nothing else |
 | `rounds` | 3 | The round cap, settable 1 to 8 |
 | `timeout` | 900 | Seconds one round's reviewer may run, settable 60 to 3,600 |
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 5 Adapters) |
-| `copilotTokenFile` | none | The absolute path of a file holding the token that the reviewer's Copilot signs in with, such as `/run/secrets/copilot`. None reads the token from `~/.config/squiz/copilot-token` where that file exists, and otherwise leaves Copilot to find its own login (§ 5 Tools) |
+| `copilotTokenFile` | none | The absolute path of a file holding the token the reviewer's Copilot signs in with. None reads the token from `~/.config/squiz/copilot-token` where that file exists, and otherwise leaves Copilot to its own login (§ 5 Tools) |
+
+`model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
+with a letter, a digit or `@`. An empty string is refused rather than read as
+none.
 
 `copilotTokenFile` is an absolute path of up to 4,096 characters. The file it
 names, and the default file, each hold the token alone, of letters, digits and
-`_`, and spaces, tabs and line ends around it are dropped. Either is read where
-a Copilot reviewer starts, and `squiz doctor` signs in with it, so it must be
-readable by the user squiz runs as. Each belongs outside the repository, where
-the reviewer cannot read it. A value that is not
-such a path is refused with an error that leaves the value out, since a token
-written there by mistake would otherwise be printed:
+`_`, and the spaces, tabs and line ends around it are dropped.
+Either file is read where a Copilot reviewer starts, and by `squiz doctor`. A
+value that is not such a path is refused with an error that leaves the value
+out:
 
 ```
 /work/squiz/.squiz.json: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for ~/.config/squiz/copilot-token or Copilot's own login
 ```
 
-`model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting
-with a letter, a digit or `@`. An empty string is refused rather than read as
-none. A model the configured reviewer does not offer fails the round at setup,
-and never runs it on another model.
-
-`reviewer` chooses the adapter, and nothing else changes with it. `copilot`
-needs the GitHub Copilot CLI installed and signed in.
-
-A setting outside its range, or of a type the table does not give it, is
-rejected with an error naming the setting, the value given and what was
-expected. A key the table does not name is rejected the same way, with an error
-saying it is not a setting and listing the settings there are. A `.squiz.json`
-that cannot be read or parsed is a failure the harness controls, so the command
-exits 1 and its stderr names it.
+A setting outside its range, or of a type the table does not give it, is refused
+with an error naming the setting, the value given and what was expected. A key
+the table does not name is refused with an error saying it is not a setting, and
+listing the settings there are. Where `.squiz.json` cannot be read or parsed, the
+command exits 1, and its stderr names the file.
 
 ## 11. Human intervention
 
