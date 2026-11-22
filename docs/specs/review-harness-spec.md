@@ -1121,306 +1121,171 @@ closes it.
 
 ## 6. The summary
 
-One comment is posted on the pull request when an episode closes. It carries the
-status of every finding, what each round did, and the cost of the review. It is
-never edited or replaced, so a second episode on the same pull request posts a
-second comment. The local venue writes it as `summary.md` instead (§ 4). Every
-line that says where the summary is, such as `squiz review`'s "its summary is
-on the pull request", says it as `Change.summaryAt` gives it.
+When an episode closes, squiz posts one summary comment on the pull request. It
+carries the status of every finding, what each round did, and what the review
+cost. It is never edited or replaced, so a second episode on the same pull
+request posts a second comment. The local venue writes it to `summary.md`
+instead (§ 4 The local venue).
 
-**An episode reports its close once.** The round that closes it writes the
-close to the episode's state, and then posts the comment, as The state file
-under § 3 sets out. Every path that ends an episode writes the close, whether or
-not its comment is then posted. A round that leaves threads open for the coding
-agent posts no summary. Nor does a failed round that leaves a round to run: it
-posts the failure comment under § 8 instead.
+A round that leaves threads open for the coding agent posts no summary. Nor does
+a failed round that leaves a round to run: it posts its failure comment instead
+(§ 8 The failure comment).
 
 **A failed round that spends the last of the round cap or the token bound posts
-the summary of the rounds that ran** (§ 3 The round cap), and its failure
-comment after it. The summary is built as at any close. Its threads are the ones
-the round handed over, each as the round's salvaged verdicts left it, and the
-ones its salvaged findings opened. Its Notes end with a line saying the budget
-ran out before the review could be completed, so a person needs to look:
+the summary of the rounds that ran**, and then its failure comment. § 3 The
+state file says how it records the close, and § 8 what `squiz review` exits for
+it. The summary counts each thread the failed round gave no verdict by
+the reviewer's last ruling on it (§ 3 The state file): a resolved thread last
+ruled `fixed` or `withdrawn` counts as that ruling, and every other one counts as
+`open`, or `disputed` where the coding agent replied. Its Notes end with this
+line:
 
 ```markdown
 - The budget ran out before the review could be completed: the last attempt failed, and spent the last of the round cap. A person needs to look at this change.
 ```
 
-Where the token bound closed the episode, the line says "the last of the token
+Where the token bound closed the episode, it reads "the last of the token
 bound". Where states were queued behind the failed round, the line names them
-before its last sentence, as "Squiz did not review 8d21a4f." An attempt that was
-no round closes the same way where its tokens reach the token bound, and its
-summary may count no rounds. `squiz review` exits 3 for the failed round's state
-and for every state queued behind it, whatever is open, because no round
-reviewed them (§ 7).
-
-**A state reviewed clean that closes the episode once the state behind it is
-superseded closes it without running a reviewer** (§ 3 The state file). The
-round host lists the episode's threads and posts the summary from them and from
-what the episode recorded, with the findings no thread holds that the clean
-round and the rounds before it recorded, as Notes lists them below.
-
-**A thread the closing round gave no verdict is counted by the last ruling the
-state file holds for it** (§ 3 The state file). Only a failed round and a close
-on a state reviewed clean leave such threads. A resolved thread last ruled
-`fixed` or `withdrawn` counts as that ruling. Every other thread counts as
-`open`, or `disputed` where the coding agent replied, as the default verdict
-would rule it, resolved or not.
+before its last sentence, as "Squiz did not review 8d21a4f."
 
 ### What the comment carries
 
 Four blocks, in this order.
 
-1. **The counts, what the review spent, and who reviewed it.** Rounds run, findings raised, how many ended `fixed`, `withdrawn`, `open` and `disputed`,
-   and the tokens each round spent with the episode's total, followed by the
-   dollars where the reviewer's CLI priced the model, and the AI credits where it
-   reported those. Then the reviewer CLI and the model each round ran on, as the
-   run reported them. Findings raised counts every thread of the episode, and
-   every finding that no thread holds that Notes lists. The findings that no
-   thread holds carry no status.
-2. **The findings that need a person.** Every `open` finding and every
-   `disputed` one, each with its headline and where it sits: `file:line` for a
-   thread anchored to a line, and the file alone for one anchored to the file,
-   a finding about the change as a whole among them. When there are none, the
-   comment says so in one line.
-3. **Rounds.** Each round in the order it ran, with the short commit it
-   reviewed, how many findings it raised, and the rulings it replied with: each
-   thread it closed while the thread was open, and each it kept open. A round
-   that raised nothing and ruled on nothing says so in one line, as
-   `- Round 4 at 9a0b1c2: found nothing new and ruled on nothing`. The list is
-   read from the episode's state file and never from the pull request, so a
-   round whose replies GitHub refused is listed all the same.
-4. **Notes.** Anything else a person reviewing the pull request should know:
-   - a finding the harness could anchor to neither a line nor a file, with its
-     `file:line`, or as about the change as a whole for one scoped to `change`;
-   - a finding whose comment could not be posted at all, with its location, or
-     as about the change as a whole for one scoped to `change`;
-   - a thread the last round kept open whose reason could not be posted, with
-     its location and headline;
-   - a thread any round closed whose reply could not be posted, with its
-     location, headline and ruling;
-   - a ruling of the last round that could not be applied, with what the
-     reviewer ruled;
-   - a round whose finished review never read the diff of a changed file, with
-     the round's number and the files;
-   - a round whose review the time bound cut short, with the round's number and
-     the bound;
-   - a cap or bound that ended the episode early, with each queued state it left
-     not reviewed;
-   - a failed round that spent the last of the cap or the bound, as the line
-     above shows.
+1. **The counts, the spend and the reviewer.** Rounds run and findings raised,
+   then how many findings ended `fixed`, `withdrawn`, `open` and `disputed`.
+   Findings raised counts every thread of the episode, and every finding no
+   thread holds that Notes lists. A finding no thread holds carries no status.
+   The spend line and the reviewer line follow, as The format sets out.
+2. **Needs a person.** Every `open` finding and every `disputed` one, with its
+   headline and where it sits: `file:line` for a thread on a line, and the file
+   alone for a thread on a file. Where there are none, the block says so in one
+   line.
+3. **Rounds.** Each round in the order it ran, with the short commit it reviewed,
+   how many findings it raised, and the rulings it gave. A round that raised
+   nothing and ruled on nothing reads
+   `- Round 4 at 9a0b1c2: found nothing new and ruled on nothing`.
+4. **Notes.** What the threads do not show, one line each, in this order:
+   - each finding no thread holds, the earlier rounds' first and then the closing
+     round's;
+   - each thread the closing round kept open whose reason could not be posted;
+   - each thread any round closed whose reply could not be posted, with the
+     ruling;
+   - each ruling of the closing round that could not be applied;
+   - each round whose finished review never read the diff of a changed file;
+   - each round the time bound cut short;
+   - the cap or the bound, where one ended the episode, with each queued state it
+     left not reviewed, or the line of a failed round that spent it, as above.
 
-**A closing reply that could not be posted is a line naming the ruling**, read
-from the round's entry in the state file:
+**A round's findings raised are every finding the reviewer reported**, whether
+or not its comment was posted. **A round's rulings count, by verdict, each
+`fixed` or `withdrawn` verdict on a thread that was open when it was handed
+over, and every `open` verdict.** A verdict on a thread that was not handed
+over, and a second verdict on one thread, are not counted.
 
-```markdown
-- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)
-```
+**A finding no thread holds is named by its location**, or as "About the change
+as a whole" for one scoped to `change`, and says why no thread holds it. A
+finding of an earlier round that no later round raised again names the latest
+round that raised it, and says only that. One a later round raised again is
+listed once, as the later round's.
 
-**A ruling that could not be applied is a line saying what the reviewer ruled**,
-so a person can apply it by hand. A thread that was handed over is named by its
-location and headline, and one that was not by the id the reviewer gave:
+**A ruling that could not be applied says what the reviewer ruled**, so that a
+person can apply it by hand. A thread that was handed over is named by its
+location and headline, and one that was not by the id the reviewer gave. Each
+line carries the verdict the reviewer gave:
 
-```markdown
-- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the thread could not be resolved)
-- `src/queue.ts:140` — The cap is never read (ruled open, and the thread could not be re-opened)
-- `src/cache.ts:12` — The cache is never cleared (given no ruling, which keeps it open, and the thread could not be re-opened)
-- `src/cache.ts:30` — The key ignores the locale (ruled open a second time, which was not applied: the first ruling stands)
-- A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied
-```
+- a `fixed` or `withdrawn` ruling GitHub refused ends
+  `(ruled fixed, and the thread could not be resolved)`;
+- an `open` ruling GitHub refused ends
+  `(ruled open, and the thread could not be re-opened)`;
+- a thread given no ruling that could not be re-opened ends
+  `(given no ruling, which keeps it open, and the thread could not be re-opened)`;
+- a second ruling on one thread, of any verdict, ends
+  `(ruled open a second time, which was not applied: the first ruling stands)`;
+- a ruling on a thread that was not handed over, of any verdict, reads
+  ``- A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied``.
 
-**Notes names every finding no thread holds that the episode raised.** A round
-that leaves the episode open keeps each of its own as its Notes line (§ 3 The
-state file), and `squiz review` prints each on stderr (§ 7). The summary lists
-the earlier rounds' first, then the closing round's. An earlier round's line
-that no later round raised again names the latest round that raised it, and
-says only that, since a round that does not raise a finding again has not said
-it was fixed:
+**A round whose finished review never read the diff of a changed file names the
+files**, at most ten of them, followed by "and N more" for the N past ten. Each
+name is one code span. A control character in it is shown escaped, a line break
+as `\n`, and the span's fence is one backtick longer than any run of backticks in
+the name. A round the time bound cut short has no such line.
 
-```markdown
-- Raised in round 1 and not raised again: `src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)
-- About the change as a whole: The retry queue duplicates the scheduler (raised, and its comment could not be posted)
-```
-
-A line a later round raised again is listed once, as the later round's. A close
-on a state reviewed clean gives that round's lines as they are, after the
-earlier rounds' it did not raise again. A failed round lists the findings it
-salvaged in its failure comment, and where it closes the episode, in the
-summary too, as the closing round's (§ 8 The failure comment). Both venues write
-the same body, so `summary.md` lists them as the comment does.
-
-**A round whose finished review never read the diff of a changed file is a
-line of its own**, naming the files, the first ten of them where there are more.
-It is read from the round's entry in the state file. Each name is one code span
-on the line: a control character in it is shown escaped, a line break as `\n`,
-and the span's fence is one backtick longer than any run of backticks in the
-name. A round the time bound cut
-short has no such line, because its own line says the review did not finish:
-
-```markdown
-- The reviewer finished round 1 without reading the diff of 2 changed files: `src/queue.ts`, `docs/a file.md`
-- The reviewer finished round 2 without reading the diff of 12 changed files: `f1.ts`, `f2.ts`, `f3.ts`, `f4.ts`, `f5.ts`, `f6.ts`, `f7.ts`, `f8.ts`, `f9.ts`, `f10.ts`, and 2 more
-```
-
-**A round whose review the time bound cut short is a line of its own**, written
-by the round that later closes the episode, from the episode's state:
-
-```markdown
-- The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
-```
-
-**A cap or bound that left queued states not reviewed is one line, naming the
-bound and each of those states**, as § 3 The state file names them. It takes the
-place of the line the bound writes where nothing was queued. The line a failed
-round's close writes names them itself, as shown above:
-
-```markdown
-- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f or 8d21a4f with different replies
-- The episode ended at the token bound with nothing left open, and did not review 3f9c2e0 with different replies
-```
+**The line of a cap or a bound that ended the episode names it, and each state
+left not reviewed** as § 3 The state file names them. Where nothing was queued,
+the line ends after "rather than with nothing left open". Where the closing
+round left nothing open and the bound left queued states not reviewed, it reads
+"ended at the token bound with nothing left open, and did not review 3f9c2e0
+with different replies".
 
 ### The format
 
 ```markdown
-**Squiz review — 3 rounds, 7 findings**
+**Squiz review — 3 rounds, 10 findings**
 
-Fixed 2 · Withdrawn 1 · Open 3 · Disputed 1
-48,200 tokens over 3 rounds: 20,100, 16,400, 11,700 · $0.0134
-Reviewed by `pi` on `openai/gpt-5-mini`
+Fixed 2 · Withdrawn 1 · Open 4 · Disputed 1
+At least 48,200 tokens over 3 rounds: 20,100, at least 16,400, 11,700 · at least $0.0105 · at least 0.84 AI credits
+Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3
 
 **Needs a person**
 
-- `packages/sync/src/queue.ts:134` — Retry backoff resets on every enqueue (open)
-- `packages/sync/src/session.ts:57` — Clock skew is read as token expiry (disputed)
-- `packages/sync/src/retry.ts` — Every path here is dead once the queue lands (open)
-- `packages/sync/src/queue.ts` — The retry queue duplicates the scheduler already in `packages/sync/src/scheduler.ts` (open)
+- `src/cache.ts:30` — The key ignores the locale (open)
+- `src/session.ts:57` — Clock skew is read as token expiry (disputed)
+- `src/retry.ts` — Every path here is dead once the queue lands (open)
+- `src/queue.ts:140` — The cap is never read (open)
+- `src/queue.ts:88` — The retry limit is read before it is set (open)
 
 **Rounds**
 
 - Round 1 at 3f9c2e0: raised 6 findings
-- Round 2 at 1b86987: raised nothing, and ruled 2 fixed, 1 withdrawn and 3 open
-- Round 3 at 8d21a4f: raised 1 finding, and ruled 3 open
+- Round 2 at 1b86987: raised 2 findings, and ruled 2 fixed, 1 withdrawn and 2 open
+- Round 3 at 8d21a4f: raised 2 findings, and ruled 1 fixed and 2 open
 
 **Notes**
 
+- Raised in round 1 and not raised again: `src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)
+- About the change as a whole: The retry queue duplicates the scheduler (raised, and its comment could not be posted)
+- `src/retry.ts` — Every path here is dead once the queue lands (kept open, and the reviewer's reason could not be posted on its thread)
+- `src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)
+- `src/cache.ts:30` — The key ignores the locale (ruled fixed, and the thread could not be resolved)
+- The reviewer finished round 1 without reading the diff of 2 changed files: `src/queue.ts`, `docs/a file.md`
 - The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then
+- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f with different replies or 5e6f7a8
 ```
 
-Notes is omitted when there is nothing to report, and Rounds when the episode ran
-no round.
+Notes is left out where there is nothing to report, and Rounds where the episode
+ran no round.
 
-Each round is written to the episode's local state file as the review finishes,
-before anything is posted. The closing replies it could not post are added when
-it records its end, and its posting time once posting ends:
+**The spend line leads with the tokens**, which every round with a cost carries:
+the total, the rounds it covers, and each round's own. The dollars follow where
+the reviewer's CLI priced the model, and the AI credits, to two places, where it
+reported them, as Copilot does. A round with credits carries no dollars, never
+zero dollars. Each total covers the rounds that carry it, so a round run on a
+subscription adds no dollars.
 
-```json
-{ "reviewer": "pi", "dollars": 0.0134, "tokens": 20100, "messages": 9, "models": ["openai/gpt-5-mini"], "elapsedSeconds": 901.2, "cutShortAtSeconds": 900, "postingSeconds": 4.3, "head": "1b86987c4f0e2d6a9b3c5e7f8a1d2c3b4e5f6a7b", "raised": 0, "ruled": { "fixed": 2, "withdrawn": 1, "open": 3 }, "unpostedReplies": ["`src/queue.ts:134` — Retry backoff resets (ruled fixed, and the reviewer's reply could not be posted on its thread)"], "unread": ["docs/a file.md"] }
-```
+- **A figure that is a floor reads "at least"** (§ 5 The `pi` adapter): the
+  floor round's own figure, and every total of an episode holding one.
+- **A round that completed no assistant message reads "unknown"** in place of its
+  tokens, never zero. A floor round among them still marks the totals. Where no
+  round with a cost completed one, the line reads "No spend was reported"
+  followed by the rounds it covers, as "No spend was reported over 2 rounds".
+- **A round with no cost has no figure.** The line covers the rounds that have
+  one, says how many those are, and names no round's own figure:
+  `18,200 tokens over 1 of 2 rounds · 0.36 AI credits`. Where no round has a
+  cost, there is no spend line.
 
-- `reviewer` is the reviewer CLI the round ran, as `reviewer` in Configuration
-  names it.
+**The reviewer line names the reviewer CLI each round ran and the models its run
+reported** (§ 5 Adapters), never the `model` `.squiz.json` configures. Where
+every round ran the same reviewer on the same models, it names them once, as
+``Reviewed by `copilot` on `gpt-5-mini` and `claude-haiku-4.5` ``. Where the
+rounds differ, it names each model with the rounds that ran on it, under the
+reviewer that ran them, in the order the rounds first named each, as the example
+does. A round that ran two models is listed under both.
 
-- `dollars` and `tokens` are what the round spent, the dollars being zero where
-  the reviewer's CLI did not price the model. `messages` is how many assistant
-  messages the two cover, or for Copilot how many model requests. A round with no
-  cost, which only a Copilot round can be, carries none of the three.
-- `credits` is the AI credits the round spent, where the reviewer's CLI
-  reported them, as Copilot does. It is absent for a `pi` round.
-- `models` is every model the round's runs reported their spend against, in the
-  order they first named each, spelled as the adapter reads them (§ 5). A round
-  that ran the reviewer twice names the models of both runs. It is absent where
-  no run named a model, and a round with no cost carries none.
-- `elapsedSeconds` is the wall clock from starting the reviewer to having it
-  stopped, to a tenth of a second. A round that ran the reviewer twice counts
-  both runs.
-- `cutShortAtSeconds` is the time bound the round ran under, present only where
-  the bound ended a review the reviewer had not finished.
-- `postingSeconds` is the wall clock from the round's first call after the review
-  to its last, to a tenth of a second. It is absent where the round posted nothing,
-  and where the round was stopped before posting ended.
-- `floor` is `true` where the round's cost is a floor (§ 5, The `pi` adapter),
-  and absent where it is a total. A Copilot round never carries it.
-- `head` is the full head commit of the state the round reviewed.
-- `raised` is how many findings the reviewer reported, whether or not their
-  comments were posted.
-- `ruled` counts the rulings the round set out to reply with, by verdict: a
-  `fixed` or `withdrawn` verdict on a thread that was open when it was handed
-  over, and every `open` verdict the reviewer gave. A verdict naming a thread
-  that was not handed over, and a second verdict on one thread, are not counted.
-  The counts are taken before anything is posted.
-- `unpostedReplies` is the Notes line of each reply on a thread the round
-  closed that GitHub refused, and is absent where none was refused. A failed
-  round lists them in its failure comment, and records them only where it closes
-  the episode, in the update that writes the close.
-- `unread` is each changed file whose diff the round's finished review never
-  read through `git_diff`, by its name after the change. It is absent where the
-  review read every one, where the review did not finish, and where the
-  reviewer's adapter could not say what it read.
-
-A field this list does not say can be absent that is missing, or a field that
-does not hold a value of the right kind, makes the file unreadable, as § 3 The
-state file sets out.
-
-**The spend line leads with the tokens**, which every reviewer reports. A round
-with no dollar figure, such as a model run on a subscription, adds none, and
-where only some rounds were priced, the dollar total covers those.
-
-**A Copilot round carries AI credits in place of dollars**, to two decimal
-places, and never zero dollars:
-
-```markdown
-31,400 tokens over 2 rounds: 18,200, 13,200 · 0.84 AI credits
-```
-
-Where some rounds carry credits and others dollars, the line gives both totals,
-each covering the rounds that carry it. A round that completed no assistant
-message is given as unknown rather than as zero.
-
-**A round with no cost has no figure in the line**, neither a zero nor a floor.
-The line covers the rounds that have one, and says how many those are:
-
-```markdown
-18,200 tokens over 1 of 2 rounds · 0.36 AI credits
-```
-
-Where no round of the episode has a cost, the comment carries no spend line.
-
-**A figure that is a floor reads "at least"**: a floor round's own, and every
-total of an episode holding one. Here the second of two rounds is a floor:
-
-```markdown
-At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.0105
-```
-
-A `pi` round the time bound killed is such a round: it reports the spend of the
-messages that completed. A floor round that completed no assistant message is
-given as unknown, and the totals beside it are still marked.
-
-**The reviewer line names the reviewer CLI each round ran and the model the run
-reported**, as § 5 sets out for each adapter, never the `model` `.squiz.json`
-configures, since a CLI can run another. A round whose run reported no model
-reads "an unknown model".
-
-Where every round ran the same reviewer on the same models, the line names them
-once:
-
-```markdown
-Reviewed by `pi` on `openai/gpt-5-mini`
-Reviewed by `copilot` on `gpt-5-mini` and `claude-haiku-4.5`
-```
-
-Where the rounds differ, each model is named with the rounds that ran on it,
-under the reviewer that ran them, in the order the rounds first named each. A
-round that ran two models is listed under both:
-
-```markdown
-Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 3, and on an unknown model in round 2
-Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3
-```
-
-Each model is one code span on one line, with every run of whitespace in its
-name collapsed to a space. A round recorded with no reviewer reads "an unknown
-reviewer". An episode that ran no round has no reviewer line.
+A run that reported no model reads "an unknown model", and a round recorded with
+no reviewer reads "an unknown reviewer". Each model is one code span, with every
+run of whitespace in its name collapsed to a space. An episode that ran no round
+has no reviewer line.
 
 ## 7. Commands
 
