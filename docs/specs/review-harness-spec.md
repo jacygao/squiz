@@ -3532,76 +3532,18 @@ counts nothing against it. Dollars and AI credits bound nothing.
 
 ## 9. The project
 
-Squiz is its own repository, not a directory inside a host project.
-
 ### Language
 
-Squiz is written in TypeScript and runs on Node. Node strips the types and runs
-the `.ts` files as they are, so there is no build step and no compiled output.
+Squiz runs as installed, with no build step and no compiled output. Node 24 or
+later runs its TypeScript directly, and the `squiz` command is `bin/squiz`, a
+shell script that runs the `.ts` entry point under Node. The one JavaScript file
+is the Copilot extension, `extension.mjs`, which imports only Node's own modules
+and the `@github/copilot-sdk/extension` that Copilot supplies.
 
-- **Erasable syntax only.** No `enum`, no parameter properties, no namespaces. A
-  union of string literals stands where an enum would.
-- **Types are checked by `tsc --noEmit` in CI.** Stripping does not check them.
-- **Node 24 or later.** The setup check reports the version.
-- **macOS and Linux.** Squiz detaches its round host, finds its processes again
-  and stops them through Unix process calls: `ps`, `setsid`, process groups and
-  signals. On Windows it runs under WSL. No review has run on Linux yet (#722).
-- **`bin/squiz` is a shell shim.** Node decides to strip types from the `.ts`
-  extension, so the entry point cannot be an extensionless Node file. The shim
-  execs the real one.
+Squiz has no runtime dependencies. Everything outside its own process is a
+subprocess: `git`, `gh`, `ps` and the reviewer's CLI.
 
-The Copilot extension is the one file in JavaScript, because Copilot starts only
-an `extension.mjs`. It imports nothing but Node's own modules and the
-`@github/copilot-sdk/extension` that Copilot supplies.
-
-There are no runtime dependencies. Everything outside the process is a
-subprocess: `git`, `gh`, `ps`, and the reviewer's own CLI.
-
-### Structure
-
-The layout is a Claude Code plugin, which is also the package that is
-distributed.
-
-```
-.claude-plugin/plugin.json   manifest: name, version, description, and the Copilot extensions directory
-.claude-plugin/marketplace.json  the marketplace named squiz, listing this repository's root as the one plugin
-hooks/hooks.json             the Stop, SubagentStop, SessionStart, SubagentStart and UserPromptSubmit registrations, which Claude Code and Copilot both run
-extensions/squiz-wake/       extension.mjs, the Copilot extension the round host wakes a Copilot session through
-bin/                         the CLI, on Claude Code's Bash tool PATH while enabled, and linked onto PATH for other agents by squiz init
-charter.md                   the standing review instructions, shipped as one file
-src/
-  cli.ts                     the entry point bin/squiz execs, one subcommand each
-  config/                    .squiz.json, its defaults and its ranges
-  review/                    the squiz review entry point, what it prints and exits with, squiz status, squiz init, squiz doctor, and squiz version
-  hook/                      squiz hook: a stop resolves the change and queues its review, and a start or a prompt hands the worktree to the venue
-  host/                      the round host, which takes queued states, runs their rounds, and notes and wakes their owners
-  sessions/                  starting and finding a session, closing its pane, reading a hook's payload, the note and its wake, and the user's Copilot settings; no review knowledge
-  loop/                      episode state, round cap, verdict decisions
-  worktree/                  toplevel resolution and the reviewer's snapshot
-  reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
-  venues/                    the venue contract, venueFor, and one directory per venue
-    github/                  the pull request, review threads, replies, resolve and re-open, summary, through gh
-    local/                   the working tree's commit, threads.json, summary.md and failure files
-  findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
-  testing/                   the stand-ins and processes the tests run; no command reaches it
-eval/                        the rig that scores the reviewer against changes with known defects: it runs the real reviewer once over a change, holds the cases under cases/, and summarises the run; no command reaches it
-docs/specs/                  this document
-docs/notes/                  durable facts learned by building
-```
-
-`src/` is organised by what a thing is about rather than by which command
-reaches it. Several commands share `venues/`, and `cli.ts` maps a subcommand to
-the directory that does the work.
-
-**`src/sessions/` knows nothing about reviews.** It starts a command as a
-session, finds it again by pid and start time, closes its pane, reads a hook's
-payload into the session that stopped and the session that owns it, writes
-and delivers a note, and reads the user's Copilot settings. Nothing in it names
-a pull request, a round or a finding, and it imports nothing from the rest of
-`src/`.
-
-A test sits beside the code it tests, named for it: `src/config/config.ts` is
-tested by `src/config/config.test.ts`.
+Squiz runs on macOS and Linux, and on Windows under WSL.
 
 ## 10. Adoption
 
