@@ -2264,11 +2264,11 @@ it does on every path.
 
 | Failure | What happens |
 |---|---|
-| Squiz cannot read or write its own files: the configuration, the state file, the queue, or the reviewing record. Or git cannot name the worktree or its branch | Exit 1, naming the file and the error, and no review runs. A state not yet taken stays queued, and what already landed stands. Nothing more is posted. A state file missing a field its writer always writes cannot be read, and the reason names the field: `/work/squiz/.squiz/41/state.json: round 1 has "raised" as undefined`. |
+| Squiz cannot read or write its own files: the configuration, the state file, the queue, or the reviewing record. Or git cannot name the worktree or its branch | Exit 1, naming the file and the error, and no review runs. What already landed stands, and nothing more is posted. A queue write that fails queues nothing and starts no round host. A reviewing record that cannot be written records the state failed, and the state stays queued only where that write fails too. Any other state not yet taken stays queued. A state file missing a field its writer always writes cannot be read, and the reason names the field: `/work/squiz/.squiz/41/state.json: round 1 has "raised" as undefined`. |
 | The round's rulings and spend cannot be written | Exit 1. Nothing the reviewer found is posted, and no verdict is applied. |
 | The round's end cannot be written | Exit 1. No summary is posted, and the episode reads as open, so the next run reviews the pull request again. |
 | The round's result cannot be recorded | What the round posted stands. `host.log` names the result and the reason, and `squiz status` shows the round killed. A `squiz review` waiting on it exits 4 at its deadline. A later run exits 1, saying the round host stopped before its round ended, unless the round closed the episode. |
-| A round's posting time or resume command cannot be written | The round's result stands. `squiz status` shows `—` under Resume. |
+| A round's posting time or resume command cannot be written | The round's result stands. A round with no resume command saved shows `—` under Resume in `squiz status`. |
 | The reviewer is not installed, or ends without completing a message | Exit 1, and the failure comment and stderr say why, as a setup problem rather than a bad round. What the reviewer reported is posted. |
 | The reviewer's output cannot be read, and a retry does not recover it | Exit 1, and the failure comment and stderr say why. What the reviewer reported is posted. |
 | The reviewer stops without finishing its review | Retried once where the time bound leaves time for it. Both attempts post what they reported. Where the retry fails too, exit 1, and the failure comment says the review was never finished. |
@@ -2364,8 +2364,9 @@ many findings arrived. For a `pi` reviewer they add how many messages it
 completed, the bound's seconds averaged over them, and how many requests its
 provider failed. Where the machine slept during the review, they end with "the
 machine slept for 13 minutes of the round". The summary that closes the episode
-notes the cut. A round that already holds the reviewer's finish is the review it
-declared instead: it posts no failure comment, and exits 0, 2 or 3.
+notes the cut. A round that already holds the reviewer's finish, with every
+report read back, is the review it declared instead: it posts no failure comment,
+and exits 0, 2 or 3.
 
 **A round runs in the round host, outside any caller's timeout.** The time bound
 is on the review alone. Before and after the review, each call the round makes
