@@ -80,7 +80,7 @@ const findingParameters = {
     },
     file: {
       type: "string",
-      description: "The file the finding is anchored to. On a line and a file finding only.",
+      description: "The file the finding is anchored to. On a change finding, the changed file it most concerns.",
     },
     line: {
       type: "integer",

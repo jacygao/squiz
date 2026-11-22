@@ -189,8 +189,7 @@ function needsAPerson(threads: readonly ClassifiedThread[]): string {
 
 /** One unsettled finding: where it sits, what it is, and which of the two it is. */
 function unsettledLine(thread: ClassifiedThread): string {
-  const where = thread.location === undefined ? "The change as a whole" : `\`${thread.location}\``;
-  return `- ${where} — ${named(thread.headline)} (${thread.status})`;
+  return `- \`${thread.location}\` — ${named(thread.headline)} (${thread.status})`;
 }
 
 /**
@@ -383,10 +382,8 @@ function noteLine(note: Noted | Failed): string {
     const lost = "raised, and its comment could not be posted";
     return line(where(note.finding), note.finding.headline, lost);
   }
-  // A finding about the change as a whole is in Notes because that is where one
-  // belongs, and nothing failed to place it.
-  if (note.location === undefined) return line(undefined, note.finding.headline);
   return line(note.location, note.finding.headline, "no thread could be opened for it");
+
 }
 
 /**

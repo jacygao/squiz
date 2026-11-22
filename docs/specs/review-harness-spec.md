@@ -40,15 +40,12 @@ The harness must be able to:
 - Create a review comment on a file as a whole, carrying no line
 - Reply inside an existing review comment thread
 - Resolve a review thread, and re-open one
-- Post an issue-level comment on the pull request, for the summary, for a round
-  that failed, and for a finding about the change as a whole and each reply to
-  it
-- List the pull request's issue-level comments, and whether each is hidden
-- Hide an issue-level comment as resolved, and show it again
+- Post an issue-level comment on the pull request, for the summary and for a
+  round that failed
 
 `gh pr comment` and `gh pr review` take a body only, so every anchored comment
-goes through `gh api`. Resolving and re-opening a thread, and hiding and showing
-a comment, go through GraphQL, since REST has none of them.
+goes through `gh api`. Resolving and re-opening a thread go through GraphQL,
+since REST has neither.
 
 ### Identity
 
@@ -146,12 +143,7 @@ episode has reviewed.** A state is two things, read when a trigger starts:
   holds no activity, whatever is said on it. The latest activity is the GitHub
   identifier of the newest such reply on the pull request, or none. An edited
   reply keeps its identifier and changes nothing. A deleted one can change which
-  reply is newest, and that is a change like any other. GitHub gives a reply's
-  time to the second, and a reply on a general thread (§ 5 Pull request
-  comments) has a REST id of another sequence than a reply on any other
-  thread's, so nothing orders the two within one second. Where the newest of
-  each was posted in the same second, the latest activity is both identifiers,
-  the other thread's first, separated by a space.
+  reply is newest, and that is a change like any other.
 
 Each record has one of five statuses:
 
@@ -396,9 +388,9 @@ archive before it read it reads it there.
    own (§ 5). It hands the reviewer the pull request and the threads the reviewer
    opened on it, in a snapshot of the state's head commit.
 4. **Post the findings, and act on the verdicts.** Each new finding opens a
-   thread, anchored to a file and a line, to a file as a whole, or to the change
-   as a whole (§ 5 Pull request comments). `fixed` and
-   `withdrawn` reply on their thread and close it. `open` re-opens the thread or
+   thread, anchored to a file and a line or to a file as a whole (§ 5 Pull
+   request comments). `fixed` and `withdrawn` reply on their thread and close
+   it. `open` re-opens the thread or
    leaves it open, and replies with the reviewer's reason. § 5 Findings gives
    each reply.
 5. **Record the open threads.** Where threads are open and the round cap is not
@@ -893,11 +885,9 @@ interface Venue {
     | Failed;
   openThread(change: Change, anchor: Anchor, body: string, until: Deadline): ThreadPosting;
   openFileThread(change: Change, path: string, body: string, until: Deadline): ThreadPosting;
-  /** A thread about the change as a whole, on no file and no line. */
-  openGeneralThread(change: Change, body: string, until: Deadline): ThreadPosting;
-  reply(threadId: string, body: string, until: Deadline, change?: Change): ThreadAction;
-  resolve(threadId: string, until: Deadline, change?: Change): ThreadAction;
-  reopen(threadId: string, until: Deadline, change?: Change): ThreadAction;
+  reply(threadId: string, body: string, until: Deadline): ThreadAction;
+  resolve(threadId: string, until: Deadline): ThreadAction;
+  reopen(threadId: string, until: Deadline): ThreadAction;
   postSummary(change: Change, body: string, until: Deadline): Posting;
   postFailure(change: Change, body: string, until: Deadline): Posting;
 }
@@ -921,26 +911,20 @@ function venueAt(directory: string, until?: Deadline):
 - **Store a body exactly as it was handed over, and list it back that way.**
   Each body carries its author's marker (§ 2 Identity), which is how a round
   tells the reviewer's comments from the coding agent's and a person's, in
-  either venue. A venue that adds a line of its own to a comment, as the GitHub
-  venue does to a general thread's (§ 5 Pull request comments), takes it off
-  again when it lists the comment.
+  either venue.
 - **List threads in the order they were opened, each with its comments in the
   order they were written.** Each venue says what it puts in a thread's
   `isOutdated` and a comment's `author`.
 - **Return `anchor-refused` only for a line the venue cannot hold**, and
   `posted-without-thread-id` only where the comment landed and its thread's id
   could not be read back. The caller falls back as § 5 Pull request comments
-  sets out. `openGeneralThread` returns neither.
-- **Act on a thread of the change handed in, else in the worktree the process
-  runs in.** A round hands `reply`, `resolve` and `reopen` the change it
-  reviewed, and `squiz reply` the change it read where it was run. The GitHub
-  venue runs `gh` from the process's directory: a `PRRT_` id names its own
-  repository, and a `G` id names a thread on the change's pull request, or with
-  no change handed in, on the open pull request whose head is the branch checked
-  out there. The local venue uses the `.squiz/local/` of the worktree that
-  `git rev-parse --show-toplevel` names for the process's directory. The round
-  host runs in the worktree it serves, and `squiz reply` in the one it is run
-  in.
+  sets out.
+- **Act on a thread in the worktree the process runs in.** `reply`, `resolve`
+  and `reopen` are handed no change, so they act from the process's directory.
+  The GitHub venue runs `gh` there, and a `PRRT_` id names its own repository.
+  The local venue uses the `.squiz/local/` of the worktree that
+  `git rev-parse --show-toplevel` names for it. The round host runs in the
+  worktree it serves, and `squiz reply` in the one it is run in.
 
 The renderers stay outside the venue. A summary or a failure comment is
 composed once, as markdown, whichever venue takes it.
@@ -969,14 +953,13 @@ describe, and the GitHub access § 2 lists. It is the only venue that runs `gh`.
 | Member | In the GitHub venue |
 |---|---|
 | `key`, `name`, `rerun`, `summaryAt` | The pull request's number, `PR #41`, `squiz review 41`, `on the pull request` |
-| `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push. Its reply command runs in the pull request's worktree, inside a subshell, because a note can reach a session working in another worktree and a `G` id names a thread only on the pull request checked out where the reply runs. |
+| `followUp` | The paragraph § 3 The report shows, which asks for a commit and a push. Its reply command runs in the pull request's worktree, inside a subshell, because a note can reach a session working in another worktree and `squiz reply` reads the pull request checked out where it runs before it replies. |
 | `recordStart` | Does nothing, and returns `done`. The pull request names its own base. |
 | `recordPrompt` | Does nothing, and returns `done`. The pull request carries its own description, and the run's prompt never stands in for it. |
 | `readChange` | The open pull request whose head is the branch the worktree has checked out (§ 3, step 1). A draft is `held`, with the line § 7 `squiz review` prints for one. No pull request is `none`. Where `asked` names a number, a pull request with any other number is `none` too, with the line step 1 shows for a head that is not checked out here. |
 | `episodeDirectory` | `.squiz/<key>/` in the worktree, which keeps itself out of git (§ 3 The state file), for a key that is a pull request's number. Any other key is a failure. It runs no `gh`. |
 | `provideCommits` | Fetches the base and head commits the repository lacks, as § 5 The snapshot sets out, and adds no alternates |
-| Threads, replies, resolve and re-open | Review threads on the pull request, through `gh api` and GraphQL. Ids are `PRRT_` node ids, and `isOutdated` and `author` are what GitHub reports. `listThreads` lists the general threads too, among the review threads in the order each was opened. |
-| `openGeneralThread` | A conversation comment on the pull request, with an id of `G1`, `G2`, …, as § 5 General threads sets out. A `G` thread's `isOutdated` is always false, and a comment's `author` is what GitHub reports. |
+| Threads, replies, resolve and re-open | Review threads on the pull request, through `gh api` and GraphQL. Ids are `PRRT_` node ids, and `isOutdated` and `author` are what GitHub reports. |
 | `postSummary`, `postFailure` | An issue-level comment on the pull request |
 
 ### The local venue
@@ -1169,14 +1152,9 @@ broken while it lives. The round host and `squiz reply` both take it.
 - **Ids count up.** Threads are `T1`, `T2`, … and comments are `C1`, `C2`, …
   across every thread, in the order they were written. The newest reply is the
   one with the highest number, and that is the state's latest activity (§ 3 The
-  state file). Every comment carries the same time, so where both a thread about
-  the change as a whole and another thread hold replies, the latest activity is
-  the newest reply on each, as `C3 C4`, which § 3 gives for two replies posted in
-  one second.
-- **A thread's anchor is the one the round asked for: a line, the file as a
-  whole, or the change as a whole.** A line is always the head's, so the anchor
-  holds no side. A thread about the change as a whole holds no `path`, and its
-  anchor is `{ "at": "change" }`; it is listed with an empty `path`. The local
+  state file).
+- **A thread's anchor is the one the round asked for: a line, or the file as a
+  whole.** A line is always the head's, so the anchor holds no side. The local
   venue never refuses a line, and never answers `posted-without-thread-id`.
 - **A thread's `url` is the `file://` URL of `threads.json`, then `#` and the
   thread's id**, such as `file:///work/squiz-a/.squiz/local/threads.json#T1`.
@@ -2079,7 +2057,8 @@ The standing rules:
   the change touched the file but left no line to anchor to. It carries the file
   and no line.
 - Scope a finding to `change` only where no single file owns the defect. It
-  carries neither a file nor a line.
+  carries the changed file the finding most concerns, which is where its thread
+  goes, and no line.
 
 ### Findings
 
@@ -2108,11 +2087,12 @@ round that reported nothing and did not finish failed.
 The pull request holds the record, so a finding carries only what composes a
 comment and what the harness needs in order to route it:
 
-- `scope` — `line`, `file` or `change`, which decides inline, file-level or
-  general.
+- `scope` — `line`, `file` or `change`: what the finding is about, which
+  decides where its comment goes.
 - `file` and `line` — the changed line the comment is anchored to. A finding
-  scoped to a file carries the file alone, and one scoped to the change as a
-  whole carries neither.
+  scoped to a file carries the file alone. One scoped to the change carries the
+  changed file it most concerns and no line, and a finding of that scope with no
+  file is refused.
 - `severity` — `high`, `medium`, or `low`.
 - `headline` — the problem, named in one line.
 - `reasoning` — the bullets beneath the headline, one point each.
@@ -2259,8 +2239,9 @@ A finding's `scope`, which the reviewer sets, decides where its comment goes:
   anchored to a file and a line that the change touched. This is the normal case.
 - **File**, for a finding scoped to `file`. It becomes a review comment thread on
   the file, carrying no line.
-- **General**, for a finding scoped to `change`. It becomes a thread about the
-  change as a whole, on no file and no line, as General threads below sets out.
+- **File, for the change as a whole**, for a finding scoped to `change`. It
+  becomes a review comment thread on the changed file the finding names,
+  carrying no line, as a finding scoped to `file` does.
 
 A finding about code the change did not touch is still scoped to `line`, and
 anchored to the changed line that caused it, with the affected file and line
@@ -2274,76 +2255,34 @@ be anchored. A finding scoped to `file` whose file the diff does not carry goes
 to Notes the same way. A round that leaves the episode open keeps each such
 finding on its record, and `squiz review` prints it on stderr (§ 7).
 
-A file-scoped comment and a general one are threads like an inline one: each is
-resolved, re-opened and ruled on, and carries across rounds. Each counts as open
-for the exit status and the round cap exactly as an inline thread does, until a
-verdict closes it.
+**A finding scoped to `change` whose file the diff does not carry is posted on
+the first file the diff carries**, in the diff's order, with the file it named
+written in the text:
 
-#### General threads
+```markdown
+**Squiz reviewer · high — All seven new exported helpers lack the required tests**
 
-**Under the GitHub venue a general thread is made of conversation comments on
-the pull request.** A conversation comment has no thread and no resolve of its
-own, so squiz makes both:
+- …
 
-- **The finding is a conversation comment** in the comment format above, ending
-  with a line that names its id. Ids are `G1`, `G2`, …, counted on each pull
-  request: a new one takes the number after the highest already on it.
+**Suggested fix:** …
 
-  ```markdown
-  **Squiz reviewer · high — All seven new exported helpers lack the required tests**
+**Where:** the change as a whole. The reviewer named `src/sync/helpers.md`, which the diff does not carry.
+```
 
-  - …
+Only a diff that carries no file at all, or one that cannot be read, leaves such
+a finding on no thread. Notes then names it as about the change as a whole:
 
-  <sub>Squiz thread G1</sub> <!-- squiz:thread G1 -->
-  ```
+```markdown
+- About the change as a whole: All seven new exported helpers lack the required tests (no thread could be opened for it)
+```
 
-- **A reply is a conversation comment ending with a line that ties it to its
-  thread** and quotes the finding's first line. The coding agent's replies, the
-  reviewer's reasons and its closing replies are all posted this way:
-
-  ```markdown
-  **Squiz coding agent**
-
-  Every helper now has a test in `src/sync/helpers.test.ts`.
-
-  > In reply to G1: **Squiz reviewer · high — All seven new exported helpers lack the required tests** <!-- squiz:reply G1 -->
-  ```
-
-- **The thread is resolved where its finding's comment is hidden as resolved**,
-  through GitHub's `minimizeComment` with the classifier `RESOLVED`. Re-opening
-  it shows the comment again, through `unminimizeComment`. Both are
-  idempotent. A hide or a show GitHub refuses is a verdict that could not be
-  applied, as for any thread (§ 8): the round's outcome stands, the state file
-  keeps the ruling, the round's record and `host.log` name it, and the thread
-  counts as it was handed over.
-
-The listing reads every conversation comment on the pull request. A comment
-whose last line is one of the two trailers belongs to the thread it names, and
-is handed on with that line and the blank line before it taken off, as it was
-handed over. Every other comment, the summary and failure comments among them,
-belongs to no thread. A reply naming an id no finding holds belongs to none
-either, and where two findings name one id, the first holds it. Squiz finds its
-own threads by these trailers, and tells who wrote each comment by its marker,
-as on any thread (§ 2 Identity).
-
-**A conversation comment that cannot be listed fails the listing**, as a review
-thread does (§ 8). A general thread left out would read as one that was fixed.
-
-**A person who deletes a general finding's comment, or edits its last line,
-takes the thread away.** The listing no longer finds it, so no round hands it
-to the reviewer, its replies belong to no thread, and the episode can close
-with nothing open. An edit that keeps the last line keeps the thread, with the
-edited text. Squiz does nothing to stop or repair either, which is § 11's rule.
-
-**Under the local venue a general thread is an entry in `threads.json` with no
-`path`**, and the anchor `{ "at": "change" }` (§ 4 The record). Its id is a `T`
-id like any other.
-
-Both venues hand the reviewer a general thread with every reply on it, under
-its id, as on the change as a whole. The reviewer rules on it as on any thread,
-which is what keeps a second round from opening a second thread for the same
-finding: it is handed the one it opened, and rules on it rather than raising it
-again.
+A thread on a file is a review thread like an inline one, whatever its
+finding's scope. It is resolved, re-opened and ruled on, carries across rounds,
+and takes `squiz reply`. It counts as open for the exit status and the round cap
+exactly as an inline thread does, until a verdict closes it. So a round whose
+only finding is about the change as a whole leaves a thread open and does not
+close the episode, and the next round hands the reviewer that thread to rule on
+rather than raise again.
 
 ## 6. The summary
 
@@ -2409,8 +2348,8 @@ Four blocks, in this order.
    ```
 2. **The findings that need a person.** Every `open` finding and every
    `disputed` one, each with its headline and where it sits: `file:line` for a
-   thread anchored to a line, the file alone for one anchored to the file, and
-   `The change as a whole` for a general thread. When there are none, the
+   thread anchored to a line, and the file alone for one anchored to the file,
+   a finding about the change as a whole among them. When there are none, the
    comment says so in one line.
 3. **Rounds.** Each round in the order it ran, with the short commit it
    reviewed, how many findings it raised, and the rulings it replied with: each
@@ -2421,9 +2360,9 @@ Four blocks, in this order.
    round whose replies GitHub refused is listed all the same.
 4. **Notes.** Anything else a person reviewing the pull request should know:
    - a finding the harness could anchor to neither a line nor a file, with its
-     `file:line`;
+     `file:line`, or as about the change as a whole for one scoped to `change`;
    - a finding whose comment could not be posted at all, with its location, or
-     as about the change as a whole for a general one;
+     as about the change as a whole for one scoped to `change`;
    - a thread the last round kept open whose reason could not be posted, with
      its location and headline;
    - a thread any round closed whose reply could not be posted, with its
@@ -2519,7 +2458,7 @@ Reviewed by `pi` on `openai/gpt-5-mini`
 - `packages/sync/src/queue.ts:134` — Retry backoff resets on every enqueue (open)
 - `packages/sync/src/session.ts:57` — Clock skew is read as token expiry (disputed)
 - `packages/sync/src/retry.ts` — Every path here is dead once the queue lands (open)
-- The change as a whole — The retry queue duplicates the scheduler already in `packages/sync/src/scheduler.ts` (open)
+- `packages/sync/src/queue.ts` — The retry queue duplicates the scheduler already in `packages/sync/src/scheduler.ts` (open)
 
 **Rounds**
 
@@ -2676,23 +2615,26 @@ through the link `squiz init` makes in a directory already on its `PATH`.
 3 open threads on #185
 PRRT_kwDOUEd2qM6mPuUP scratch/paging/pages.ts:26 high — pageCount drops the partial last page
 PRRT_kwDOUEd2qM6mPuVO scratch/paging/pages.ts:34 high — pageAt starts every page one page too far
-G1 (whole change) medium — Paging duplicates the cursor the API already returns
+PRRT_kwDOUEd2qM6mPuWa scratch/paging/cursor.ts (whole file) medium — Paging duplicates the cursor the API already returns
 ```
 
 A thread whose first comment carries none of § 2 Identity's markers was opened by
 a person rather than by the reviewer. It is no finding, and its line is the
-identifier and the location alone. A general thread's location is
-`(whole change)`.
+identifier and the location alone. A thread on a file as a whole, a finding
+about the change as a whole among them, is located as the file and
+`(whole file)`.
 
 `<id>` is whatever `squiz threads` printed for that thread. It leads the line,
 undecorated, so a line splits into the identifier and the rest at the first
-space. `squiz reply G1 <text>` posts a reply on general thread `G1` of the pull
-request the directory has checked out, as § 5 General threads sets out, and
-refuses an id that pull request holds no finding for:
+space. Under the GitHub venue every id is a `PRRT_` node id. `squiz threads`
+lists review threads alone, so a conversation comment is never one of them.
+`squiz reply` hands any other id to GitHub as it does a thread's, posts
+nothing, and prints what GitHub answered:
 
 ```
-squiz: nothing replied in G9: PR #185 holds no thread "G9"
+squiz: nothing replied in G1: GitHub reported a GraphQL error: Could not resolve to a node with the global id of 'G1'
 ```
+
 
 ### `squiz review`
 
@@ -2927,8 +2869,7 @@ squiz: the failure is posted on PR #41
 squiz: put these lines in your report rather than running squiz review again
 ```
 
-A general thread is printed among the open threads, as any thread is, and
-keeps the run at exit 2 while it is open. A round that left threads open and
+A round that left threads open and
 has findings that no thread holds keeps exit 2, and prints each on stderr as
 § 6's Notes write it, after the line counting any it could not post:
 
@@ -3388,7 +3329,7 @@ The last column names the surfaces each path reaches.
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | A call before the review runs out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within their 30 seconds is this row too. The failure comment and stderr say which call ran out of time, where GitHub can still be reached. A lookup that ran out of time is never read as a branch with no pull request. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped, because a reviewer handed a subset rules on a subset. A trigger whose listing fails queues nothing. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
-| A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, a general thread whose comment GitHub will not hide or show included, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. stderr names each with its thread, what the reviewer ruled, and why it was not applied, which for a refused mutation is what GitHub answered. `squiz status` does the same for a round that reviewed. The summary that closes the episode, and the failure comment of a round that failed, name each as § 6 What the comment carries shows, without GitHub's answer. Nothing is retried. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
+| A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. stderr names each with its thread, what the reviewer ruled, and why it was not applied, which for a refused mutation is what GitHub answered. `squiz status` does the same for a round that reviewed. The summary that closes the episode, and the failure comment of a round that failed, name each as § 6 What the comment carries shows, without GitHub's answer. Nothing is retried. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. A round that closes the episode lists each in its summary's Notes, and a round that fails lists each in its failure comment. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | The reviewer's reason cannot be posted | The verdict stands, and the thread stays in the state the reviewer ruled. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. A round that closes the episode names the thread in its summary's Notes, without GitHub's answer. Nothing is retried: the next round that keeps the thread open posts a reason of its own. | `squiz review` stderr, `squiz status`, summary's Notes |
 | The reply on a thread the round closes cannot be posted | The thread is resolved all the same, and the verdict stands. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. The round records the line in its entry of the state file, and the summary that closes the episode names it in Notes, without GitHub's answer, whichever round it was. A round that fails names it in its failure comment instead. Nothing is retried, because no later round closes the thread again. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
@@ -3624,7 +3565,7 @@ src/
   worktree/                  toplevel resolution and the reviewer's snapshot
   reviewers/                 one adapter per reviewer CLI, pi/ and copilot/, what each hands its CLI, and the report checks they share
   venues/                    the venue contract, venueFor, and one directory per venue
-    github/                  the pull request, review threads and general threads, replies, resolve and re-open, summary, through gh
+    github/                  the pull request, review threads, replies, resolve and re-open, summary, through gh
     local/                   the working tree's commit, threads.json, summary.md and failure files
   findings/                  the finding contract, how one is read as the reviewer reports it, severity, the anchor validator, and where a finding's comment goes
   testing/                   the stand-ins and processes the tests run; no command reaches it

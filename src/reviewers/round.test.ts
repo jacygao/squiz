@@ -1680,7 +1680,7 @@ const reported =
 /** A reviewer whose one finding is what it can see of its own process. */
 function reporting(expression: string): string {
   const finding =
-    '{ scope: "change", severity: "low", headline, reasoning: ["what it could see"], suggestedFix: "none" }';
+    '{ scope: "change", file: "src/ui/card.ts", severity: "low", headline, reasoning: ["what it could see"], suggestedFix: "none" }';
   return [
     'const fs = require("node:fs");',
     `const headline = String(${expression});`,

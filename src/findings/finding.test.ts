@@ -75,15 +75,16 @@ test("a finding scoped to a file carries the file its thread goes on, and no lin
   assert.equal("line" in unbounded, false, "a finding scoped to a file names no line");
 });
 
-test("a finding scoped to the change carries no anchor", () => {
+test("a finding scoped to the change carries the file it most concerns, and no line", () => {
   const whole: ChangeFinding = {
     scope: "change",
+    file: "src/config/loader.ts",
     severity: "medium",
     headline: "The feature duplicates one the project already has",
     reasoning: ["`src/config/config.ts` already loads this file."],
     suggestedFix: "Call the existing loader.",
   };
-  assert.equal("file" in whole, false, "a finding scoped to the change names no file");
+  assert.equal(whole.file, "src/config/loader.ts");
   assert.equal("line" in whole, false, "a finding scoped to the change names no line");
 });
 
@@ -92,10 +93,11 @@ test("a finding scoped to the change carries no anchor", () => {
 // legal fails the check as an unused directive. Each directive sits on the line
 // the error is reported at, so it silences that one error and no other.
 
-test("the type refuses a finding scoped to the change that carries an anchor", () => {
+test("the type refuses a finding scoped to the change that carries a line, or no file", () => {
   // @ts-expect-error a finding scoped to the change carries no line
   const withLine: Finding = {
     scope: "change",
+    file: "src/place.ts",
     severity: "low",
     headline: "Named for the shape it must not have",
     reasoning: ["A finding about the change as a whole has nowhere to put a line."],
@@ -103,18 +105,18 @@ test("the type refuses a finding scoped to the change that carries an anchor", (
     line: 12,
   };
 
-  // @ts-expect-error a finding scoped to the change carries no file
-  const withFile: Finding = {
+  // @ts-expect-error a finding scoped to the change names the file a thread hangs on
+  const withoutFile: Finding = {
     scope: "change",
     severity: "low",
     headline: "Named for the shape it must not have",
-    reasoning: ["A finding about the change as a whole has nowhere to put a file."],
-    suggestedFix: "Scope it to the line instead.",
-    file: "src/place.ts",
+    reasoning: ["A thread needs a file to hang on."],
+    suggestedFix: "Name the changed file it most concerns.",
   };
 
   assert.equal(withLine.scope, "change");
-  assert.equal(withFile.scope, "change");
+  assert.equal(withoutFile.scope, "change");
+
 });
 
 test("the refusal holds for a finding that reaches the type as a variable", () => {

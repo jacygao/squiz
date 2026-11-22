@@ -1147,7 +1147,7 @@ type Posting = {
  * whether the reviewer's silence about a thread counts as a ruling on it.
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
-  const sending = { venue: on.venue, until: on.call, change: on.change };
+  const sending = { venue: on.venue, until: on.call };
   // Nothing to put up makes no call, and a round that made none posted nothing.
   const calls = ruleOn.length + output.findings.length;
   const post = <T>(posting: () => T): T => (calls === 0 ? posting() : timed(on.stopwatch, posting));
@@ -1560,21 +1560,19 @@ function threadsOpened(posted: PostedFindings): readonly ReviewThread[] {
 /**
  * One finding's new thread, as the open threads count it.
  *
- * `null` where nothing can be addressed to it: a comment whose thread id did not
- * come back, and a thread on a file whose finding carries none, which posting
- * never makes.
+ * `null` where nothing can be addressed to it, which is a comment whose thread
+ * id did not come back.
  */
 function asThread(outcome: Threaded): ReviewThread | null {
   const { finding, threadId } = outcome;
   if (threadId === null) return null;
-  if (finding.file === undefined && outcome.placement !== "change") return null;
   return {
     id: threadId,
     // The round just opened it, and only a verdict closes a thread.
     isResolved: false,
     // Nothing has moved under a thread opened against the head just read.
     isOutdated: false,
-    path: finding.file ?? "",
+    path: finding.file,
     anchor: anchorOf(outcome),
     // The round holds no read-back of the comment it wrote, and what reads this
     // reads the identifier.
@@ -1582,10 +1580,10 @@ function asThread(outcome: Threaded): ReviewThread | null {
   };
 }
 
-/** Where the comment went: the line the finding named, the file as a whole, or the change as a whole. */
+/** Where the comment went: the line the finding named, or the file as a whole. */
 function anchorOf(outcome: Threaded): ThreadAnchor {
-  if (outcome.placement === "change") return { at: "change" };
   if (outcome.placement === "file" || outcome.finding.line === undefined) return { at: "file" };
+
   return { at: "line", line: outcome.finding.line };
 }
 

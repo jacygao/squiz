@@ -44,6 +44,7 @@ const run: Run = {
       },
       {
         scope: "change",
+        file: "src/ui/card.ts",
         severity: "medium",
         headline: "Duplicates the summary",
         reasoning: ["Two."],

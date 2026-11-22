@@ -84,6 +84,7 @@ const cardWithoutReference: LineFinding = (() => {
 /** A finding with one point of reasoning and no reference, scoped to the change. */
 const duplicate: ChangeFinding = {
   scope: "change",
+  file: "src/ui/card.ts",
   severity: "low",
   headline: "The retry queue duplicates the scheduler",
   reasoning: ["Nothing calls `src/sync/scheduler.ts`."],

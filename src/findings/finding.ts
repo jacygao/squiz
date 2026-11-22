@@ -56,10 +56,14 @@ export type FileFinding = Body & {
   readonly line?: never;
 };
 
-/** A finding about the change as a whole, which goes into the summary comment. */
+/**
+ * A finding about the change as a whole, which becomes a thread on the changed
+ * file it most concerns. The reviewer names that file, because a thread needs
+ * one to hang on.
+ */
 export type ChangeFinding = Body & {
   readonly scope: "change";
-  readonly file?: never;
+  readonly file: string;
   readonly line?: never;
 };
 

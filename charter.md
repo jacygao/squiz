@@ -69,8 +69,9 @@ falls.
 - **`file`** — no single line owns the defect, or the change touched the file
   and left no line to anchor to. It carries the file and no line.
 - **`change`** — no single file owns the defect: the change duplicates something
-  the project already has, or the approach is wrong. It carries neither a file
-  nor a line.
+  the project already has, or the approach is wrong. It carries the changed file
+  the finding most concerns, which is where its thread goes, and no line. Name a
+  file the change touched.
 
 Reading beyond the diff is expected — untouched files, callers, history. Where
 the defect is somewhere the change did not touch, the finding is still scoped to
@@ -148,7 +149,8 @@ A finding carries:
 | Field | |
 |---|---|
 | `scope` | `line`, `file` or `change`, decided as above. |
-| `file` | The file the finding is anchored to. On a `line` and a `file` finding; absent on a `change` finding. |
+| `file` | The file the finding is anchored to. On a `change` finding, the changed file it most concerns. |
+
 | `line` | The line the finding is anchored to. On a `line` finding only. |
 | `severity` | `high`, `medium` or `low`. |
 | `headline` | The problem, named in one line. |

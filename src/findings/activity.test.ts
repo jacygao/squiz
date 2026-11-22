@@ -9,6 +9,7 @@ import { renderComment, renderOpenReason, renderReply } from "./comment.ts";
 // matching the markers after either is respelled.
 const opening = renderComment({
   scope: "change",
+  file: "src/ui/card.ts",
   severity: "high",
   headline: "Card can be placed off-screen",
   reasoning: ["The height is never measured."],
@@ -17,6 +18,7 @@ const opening = renderComment({
 
 const reviewerReply = renderComment({
   scope: "change",
+  file: "src/ui/card.ts",
   severity: "high",
   headline: "Still off-screen",
   reasoning: ["The clamp uses the width."],
@@ -154,25 +156,3 @@ test("a deleted newest reply hands the answer to the one before it", () => {
   assert.equal(latestActivity([thread("PRRT_a", opened, older)]), "PRRC_older");
 });
 
-/** A general thread, about the change as a whole, whose comments carry ids of their own sequence. */
-function general(id: string, ...comments: readonly ThreadComment[]): ReviewThread {
-  return { ...thread(id, ...comments), path: "", anchor: { at: "change" } };
-}
-
-// A review comment's REST id and a conversation comment's are two sequences, so neither orders replies posted in one second.
-test("#889: a review reply posted in the same second as a newer general reply, with a smaller REST id, is still new activity", () => {
-  const generalReply = comment("IC_reply", "On the general thread.", "2026-09-06T07:05:00Z", 6870441277);
-  const before = latestActivity([thread("PRRT_a", opened), general("G1", opened, generalReply)]);
-  const reviewReply = comment("PRRC_reply", "On the review thread.", "2026-09-06T07:05:00Z", 3993908108);
-  const after = latestActivity([thread("PRRT_a", opened, reviewReply), general("G1", opened, generalReply)]);
-
-  assert.equal(before, "IC_reply");
-  assert.notEqual(after, before, "the new reply left the activity as it was, so no round reviews it");
-  assert.equal(after, "PRRC_reply IC_reply");
-});
-
-test("#889: replies a second apart on a review thread and a general thread are ordered by time alone", () => {
-  const reviewReply = comment("PRRC_reply", "On the review thread.", "2026-09-06T07:05:01Z", 3993908108);
-  const generalReply = comment("IC_reply", "On the general thread.", "2026-09-06T07:05:00Z", 6870441277);
-  assert.equal(latestActivity([thread("PRRT_a", opened, reviewReply), general("G1", opened, generalReply)]), "PRRC_reply");
-});

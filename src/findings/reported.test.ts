@@ -28,6 +28,7 @@ const fileFinding = {
 
 const changeFinding = {
   scope: "change",
+  file: "src/cards/place.ts",
   severity: "low",
   headline: "The change duplicates the existing placement helper",
   reasoning: ["`src/cards/clamp.ts` already does this."],
@@ -104,8 +105,8 @@ test("reasoning that is not a list of text is caught", () => {
 test("a scope carrying an anchor it must not is refused rather than trimmed", () => {
   const cases = [
     [{ ...fileFinding, line: 12 }, /is scoped to a file and carries a line/],
-    [{ ...changeFinding, file: "src/a.ts" }, /is scoped to the change and carries a file/],
     [{ ...changeFinding, line: 12 }, /is scoped to the change and carries a line/],
+    [without(changeFinding, "file"), /^is scoped to the change and carries no file\. Name the changed file it most concerns$/],
     [without(lineFinding, "file"), /is scoped to a line and carries no file/],
     [without(fileFinding, "file"), /is scoped to a file and carries no file/],
   ] as const;

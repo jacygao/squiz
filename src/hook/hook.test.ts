@@ -81,7 +81,7 @@ type Place = {
 function fakeGh(directory: string): string {
   const at = `'${directory.replaceAll("'", `'\\''`)}'`;
   const noThreads = JSON.stringify({
-    data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] }, comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } },
+    data: { node: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } },
   });
   return [
     "#!/bin/sh",

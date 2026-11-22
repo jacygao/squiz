@@ -87,7 +87,6 @@ function oneKeyVenue(tree: string, head: string, asked: { key: string; worktree:
     listThreads: () => ({ outcome: "listed", threads: [] }),
     openThread: refuse,
     openFileThread: refuse,
-    openGeneralThread: refuse,
     reply: refuse,
     resolve: refuse,
     reopen: refuse,

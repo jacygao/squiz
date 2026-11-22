@@ -112,11 +112,10 @@ function locationOf(thread: ReviewThread): string {
       return `\`${thread.path}\` as a whole`;
     case "unnamed-line":
       return `\`${thread.path}\`, line unknown`;
-    case "change":
-      return "the change as a whole";
     default: {
       // An anchor case none of the above names. `anchor` is `never` only
-      // while those four are all there is, so a fifth stops this compiling.
+      // while those three are all there is, so a fourth stops this compiling.
+
       const unhandled: never = anchor;
       return unhandled;
     }

@@ -330,6 +330,7 @@ async function review() {
 
   const findings = told.map(([headline, reference]) => ({
     scope: "change",
+    file: "src/ui/card.ts",
     severity: "low",
     headline,
     reasoning: ["What came back is in the reference."],
