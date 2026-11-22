@@ -49,6 +49,7 @@ import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import { changedFiles, changeDiff, gitDiff } from "../reviewers/git-tools.ts";
 import { composePrompt } from "../reviewers/prompt.ts";
 import { runRound as runReview, type Round as Review } from "../reviewers/round.ts";
+import { tokenSource } from "../sessions/copilot-settings.ts";
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import type { Environment } from "../sessions/tmux.ts";
 import { addSnapshot, removeSnapshot } from "../worktree/snapshot.ts";
@@ -663,7 +664,7 @@ async function reviewOn(
       githubConfigDirectory: join(ownDirectory, "gh"),
       thinking: config.thinking,
       model: config.model,
-      ...(config.copilotTokenFile === null ? {} : { copilotTokenFile: config.copilotTokenFile }),
+      ...copilotTokenFileFor(config),
       // Whatever this says, each attempt asks the adapter for a line for every
       // place the reviewer may run.
       terminal: "none",
@@ -969,6 +970,18 @@ function handOver(
  */
 function openedByReviewer(thread: ReviewThread): boolean {
   return readThread(thread).raised === "finding";
+}
+
+/**
+ * The token file a Copilot reviewer signs in from: the one `.squiz.json` names,
+ * or else the default file where it holds one token. A default file that cannot
+ * be used is left unread, so the round runs on Copilot's own login rather than
+ * failing.
+ */
+function copilotTokenFileFor(config: Config): { copilotTokenFile?: string } {
+  if (config.reviewer !== "copilot") return {};
+  const source = tokenSource(config.copilotTokenFile, process.env);
+  return source.source === "login" ? {} : { copilotTokenFile: source.file };
 }
 
 /** Where a session ran, as the state file records it. A child is detached and has no pane. */

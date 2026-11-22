@@ -272,7 +272,7 @@ function tokenFileOf(path: string, value: unknown): string {
   // A control character is refused because the path reaches a pane's shell line, where it would be a key.
   if (typeof value === "string" && value.startsWith("/") && value.length <= 4096 && !/[\u0000-\u001f\u007f]/u.test(value)) return value;
   throw new ConfigError(
-    `${path}: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for Copilot's own login`,
+    `${path}: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for ~/.config/squiz/copilot-token or Copilot's own login`,
   );
 }
 

@@ -1,19 +1,61 @@
 /**
  * The user's own Copilot directory and the settings Copilot keeps in it, which
- * every Copilot session of that user starts with, and the token `.squiz.json`
- * can name for them.
+ * every Copilot session of that user starts with, and the token squiz signs
+ * them in with.
  *
  * Nothing here throws. Every outcome is a value the caller reads.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 /** The user's Copilot directory: `COPILOT_HOME` where it is set, and `~/.copilot` otherwise. */
 export function copilotHome(environment: NodeJS.ProcessEnv): string {
   const theirs = environment["COPILOT_HOME"];
-  return theirs !== undefined && theirs.trim() !== "" ? resolve(theirs) : join(environment["HOME"] ?? homedir(), ".copilot");
+  return theirs !== undefined && theirs.trim() !== "" ? resolve(theirs) : join(homeOf(environment), ".copilot");
+}
+
+/** The user's home directory: `HOME` where it is set, and the system's record of it otherwise. */
+function homeOf(environment: NodeJS.ProcessEnv): string {
+  const home = environment["HOME"];
+  return home !== undefined && home.trim() !== "" ? resolve(home) : homedir();
+}
+
+/** The file Copilot's token is read from where `.squiz.json` names no `copilotTokenFile`. */
+export function defaultTokenFile(environment: NodeJS.ProcessEnv): string {
+  return join(homeOf(environment), ".config", "squiz", "copilot-token");
+}
+
+/**
+ * Where the reviewer's Copilot takes its token from:
+ *
+ * - `named`: the `copilotTokenFile` that `.squiz.json` names, read or not;
+ * - `default`: the default file, which exists and holds one token;
+ * - `login`: Copilot's own login, with a `problem` where the default file
+ *   exists and cannot be used.
+ *
+ * Only a named file fails a round. A default file that cannot be used leaves
+ * Copilot on its own login.
+ */
+export type TokenSource =
+  | { readonly source: "named"; readonly file: string }
+  | { readonly source: "default"; readonly file: string }
+  | { readonly source: "login"; readonly problem?: string };
+
+export function tokenSource(named: string | null, environment: NodeJS.ProcessEnv): TokenSource {
+  if (named !== null) return { source: "named", file: named };
+  const file = defaultTokenFile(environment);
+  try {
+    statSync(file);
+  } catch (cause) {
+    // Only a file that is not there is passed over silently. One squiz cannot reach is a problem.
+    const code = codeOf(cause);
+    if (code === "ENOENT" || code === "ENOTDIR") return { source: "login" };
+    return { source: "login", problem: `the Copilot token file ${file} could not be read: ${reasonFor(cause)}` };
+  }
+  const read = copilotToken(file);
+  return "problem" in read ? { source: "login", problem: read.problem } : { source: "default", file };
 }
 
 export type UserSettings =
@@ -63,8 +105,8 @@ export function carryLogins(home: string, environment: NodeJS.ProcessEnv): strin
 }
 
 /**
- * The token in `file`, which `.squiz.json`'s `copilotTokenFile` names, with the
- * spaces, tabs and line ends around it dropped.
+ * The token in `file`, the one `tokenSource` names, with the spaces, tabs and
+ * line ends around it dropped.
  *
  * Copilot leaves `COPILOT_GITHUB_TOKEN` out of the environment it gives its
  * hooks, so a round host that a Copilot run's hook started never has it. The
