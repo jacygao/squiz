@@ -815,6 +815,7 @@ No requirement.
 - **PQ6, recording the first prompt as a local change's description: kept.** Under the local venue the reviewer has no pull request to read intent from, and the first prompt the coding agent was given is that intent. R3.7.6–R3.7.8, R4.4.17 and R4.4.18 stay, without R3.7.7's `SQUIZ_FIXER` clause, which goes with #910.
 - **PQ7, closing on a clean state after the state behind it is superseded back to it: cut.** It handles a person deleting a reply mid-review, which § 11 leaves to #819's list. B is recorded superseded, and the episode stays open for the next commit or reply.
 - **PQ2, Herdr and tmux panes: kept, and simplified.** Herdr starts the reviewer through `layout.apply`'s argv, and tmux from separate arguments, with no shell to type into (#911). The requirements about typing a line, its length and control characters leave the list with that change.
+- **PQ4, general threads built from conversation comments: cut.** A `change` finding goes on a file-level review thread of the changed file it most concerns, so it still counts as open and blocks the close (#889), and squiz keeps one kind of thread (#913). R5.12's general-thread requirements leave the list.
 - **PQ-A1, the local venue: kept.** A user chooses whether a review's record is kept on GitHub or in local files. Consolidating it with the GitHub venue is left for later.
 
 ## Not a requirement but needs a home
