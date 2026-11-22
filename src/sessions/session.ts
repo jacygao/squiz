@@ -22,7 +22,7 @@ export type SessionRequest = {
   readonly inPane: { readonly program: string; readonly arguments: readonly string[] };
   /** What runs where there is none, which may need other arguments to run unattended. */
   readonly withoutTerminal: { readonly program: string; readonly arguments: readonly string[] };
-  /** How long a Herdr pane's command may take to start running once the shell has it. */
+  /** How long a Herdr pane's command may take to start running once Herdr has opened the pane. */
   readonly startsWithinMs: number;
   /** The Herdr workspace to open the tab in. Without one, Herdr uses the focused workspace. */
   readonly workspace?: string;

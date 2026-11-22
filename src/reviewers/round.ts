@@ -137,8 +137,8 @@ export type Sessions = {
 type SessionsAt = Sessions & { readonly environment: Environment; readonly boundEndsAt: number };
 
 /**
- * How long a reviewer in a Herdr pane may take to start running once the
- * pane's shell has its line. The review itself is bounded by the round.
+ * How long a reviewer in a Herdr pane may take to start running once Herdr has
+ * opened the pane. The review itself is bounded by the round.
  */
 const STARTS_MS = 15_000;
 
@@ -1023,8 +1023,8 @@ function closePlace(place: SessionPlace, environment: Environment): string | und
  *
  * tmux closes a window with one `SIGHUP`, which a command may ignore, so the
  * window's command is found from tmux and its group signalled before the window
- * is closed. Herdr's own close escalates to `SIGKILL` across the pane's shell
- * session, which holds the command, so a Herdr pane has nothing to stop here.
+ * is closed. Herdr's own close kills the pane's process and its group, even
+ * where it ignores `SIGHUP`, so a Herdr pane has nothing to stop here.
  */
 async function stopFailedStart(left: LeftOpen | undefined, environment: Environment): Promise<void> {
   const pid = left?.backend === "tmux" ? windowProcess(left.window, environment, SESSION_BOUND_MS) : undefined;

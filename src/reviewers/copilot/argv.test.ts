@@ -113,13 +113,9 @@ test("the reading tools reach the snapshot and nothing else", () => {
   }
 });
 
-test("the script is one line, with no character a Herdr pane's shell would refuse", () => {
+test("the line is sh's -c, the script and the MCP configuration", () => {
   for (const terminal of ["pane", "none"] as const) {
-    const { args } = argv({ ...invocation, terminal });
-    assert.equal(args.length, 3, "the line is sh's -c, the script and the MCP configuration");
-    for (const argument of args) {
-      assert.doesNotMatch(argument, /[\u0000-\u001f\u007f]/u, `a control character in ${JSON.stringify(argument)}`);
-    }
+    assert.equal(argv({ ...invocation, terminal }).args.length, 3);
   }
 });
 

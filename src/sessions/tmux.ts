@@ -4,11 +4,9 @@
  * **Only the server `TMUX` names is ever asked.** Without it nothing runs tmux
  * at all, since tmux would fall back to the owner's default server.
  *
- * **The window's command line is one command, `exec` and the quoted arguments.**
- * tmux hands it to its default shell, the owner's, as one string. With nothing
- * else on the line, the shell becomes the command, so the pane's pid is the
- * command's own. A second command on the line would leave that pid naming the
- * shell.
+ * **tmux execs the command itself, from separate arguments after `--`.** No
+ * shell parses or starts it, so every argument arrives as given and the pane's
+ * pid is the command's own.
  *
  * Nothing here throws. Every answer is a value the caller reads.
  */
@@ -26,8 +24,8 @@ export type WindowRequest = {
   /** The program and its arguments, each of which reaches it exactly as given. */
   readonly argv: readonly string[];
   /**
-   * Set in the command's environment. tmux starts a window's command with the
-   * server's environment, so the client's own reaches it only through these.
+   * Set in the command's environment, over the tmux server's own, which is all
+   * the command otherwise has.
    */
   readonly variables?: Readonly<Record<string, string>>;
 };
@@ -59,13 +57,10 @@ export function openWindow(request: WindowRequest, environment: Environment, bou
   if (!insideTmux(environment)) return { outcome: "refused", reason: "TMUX is not set" };
   if (request.argv.length === 0) return { outcome: "refused", reason: "there is no command to run" };
 
-  const assigned = Object.entries(request.variables ?? {}).map(([name, value]) => `${name}=${value}`);
-  // Set again on the line, because the window's shell can set any of them as
-  // it starts: zsh reads `.zshenv` even for `-c`. `env` becomes the command
-  // with the same pid.
-  const settings = assigned.length === 0 ? [] : ["/usr/bin/env", ...assigned];
-  const commandLine = ["exec", ...[...settings, ...request.argv].map(quoted)].join(" ");
-  const variables = assigned.flatMap((assignment) => ["-e", assignment]);
+  const variables = Object.entries(request.variables ?? {}).flatMap(([name, value]) => ["-e", `${name}=${value}`]);
+  // tmux hands a command of one word to its default shell. This `sh` reads no
+  // startup file, and becomes the command with the same pid.
+  const argv = request.argv.length === 1 ? ["/bin/sh", "-c", 'exec "$0"', ...request.argv] : request.argv;
   const ran = tmux(
     [
       "new-window",
@@ -78,7 +73,8 @@ export function openWindow(request: WindowRequest, environment: Environment, bou
       request.name,
       "-c",
       request.directory,
-      commandLine,
+      "--",
+      ...argv.map(literally),
     ],
     environment,
     boundMs,
@@ -146,19 +142,13 @@ function insideTmux(environment: Environment): boolean {
 }
 
 /**
- * `argument` as one word to the POSIX shells and to fish, whatever it holds.
+ * `argument` as tmux hands it on.
  *
- * Everything but a quote or a backslash goes inside single quotes, which all of
- * them read literally. fish reads a backslash there as an escape, so each quote
- * and backslash goes in double quotes on its own, which all of them read alike.
+ * tmux reads an argument ending in `;` as the end of a command, and takes one
+ * backslash before that `;` away, whatever comes before it.
  */
-function quoted(argument: string): string {
-  if (argument === "") return "''";
-  return argument
-    .split(/(['\\])/u)
-    .filter((part) => part !== "")
-    .map((part) => (part === "'" ? `"'"` : part === "\\" ? `"\\\\"` : `'${part}'`))
-    .join("");
+function literally(argument: string): string {
+  return argument.endsWith(";") ? `${argument.slice(0, -1)}\\;` : argument;
 }
 
 type Run =

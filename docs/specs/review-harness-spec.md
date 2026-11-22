@@ -1299,12 +1299,15 @@ it.** The round host starts it in the first place that applies:
 
 | Where | How the round host starts it |
 |---|---|
-| Herdr, where `HERDR_SOCKET_PATH` is set | `herdr tab create --cwd <snapshot> --label squiz-41-r2 --no-focus --workspace <id>` gives a pane, in the workspace the state's record names, and in the focused workspace where it names none, and `herdr pane run <pane> '<gated command line>'` types the reviewer's line into the pane's shell once the shell is at its prompt |
-| tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> '<command line>'` |
+| Herdr, where `HERDR_SOCKET_PATH` is set | One `layout.apply` request on Herdr's socket opens a tab whose one pane execs the gated reviewer, in the workspace the state's record names, and in the focused workspace where it names none |
+| tmux, where `TMUX` is set | `tmux new-window -d -n squiz-41-r2 -c <snapshot> -- <program> <argument>…` |
 | Neither | As a child of the round host, with no terminal |
 
-The command line is the one the adapter built: `pi`'s, or the Copilot adapter's
-shell line, which starts Copilot. Below, "the reviewer" is that command.
+The command is the one the adapter built: `pi` and its arguments, or the
+Copilot adapter's `sh -c` line, which starts Copilot. Below, "the reviewer" is
+that command. **No shell stands between the backend and the reviewer**, so every
+argument reaches it byte for byte, newlines and tabs too, and no shell's startup
+files run.
 
 **The Herdr workspace is the trigger's.** A trigger records the
 `HERDR_WORKSPACE_ID` in its environment on the state's record. Herdr sets it in
@@ -1312,60 +1315,69 @@ every pane it manages, so the reviewer's tab opens beside the coding agent's
 pane. A workspace id is a `w` and a number, such as `w2`, and a value of any
 other shape is not recorded.
 
+**Herdr is asked through its socket.** `layout.apply` has no CLI, so the round
+host sends each request as one line of JSON to the socket `HERDR_SOCKET_PATH`
+names, from a Node process of its own, and reads one line back:
+
+```json
+{"id":"squiz:layout.apply","method":"layout.apply","params":{"root":{"type":"pane","command":["/bin/sh","-c","<gate>","/tmp/squiz-gate-Xa81Qe","400","pi","--session-dir",…],"cwd":"<snapshot>","env":{"SQUIZ_REPORTS":"…","GH_TOKEN":"",…},"label":"squiz-41-r2"},"tab_label":"squiz-41-r2","focus":false,"workspace_id":"w2"}}
+```
+
+`pane.process_info`, `pane.close` and `pane.get` go the same way. A socket
+nothing answers on is a refusal: nothing opened, and the round host goes on to
+tmux or a child. A `workspace_not_found` refusal for the recorded workspace is
+asked again with no `workspace_id`.
+
 **In Herdr, the start returns once the reviewer is running, and the round's
-bound is all that limits the review.** `herdr pane run` types a line and returns
-at once. The line is the reviewer's behind a gate, each word single-quoted:
-
-```
-'/bin/sh' '-c' '<gate>' '/tmp/squiz-gate-Xa81Qe' '400' 'pi' '--session-dir' …
-```
-
-**No line over 512 bytes is typed**, because a new pane's shell can drop part
-of a long line before its line editor starts. A longer gated line is written to
-a file named `line` in the gate directory before the tab is created, and the
-line typed runs that file, which removes itself and then execs the gated line:
-
-```
-'/bin/sh' '/tmp/squiz-gate-Xa81Qe/line'
-```
-
-tmux types nothing: the command line is `new-window`'s own argument.
-
-The gate writes its pid into the gate directory, waits for a `go` file there,
+bound is all that limits the review.** The pane's argv is a gate, a `/bin/sh`
+that writes its pid into the gate directory, waits for a `go` file there,
 removes the directory, and then becomes the reviewer with the same pid, group
-and start time. The round host removes the directory of a start that failed. The
-round host reads the pid and the reviewer's group while the gate is shut, and
-only then writes `go`, so a start that fails never lets the reviewer run. A
-gate left waiting gives up on its own after four times the bound on each
-program the start runs, without running the reviewer. Where the reviewer's
-command is not on the shell's path, the gate says so and the start fails at
-once. Where the reviewer has not started 15 seconds after the line was typed,
-the start fails.
+and start time. Once the gate has written its pid, the round host reads the
+pid's identity, and then confirms with `pane.process_info` that the pane's
+`shell_pid` and `foreground_process_group_id` are both that pid. Only then does
+it write `go`, so a start that fails never lets the reviewer run, and a
+reviewer that exits at once is still running when it is read. A pane whose gate
+never writes its pid is a start that failed, however long the pane stays open.
 
-**A pane's shell reads the line as typed**, so a control character in an
-argument would be a key. The round host checks the arguments before it creates
-the tab, and treats a command holding one as a pane Herdr refused: nothing
-opens, and it goes on to tmux or a child.
+The round host removes the gate directory of a start that failed. A gate left
+waiting gives up on its own after four times the bound on each call the start
+makes, without running the reviewer. Where the gate has not written its pid 15
+seconds after Herdr opened the pane, the start fails.
+
+**The reviewer runs on the round host's `PATH`, not the Herdr server's.** The
+server's `PATH` is that of whatever first started it, and may lack a directory
+the coding agent's has. The pane's `env` carries the `PATH` the round's
+variables set, or else the round host's own, which is the coding agent's, so
+it also reaches a program the reviewer's command runs by name, as the Copilot
+adapter's `sh` line runs `copilot`. A program named without a `/` is found on
+that `PATH` first, and Herdr is handed its absolute path. A program found on it
+nowhere is a refusal: no pane opens, and the round goes on to tmux or a child,
+as it does wherever Herdr opens nothing. Where the program is gone by the time
+the gate runs, the gate says so and the start fails at once.
+
+**tmux execs the reviewer itself.** Given two or more words after `--`, tmux
+runs them with no shell. A command of one word it would hand to its default
+shell, so the round host gives it as `/bin/sh -c 'exec "$0"' <program>`, which
+reads no startup file and becomes the program with the same pid. tmux reads an
+argument ending in `;` as the end of a command, so the round host writes that
+`;` as `\;`, which tmux reads back as the `;`. tmux starts the window's command
+with the `PATH` of the `tmux` command that opened the window, which is the
+round host's.
 
 **The variables the round sets reach the reviewer on every backend, over any
-value the pane's shell gives them.** They are the adapter's, and the GitHub
-variables under Tools, which come last so that no adapter can undo them. A child
-has them in its environment. A pane gets them through Herdr's `--env` and tmux's
-`-e`, and again as `env` arguments in front of the gate or the reviewer, because
-the shell's startup files can set any of them again:
-
-```
-'/usr/bin/env' 'SQUIZ_REPORTS=…' 'GH_TOKEN=' 'GH_CONFIG_DIR=…' … '/bin/sh' '-c' '<gate>' …
-```
-
-`env` then becomes the gate or the reviewer, so the pid, group and start time
-the round reads are still the reviewer's.
+value the backend's own environment gives them.** They are the adapter's, and
+the GitHub variables under Tools, which come last so that no adapter can undo
+them. A child has them in its environment, a Herdr pane in `layout.apply`'s
+`env`, and a tmux window through `new-window -e`. An empty value arrives set and
+empty. Everything else the reviewer's environment holds is the Herdr or tmux
+server's, but for its `PATH`.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
-closes a window when its command exits. Herdr returns the pane to its shell when
-`pi` exits, and the round host then closes it with `herdr pane close`. Each
-round's `pi` writes its session to `.squiz/<number>/rounds/<k>/session/`, and the
-round host writes the command that resumes it to `rounds/<k>/resume.txt`:
+closes a window when its command exits, and Herdr removes the pane and its tab.
+The round host still closes it, and `pane.get` answering `pane_not_found`
+confirms it is gone. Each round's `pi` writes its session to
+`.squiz/<number>/rounds/<k>/session/`, and the round host writes the command
+that resumes it to `rounds/<k>/resume.txt`:
 
 ```
 pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
@@ -1384,16 +1396,18 @@ takes no input.
 
 **The round host stops a reviewer in a pane the way it stops one it started
 itself.** At the time bound it signals the reviewer's process group, and then it
-closes the pane. It reads the reviewer's group from the backend while `pi` runs:
+closes the pane. It reads the reviewer's group from the backend while the
+reviewer runs:
 
 | Backend | Where the reviewer's group comes from |
 |---|---|
-| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's command is the one the adapter built, `pi` or the `sh` of the Copilot adapter's line, so this is that command's own pid and leads its group. |
-| Herdr | The pid the gate wrote, confirmed as `foreground_process_group_id` from `herdr pane process-info`, before and after its identity is read. Its `shell_pid` is the pane's shell, whose group does not hold the reviewer. |
+| tmux | `tmux display -p -t <pane> '#{pane_pid}'`. The window's process is the reviewer, `pi` or the `sh` of the Copilot adapter's line, so this is its own pid and leads its group. |
+| Herdr | The pid the gate wrote, confirmed as both `shell_pid` and `foreground_process_group_id` from `pane.process_info` before the gate opens. |
 
-A pane close is not relied on to stop anything: neither backend's close reaches
-a process in a session of its own, and a command that ignores `SIGHUP` outlives
-a tmux window.
+A pane close is not relied on to stop anything. Herdr's `pane close` sends the
+pane's process `SIGHUP` and kills it and its group where it ignores that, but
+neither backend's close reaches a process in a session of its own, and a
+command that ignores `SIGHUP` outlives a tmux window.
 
 ### The snapshot
 
@@ -1638,9 +1652,10 @@ without a word, and one that exists and cannot be used is a warning in `squiz
 doctor` (§ 7 The setup check).
 
 **The token is read into the environment of the Copilot it signs in, and
-nowhere else.** The reviewer's line reads the file in its shell, so a pane's
-line carries the file's path and never the token. The round's setup reads it
-first. No log, record, reason, summary or failure comment holds the token.
+nowhere else.** The Copilot adapter's `sh` line reads the file, so the
+reviewer's arguments carry the file's path and never the token. The round's
+setup reads it first. No log, record, reason, summary or failure comment holds
+the token.
 
 A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
 model credential in the round, and nothing here handles that.
@@ -1782,7 +1797,7 @@ nothing.
 The adapter `reviewer` chooses by default. It must:
 
 - **Hand `pi` the prompt as a file**, read into its first message, so that no
-  argument carries a newline, which a pane's shell would read as a key.
+  limit on an argument's length bounds the prompt.
 - **Grant exactly the tools Tools names.** `pi` drops a name the grant does not
   carry without saying so, so a grant short of a reporting call leaves the
   reviewer no way to report.
@@ -1867,8 +1882,7 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
   exits by itself once the reviewer's last message is written, with nobody to
   answer it.
 - **Hand Copilot the prompt byte for byte**, read from its file as Copilot
-  starts, so that no newline reaches the line a pane's shell reads. The prompt
-  must fit in one argument, which Linux limits to 128 KiB, and nothing here
+  starts. The prompt must fit in one argument, which Linux limits to 128 KiB, and nothing here
   handles a longer one.
 - **Put the charter in the system prompt**, as the instructions of a custom agent
   the adapter writes into its own `COPILOT_HOME`, where it wins over a tree's
@@ -3755,12 +3769,12 @@ worktree is a configuration that cannot be read.
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 5 Adapters) |
 | `copilotTokenFile` | none | The absolute path of a file holding the token that the reviewer's Copilot signs in with, such as `/run/secrets/copilot`. None reads the token from `~/.config/squiz/copilot-token` where that file exists, and otherwise leaves Copilot to find its own login (§ 5 Tools) |
 
-`copilotTokenFile` is an absolute path of up to 4,096 characters, none of them a
-control character. The file it names, and the default file, each hold the token
-alone, of letters, digits and `_`, and spaces, tabs and line ends around it are
-dropped. Either is read where a Copilot reviewer starts, and `squiz doctor`
-signs in with it, so it must be readable by the user squiz runs as. Each
-belongs outside the repository, where the reviewer cannot read it. A value that is not
+`copilotTokenFile` is an absolute path of up to 4,096 characters. The file it
+names, and the default file, each hold the token alone, of letters, digits and
+`_`, and spaces, tabs and line ends around it are dropped. Either is read where
+a Copilot reviewer starts, and `squiz doctor` signs in with it, so it must be
+readable by the user squiz runs as. Each belongs outside the repository, where
+the reviewer cannot read it. A value that is not
 such a path is refused with an error that leaves the value out, since a token
 written there by mistake would otherwise be printed:
 

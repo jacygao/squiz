@@ -10,123 +10,128 @@ import { identityOf, stillRunning } from "./process.ts";
 
 const BOUND_MS = 10_000;
 
-/** One answer a fake `herdr` gives: what it prints, and what it exits with. */
+/** One answer the fake Herdr gives a call. */
 type Answer = {
-  readonly stdout: string;
-  readonly status?: number;
-  readonly sleepSeconds?: number;
-  /** Print it on stderr instead, as Herdr prints a refusal. */
-  readonly onStderr?: boolean;
-  /** For `pane run`: write this pid into the gate the typed line names, as the gate would. */
+  /** What follows the request's `id` in the answer: a `result` or an `error`. */
+  readonly answer?: Readonly<Record<string, unknown>>;
+  /** A line sent as it is, in place of `answer`. */
+  readonly raw?: string;
+  /** How long to wait before answering. */
+  readonly sleepMs?: number;
+  /** Close the connection with no answer. */
+  readonly hangUp?: true;
+  /** For `layout.apply`: write this pid into the gate the pane's argv names, as the gate would. */
   readonly gatePid?: number;
-  /** For `pane run`: run the typed line, in the background, as the pane's shell would. */
-  readonly runsLine?: boolean;
+  /** For `layout.apply`: run the pane's argv in the background, as Herdr would. */
+  readonly runs?: true;
 };
 
-const json = (value: unknown): Answer => ({ stdout: `${JSON.stringify(value)}\n` });
-const refusal = (code: string): Answer => ({
-  stdout: `${JSON.stringify({ error: { code, message: `${code} said` }, id: "cli" })}\n`,
-  status: 1,
-  onStderr: true,
+const result = (value: unknown): Answer => ({ answer: { result: value } });
+const refusal = (code: string): Answer => ({ answer: { error: { code, message: `${code} said` } } });
+const layoutApplied = (pane: string, gatePid?: number): Answer => ({
+  ...result({ type: "layout_apply", layout: { workspace_id: "w1", tab_id: "w1:t9", root: { type: "pane", pane_id: pane } } }),
+  ...(gatePid === undefined ? {} : { gatePid }),
 });
-const tabCreated = (pane: string): Answer =>
-  json({ id: "cli:tab:create", result: { root_pane: { pane_id: pane, tab_id: "w1:t9" }, type: "tab_created" } });
-// `pane run` prints nothing once it has typed the line.
-const typed = (gatePid?: number): Answer => ({ stdout: "", ...(gatePid === undefined ? {} : { gatePid }) });
 const processInfo = (pane: string, group: number, shell: number): Answer =>
-  json({
-    id: "cli:pane:process_info",
-    result: {
-      process_info: {
-        foreground_process_group_id: group,
-        foreground_processes: [{ name: "node", pid: group }],
-        pane_id: pane,
-        shell_pid: shell,
-      },
-      type: "pane_process_info",
+  result({
+    process_info: {
+      foreground_process_group_id: group,
+      foreground_processes: [{ name: "sh", pid: shell }],
+      pane_id: pane,
+      shell_pid: shell,
     },
+    type: "pane_process_info",
   });
-const paneInfo = (pane: string): Answer =>
-  json({ id: "cli:pane:get", result: { pane: { pane_id: pane }, type: "pane_info" } });
-const closedOk: Answer = json({ id: "cli:pane:close", result: { type: "ok" } });
+const paneInfo = (pane: string): Answer => result({ pane: { pane_id: pane }, type: "pane_info" });
+const closedOk: Answer = result({ type: "ok" });
 
 /**
- * A `herdr` on `PATH` that answers from `answers`, keyed by its first two
- * arguments joined with a dash, and records every call.
+ * A Herdr server, in a process of its own, that answers from `answers`, keyed
+ * by method, and records every request.
  *
- * A key's answers are given in turn, and the last one repeats. A call no key
- * names is refused as `unexpected_call`.
+ * A method's answers are given in turn, and the last one repeats. A method no
+ * key names is refused as `unexpected_call`.
  */
-type FakeHerdr = { readonly options: HerdrOptions; readonly calls: () => readonly string[] };
-
-function withFakeHerdr<T>(answers: Record<string, readonly Answer[]>, body: (fake: FakeHerdr) => T): T {
-  const directory = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-"));
-  try {
-    for (const [key, list] of Object.entries(answers)) {
-      list.forEach((answer, index) => {
-        const names = [`${key}-${index + 1}`, ...(index === list.length - 1 ? [`${key}-last`] : [])];
-        for (const name of names) {
-          writeFileSync(join(directory, `answer-${name}.out`), answer.stdout, "utf8");
-          writeFileSync(join(directory, `answer-${name}.status`), String(answer.status ?? 0), "utf8");
-          if (answer.onStderr === true) writeFileSync(join(directory, `answer-${name}.stderr`), "", "utf8");
-          if (answer.sleepSeconds !== undefined) {
-            writeFileSync(join(directory, `answer-${name}.sleep`), String(answer.sleepSeconds), "utf8");
-          }
-          if (answer.gatePid !== undefined) {
-            writeFileSync(join(directory, `answer-${name}.gatepid`), String(answer.gatePid), "utf8");
-          }
-          if (answer.runsLine === true) writeFileSync(join(directory, `answer-${name}.runs`), "", "utf8");
-        }
-      });
+const FAKE_SERVER = `
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+const [dir, socket] = process.argv.slice(1);
+const answers = JSON.parse(fs.readFileSync(path.join(dir, "answers.json"), "utf8"));
+const counts = {};
+require("node:net").createServer((connection) => {
+  let buffer = "";
+  connection.on("data", (chunk) => {
+    buffer += chunk;
+    const end = buffer.indexOf("\\n");
+    if (end === -1) return;
+    const request = JSON.parse(buffer.slice(0, end));
+    fs.appendFileSync(path.join(dir, "calls"), JSON.stringify({ method: request.method, params: request.params }) + "\\n");
+    const list = answers[request.method];
+    if (list === undefined) {
+      connection.end(JSON.stringify({ id: request.id, error: { code: "unexpected_call", message: "no answer" } }) + "\\n");
+      return;
     }
-    const fake = join(directory, "herdr");
-    writeFileSync(
-      fake,
-      [
-        "#!/bin/sh",
-        '[ "$1" = warm ] && exit 0',
-        'dir=$(dirname "$0")',
-        'printf "%s\\n" "$*" >> "$dir/calls"',
-        'key="$1-$2"',
-        'n=$(cat "$dir/count-$key" 2>/dev/null || echo 0)',
-        "n=$((n + 1))",
-        'echo "$n" > "$dir/count-$key"',
-        'answer="$dir/answer-$key-$n"',
-        '[ -f "$answer.out" ] || answer="$dir/answer-$key-last"',
-        '[ -f "$answer.out" ] || { echo \'{"error":{"code":"unexpected_call","message":"no answer"}}\'; exit 1; }',
-        '[ -f "$answer.sleep" ] && sleep "$(cat "$answer.sleep")"',
-        'line=$4',
-        'if [ -f "$answer.runs" ]; then /bin/sh -c "$line" </dev/null >/dev/null 2>&1 & fi',
-        'if [ -f "$answer.gatepid" ]; then',
-        '  eval "set -- $line"',
-        // The typed line is `/bin/sh -c <gate script> <gate> …`, whose fourth
-        // word is the gate, or `/bin/sh <gate>/<file>`, which runs one written there.
-        '  gate=$4; [ $# -eq 2 ] && gate=$(dirname "$2")',
-        '  echo "$gate" >> "$dir/gates"',
-        '  cat "$answer.gatepid" > "$gate/pid"',
-        'fi',
-        'if [ -f "$answer.stderr" ]; then cat "$answer.out" >&2; else cat "$answer.out"; fi',
-        'exit "$(cat "$answer.status")"',
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    chmodSync(fake, 0o755);
-    // macOS checks a new executable the first time it runs, which under load can spend a bound.
-    spawnSync(fake, ["warm"], { stdio: "ignore" });
-
-    const calls = (): readonly string[] => {
-      const path = join(directory, "calls");
-      return existsSync(path) ? readFileSync(path, "utf8").split("\n").filter((line) => line !== "") : [];
+    counts[request.method] = (counts[request.method] ?? 0) + 1;
+    const answer = list[Math.min(counts[request.method], list.length) - 1];
+    const argv = request.params?.root?.command ?? [];
+    if (answer.gatePid !== undefined) {
+      fs.appendFileSync(path.join(dir, "gates"), argv[3] + "\\n");
+      fs.writeFileSync(path.join(argv[3], "pid"), String(answer.gatePid));
+    }
+    if (answer.runs === true) {
+      fs.appendFileSync(path.join(dir, "gates"), argv[3] + "\\n");
+      const env = { ...process.env, ...request.params.root.env };
+      spawn(argv[0], argv.slice(1), { detached: true, stdio: "ignore", env }).unref();
+    }
+    const reply = () => {
+      if (answer.hangUp === true) return connection.destroy();
+      connection.end((answer.raw ?? JSON.stringify({ id: request.id, ...answer.answer })) + "\\n");
     };
-    return body({
-      options: {
-        environment: { PATH: `${directory}:/usr/bin:/bin`, HERDR_SOCKET_PATH: join(directory, "none.sock") },
-        boundMs: BOUND_MS,
-      },
-      calls,
-    });
+    if (answer.sleepMs === undefined) reply();
+    else setTimeout(reply, answer.sleepMs);
+  });
+}).listen(socket);
+`;
+
+type Call = { readonly method: string; readonly params: Record<string, unknown> };
+type FakeHerdr = {
+  readonly options: HerdrOptions;
+  readonly calls: () => readonly Call[];
+  /** Where `pi` is, on the first directory of the PATH the start is given. */
+  readonly pi: string;
+};
+
+/** Each call as `<method> <pane_id>`, the pane left off where there is none. */
+const named = (calls: readonly Call[]): string[] =>
+  calls.map(({ method, params }) => (typeof params["pane_id"] === "string" ? `${method} ${params["pane_id"]}` : method));
+
+async function withFakeHerdr<T>(answers: Record<string, readonly Answer[]>, body: (fake: FakeHerdr) => T): Promise<T> {
+  const directory = mkdtempSync(join(tmpdir(), "sqf-"));
+  const socket = join(directory, "s.sock");
+  let server: ChildProcess | undefined;
+  try {
+    writeFileSync(join(directory, "answers.json"), JSON.stringify(answers), "utf8");
+    const pi = join(directory, "pi");
+    writeFileSync(pi, "#!/bin/sh\n", { mode: 0o755 });
+    server = spawn(process.execPath, ["-e", FAKE_SERVER, directory, socket], { stdio: "ignore" });
+    for (let tries = 0; tries < 200 && !existsSync(socket); tries += 1) {
+      await new Promise((settle) => setTimeout(settle, 25));
+    }
+    assert.ok(existsSync(socket), "the fake Herdr made no socket");
+    const calls = (): readonly Call[] => {
+      const path = join(directory, "calls");
+      if (!existsSync(path)) return [];
+      return readFileSync(path, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line) as Call);
+    };
+    // The gate runs the system's commands by name, as on any PATH a caller has.
+    const environment = { HERDR_SOCKET_PATH: socket, PATH: `${directory}:/usr/bin:/bin` };
+    return body({ options: { environment, boundMs: BOUND_MS }, calls, pi });
   } finally {
+    server?.kill("SIGKILL");
     // A gate the fake wrote into had no command to remove it once opened.
     const gates = join(directory, "gates");
     if (existsSync(gates)) {
@@ -146,24 +151,31 @@ const command: PaneCommand = {
   startsWithinMs: 20_000,
 };
 
+/** The argv the pane was given, from the start's `layout.apply`. */
+function paneArgv(calls: readonly Call[]): readonly string[] {
+  const apply = calls.find((call) => call.method === "layout.apply");
+  const root = apply?.params["root"] as { command?: string[] } | undefined;
+  return root?.command ?? [];
+}
+
+/** The environment the pane was given, from the start's `layout.apply`. */
+function paneEnv(calls: readonly Call[]): Readonly<Record<string, string>> {
+  const apply = calls.find((call) => call.method === "layout.apply");
+  const root = apply?.params["root"] as { env?: Record<string, string> } | undefined;
+  return root?.env ?? {};
+}
+
 test("only an environment with HERDR_SOCKET_PATH set is inside Herdr", () => {
   assert.equal(insideHerdr({ HERDR_SOCKET_PATH: "/run/herdr.sock" }), true);
   assert.equal(insideHerdr({ HERDR_SOCKET_PATH: "" }), false);
   assert.equal(insideHerdr({ TMUX: "/tmp/tmux" }), false);
 });
 
-// The pane's shell at its prompt, and then the gate leading the foreground.
-const atPromptThenRunning = (pane: string, group: number): readonly Answer[] => [
-  processInfo(pane, 1, 1),
-  processInfo(pane, group, 1),
-];
-
-test("a started command's leader is the pane's foreground group, read again by ps", () => {
-  withFakeHerdr(
+test("a started command's leader is the pane's process, read again by ps", async () => {
+  await withFakeHerdr(
     {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w1:p7", process.pid),
+      "layout.apply": [layoutApplied("w1:p7", process.pid)],
+      "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
     },
     ({ options, calls }) => {
       const own = identityOf(process.pid, BOUND_MS);
@@ -176,186 +188,159 @@ test("a started command's leader is the pane's foreground group, read again by p
         pane: "w1:p7",
         leader: own.outcome === "read" ? own.identity : undefined,
       });
-      const [create, prompt, run, ...reads] = calls();
-      assert.deepEqual([create, prompt, ...reads], [
-        "tab create --cwd /somewhere --label squiz-test --no-focus",
-        "pane process-info --pane w1:p7",
-        "pane process-info --pane w1:p7",
-        "pane process-info --pane w1:p7",
-      ]);
-      assert.ok(run?.startsWith("pane run w1:p7 '/bin/sh' '-c' "), run);
-      assert.ok(run?.endsWith(" 'pi' '--first' 'two words'"), run);
+      assert.deepEqual(named(calls()), ["layout.apply", "pane.process_info w1:p7"]);
     },
   );
 });
 
-test("the line typed hands the shell every argument as one word", () => {
-  const argument = "it's $HOME; `id` a\\b \"c\" *";
-  withFakeHerdr(
+test("the tab is one layout.apply, whose pane execs the gate with no shell (#911)", async () => {
+  await withFakeHerdr(
     {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w1:p7", process.pid),
+      "layout.apply": [layoutApplied("w1:p7", process.pid)],
+      "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
     },
-    ({ options, calls }) => {
-      const started = startInHerdrPane({ ...command, arguments: [argument, ""] }, options);
+    ({ options, calls, pi }) => {
+      const variables = { SESSION_MARK: "it's $HOME", GH_TOKEN: "" };
+      const started = startInHerdrPane({ ...command, variables }, options);
       assert.equal(started.outcome, "started", JSON.stringify(started));
 
-      const line = (calls()[2] ?? "").slice("pane run w1:p7 ".length);
-      const words = spawnSync("/bin/sh", ["-c", `for word in ${line}; do printf '%s\\0' "$word"; done`], {
-        encoding: "utf8",
-      }).stdout.split("\0");
-      assert.deepEqual(words.slice(-4), ["pi", argument, "", ""]);
+      const [apply] = calls();
+      const { root, ...rest } = apply?.params ?? {};
+      assert.equal(apply?.method, "layout.apply");
+      assert.deepEqual(rest, { tab_label: "squiz-test", focus: false });
+      const { command: argv, ...pane } = root as { command: string[] };
+      assert.deepEqual(pane, { type: "pane", cwd: "/somewhere", env: { PATH: options.environment["PATH"], ...variables }, label: "squiz-test" });
+      assert.deepEqual(argv.slice(0, 2), ["/bin/sh", "-c"]);
+      assert.match(argv[3] ?? "", /squiz-gate-/u);
+      assert.deepEqual(argv.slice(5), [pi, "--first", "two words"]);
     },
   );
 });
 
-// A fresh pane's shell keeps 1024 bytes of a line typed before its line editor
-// starts, and a line cut short starts nothing (#516).
-const TYPED_AT_MOST = 512;
-
-/** `line` split into words as a POSIX shell reads it. */
-function wordsOf(line: string): string[] {
-  const listed = spawnSync("/bin/sh", ["-c", `for word in ${line}; do printf '%s\\0' "$word"; done`], { encoding: "utf8" });
-  return listed.stdout.split("\0").slice(0, -1);
-}
-
-/** Start `program` with `args` against a fake that answers every call, and hand `body` the line it typed. */
-function typedFor<T>(program: string, args: readonly string[], body: (line: string) => T): T {
-  return withFakeHerdr(
+test("every argument reaches the pane's argv as given, control characters too (#911)", async () => {
+  const awkward = ["line one\nline two", "a\ttab", "it's $HOME; `id` a\\b \"c\" *", "", "ctrl\u0003c", "del\u007f"];
+  await withFakeHerdr(
     {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w1:p7", process.pid),
+      "layout.apply": [layoutApplied("w1:p7", process.pid)],
+      "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
     },
-    ({ options, calls }) => {
-      const started = startInHerdrPane({ ...command, program, arguments: args }, options);
+    ({ options, calls, pi }) => {
+      const started = startInHerdrPane({ ...command, arguments: awkward }, options);
       assert.equal(started.outcome, "started", JSON.stringify(started));
-      return body((calls()[2] ?? "").slice("pane run w1:p7 ".length));
+      assert.deepEqual(paneArgv(calls()).slice(5), [pi, ...awkward]);
     },
   );
-}
-
-test("a line at the bound is typed whole, and one a byte over it is run from a file in the gate (#516)", () => {
-  const shortest = typedFor("pi", ["x"], (line) => Buffer.byteLength(line));
-  const atBound = "x".repeat(1 + TYPED_AT_MOST - shortest);
-
-  typedFor("pi", [atBound], (line) => {
-    assert.equal(Buffer.byteLength(line), TYPED_AT_MOST);
-    assert.deepEqual(wordsOf(line).slice(-2), ["pi", atBound]);
-  });
-  typedFor("pi", [`${atBound}x`], (line) => {
-    assert.ok(Buffer.byteLength(line) <= TYPED_AT_MOST, `${Buffer.byteLength(line)} bytes were typed`);
-    const words = wordsOf(line);
-    assert.equal(words.length, 2, line);
-    assert.equal(words[0], "/bin/sh");
-    assert.match(readFileSync(words[1] ?? "", "utf8"), new RegExp(`'pi' '${atBound}x'`, "u"));
-  });
 });
 
-test("a line run from a file hands the command every argument byte for byte (#516)", () => {
-  const directory = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-file-"));
-  try {
-    const out = join(directory, "it's a $dir");
-    // As the Copilot adapter's line is: an `sh -c` script, and a JSON `$0` long enough to be cut.
-    const script = `printf '%s\\0' "$0" "$@" > '${out.replaceAll("'", "'\\''")}'`;
-    const json = JSON.stringify({ servers: { squiz: { env: { A: "it's $HOME `id` a\\b" }, args: ["x ".repeat(700)] } } });
-    const args = ["-c", script, json, "two words", "$HOME", "", "it's"];
-
-    typedFor("/bin/sh", args, (line) => {
-      assert.ok(Buffer.byteLength(line) <= TYPED_AT_MOST, `${Buffer.byteLength(line)} bytes were typed`);
-      // The start opened the gate, so the line runs the command at once, as the pane's shell would.
-      const ran = spawnSync("/bin/sh", ["-c", line], { encoding: "utf8", timeout: BOUND_MS });
-      assert.equal(ran.status, 0, ran.stderr);
-      assert.deepEqual(readFileSync(out, "utf8").split("\0").slice(0, -1), args.slice(2));
-      assert.equal(existsSync(wordsOf(line)[1] ?? ""), false, "the file outlived the line it held");
+// The pane's process would have the server's PATH, which may lack a directory
+// the caller's has, for the program or for anything it runs by name.
+test("the program is found on the caller's PATH, or the PATH its variables give, and the pane gets that PATH (#911)", async () => {
+  const answers = {
+    "layout.apply": [layoutApplied("w1:p7", process.pid)],
+    "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
+  };
+  await withFakeHerdr(answers, ({ options, calls, pi }) => {
+    const started = startInHerdrPane(command, options);
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    assert.equal(paneArgv(calls())[5], pi);
+    assert.equal(paneEnv(calls())["PATH"], options.environment["PATH"]);
+  });
+  await withFakeHerdr(answers, ({ options, calls, pi }) => {
+    const given = `/nowhere:${join(pi, "..")}`;
+    const started = startInHerdrPane({ ...command, variables: { PATH: given } }, {
+      ...options,
+      environment: { ...options.environment, PATH: "/nowhere" },
     });
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("a gate that lets its command run leaves no directory behind (#453)", () => {
-  typedFor("/bin/sh", ["-c", "exit 0"], (line) => {
-    const gate = wordsOf(line)[3] ?? "";
-    assert.match(gate, /squiz-gate-/u, line);
-    // The start opened the gate, so the line runs the command at once, as the pane's shell would.
-    const ran = spawnSync("/bin/sh", ["-c", line], { encoding: "utf8", timeout: BOUND_MS });
-    assert.equal(ran.status, 0, ran.stderr);
-    const left = existsSync(gate) ? readdirSync(gate) : [];
-    assert.equal(existsSync(gate), false, `the gate still holds ${JSON.stringify(left)}`);
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    assert.equal(paneArgv(calls())[5], pi);
+    assert.equal(paneEnv(calls())["PATH"], given);
   });
 });
 
-test("a pane Herdr refuses to open is refused, and nothing more is asked of it", () => {
-  withFakeHerdr({ "tab-create": [refusal("workspace_not_found")] }, ({ options, calls }) => {
+test("a program on no directory of the PATH is refused, and Herdr is never called (#911)", async () => {
+  await withFakeHerdr({ "layout.apply": [layoutApplied("w1:p7", process.pid)] }, ({ options, calls }) => {
+    const started = startInHerdrPane({ ...command, program: "squiz-no-such-reviewer" }, options);
+    assert.deepEqual(started, { outcome: "refused", reason: "there is no squiz-no-such-reviewer on the path" });
+    assert.deepEqual(calls(), []);
+  });
+});
+
+test("a gate that lets its command run leaves no directory behind (#453)", async () => {
+  await withFakeHerdr(
+    {
+      "layout.apply": [layoutApplied("w1:p7", process.pid)],
+      "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
+    },
+    ({ options, calls }) => {
+      const started = startInHerdrPane({ ...command, program: "/bin/sh", arguments: ["-c", "exit 0"] }, options);
+      assert.equal(started.outcome, "started", JSON.stringify(started));
+      const argv = paneArgv(calls());
+      const gate = argv[3] ?? "";
+      // The start opened the gate, so the argv runs the command at once, as Herdr would.
+      const ran = spawnSync(argv[0] ?? "", argv.slice(1), { encoding: "utf8", timeout: BOUND_MS });
+      assert.equal(ran.status, 0, ran.stderr);
+      const left = existsSync(gate) ? readdirSync(gate) : [];
+      assert.equal(existsSync(gate), false, `the gate still holds ${JSON.stringify(left)}`);
+    },
+  );
+});
+
+test("a pane Herdr refuses to open is refused, and nothing more is asked of it", async () => {
+  await withFakeHerdr({ "layout.apply": [refusal("layout_apply_failed")] }, ({ options, calls }) => {
     const started = startInHerdrPane(command, options);
 
     assert.equal(started.outcome, "refused", JSON.stringify(started));
-    assert.match("reason" in started ? started.reason : "", /workspace_not_found/u);
+    assert.match("reason" in started ? started.reason : "", /layout_apply_failed/u);
     assert.equal(calls().length, 1);
   });
 });
 
-test("an argument holding a control character is refused, and herdr is never run", () => {
-  for (const argument of ["line one\nline two", "a\ttab", "/path/with\na newline", "a\rb", "ctrl\u0003c", "del\u007f"]) {
-    withFakeHerdr({ "tab-create": [tabCreated("w1:p7")] }, ({ options, calls }) => {
-      const started = startInHerdrPane({ ...command, arguments: ["--first", argument] }, options);
-
-      assert.equal(started.outcome, "refused", `${JSON.stringify(argument)} read as ${JSON.stringify(started)}`);
-      assert.deepEqual(calls(), [], `herdr was run for ${JSON.stringify(argument)}`);
-    });
-  }
-});
-
-test("a command given a workspace opens its tab there", () => {
-  withFakeHerdr(
+test("a command given a workspace opens its tab there", async () => {
+  await withFakeHerdr(
     {
-      "tab-create": [tabCreated("w2:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w2:p7", process.pid),
+      "layout.apply": [layoutApplied("w2:p7", process.pid)],
+      "pane.process_info": [processInfo("w2:p7", process.pid, process.pid)],
     },
     ({ options, calls }) => {
       const started = startInHerdrPane({ ...command, workspace: "w2" }, options);
 
       assert.equal(started.outcome, "started", JSON.stringify(started));
-      assert.equal(calls()[0], "tab create --cwd /somewhere --label squiz-test --no-focus --workspace w2");
+      assert.equal(calls()[0]?.params["workspace_id"], "w2");
     },
   );
 });
 
-test("a workspace that is not Herdr's shape is refused, and herdr is never run with it", () => {
+test("a workspace that is not Herdr's shape is refused, and Herdr is never called with it", async () => {
   for (const workspace of ["--focus", "", "w", "w1:p2", "W1", "w01", "w1 w2"]) {
-    withFakeHerdr({ "tab-create": [tabCreated("w1:p7")] }, ({ options, calls }) => {
+    await withFakeHerdr({ "layout.apply": [layoutApplied("w1:p7")] }, ({ options, calls }) => {
       const started = startInHerdrPane({ ...command, workspace }, options);
 
       assert.equal(started.outcome, "refused", `${JSON.stringify(workspace)} read as ${JSON.stringify(started)}`);
-      assert.deepEqual(calls(), [], `herdr was run for ${JSON.stringify(workspace)}`);
+      assert.deepEqual(calls(), [], `Herdr was called for ${JSON.stringify(workspace)}`);
     });
   }
 });
 
-test("a workspace Herdr no longer has opens the tab in the focused one instead", () => {
-  withFakeHerdr(
+test("a workspace Herdr no longer has opens the tab in the focused one instead", async () => {
+  await withFakeHerdr(
     {
-      "tab-create": [refusal("workspace_not_found"), tabCreated("w1:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w1:p7", process.pid),
+      "layout.apply": [refusal("workspace_not_found"), layoutApplied("w1:p7", process.pid)],
+      "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
     },
     ({ options, calls }) => {
       const started = startInHerdrPane({ ...command, workspace: "w2" }, options);
 
       assert.equal(started.outcome, "started", JSON.stringify(started));
-      assert.deepEqual(calls().slice(0, 2), [
-        "tab create --cwd /somewhere --label squiz-test --no-focus --workspace w2",
-        "tab create --cwd /somewhere --label squiz-test --no-focus",
-      ]);
+      const [first, second] = calls();
+      assert.equal(first?.params["workspace_id"], "w2");
+      assert.equal(second?.method, "layout.apply");
+      assert.equal("workspace_id" in (second?.params ?? {}), false, JSON.stringify(second));
     },
   );
 });
 
-test("a server with no workspace at all still refuses when one was named", () => {
-  withFakeHerdr({ "tab-create": [refusal("workspace_not_found")] }, ({ options, calls }) => {
+test("a server with no workspace at all still refuses when one was named", async () => {
+  await withFakeHerdr({ "layout.apply": [refusal("workspace_not_found")] }, ({ options, calls }) => {
     const started = startInHerdrPane({ ...command, workspace: "w2" }, options);
 
     assert.equal(started.outcome, "refused", JSON.stringify(started));
@@ -363,14 +348,15 @@ test("a server with no workspace at all still refuses when one was named", () =>
   });
 });
 
-test("a herdr that is not on the path is refused", () => {
-  const empty = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-path-"));
+test("a socket no Herdr server answers on is refused", () => {
+  const empty = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-none-"));
   try {
-    const started = startInHerdrPane(command, {
-      environment: { PATH: empty, HERDR_SOCKET_PATH: join(empty, "none.sock") },
+    const started = startInHerdrPane({ ...command, program: process.execPath }, {
+      environment: { HERDR_SOCKET_PATH: join(empty, "none.sock") },
       boundMs: BOUND_MS,
     });
     assert.equal(started.outcome, "refused", JSON.stringify(started));
+    assert.match("reason" in started ? started.reason : "", /no Herdr server answers at .*none\.sock/u);
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }
@@ -379,70 +365,49 @@ test("a herdr that is not on the path is refused", () => {
 // Every case below may have opened a pane, so none of them is a refusal the
 // caller could fall back from by starting the command a second time.
 
-test("a tab create whose answer cannot be read failed, and is not read as a pane", () => {
+test("a layout.apply whose answer cannot be read failed, and is not read as a pane", async () => {
   for (const answer of [
-    { stdout: "Created tab w1:t2\n" },
-    { stdout: "Created tab w1:t2\n", status: 1 },
-    { stdout: "" },
-    json({ id: "cli:tab:create", result: { root_pane: { pane_id: 7 } } }),
-    json({ id: "cli:tab:create", result: { root_pane: { pane_id: "" } } }),
-    json({ id: "cli:tab:create", error: { code: "odd" }, result: { root_pane: { pane_id: "w1:p1" } } }),
-    json([]),
+    { raw: "Created tab w1:t2" },
+    { raw: "" },
+    { hangUp: true } as const,
+    result({ layout: { root: { pane_id: 7 } } }),
+    result({ layout: { root: { pane_id: "" } } }),
+    result({ root_pane: { pane_id: "w1:p1" } }),
+    { answer: { error: { code: "odd" }, result: layoutApplied("w1:p1").answer?.["result"] } },
+    { raw: "[]" },
   ]) {
     // Every later call is answered as if pane w1:p1 had opened, so a start that
     // made a pane up from this answer would come back started.
-    const later = {
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w1:p1", process.pid),
-    };
-    withFakeHerdr({ "tab-create": [answer], ...later }, ({ options, calls }) => {
+    const later = { "pane.process_info": [processInfo("w1:p1", process.pid, process.pid)] };
+    await withFakeHerdr({ "layout.apply": [{ ...answer, gatePid: process.pid }], ...later }, ({ options, calls }) => {
       const started = startInHerdrPane(command, options);
       assert.equal(started.outcome, "failed", `${JSON.stringify(answer)} read as ${JSON.stringify(started)}`);
-      assert.equal(calls().length, 1, `more was asked after ${JSON.stringify(answer)}: ${calls().join("; ")}`);
+      assert.equal(calls().length, 1, `more was asked after ${JSON.stringify(answer)}: ${named(calls()).join("; ")}`);
     });
   }
 });
 
-test("a tab create that does not answer within the bound failed, and is not waited out", () => {
-  withFakeHerdr({ "tab-create": [{ ...tabCreated("w1:p7"), sleepSeconds: 30 }] }, ({ options }) => {
+test("a layout.apply that does not answer within the bound failed, and is not waited out", async () => {
+  await withFakeHerdr({ "layout.apply": [{ ...layoutApplied("w1:p7"), sleepMs: 30_000 }] }, ({ options }) => {
     const begun = Date.now();
     const started = startInHerdrPane(command, { ...options, boundMs: 300 });
     const elapsedMs = Date.now() - begun;
 
     assert.equal(started.outcome, "failed", JSON.stringify(started));
     assert.match("reason" in started ? started.reason : "", /300ms/u);
-    assert.ok(elapsedMs < 5_000, `the herdr was waited on for ${elapsedMs}ms`);
+    assert.ok(elapsedMs < 5_000, `Herdr was waited on for ${elapsedMs}ms`);
   });
 });
 
-test("a line Herdr would not type failed, and its pane is closed", () => {
-  withFakeHerdr(
+// A pane that opened and never ran the command would otherwise look like a
+// reviewer still thinking. Only the gate's pid tells the two apart.
+test("a pane that opens and never runs the command failed once its wait ran out, and its pane is closed", async () => {
+  await withFakeHerdr(
     {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-process-info": [processInfo("w1:p7", 1, 1)],
-      "pane-run": [refusal("pane_not_found")],
-      "pane-close": [closedOk],
-      "pane-get": [refusal("pane_not_found")],
-    },
-    ({ options, calls }) => {
-      const started = startInHerdrPane(command, options);
-
-      assert.equal(started.outcome, "failed", JSON.stringify(started));
-      assert.match("reason" in started ? started.reason : "", /pane_not_found/u);
-      assert.equal("paneLeftOpen" in started, false, JSON.stringify(started));
-      assert.deepEqual(calls().slice(-2), ["pane close w1:p7", "pane get w1:p7"]);
-    },
-  );
-});
-
-test("a command that never starts in its pane failed once its wait ran out, and its pane is closed", () => {
-  withFakeHerdr(
-    {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-process-info": [processInfo("w1:p7", 1, 1)],
-      "pane-run": [typed()],
-      "pane-close": [closedOk],
-      "pane-get": [refusal("pane_not_found")],
+      "layout.apply": [layoutApplied("w1:p7")],
+      "pane.process_info": [processInfo("w1:p7", 4242, 4242)],
+      "pane.close": [closedOk],
+      "pane.get": [refusal("pane_not_found")],
     },
     ({ options, calls }) => {
       const begun = Date.now();
@@ -452,25 +417,24 @@ test("a command that never starts in its pane failed once its wait ran out, and 
       assert.equal(started.outcome, "failed", JSON.stringify(started));
       assert.match("reason" in started ? started.reason : "", /did not start in the pane within 500ms/u);
       assert.ok(elapsedMs >= 500 && elapsedMs < 5_000, `the command was waited on for ${elapsedMs}ms`);
-      assert.deepEqual(calls().slice(-2), ["pane close w1:p7", "pane get w1:p7"]);
+      assert.deepEqual(named(calls()), ["layout.apply", "pane.close w1:p7", "pane.get w1:p7"]);
     },
   );
 });
 
 // The gate is all that stands between a start that failed and a second
-// reviewer, since the line may already have been typed and run.
-test("a start that fails once its line is running never lets the command run", async () => {
+// reviewer, since Herdr runs the pane's argv as it opens the pane.
+test("a start that fails once its gate is running never lets the command run", async () => {
   const marker = join(mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-gate-")), "ran");
   let gatePid = 0;
   try {
-    withFakeHerdr(
+    await withFakeHerdr(
       {
-        "tab-create": [tabCreated("w1:p7")],
-        // The pane's foreground is never the gate, so the start fails after reading its pid.
-        "pane-process-info": [processInfo("w1:p7", 1, 1), processInfo("w1:p7", 4242, 1)],
-        "pane-run": [{ stdout: "", runsLine: true }],
-        "pane-close": [closedOk],
-        "pane-get": [refusal("pane_not_found")],
+        "layout.apply": [{ ...layoutApplied("w1:p7"), runs: true }],
+        // The pane's process is never the gate, so the start fails after reading its pid.
+        "pane.process_info": [processInfo("w1:p7", 4242, 4242)],
+        "pane.close": [closedOk],
+        "pane.get": [refusal("pane_not_found")],
       },
       ({ options }) => {
         const started = startInHerdrPane({ ...command, program: "/usr/bin/touch", arguments: [marker] }, {
@@ -478,9 +442,9 @@ test("a start that fails once its line is running never lets the command run", a
           boundMs: 500,
         });
         assert.equal(started.outcome, "failed", JSON.stringify(started));
-        const named = /not the command's ([0-9]+)/u.exec("reason" in started ? started.reason : "");
-        assert.ok(named !== null, JSON.stringify(started));
-        gatePid = Number(named[1]);
+        const read = /not the command's ([0-9]+)/u.exec("reason" in started ? started.reason : "");
+        assert.ok(read !== null, JSON.stringify(started));
+        gatePid = Number(read[1]);
       },
     );
     // It gives up after four bounds, as it would in a pane that could not be closed.
@@ -495,139 +459,56 @@ test("a start that fails once its line is running never lets the command run", a
   }
 });
 
-test("a pane whose shell is not yet at its prompt is waited for, and the line is typed once", () => {
-  withFakeHerdr(
-    {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-process-info": [
-        processInfo("w1:p7", 999, 1),
-        processInfo("w1:p7", 999, 1),
-        processInfo("w1:p7", 1, 1),
-        processInfo("w1:p7", process.pid, 1),
-      ],
-      "pane-run": [typed(process.pid)],
-    },
-    ({ options, calls }) => {
-      const started = startInHerdrPane(command, options);
-
-      assert.equal(started.outcome, "started", JSON.stringify(started));
-      const runs = calls().filter((call) => call.startsWith("pane run "));
-      assert.equal(runs.length, 1, calls().join("; "));
-      assert.equal(calls().indexOf(runs[0] ?? ""), 4, calls().join("; "));
-      assert.equal(calls().filter((call) => call.startsWith("pane close ")).length, 0, calls().join("; "));
-    },
-  );
-});
-
-test("a pane still busy when the bound runs out failed with the reason, and nothing was typed", () => {
-  withFakeHerdr(
-    {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-process-info": [processInfo("w1:p7", 999, 1)],
-      "pane-close": [closedOk],
-      "pane-get": [refusal("pane_not_found")],
-    },
-    ({ options, calls }) => {
-      const begun = Date.now();
-      const started = startInHerdrPane(command, { ...options, boundMs: 1_000 });
-      const elapsedMs = Date.now() - begun;
-
-      assert.equal(started.outcome, "failed", JSON.stringify(started));
-      assert.match("reason" in started ? started.reason : "", /still running 999/u);
-      assert.equal("paneLeftOpen" in started, false, JSON.stringify(started));
-      assert.equal(calls().filter((call) => call.startsWith("pane run ")).length, 0, calls().join("; "));
-      assert.ok(elapsedMs >= 1_000 && elapsedMs < 5_000, `the busy pane was waited on for ${elapsedMs}ms`);
-      assert.deepEqual(calls().slice(-2), ["pane close w1:p7", "pane get w1:p7"]);
-    },
-  );
-});
-
-test("a foreground group that is the shell's is never returned, and the pane is closed", () => {
-  withFakeHerdr(
-    {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-run": [typed(4242)],
-      "pane-process-info": [processInfo("w1:p7", 4242, 4242)],
-      "pane-close": [closedOk],
-      "pane-get": [refusal("pane_not_found")],
-    },
-    ({ options, calls }) => {
-      const started = startInHerdrPane(command, options);
-
-      assert.equal(started.outcome, "failed", JSON.stringify(started));
-      assert.match("reason" in started ? started.reason : "", /shell/u);
-      assert.deepEqual(calls().slice(-2), ["pane close w1:p7", "pane get w1:p7"]);
-    },
-  );
-});
-
-test("a foreground group that is not the gate's is never returned", () => {
-  withFakeHerdr(
-    {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": atPromptThenRunning("w1:p7", 4242),
-      "pane-close": [closedOk],
-      "pane-get": [refusal("pane_not_found")],
-    },
-    ({ options }) => {
-      const started = startInHerdrPane(command, options);
-      assert.equal(started.outcome, "failed", JSON.stringify(started));
-      assert.match("reason" in started ? started.reason : "", /4242, not the command's/u);
-    },
-  );
-});
-
-test("a foreground group that changes while its leader is read is never returned", () => {
-  withFakeHerdr(
-    {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-run": [typed(process.pid)],
-      "pane-process-info": [processInfo("w1:p7", 1, 1), processInfo("w1:p7", process.pid, 1), processInfo("w1:p7", 7, 1)],
-      "pane-close": [closedOk],
-      "pane-get": [refusal("pane_not_found")],
-    },
-    ({ options }) => {
-      const started = startInHerdrPane(command, options);
-      assert.equal(started.outcome, "failed", JSON.stringify(started));
-      assert.match("reason" in started ? started.reason : "", /changed/u);
-    },
-  );
-});
-
-test("process info that cannot be read failed, and the pane is closed", () => {
-  for (const answer of [
-    json({ id: "cli:pane:process_info", result: { process_info: { shell_pid: 1 } } }),
-    json({ id: "cli:pane:process_info", result: { process_info: { foreground_process_group_id: "9", shell_pid: 1 } } }),
-    json({ id: "cli:pane:process_info", result: { process_info: { foreground_process_group_id: 9.5, shell_pid: 1 } } }),
-    { stdout: "not json" },
-    { stdout: "" },
-  ]) {
-    withFakeHerdr(
+test("a pane whose process is not the gate is never returned, and the pane is closed", async () => {
+  for (const [group, shell] of [[4242, 4242], [process.pid, 4242], [4242, process.pid]] as const) {
+    await withFakeHerdr(
       {
-        "tab-create": [tabCreated("w1:p7")],
-        "pane-run": [typed(process.pid)],
-        "pane-process-info": [processInfo("w1:p7", 1, 1), answer],
-        "pane-close": [closedOk],
-        "pane-get": [refusal("pane_not_found")],
+        "layout.apply": [layoutApplied("w1:p7", process.pid)],
+        "pane.process_info": [processInfo("w1:p7", group, shell)],
+        "pane.close": [closedOk],
+        "pane.get": [refusal("pane_not_found")],
       },
       ({ options, calls }) => {
         const started = startInHerdrPane(command, options);
-        assert.equal(started.outcome, "failed", `${JSON.stringify(answer)} read as ${JSON.stringify(started)}`);
-        assert.deepEqual(calls().slice(-2), ["pane close w1:p7", "pane get w1:p7"]);
+        assert.equal(started.outcome, "failed", `${group}/${shell} read as ${JSON.stringify(started)}`);
+        assert.match("reason" in started ? started.reason : "", /not the command's/u);
+        assert.deepEqual(named(calls()).slice(-2), ["pane.close w1:p7", "pane.get w1:p7"]);
       },
     );
   }
 });
 
-test("a pane that could not be confirmed closed after a failed start is named", () => {
-  withFakeHerdr(
+test("process info that cannot be read failed, and the pane is closed", async () => {
+  for (const answer of [
+    result({ process_info: { shell_pid: 1 } }),
+    result({ process_info: { foreground_process_group_id: "9", shell_pid: 9 } }),
+    result({ process_info: { foreground_process_group_id: 9.5, shell_pid: 9 } }),
+    refusal("pane_not_found"),
+    { raw: "not json" },
+  ]) {
+    await withFakeHerdr(
+      {
+        "layout.apply": [layoutApplied("w1:p7", process.pid)],
+        "pane.process_info": [answer],
+        "pane.close": [closedOk],
+        "pane.get": [refusal("pane_not_found")],
+      },
+      ({ options, calls }) => {
+        const started = startInHerdrPane(command, options);
+        assert.equal(started.outcome, "failed", `${JSON.stringify(answer)} read as ${JSON.stringify(started)}`);
+        assert.deepEqual(named(calls()).slice(-2), ["pane.close w1:p7", "pane.get w1:p7"]);
+      },
+    );
+  }
+});
+
+test("a pane that could not be confirmed closed after a failed start is named", async () => {
+  await withFakeHerdr(
     {
-      "tab-create": [tabCreated("w1:p7")],
-      "pane-process-info": [processInfo("w1:p7", 1, 1)],
-      "pane-run": [refusal("pane_not_found")],
-      "pane-close": [closedOk],
-      "pane-get": [paneInfo("w1:p7")],
+      "layout.apply": [layoutApplied("w1:p7", process.pid)],
+      "pane.process_info": [refusal("server_busy")],
+      "pane.close": [closedOk],
+      "pane.get": [paneInfo("w1:p7")],
     },
     ({ options }) => {
       const started = startInHerdrPane(command, options);
@@ -637,23 +518,23 @@ test("a pane that could not be confirmed closed after a failed start is named", 
   );
 });
 
-test("a pane is closed only once Herdr no longer has it", () => {
-  withFakeHerdr({ "pane-close": [closedOk], "pane-get": [refusal("pane_not_found")] }, ({ options, calls }) => {
+test("a pane is closed only once Herdr no longer has it", async () => {
+  await withFakeHerdr({ "pane.close": [closedOk], "pane.get": [refusal("pane_not_found")] }, ({ options, calls }) => {
     assert.deepEqual(closeHerdrPane("w1:p7", options), { outcome: "closed" });
-    assert.deepEqual(calls(), ["pane close w1:p7", "pane get w1:p7"]);
+    assert.deepEqual(named(calls()), ["pane.close w1:p7", "pane.get w1:p7"]);
   });
 
-  for (const afterwards of [paneInfo("w1:p7"), refusal("server_not_running"), { stdout: "??" }]) {
-    withFakeHerdr({ "pane-close": [closedOk], "pane-get": [afterwards] }, ({ options }) => {
+  for (const afterwards of [paneInfo("w1:p7"), refusal("server_not_running"), { raw: "??" }]) {
+    await withFakeHerdr({ "pane.close": [closedOk], "pane.get": [afterwards] }, ({ options }) => {
       const closed = closeHerdrPane("w1:p7", options);
       assert.equal(closed.outcome, "failed", `${JSON.stringify(afterwards)} read as ${JSON.stringify(closed)}`);
     });
   }
 });
 
-test("a pane Herdr no longer has is closed, whatever the close said", () => {
-  const answers = { "pane-close": [refusal("pane_not_found")], "pane-get": [refusal("pane_not_found")] };
-  withFakeHerdr(answers, ({ options }) => {
+test("a pane Herdr no longer has is closed, whatever the close said", async () => {
+  const answers = { "pane.close": [refusal("pane_not_found")], "pane.get": [refusal("pane_not_found")] };
+  await withFakeHerdr(answers, ({ options }) => {
     assert.deepEqual(closeHerdrPane("w1:p7", options), { outcome: "closed" });
   });
 });
@@ -681,8 +562,11 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     return { ...base, HOME: home, ...extra };
   };
 
+  // The start's PATH holds only the fakes and the system's directories.
+  const herdrPath = spawnSync("/bin/sh", ["-c", "command -v herdr"], { encoding: "utf8" }).stdout.trim();
+
   const herdr = (args: readonly string[]): { status: number | null; output: string } => {
-    const result = spawnSync("herdr", args, {
+    const result = spawnSync(herdrPath, args, {
       encoding: "utf8",
       env: options.environment as NodeJS.ProcessEnv,
       timeout: BOUND_MS,
@@ -690,16 +574,19 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
   };
 
+  const ensureWorkspace = (): void => {
+    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
+    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+  };
+
   before(async () => {
     home = mkdtempSync("/tmp/sqh-");
     fakes = join(home, "bin");
     mkdirSync(fakes);
-    const herdrPath = spawnSync("/bin/sh", ["-c", "command -v herdr"], { encoding: "utf8" }).stdout.trim();
     // Stands in for the agent: it writes its pid, adds it to a list of runs
     // beside it, and writes its SESSION_MARK where a third argument names a file
-    // for it. It tells Herdr it is a `pi` in the state
-    // AGENT_STATE names, idle by default, and becomes a sleep of the given
-    // length with the same pid.
+    // for it. It tells Herdr it is a `pi` in the state AGENT_STATE names, idle
+    // by default, and becomes a sleep of the given length with the same pid.
     writeFileSync(
       join(fakes, "pi"),
       [
@@ -714,32 +601,19 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
       "utf8",
     );
     chmodSync(join(fakes, "pi"), 0o755);
-    // Holds a pane's shell back from its prompt, as a person's slow dotfiles
-    // would, wherever the tab sets SHELL_STARTS_IN.
-    // Sets SESSION_MARK as a person's dotfiles would export a token, wherever
-    // the tab sets RC_SETS_MARK.
-    writeFileSync(
-      join(home, ".zshenv"),
-      [
-        '[ -n "$SHELL_STARTS_IN" ] && sleep "$SHELL_STARTS_IN"',
-        '[ -n "$RC_SETS_MARK" ] && export SESSION_MARK="$RC_SETS_MARK"',
-        "",
-      ].join("\n"),
-      "utf8",
-    );
 
     const socket = join(home, ".config", "herdr", "sessions", session, "herdr.sock");
-    // The pane's shell reads this home's dotfiles, which leave the path alone,
-    // so `pi` is the fake wherever the system's profile puts it on the path.
+    // `pi` is found on the server's path, so it is the fake. The server has its
+    // own SESSION_MARK, as it would have a person's token.
     server = spawn(herdrPath, ["--session", session, "server"], {
-      env: environmentFor({ PATH: `${fakes}:/usr/bin:/bin` }) as NodeJS.ProcessEnv,
+      env: environmentFor({ PATH: `${fakes}:/usr/bin:/bin`, SESSION_MARK: "gho_fromserver" }) as NodeJS.ProcessEnv,
       stdio: "ignore",
     });
     for (let tries = 0; tries < 100 && !existsSync(socket); tries += 1) {
       await new Promise((settle) => setTimeout(settle, 100));
     }
     assert.ok(existsSync(socket), `the private Herdr server made no socket at ${socket}`);
-    options = { environment: environmentFor({ HERDR_SOCKET_PATH: socket }), boundMs: BOUND_MS };
+    options = { environment: environmentFor({ HERDR_SOCKET_PATH: socket, PATH: `${fakes}:/usr/bin:/bin` }), boundMs: BOUND_MS };
   });
 
   after(() => {
@@ -774,7 +648,7 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     assert.equal(existsSync(join(home, "none.pid")), false, "the command ran");
   });
 
-  test("the leader is the process running the command, not the pane's shell", async () => {
+  test("the leader is the process running the command, and the pane's own", async () => {
     const created = herdr(["workspace", "create", "--cwd", home, "--no-focus"]);
     assert.equal(created.status, 0, `no workspace was created: ${created.output}`);
 
@@ -786,11 +660,25 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     try {
       assert.equal(started.leader.pid, Number(await written(pidFile)));
       const info = JSON.parse(herdr(["pane", "process-info", "--pane", started.pane]).output);
-      assert.notEqual(started.leader.pid, info.result.process_info.shell_pid);
+      assert.equal(info.result.process_info.shell_pid, started.leader.pid);
       assert.deepEqual(stillRunning(started.leader, BOUND_MS), { outcome: "running" });
     } finally {
       assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
     }
+  });
+
+  // The pane exists from the moment Herdr answers, so it says nothing about
+  // whether the command ever ran.
+  test("a pane whose command is not there failed, and its tab is gone (#911)", () => {
+    ensureWorkspace();
+    const tabs = (): number => JSON.parse(herdr(["tab", "list"]).output).result.tabs.length;
+    const before = tabs();
+    const started = startInHerdrPane({ ...fakeCommand("squiz-absent", "", 0), program: join(home, "squiz-no-such-reviewer") }, options);
+
+    assert.equal(started.outcome, "failed", JSON.stringify(started));
+    assert.match("reason" in started ? started.reason : "", /found no \/.*\/squiz-no-such-reviewer/u);
+    assert.equal("paneLeftOpen" in started, false, JSON.stringify(started));
+    assert.equal(tabs(), before, "the tab is still open");
   });
 
   test("a tab opens in the workspace it is given, and in the focused one otherwise", () => {
@@ -823,18 +711,12 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     }
   });
 
-  // The client has the variable too. Herdr starts the pane's shell with the
-  // server's environment, so the client having it is not enough.
-  test("the variables given reach the command, though the server never had them", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+  test("the variables given reach the command over the server's own", async () => {
+    ensureWorkspace();
     const variables = { SESSION_MARK: "it's $HOME; a b=c" };
     const markFile = join(home, "mark.txt");
     const command = fakeCommand("squiz-variables", join(home, "variables.pid"), 60);
-    const started = startInHerdrPane(
-      { ...command, arguments: [...command.arguments, markFile], variables },
-      { ...options, environment: { ...options.environment, ...variables } },
-    );
+    const started = startInHerdrPane({ ...command, arguments: [...command.arguments, markFile], variables }, options);
     assert.equal(started.outcome, "started", JSON.stringify(started));
     if (started.outcome !== "started") return;
     try {
@@ -845,13 +727,12 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
   });
 
   // The empty value is how the round keeps a GitHub token from the reviewer.
-  test("the variables given win over the ones the pane's shell sets as it starts, empty ones too", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
-    const markFile = join(home, "rc-mark.txt");
-    const command = fakeCommand("squiz-rc", join(home, "rc.pid"), 60);
+  test("a variable given empty reaches the command set and empty, over the server's own", async () => {
+    ensureWorkspace();
+    const markFile = join(home, "empty-mark.txt");
+    const command = fakeCommand("squiz-empty", join(home, "empty.pid"), 60);
     const started = startInHerdrPane(
-      { ...command, arguments: [...command.arguments, markFile], variables: { SESSION_MARK: "", RC_SETS_MARK: "gho_fromrc" } },
+      { ...command, arguments: [...command.arguments, markFile], variables: { SESSION_MARK: "" } },
       options,
     );
     assert.equal(started.outcome, "started", JSON.stringify(started));
@@ -863,30 +744,14 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     }
   });
 
-  // The pane's shell would read the newline as Enter, and run half the line.
-  test("a command with a newline in an argument is refused, and no tab opens", () => {
-    const tabs = (): number => JSON.parse(herdr(["tab", "list"]).output).result.tabs.length;
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
-    const before = tabs();
-    const pidFile = join(home, "newline.pid");
-    const command = fakeCommand("squiz-newline", pidFile, 60);
-    const started = startInHerdrPane({ ...command, arguments: [...command.arguments, "line one\nline two"] }, options);
-
-    assert.equal(started.outcome, "refused", JSON.stringify(started));
-    assert.equal(tabs(), before, "a tab opened");
-    assert.equal(existsSync(pidFile), false, "the command ran");
-  });
-
-  test("a line longer than a fresh pane's shell reads whole still starts, with every argument as given (#516)", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
-    const out = join(home, "long line's $args");
+  test("every argument reaches the command as given, newlines, tabs and long ones too (#911)", async () => {
+    ensureWorkspace();
+    const out = join(home, "awkward's $args");
     const quotedOut = `'${out.replaceAll("'", "'\\''")}'`;
     const script = `printf '%s\\0' "$0" "$@" > ${quotedOut}.part && mv ${quotedOut}.part ${quotedOut}; exec sleep 60`;
     const json = JSON.stringify({ servers: { squiz: { env: { A: "it's $HOME `id` a\\b" }, args: ["x ".repeat(800)] } } });
-    const args = ["-c", script, json, "two words", "$HOME", "", "it's"];
-    const started = startInHerdrPane({ ...fakeCommand("squiz-long", "", 0), program: "/bin/sh", arguments: args }, options);
+    const args = ["-c", script, json, "line one\nline two", "a\ttab", "$HOME", "", "it's"];
+    const started = startInHerdrPane({ ...fakeCommand("squiz-awkward", "", 0), program: "/bin/sh", arguments: args }, options);
     assert.equal(started.outcome, "started", JSON.stringify(started));
     if (started.outcome !== "started") return;
     try {
@@ -899,27 +764,9 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     }
   });
 
-  test("a pane whose shell is slow to reach its prompt still starts the command, once", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
-    const pidFile = join(home, "slow-shell.pid");
-    const started = startInHerdrPane(
-      { ...fakeCommand("squiz-slow-shell", pidFile, 60), variables: { SHELL_STARTS_IN: "2" } },
-      options,
-    );
-    assert.equal(started.outcome, "started", JSON.stringify(started));
-    if (started.outcome !== "started") return;
-    try {
-      assert.equal(started.leader.pid, Number(await written(pidFile)));
-      await new Promise((settle) => setTimeout(settle, 1_000));
-      assert.equal(readFileSync(`${pidFile}.runs`, "utf8"), `${started.leader.pid}\n`, "the command ran more than once");
-    } finally {
-      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
-    }
-  });
-
-  test("once the command exits and the pane is back at its shell, the pane closes", async () => {
-    const started = startInHerdrPane(fakeCommand("squiz-exits", join(home, "exits.pid"), 8), options);
+  test("once the command exits Herdr closes its tab, and a close afterwards confirms it (#911)", async () => {
+    ensureWorkspace();
+    const started = startInHerdrPane(fakeCommand("squiz-exits", join(home, "exits.pid"), 2), options);
     assert.equal(started.outcome, "started", JSON.stringify(started));
     if (started.outcome !== "started") return;
 
@@ -929,19 +776,19 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
       presence = stillRunning(started.leader, BOUND_MS);
     }
     assert.deepEqual(presence, { outcome: "gone" });
-    const info = JSON.parse(herdr(["pane", "process-info", "--pane", started.pane]).output);
-    assert.equal(info.result.process_info.foreground_process_group_id, info.result.process_info.shell_pid);
-
+    let afterwards = herdr(["pane", "get", started.pane]);
+    for (let tries = 0; tries < 50 && !/pane_not_found/u.test(afterwards.output); tries += 1) {
+      await new Promise((settle) => setTimeout(settle, 100));
+      afterwards = herdr(["pane", "get", started.pane]);
+    }
+    assert.match(afterwards.output, /pane_not_found/u, "Herdr kept the pane after its command exited");
     assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
-    const afterwards = herdr(["pane", "get", started.pane]);
-    assert.match(afterwards.output, /pane_not_found/u);
   });
 
   // #449: a `pi` started on its prompt is busy until the review is done, and the
   // start returned only then, so any review longer than the wait failed.
   test("a command still working when the start's wait runs out is started, not failed (#449)", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    ensureWorkspace();
     const pidFile = join(home, "working.pid");
     const started = startInHerdrPane(
       { ...fakeCommand("squiz-working", pidFile, 60), startsWithinMs: 4_000, variables: { AGENT_STATE: "working" } },
@@ -958,22 +805,17 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
   });
 
   test("a command that exits at once still started, and its leader is the command's own", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    ensureWorkspace();
     const pidFile = join(home, "at-once.pid");
     const started = startInHerdrPane(fakeCommand("squiz-at-once", pidFile, 0), options);
     assert.equal(started.outcome, "started", JSON.stringify(started));
     if (started.outcome !== "started") return;
-    try {
-      assert.equal(started.leader.pid, Number(await written(pidFile)));
-    } finally {
-      assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
-    }
+    assert.equal(started.leader.pid, Number(await written(pidFile)));
+    assert.deepEqual(closeHerdrPane(started.pane, options), { outcome: "closed" });
   });
 
   test("a command that started leaves no gate directory behind once it runs (#453)", async () => {
-    const workspaces = JSON.parse(herdr(["workspace", "list"]).output).result.workspaces;
-    if (workspaces.length === 0) assert.equal(herdr(["workspace", "create", "--cwd", home]).status, 0);
+    ensureWorkspace();
     // The gate is made in the temporary directory, so one of the test's own holds nothing else.
     const temporary = mkdtempSync(join(home, "tmp-"));
     const pidFile = join(home, "gate-gone.pid");
