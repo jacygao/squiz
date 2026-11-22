@@ -6,7 +6,7 @@
  * Nothing here throws. Every outcome is a value the caller reads.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -46,7 +46,14 @@ export type TokenSource =
 export function tokenSource(named: string | null, environment: NodeJS.ProcessEnv): TokenSource {
   if (named !== null) return { source: "named", file: named };
   const file = defaultTokenFile(environment);
-  if (!existsSync(file)) return { source: "login" };
+  try {
+    statSync(file);
+  } catch (cause) {
+    // Only a file that is not there is passed over silently. One squiz cannot reach is a problem.
+    const code = codeOf(cause);
+    if (code === "ENOENT" || code === "ENOTDIR") return { source: "login" };
+    return { source: "login", problem: `the Copilot token file ${file} could not be read: ${reasonFor(cause)}` };
+  }
   const read = copilotToken(file);
   return "problem" in read ? { source: "login", problem: read.problem } : { source: "default", file };
 }

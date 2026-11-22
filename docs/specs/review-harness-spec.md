@@ -3297,7 +3297,8 @@ Tools), and the line says which source it signed in with: the token in
 `copilotTokenFile`, the token in the default file, or Copilot's own login. A
 `copilotTokenFile` that cannot be used fails the row without running Copilot. A
 default file that exists and cannot be used is a warning naming it, and the
-prompt runs on Copilot's own login, as the round does. The token is never
+prompt runs on Copilot's own login, as the round does. Where that prompt fails,
+the failed row names the default file it passed over. The token is never
 printed. The prompt is bounded at 60 seconds. A model the account cannot use
 fails the row, with the reason Copilot prints:
 

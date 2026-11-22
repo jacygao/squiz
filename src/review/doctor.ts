@@ -604,13 +604,16 @@ function copilotSignIn(line: string, model: string | undefined, config: Config, 
       { ...context, environment, directory: scratch, boundMs: context.signInBoundMs },
       withIndentedDetail,
     );
+    const unused = source.source === "login" ? source.problem : undefined;
     if (asked.outcome === "answered") {
       const signed = `${line}. Signed in with ${from}; the check spent one request on ${model ?? "the model Copilot falls back to"}`;
-      const unused = source.source === "login" ? source.problem : undefined;
       return unused === undefined ? { level: "present", line: signed } : { level: "warning", line: `${signed}: warning: ${unused}` };
     }
     const reason = asked.outcome === "absent" ? "copilot vanished from PATH" : asked.reason;
-    return { level: "failed", line: `${line}. Its sign-in check failed: ${reason}` };
+    const failed = `${line}. Its sign-in check failed: ${reason}`;
+    // A default file that could not be used may be why Copilot is signed out, so it is named here too.
+    const passedOver = unused === undefined ? "" : `${reason.endsWith(".") ? "" : "."} The default token file was passed over: ${unused}`;
+    return { level: "failed", line: `${failed}${passedOver}` };
   } catch (error) {
     return { level: "failed", line: `${line}. Its sign-in could not be checked: ${describe(error)}` };
   } finally {

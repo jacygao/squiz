@@ -60,3 +60,19 @@ test("#914: a default file that cannot be used leaves Copilot's own login, with 
     assert.match(source.source === "login" ? (source.problem ?? "") : "", /could not be read/u);
   }
 });
+
+test("#914: a default file behind a directory that cannot be searched is a problem naming it, not a missing file", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches any directory");
+  const at = home(t);
+  const file = plant(at, `${PLANTED}\n`);
+  const directory = join(at, ".config", "squiz");
+  chmodSync(directory, 0o000);
+  let source;
+  try {
+    source = tokenSource(null, { HOME: at });
+  } finally {
+    chmodSync(directory, 0o755);
+  }
+  assert.equal(source.source, "login");
+  assert.match(source.source === "login" ? (source.problem ?? "") : "", new RegExp(`^the Copilot token file ${file} could not be read: `, "u"));
+});

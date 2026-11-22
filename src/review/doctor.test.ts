@@ -750,6 +750,15 @@ test("#914: a default file that cannot be used is a warning naming it, and the c
   assert.ok(!row.printed.includes(PLANTED), row.printed);
 });
 
+test("#914: a sign-in that fails on Copilot's own login names the default file it passed over", () => {
+  const row = signInRow(failingWith(SIGNED_OUT), {}, ASTRA, undefined, undefined, "");
+  assert.match(
+    row.line,
+    /\. Its sign-in check failed: copilot exited 1: Error: No authentication information found\. The default token file was passed over: the Copilot token file \/.*\/\.config\/squiz\/copilot-token is empty$/u,
+  );
+  assert.equal(row.exit, 1);
+});
+
 test("the sign-in is checked with one prompt on the model .squiz.json configures (#771)", () => {
   const row = signInRow("echo OK");
 
