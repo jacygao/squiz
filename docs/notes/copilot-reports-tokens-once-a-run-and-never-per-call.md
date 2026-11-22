@@ -3,7 +3,7 @@ settles: "§ 5 — what a Copilot adapter's read can return as a round's cost; �
 issue: 458
 recorded: 2026-10-06
 versions: { copilot: 1.0.91, models: "gpt-5-mini, claude-haiku-4.5, gpt-6-astra", macos: 26.6.2 }
-recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-call usage event
+recheck-when: Copilot CLI upgrades past 1.0.91, its JSON stream gains a per-call usage event, or it stops exiting on its own at the end of a run
 ---
 
 # Copilot reports tokens once a run, and never per call
@@ -31,6 +31,13 @@ recheck-when: Copilot CLI upgrades past 1.0.91, or its JSON stream gains a per-c
   usage file and emitted its final events before exiting. After `SIGKILL` there
   was no usage file. So a Copilot round never reports a floor during the run, as
   `pi` does: it reports everything at the end or nothing.
+- **Keep the usage line as Copilot reports it.** It is Copilot's own total for
+  the run, so nothing is added to it. Summing the cache figures onto
+  `inputTokens` would count them twice, as the cached-input question below
+  shows.
+- **Read whether the review finished from the finish in the report file, never
+  from Copilot's exit.** Copilot exits by itself whether or not the reviewer
+  finished its review.
 
 ## Needs your input
 
@@ -91,3 +98,7 @@ it, as in `pi`, was not established.
 - Three models, all through GitHub's own routing. A BYOK provider
   (`COPILOT_PROVIDER_BASE_URL`) was not configured.
 - The `SIGKILL` case is one run.
+- That Copilot exits by itself whether or not the review finished is the
+  specification's statement, there since 2026-10-06 and still on
+  `origin/spec-requirements-list` at `1681b1f`. No run that exited without a
+  finish is recorded here.
