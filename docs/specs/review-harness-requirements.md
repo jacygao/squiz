@@ -816,6 +816,7 @@ No requirement.
 - **PQ7, closing on a clean state after the state behind it is superseded back to it: cut.** It handles a person deleting a reply mid-review, which § 11 leaves to #819's list. B is recorded superseded, and the episode stays open for the next commit or reply.
 - **PQ2, Herdr and tmux panes: kept, and simplified.** Herdr starts the reviewer through `layout.apply`'s argv, and tmux from separate arguments, with no shell to type into (#911). The requirements about typing a line, its length and control characters leave the list with that change.
 - **PQ4, general threads built from conversation comments: cut.** A `change` finding goes on a file-level review thread of the changed file it most concerns, so it still counts as open and blocks the close (#889), and squiz keeps one kind of thread (#913). R5.12's general-thread requirements leave the list.
+- **PQ8, signing Copilot in from `copilotTokenFile`: kept, with a default.** The reviewer signs in from it where Copilot drops `COPILOT_GITHUB_TOKEN` from its hooks, as SWE-drill's does. With the setting unset, squiz reads `~/.config/squiz/copilot-token` where it exists, and is silent where it does not (#914).
 - **PQ-A1, the local venue: kept.** A user chooses whether a review's record is kept on GitHub or in local files. Consolidating it with the GitHub venue is left for later.
 
 ## Not a requirement but needs a home
