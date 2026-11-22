@@ -261,16 +261,14 @@ function reviewerOf(path: string, value: unknown): Reviewer {
 }
 
 /**
- * An absolute path with no control character. Relative to nothing, because
- * the hook, the round host and a command typed by hand each run in a directory
- * of their own.
+ * An absolute path, relative to nothing, because the hook, the round host and a
+ * command typed by hand each run in a directory of their own.
  *
  * A refusal leaves the value out, unlike every other setting's, because the
  * value most likely to be written here by mistake is the token itself.
  */
 function tokenFileOf(path: string, value: unknown): string {
-  // A control character is refused because the path reaches a pane's shell line, where it would be a key.
-  if (typeof value === "string" && value.startsWith("/") && value.length <= 4096 && !/[\u0000-\u001f\u007f]/u.test(value)) return value;
+  if (typeof value === "string" && value.startsWith("/") && value.length <= 4096) return value;
   throw new ConfigError(
     `${path}: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for ~/.config/squiz/copilot-token or Copilot's own login`,
   );
@@ -286,7 +284,7 @@ function thinkingOf(path: string, value: unknown): Thinking {
 /**
  * A model name as the reviewer CLIs spell them: `gpt-5-mini`, `openai/gpt-5-mini`,
  * `openrouter/qwen/qwen3-coder:free`. It reaches the CLI as one argument, inside
- * a pane's shell line, so nothing a shell or an option parser reads is allowed:
+ * the Copilot adapter's `sh` line, so nothing a shell or an option parser reads is allowed:
  * no space, quote, `$`, backtick or operator, and nothing but a letter, a digit
  * or `@` first, so no leading `-`.
  */

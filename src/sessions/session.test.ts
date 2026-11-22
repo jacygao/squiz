@@ -149,12 +149,12 @@ test("Herdr refusing falls back to tmux, and the caller is told why", async () =
 });
 
 test("Herdr refusing outside tmux falls back to a child with no terminal", async () => {
-  const { backends, calls } = fakes({ herdr: { outcome: "refused", reason: "tab create refused" } });
+  const { backends, calls } = fakes({ herdr: { outcome: "refused", reason: "layout.apply refused" } });
   const started = await startSession(request, { environment: insideHerdr, boundMs: BOUND_MS }, backends);
   assert.deepEqual(plain(started), {
     outcome: "started",
     place: { backend: "child", identity: childIdentity },
-    refusals: [{ backend: "herdr", reason: "tab create refused" }],
+    refusals: [{ backend: "herdr", reason: "layout.apply refused" }],
   });
   assert.deepEqual(backendsCalled(calls), ["herdr", "child"]);
 });

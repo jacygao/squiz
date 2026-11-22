@@ -570,7 +570,7 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
       Object.entries(noPanes()).filter(([name]) => name !== "ZDOTDIR"),
     );
     const socket = join(home, ".config", "herdr", "sessions", session, "herdr.sock");
-    // The server carries GitHub credentials, as a person's would, for the pane's shell to inherit.
+    // The server carries GitHub credentials, as a person's would, for the pane's process to inherit.
     server = spawn(herdrPath, ["--session", session, "server"], {
       env: { ...base, ...githubCredentials(home), HOME: home, PATH: `${fakes}:/usr/bin:/bin` } as NodeJS.ProcessEnv,
       stdio: "ignore",
@@ -681,7 +681,6 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
         return { ...line, environment: { ...line.environment, STAND_IN: standIn } };
       },
     };
-    // Herdr refuses a newline or a tab anywhere in what it starts.
     const prompt = "# Review pull request #142\n\n\tIndented, with 'quotes', $1 and $@.\n";
     const places: SessionPlace[] = [];
 

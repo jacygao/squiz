@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -170,10 +170,11 @@ test("the variables given reach the command, though the server never had them", 
 
 const zshPath = spawnSync("/bin/sh", ["-c", "command -v zsh"], { encoding: "utf8" }).stdout.trim();
 
-// zsh reads `.zshenv` even for `-c`. The empty value is how the round keeps a
-// GitHub token from the reviewer.
+// zsh reads `.zshenv` even for `-c`, so a command it started would have the
+// token the file sets. The empty value is how the round keeps a GitHub token
+// from the reviewer.
 test(
-  "the variables given win over the ones the window's shell sets as it starts, empty ones too",
+  "a variable given empty reaches the command empty, whatever the default shell's startup file sets",
   { skip: skip || (zshPath === "" ? "zsh is not installed" : false) },
   async (t) => {
     const server = privateServer(t, zshPath);
@@ -194,6 +195,44 @@ test(
   },
 );
 
+// A default shell that leaves a mark, so a command handed to it is told from one tmux execs itself.
+function markingShell(directory: string): { readonly shell: string; readonly mark: string } {
+  const shell = join(directory, "marking-shell");
+  const mark = join(directory, "shell-ran");
+  writeFileSync(shell, `#!/bin/sh\n: > '${mark}'\nexec /bin/sh "$@"\n`, { mode: 0o755 });
+  return { shell, mark };
+}
+
+test("a window's command runs with no shell between it and tmux (#911)", { skip }, async (t) => {
+  const directory = scratch(t);
+  const { shell, mark } = markingShell(directory);
+  const server = privateServer(t, shell);
+  const file = join(directory, "record.json");
+
+  opened(openWindow({ name: "squiz-no-shell", directory, argv: recorder(file) }, server.environment, BOUND_MS));
+
+  await recordOf(file);
+  assert.equal(existsSync(mark), false, "tmux handed the command to its default shell");
+});
+
+// tmux hands a command of one word to its default shell, which would split a
+// path holding a space.
+test("a command of one word starts as given, and its pid is its own (#911)", { skip }, async (t) => {
+  const directory = scratch(t);
+  const { shell, mark } = markingShell(directory);
+  const server = privateServer(t, shell);
+  const file = join(directory, "record.json");
+  const program = join(directory, "a program's $dir", "record");
+  mkdirSync(join(program, ".."));
+  const [node = "", , script = ""] = recorder(file);
+  writeFileSync(program, `#!${node}\n${script.replace("process.argv.slice(1)", `[${JSON.stringify(file)}]`)}\n`, { mode: 0o755 });
+
+  const { identity } = opened(openWindow({ name: "squiz-one-word", directory, argv: [program] }, server.environment, BOUND_MS));
+
+  assert.equal(identity.pid, (await recordOf(file)).pid);
+  assert.equal(existsSync(mark), false, "tmux handed the command to its default shell");
+});
+
 const AWKWARD = [
   "two words",
   "it's",
@@ -211,6 +250,10 @@ const AWKWARD = [
   "",
   "*",
   "; exit 1",
+  "ends;",
+  ";",
+  ";;",
+  "ends\\;",
   "&& echo no",
   "| cat",
   "~",
@@ -222,7 +265,7 @@ const AWKWARD = [
   "ünïcödé",
 ];
 
-// tmux hands the command line to its default shell, which is whatever the owner's is.
+// The default shell is whatever the owner's is, and none of them may come between tmux and the command.
 for (const shell of ["sh", "dash", "bash", "zsh", "fish"]) {
   const path = spawnSync("/bin/sh", ["-c", 'command -v "$1"', "-", shell], { encoding: "utf8" }).stdout.trim();
   const shellSkip = skip || (path === "" && process.env["CI"] === undefined ? `${shell} is not installed` : false);

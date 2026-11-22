@@ -71,11 +71,18 @@ the close as tidying the screen.
   gate, and reads the group before `pi` runs. § 5 The reviewer session says
   how.
 
+  2026-11-22: squiz now starts the gate as the pane's own argv through
+  `layout.apply`, with no shell. There `shell_pid` is the gate, and so is the
+  foreground group, as the note on a tab `layout.apply` starts records.
+
 - **Have the round host close a Herdr pane itself once `pi` exits.** Herdr
   returns the pane to its shell, as its documentation says: in four runs out of
   four the shell's prompt came back, the foreground process was `zsh`, and
   `herdr agent get <name>` answered `agent_not_found`. A tmux window closes by
   itself when its command exits, in every run.
+
+  2026-11-22: a pane `layout.apply` starts with an argv has no shell to return
+  to, and Herdr removes it and its tab when the command exits.
 
 - **Expect what a command leaves in its group to be treated differently when
   the command exits.** In tmux the pane's process leads the session, so its exit

@@ -11,19 +11,16 @@
  *   ran. A pane this module opened is closed before it says so, and named where
  *   the close could not be confirmed.
  *
- * **The start returns once the command is running, however long it runs.**
- * The command is typed into the pane's shell behind a gate: a `/bin/sh` that
- * writes its pid, waits for the gate to open, and then becomes the command. The
- * gate opens only once the leader has been read, so a command that would exit
- * at once is still running when it is read, and a start that fails never lets
- * the command run.
+ * **Herdr execs the pane's argv itself, with no shell, and that argv is a gate.**
+ * The gate is a `/bin/sh` that writes its pid, waits for the gate to open, and
+ * then becomes the command. The gate opens only once the leader has been read,
+ * so a command that would exit at once is still running when it is read, and a
+ * start that fails never lets the command run.
  *
- * **The leader is the pane's foreground group, read while the gate is shut.**
- * `shell_pid` is the pane's shell, whose group does not hold the command, so a
- * group equal to the shell's is never returned.
- *
- * Herdr is before 1.0. Each answer is read field by field, and one that cannot
- * be read is a failure, never a pane. Nothing here throws.
+ * Every call goes to the socket `HERDR_SOCKET_PATH` names, through a Node
+ * process of its own, since the start is synchronous throughout. Herdr is
+ * before 1.0. Each answer is read field by field, and one that cannot be read
+ * is a failure, never a pane. Nothing here throws.
  */
 
 import { spawnSync } from "node:child_process";
@@ -36,30 +33,24 @@ import { identityOf, type ProcessIdentity } from "./process.ts";
 export type HerdrEnvironment = Readonly<Record<string, string | undefined>>;
 
 export type HerdrOptions = {
-  /** What every `herdr` runs with. Its `HERDR_SOCKET_PATH` names the server. */
+  /** Its `HERDR_SOCKET_PATH` names the server. */
   readonly environment: HerdrEnvironment;
-  /**
-   * Bounds each `herdr` and `ps` this runs, since one cut short could not tell
-   * what it did. Also bounds the wait for a new pane's shell to reach its prompt.
-   */
+  /** Bounds each call to Herdr and each `ps`, since one cut short could not tell what it did. */
   readonly boundMs: number;
 };
 
 export type PaneCommand = {
   readonly directory: string;
-  /** The tab's label. */
+  /** The tab's label, and the pane's. */
   readonly name: string;
-  /** The executable, found on the path of the pane's shell. */
+  /** The executable, found on the path of the Herdr server's environment. */
   readonly program: string;
   readonly arguments: readonly string[];
-  /** How long the command may take to start running once the pane's shell has it. */
+  /** How long the gate may take to start running once Herdr has opened the pane. */
   readonly startsWithinMs: number;
   /** The workspace the tab opens in. Absent, it opens in the focused one. */
   readonly workspace?: string;
-  /**
-   * Set in the pane's shell, and again on the command's line. Herdr starts the shell
-   * with the server's environment, so the client's own reaches it only through these.
-   */
+  /** Set in the command's environment, over the Herdr server's own. */
   readonly variables?: Readonly<Record<string, string>>;
 };
 
@@ -88,12 +79,9 @@ export function isHerdrWorkspace(id: string): boolean {
  * refusal cannot mean some other workspace.
  */
 export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): PaneStart {
-  // The pane's shell reads the command as typed, so a control character in it
-  // would be a key: a newline would end the line early, and a tab would complete.
-  const unsafe = command.arguments.findIndex((argument) => CONTROL.test(argument));
-  if (unsafe !== -1) {
-    const reason = `argument ${unsafe + 1} holds a control character, which a pane's shell would read as a key`;
-    return { outcome: "refused", reason };
+  // A malformed id is a bug upstream.
+  if (command.workspace !== undefined && !isHerdrWorkspace(command.workspace)) {
+    return { outcome: "refused", reason: `${JSON.stringify(command.workspace)} is not a Herdr workspace id` };
   }
   let gate: string;
   try {
@@ -110,16 +98,16 @@ export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): P
 /** Close `pane`, and confirm with Herdr that it no longer has it. */
 export function closeHerdrPane(pane: string, options: HerdrOptions): PaneClose {
   // What the close said is not trusted either way. Only asking for the pane afterwards confirms it.
-  const close = herdr(["pane", "close", pane], options.environment, options.boundMs);
-  const after = herdr(["pane", "get", pane], options.environment, options.boundMs);
+  const close = herdr("pane.close", { pane_id: pane }, options);
+  const after = herdr("pane.get", { pane_id: pane }, options);
   if (after.outcome === "refused" && after.code === "pane_not_found") return { outcome: "closed" };
   const closeSaid = close.outcome === "answered" ? "closed" : describe(close);
   const afterSaid = after.outcome === "answered" ? "Herdr still has the pane" : describe(after);
-  return { outcome: "failed", reason: `herdr pane close: ${closeSaid}; then herdr pane get: ${afterSaid}` };
+  return { outcome: "failed", reason: `pane.close: ${closeSaid}; then pane.get: ${afterSaid}` };
 }
 
 /**
- * What the pane's shell runs: `/bin/sh -c GATE <gate> <polls> <program> <arguments…>`.
+ * The pane's argv: `/bin/sh -c GATE <gate> <polls> <program> <arguments…>`.
  *
  * It writes its pid to `<gate>/pid`, or `<gate>/absent` where the program is not
  * on its path. It then waits for `<gate>/go`, removes the gate, and becomes the program. It gives
@@ -141,78 +129,48 @@ const GATE_POLL_MS = 50;
 // of which is bounded once.
 const GATE_HOLDS_BOUNDS = 4;
 
-// Any C0 control character, and DEL.
-const CONTROL = /[\u0000-\u001f\u007f]/u;
-
 function startBehind(gate: string, command: PaneCommand, options: HerdrOptions): PaneStart {
   const polls = Math.ceil((GATE_HOLDS_BOUNDS * options.boundMs) / GATE_POLL_MS);
-  // Set again on the line, because the pane's shell runs a person's startup
-  // files after `--env`, and those can set any of them. `env` becomes the gate
-  // with the same pid.
-  const assigned = Object.entries(command.variables ?? {}).map(([name, value]) => `${name}=${value}`);
-  const settings = assigned.length === 0 ? [] : ["/usr/bin/env", ...assigned];
-  const gated = [...settings, "/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments]
-    .map(quoted)
-    .join(" ");
-  if (CONTROL.test(gated)) {
-    return { outcome: "refused", reason: `the gate ${JSON.stringify(gate)} holds a control character` };
-  }
-  const line = typeable(gated, gate);
-  if (line.outcome === "unwritten") return { outcome: "refused", reason: line.reason };
-  const variables = Object.entries(command.variables ?? {}).flatMap(([name, value]) => ["--env", `${name}=${value}`]);
-  const tab = ["tab", "create", "--cwd", command.directory, "--label", command.name, "--no-focus", ...variables];
+  const root = {
+    type: "pane",
+    command: ["/bin/sh", "-c", GATE, gate, String(polls), command.program, ...command.arguments],
+    cwd: command.directory,
+    env: command.variables ?? {},
+    label: command.name,
+  };
+  const layout = { root, tab_label: command.name, focus: false };
   let created: Answer;
   if (command.workspace === undefined) {
-    created = herdr(tab, options.environment, options.boundMs);
+    created = herdr("layout.apply", layout, options);
   } else {
-    // A malformed id is a bug upstream, and one like `--focus` would be read as a flag.
-    if (!isHerdrWorkspace(command.workspace)) {
-      return { outcome: "refused", reason: `${JSON.stringify(command.workspace)} is not a Herdr workspace id` };
-    }
-    created = herdr([...tab, "--workspace", command.workspace], options.environment, options.boundMs);
+    created = herdr("layout.apply", { ...layout, workspace_id: command.workspace }, options);
     if (created.outcome === "refused" && created.code === "workspace_not_found") {
-      created = herdr(tab, options.environment, options.boundMs);
+      created = herdr("layout.apply", layout, options);
     }
   }
   if (created.outcome === "absent") return { outcome: "refused", reason: created.reason };
   if (created.outcome === "refused") {
-    return { outcome: "refused", reason: `herdr tab create refused: ${created.code}: ${created.message}` };
+    return { outcome: "refused", reason: `layout.apply refused: ${created.code}: ${created.message}` };
   }
-  if (created.outcome === "unknown") return { outcome: "failed", reason: `herdr tab create: ${created.reason}` };
-  const pane = field(field(created.result, "root_pane"), "pane_id");
+  if (created.outcome === "unknown") return { outcome: "failed", reason: `layout.apply: ${created.reason}` };
+  const pane = field(field(field(created.result, "layout"), "root"), "pane_id");
   if (typeof pane !== "string" || pane === "") {
-    return { outcome: "failed", reason: `herdr tab create named no pane: ${JSON.stringify(created.result)}` };
+    return { outcome: "failed", reason: `layout.apply named no pane: ${JSON.stringify(created.result)}` };
   }
-
-  // A new pane's shell runs its own startup first, and a line typed meanwhile
-  // can be lost to it.
-  const notReady = atPrompt(pane, options);
-  if (notReady !== undefined) return abandon(pane, notReady, options);
-
-  // `pane run` types the line and returns at once. Whatever it answered, the
-  // line may have been typed, which is safe only because the gate is still shut.
-  const sent = herdr(["pane", "run", pane, line.typed], options.environment, options.boundMs);
-  if (sent.outcome !== "answered") return abandon(pane, `herdr pane run: ${describe(sent)}`, options);
 
   const pid = gatedPid(gate, command);
   if (pid.outcome !== "read") return abandon(pane, pid.reason, options);
-  // The gate becomes the command without changing its pid, group or start
-  // time, so the identity read now is the command's.
-  const group = foregroundGroup(pane, options);
-  if (group.outcome !== "read") return abandon(pane, group.reason, options);
-  if (group.group !== pid.pid) {
-    return abandon(pane, `the pane's foreground group is ${group.group}, not the command's ${pid.pid}`, options);
-  }
   const leader = identityOf(pid.pid, options.boundMs);
   if (leader.outcome === "gone") return abandon(pane, `the command ${pid.pid} had gone before its gate opened`, options);
   if (leader.outcome === "unknown") return abandon(pane, leader.reason, options);
-  // A group id is not reused while the group has a member, so the same group
-  // afterwards means the identity read in between is its leader's, not a stranger's.
-  const again = foregroundGroup(pane, options);
-  if (again.outcome !== "read") return abandon(pane, again.reason, options);
-  if (again.group !== group.group) {
-    const changed = `the pane's foreground group changed from ${group.group} to ${again.group} while it was read`;
-    return abandon(pane, changed, options);
+  // Herdr removes a pane once its process exits, and a pid is not reused while
+  // its process lives. So a pane still led by the pid afterwards means the
+  // identity read in between is the gate's, not a stranger's.
+  const info = processInfo(pane, options);
+  if (info.outcome !== "read") return abandon(pane, info.reason, options);
+  if (info.shell !== pid.pid || info.group !== pid.pid) {
+    const reason = `the pane's process is ${info.shell} in the foreground group ${info.group}, not the command's ${pid.pid}`;
+    return abandon(pane, reason, options);
   }
   try {
     writeFileSync(join(gate, "go"), "");
@@ -222,37 +180,6 @@ function startBehind(gate: string, command: PaneCommand, options: HerdrOptions):
   return { outcome: "started", pane, leader: leader.identity };
 }
 
-/**
- * The most a line typed into a pane may hold.
- *
- * A new pane's shell may not have started its line editor when the line
- * arrives. The terminal then keeps 1024 bytes of an unfinished line on macOS,
- * and a line cut inside a quoted word runs nothing.
- */
-const TYPED_AT_MOST = 512;
-
-type Typeable =
-  | { readonly outcome: "typeable"; readonly typed: string }
-  | { readonly outcome: "unwritten"; readonly reason: string };
-
-/**
- * `gated` as it is typed: whole where it fits, and otherwise a short line that
- * runs it from a file in the gate.
- *
- * The file is written whole before anything is typed. It removes itself and
- * then becomes the gated line, so the gate's pid is still the typed command's.
- */
-function typeable(gated: string, gate: string): Typeable {
-  if (Buffer.byteLength(gated) <= TYPED_AT_MOST) return { outcome: "typeable", typed: gated };
-  const file = join(gate, "line");
-  try {
-    writeFileSync(file, `rm -f "$0"; exec ${gated}\n`, { mode: 0o600 });
-  } catch (cause) {
-    return { outcome: "unwritten", reason: `the command's line could not be written to the gate: ${String(cause)}` };
-  }
-  return { outcome: "typeable", typed: ["/bin/sh", file].map(quoted).join(" ") };
-}
-
 /** Close a pane a start opened and could not finish, and say why the start failed. */
 function abandon(pane: string, reason: string, options: HerdrOptions): PaneStart {
   const closed = closeHerdrPane(pane, options);
@@ -260,25 +187,9 @@ function abandon(pane: string, reason: string, options: HerdrOptions): PaneStart
   return { outcome: "failed", reason: `${reason}; and ${closed.reason}`, paneLeftOpen: pane };
 }
 
-const RETRY_MS = 100;
-
 /** Block this thread for `ms`. The start is synchronous throughout, so there is nothing to yield to. */
 function pause(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** Wait for the pane's shell to hold the foreground alone, and say why not where it never did. */
-function atPrompt(pane: string, options: HerdrOptions): string | undefined {
-  const until = Date.now() + options.boundMs;
-  for (;;) {
-    const info = processInfo(pane, options);
-    if (info.outcome !== "read") return info.reason;
-    if (info.group === info.shell) return undefined;
-    if (Date.now() >= until) {
-      return `the pane's shell was still running ${info.group} in the foreground after ${options.boundMs}ms`;
-    }
-    pause(RETRY_MS);
-  }
 }
 
 type PidRead = { readonly outcome: "read"; readonly pid: number } | { readonly outcome: "unknown"; readonly reason: string };
@@ -288,7 +199,7 @@ function gatedPid(gate: string, command: PaneCommand): PidRead {
   const until = Date.now() + command.startsWithinMs;
   for (;;) {
     if (existsSync(join(gate, "absent"))) {
-      return { outcome: "unknown", reason: `the pane's shell found no ${command.program} on its path` };
+      return { outcome: "unknown", reason: `the pane found no ${command.program} on its path` };
     }
     let written: string | undefined;
     try {
@@ -308,48 +219,23 @@ function gatedPid(gate: string, command: PaneCommand): PidRead {
   }
 }
 
-type GroupRead =
-  | { readonly outcome: "read"; readonly group: number }
-  | { readonly outcome: "unknown"; readonly reason: string };
-
-/** The pane's foreground process group, where it is not the shell's. */
-function foregroundGroup(pane: string, options: HerdrOptions): GroupRead {
-  const info = processInfo(pane, options);
-  if (info.outcome !== "read") return info;
-  if (info.group === info.shell) {
-    const reason = `the pane's foreground group ${info.group} is its shell's, so the command was not running`;
-    return { outcome: "unknown", reason };
-  }
-  return { outcome: "read", group: info.group };
-}
-
 type InfoRead =
   | { readonly outcome: "read"; readonly group: number; readonly shell: number }
   | { readonly outcome: "unknown"; readonly reason: string };
 
 function processInfo(pane: string, options: HerdrOptions): InfoRead {
-  const answer = herdr(["pane", "process-info", "--pane", pane], options.environment, options.boundMs);
+  const answer = herdr("pane.process_info", { pane_id: pane }, options);
   if (answer.outcome !== "answered") {
-    return { outcome: "unknown", reason: `herdr pane process-info: ${describe(answer)}` };
+    return { outcome: "unknown", reason: `pane.process_info: ${describe(answer)}` };
   }
   const info = field(answer.result, "process_info");
   const group = field(info, "foreground_process_group_id");
   const shell = field(info, "shell_pid");
   if (!isPid(group) || !isPid(shell)) {
     const said = JSON.stringify(answer.result);
-    return { outcome: "unknown", reason: `herdr pane process-info named no group and shell: ${said}` };
+    return { outcome: "unknown", reason: `pane.process_info named no group and process: ${said}` };
   }
   return { outcome: "read", group, shell };
-}
-
-/**
- * `text` as one word to a POSIX shell, zsh or fish.
- *
- * Inside single quotes all three take every character literally but the quote,
- * which closes the quotes, is written escaped, and opens them again.
- */
-function quoted(text: string): string {
-  return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
 type Answer =
@@ -359,49 +245,73 @@ type Answer =
   | { readonly outcome: "unknown"; readonly reason: string };
 
 /**
- * Run `herdr` with `args`, and read its answer.
+ * Send one request on the socket, and print the first line that comes back.
  *
- * - **Answered**: it exited 0 with a `result` and no `error`, or exited 0 and
- *   printed nothing at all, as `pane run` does.
- * - **Refused**: it exited non-zero with an `error` carrying a `code`, and no `result`.
- * - **Absent**: there is no `herdr` to run, so it did nothing.
+ * Exits 3 where it could not connect, so nothing was sent. Any other failure
+ * may have come after the request reached Herdr.
+ */
+const CLIENT = `
+const [socket, request] = process.argv.slice(1);
+const connection = require("node:net").createConnection(socket);
+let connected = false;
+let answer = "";
+connection.on("connect", () => { connected = true; connection.write(request + "\\n"); });
+connection.on("data", (chunk) => {
+  answer += chunk;
+  const end = answer.indexOf("\\n");
+  if (end === -1) return;
+  process.stdout.write(answer.slice(0, end));
+  connection.destroy();
+});
+connection.on("error", (error) => { process.stderr.write(String(error.code ?? error.message)); process.exitCode = connected ? 2 : 3; });
+connection.on("close", () => { if (process.exitCode === undefined && answer.indexOf("\\n") === -1) process.exitCode = 2; });
+`;
+
+/**
+ * Call `method` with `params` on the Herdr server, and read its answer.
+ *
+ * - **Answered**: a `result` and no `error`.
+ * - **Refused**: an `error` carrying a `code`, and no `result`.
+ * - **Absent**: there is no server to call, so it did nothing.
  * - **Unknown**: anything else, which may have done anything.
  */
-function herdr(args: readonly string[], environment: HerdrEnvironment, boundMs: number): Answer {
-  const run = spawnSync("herdr", args, {
+function herdr(method: string, params: unknown, options: HerdrOptions): Answer {
+  const socket = options.environment["HERDR_SOCKET_PATH"] ?? "";
+  if (socket === "") return { outcome: "absent", reason: "HERDR_SOCKET_PATH is not set" };
+  const request = JSON.stringify({ id: `squiz:${method}`, method, params });
+  const run = spawnSync(process.execPath, ["-e", CLIENT, socket, request], {
     encoding: "utf8",
-    env: environment as NodeJS.ProcessEnv,
+    env: {},
     // Never zero, which `spawnSync` reads as no bound at all.
-    timeout: Math.max(1, boundMs),
+    timeout: Math.max(1, options.boundMs),
   });
-
   if (run.error !== undefined) {
     const code = "code" in run.error ? run.error.code : undefined;
-    if (code === "ETIMEDOUT") return { outcome: "unknown", reason: `herdr did not answer within ${boundMs}ms` };
-    if (code === "ENOENT") return { outcome: "absent", reason: "there is no herdr on the path" };
-    return { outcome: "unknown", reason: `herdr could not be run: ${run.error.message}` };
+    if (code === "ETIMEDOUT") return { outcome: "unknown", reason: `Herdr did not answer within ${options.boundMs}ms` };
+    return { outcome: "unknown", reason: `the call to Herdr could not be run: ${run.error.message}` };
   }
-  if (run.status === null) return { outcome: "unknown", reason: `herdr was killed by ${run.signal ?? "a signal"}` };
-
-  // Herdr prints an answer on stdout and a refusal on stderr.
-  const said = run.stdout.trim() === "" ? run.stderr.trim() : run.stdout.trim();
-  if (run.status === 0 && said === "") return { outcome: "answered", result: null };
+  if (run.status === 3) {
+    return { outcome: "absent", reason: `no Herdr server answers at ${socket}: ${run.stderr.trim()}` };
+  }
+  if (run.status !== 0) {
+    const said = run.status === null ? `was killed by ${run.signal ?? "a signal"}` : `failed: ${run.stderr.trim()}`;
+    return { outcome: "unknown", reason: `the call to Herdr ${said}` };
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(said);
+    parsed = JSON.parse(run.stdout);
   } catch {
-    const line = JSON.stringify(firstLine(said));
-    return { outcome: "unknown", reason: `herdr exited ${run.status} and printed no JSON: ${line}` };
+    return { outcome: "unknown", reason: `Herdr answered with no JSON: ${JSON.stringify(run.stdout)}` };
   }
   const result = field(parsed, "result");
   const error = field(parsed, "error");
-  if (run.status === 0 && result !== undefined && error === undefined) return { outcome: "answered", result };
+  if (result !== undefined && error === undefined) return { outcome: "answered", result };
   const code = field(error, "code");
-  if (run.status !== 0 && result === undefined && typeof code === "string") {
+  if (result === undefined && typeof code === "string") {
     const message = field(error, "message");
     return { outcome: "refused", code, message: typeof message === "string" ? message : "" };
   }
-  return { outcome: "unknown", reason: `herdr exited ${run.status} with an answer it cannot be read by: ${said}` };
+  return { outcome: "unknown", reason: `Herdr gave an answer it cannot be read by: ${run.stdout}` };
 }
 
 function describe(answer: Answer): string {
@@ -424,8 +334,4 @@ function field(value: unknown, name: string): unknown {
 
 function isPid(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
-}
-
-function firstLine(text: string): string {
-  return text.split("\n", 1)[0] ?? "";
 }
