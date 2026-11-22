@@ -1560,22 +1560,25 @@ listed once, as the later round's.
 
 **A ruling that could not be applied says what the reviewer ruled**, so that a
 person can apply it by hand. A thread that was handed over is named by its
-location and headline, and one that was not by the id the reviewer gave. The
-line ends in one of these:
+location and headline, and one that was not by the id the reviewer gave. Each
+line carries the verdict the reviewer gave:
 
-- `(ruled fixed, and the thread could not be resolved)`
-- `(ruled open, and the thread could not be re-opened)`
-- `(given no ruling, which keeps it open, and the thread could not be re-opened)`
-- `(ruled open a second time, which was not applied: the first ruling stands)`
-
-A ruling on a thread that was not handed over reads
-``- A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied``.
+- a `fixed` or `withdrawn` ruling GitHub refused ends
+  `(ruled fixed, and the thread could not be resolved)`;
+- an `open` ruling GitHub refused ends
+  `(ruled open, and the thread could not be re-opened)`;
+- a thread given no ruling that could not be re-opened ends
+  `(given no ruling, which keeps it open, and the thread could not be re-opened)`;
+- a second ruling on one thread, of any verdict, ends
+  `(ruled open a second time, which was not applied: the first ruling stands)`;
+- a ruling on a thread that was not handed over, of any verdict, reads
+  ``- A ruling of withdrawn on thread `PRRT_kwDOAbc999`, which was not handed to the reviewer, was not applied``.
 
 **A round whose finished review never read the diff of a changed file names the
-files**, the first ten of them followed by "and 2 more" where there are more.
-Each name is one code span. A control character in it is shown escaped, a line
-break as `\n`, and the span's fence is one backtick longer than any run of
-backticks in the name. A round the time bound cut short has no such line.
+files**, at most ten of them, followed by "and N more" for the N past ten. Each
+name is one code span. A control character in it is shown escaped, a line break
+as `\n`, and the span's fence is one backtick longer than any run of backticks in
+the name. A round the time bound cut short has no such line.
 
 **The line of a cap or a bound that ended the episode names it, and each state
 left not reviewed** as § 3 The state file names them. Where nothing was queued,
@@ -1604,7 +1607,7 @@ Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `
 
 - Round 1 at 3f9c2e0: raised 6 findings
 - Round 2 at 1b86987: raised 2 findings, and ruled 2 fixed, 1 withdrawn and 2 open
-- Round 3 at 8d21a4f: raised 1 finding, and ruled 3 open
+- Round 3 at 8d21a4f: raised 1 finding, and ruled 1 fixed and 2 open
 
 **Notes**
 
