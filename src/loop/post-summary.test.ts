@@ -317,12 +317,7 @@ test("a summary GitHub would not take comes back as a failure with its reason", 
   );
 });
 
-/**
- * A reserve already spent makes no call at all.
- *
- * A call made past the end of the reserve would run the round past its bound.
- */
-test("a margin with nothing left on it posts nothing and says so", async () => {
+test("a deadline with nothing left on it posts nothing and says so", async () => {
   await withFakeGh({ stdout: CREATED }, (gh) => {
     const posting = postEpisodeSummary(closing, githubVenue, deadlineIn(0));
 

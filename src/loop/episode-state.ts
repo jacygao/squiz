@@ -84,8 +84,8 @@ export type Timings = {
    */
   readonly cutShortAtSeconds?: number;
   /**
-   * Wall-clock seconds from the first call of the posting reserve to the last, to
-   * a tenth. Absent where the round posted nothing, or was stopped before its
+   * Wall-clock seconds from the round's first call after the review to its last,
+   * to a tenth. Absent where the round posted nothing, or was stopped before its
    * posting ended.
    */
   readonly postingSeconds?: number;

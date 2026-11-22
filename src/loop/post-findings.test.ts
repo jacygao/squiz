@@ -262,7 +262,7 @@ function post(findings: readonly Finding[], against = diff): PostedFindings {
       description: "",
     },
   };
-  return postFindings(round, { venue: githubVenue, until: deadlineIn(600_000) });
+  return postFindings(round, { venue: githubVenue, until: () => deadlineIn(600_000) });
 }
 
 /** A create response, which carries no `in_reply_to_id` at all when it opened a thread. */

@@ -13,9 +13,9 @@
  * Nothing here throws. Every outcome is a value the caller reads, because the
  * round host has to record a result for every round it takes.
  *
- * A round has three parts, each on a deadline of its own: the calls before the
- * review, the review under the configured time bound, and posting under a
- * reserve that starts when the review ends.
+ * The review runs under the configured time bound. Every call the round makes
+ * outside it, to the venue or to git, runs under a deadline of its own, so a
+ * slow call costs no other call its time.
  *
  * Nothing here exits, and nothing here decides whether another round happens.
  * The exit code is the caller's, and so is the block-or-close decision, which
@@ -97,13 +97,10 @@ import { applyVerdicts, rulingsOn, rulingsReplied, type AppliedVerdict, type App
 const LOCK_BOUND_MS = 5_000;
 
 /**
- * The part before the review: the pull request lookup, the threads listing, the
- * diff, and the fetch and add that make the snapshot.
+ * One call the round makes outside the review. A venue call that pages, or reads
+ * back what it created, makes several requests inside it, and they share it.
  */
-const BEFORE_REVIEW_MS = 30_000;
-
-/** The part after the review: the findings, the verdicts and the comments. */
-const POSTING_RESERVE_MS = 60_000;
+const CALL_MS = 30_000;
 
 /** What one round needs to run. */
 export type RoundSetup = {
@@ -121,20 +118,13 @@ export type RoundSetup = {
   /** The charter file handed to the reviewer, which is the same every round. */
   readonly charterFile: string;
   /**
-   * A posting reserve below the round's own, so that a test can reach it without
-   * waiting a minute out.
+   * A deadline for each call below the round's own, so that a test can reach it
+   * without waiting it out.
    *
    * It only lowers: a larger value is ignored, and no configuration is read to
-   * set it. The reserve is not a project's to raise.
+   * set it. The deadline is not a project's to raise.
    */
-  readonly postingMs?: number;
-  /**
-   * A deadline for the calls before the review below the round's own, so that a
-   * test can spend it without waiting it out.
-   *
-   * It only lowers, like the posting reserve, and for the same reason.
-   */
-  readonly preReviewMs?: number;
+  readonly callMs?: number;
   /**
    * Whether a failed round posts its failure comment. It does unless a caller
    * asks otherwise, for a round whose failure is announced some other way.
@@ -400,17 +390,12 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   const directory = setup.worktree;
 
   const now = setup.now ?? Date.now;
-  // One deadline over the whole part, not a bound on each of its calls. The
-  // threads listing pages, so how many calls the part makes is not known in
-  // advance, and a bound per call lets every page have the whole of one.
-  const preReview: PreReview = {
-    directory,
-    until: deadlineIn(lowered(setup.preReviewMs, BEFORE_REVIEW_MS), now),
-  };
+  const callMs = lowered(setup.callMs, CALL_MS);
+  const call = (): Deadline => deadlineIn(callMs);
 
   // The change comes first, because its key is the episode's. A worktree with
   // no change to review ends here, with no episode opened.
-  const gated = gate(setup.venue, preReview);
+  const gated = gate(setup.venue, directory, call());
   if ("ended" in gated) return gated.ended;
   const change = gated.step;
   opened.change = change;
@@ -446,13 +431,6 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
   // post a second comment for one episode.
   if (onFile?.closeReported === true) return { outcome: "episode-over" };
 
-  // One posting reserve for the round, made the first time anything asks for it.
-  // The failure comment goes up under the deadline the salvaged findings ran
-  // under, and a reserve made afresh for it would outlast theirs.
-  const postingMs = lowered(setup.postingMs, POSTING_RESERVE_MS);
-  let reserve: Deadline | undefined;
-  const posting = (reviewOverAt?: number): Deadline =>
-    (reserve ??= reserveAfter(postingMs, reviewOverAt, now));
   const stopwatch: Stopwatch = { now };
 
   const concluded = await reviewOn(change, onFile, {
@@ -460,8 +438,7 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
     opened,
     episode,
     key,
-    preReview,
-    posting,
+    call,
     stopwatch,
   });
   const reported: RoundConclusion =
@@ -471,27 +448,11 @@ async function round(setup: RoundSetup, opened: Opened): Promise<RoundConclusion
           ...concluded,
           failureComment: {
             key,
-            posting: timed(stopwatch, posting(), () => postFailure(setup.venue, change, concluded, posting())),
+            posting: timed(stopwatch, () => postFailure(setup.venue, change, concluded, call())),
           },
         };
   keepPostingTime(episode, stopwatch, setup.postingTimeUnwritten);
   return reported;
-}
-
-/**
- * The posting reserve, starting now.
- *
- * `reviewOverAt` is the moment the review had to be over by, where a review ran.
- * Stopping the reviewer runs after that moment, and whatever the stop took past
- * it comes off the reserve rather than being added to the round.
- */
-function reserveAfter(
-  postingMs: number,
-  reviewOverAt: number | undefined,
-  now: () => number,
-): Deadline {
-  const overrun = reviewOverAt === undefined ? 0 : Math.max(0, now() - reviewOverAt);
-  return deadlineIn(Math.max(0, postingMs - overrun), now);
 }
 
 /**
@@ -506,13 +467,8 @@ type Stopwatch = {
   round?: number;
 };
 
-/**
- * Run `post` as part of the round's posting, timed where `reserve` has time left
- * for a call. A post the reserve leaves no time for makes no call, and the
- * round's posting time covers calls.
- */
-function timed<T>(stopwatch: Stopwatch, reserve: Deadline, post: () => T): T {
-  if (reserve.passed()) return post();
+/** Run `post` as part of the round's posting, which the stopwatch times. */
+function timed<T>(stopwatch: Stopwatch, post: () => T): T {
   const started = stopwatch.now();
   const result = post();
   stopwatch.first ??= started;
@@ -523,10 +479,9 @@ function timed<T>(stopwatch: Stopwatch, reserve: Deadline, post: () => T): T {
 /**
  * Add how long the round's posting took to the round's entry in the state.
  *
- * Written after the posting, so under a wait of its own rather than the reserve
- * the posting may have spent. A write that fails is told to `unwritten` and fails
- * nothing: the time is a measurement, the round's result is decided already, and
- * nothing reads it to decide anything.
+ * A write that fails is told to `unwritten` and fails nothing: the time is a
+ * measurement, the round's result is decided already, and nothing reads it to
+ * decide anything.
  */
 function keepPostingTime(episode: Episode, stopwatch: Stopwatch, unwritten?: (reason: string) => void): void {
   const { first, last, round } = stopwatch;
@@ -538,9 +493,6 @@ function keepPostingTime(episode: Episode, stopwatch: Stopwatch, unwritten?: (re
   if (kept.outcome === "failed") unwritten?.(kept.reason);
 }
 
-/** The calls before the review, under the one deadline the snapshot's add runs under too. */
-type PreReview = { readonly directory: string; readonly until: Deadline };
-
 /** What the part of a round after the gate runs with. */
 type AfterTheGate = {
   readonly setup: RoundSetup;
@@ -549,13 +501,8 @@ type AfterTheGate = {
   readonly episode: Episode;
   /** The change's key, which names the episode, the snapshot and the session. */
   readonly key: string;
-  readonly preReview: PreReview;
-  /**
-   * The posting reserve, the same deadline every time it is asked for. The first
-   * asking makes it, and names the moment the review had to be over by where a
-   * review ran.
-   */
-  readonly posting: (reviewOverAt?: number) => Deadline;
+  /** A fresh deadline for one call. */
+  readonly call: () => Deadline;
   readonly stopwatch: Stopwatch;
 };
 
@@ -564,7 +511,7 @@ type AfterTheGate = {
  * are anchored against, the list of changed files the prompt carries, and their
  * paths, which the files the reviewer read are counted against.
  *
- * Both run under the part of the round before the review, and neither throws.
+ * All three run under `until`, and none throws.
  */
 async function readDiff(
   tree: string,
@@ -572,7 +519,7 @@ async function readDiff(
 ): Promise<
   { readonly diff: string; readonly listing: string; readonly files: readonly string[] } | { readonly unread: string }
 > {
-  if (until.passed()) return { unread: "the time before the review ran out" };
+  if (until.passed()) return { unread: "the time given to read it ran out" };
   const signal = AbortSignal.timeout(Math.max(1, until.remaining()));
   const diff = await changeDiff(tree, signal);
   if (diff.failed) return { unread: diff.text };
@@ -587,7 +534,7 @@ async function readDiff(
 async function reviewOn(
   change: Change,
   onFile: EpisodeState | null,
-  { setup, opened, episode, key, preReview, posting: startPosting, stopwatch }: AfterTheGate,
+  { setup, opened, episode, key, call, stopwatch }: AfterTheGate,
 ): Promise<RoundConclusion> {
   const { config } = setup;
   const directory = episode.worktree;
@@ -596,17 +543,17 @@ async function reviewOn(
   const bounds: EpisodeBounds = { rounds: config.rounds, tokens: config.tokens };
   const over = exhausted(state, bounds);
   if (over !== null) {
-    return closeBeforeReview(over, change, { setup, episode, key, preReview, posting: startPosting, stopwatch });
+    return closeBeforeReview(over, change, { setup, episode, key, call, stopwatch });
   }
 
-  const listing = handOver(setup.venue, change, preReview);
+  const listing = handOver(setup.venue, change, call());
   if ("ended" in listing) return listing.ended;
   const handedOver = listing.step.threads;
   // The state the round would review is the pull request as it stands, and a
   // result recorded against any other state would claim a review it never had.
   const now: StateKey = { head: change.head, activity: listing.step.activity };
   if (setup.state !== undefined && !sameState(now, setup.state)) {
-    return supersededBy(now, change, handedOver, { setup, episode, key, posting: startPosting, stopwatch });
+    return supersededBy(now, change, handedOver, { setup, episode, key, call, stopwatch });
   }
 
   const ordinal = state.rounds.length + 1;
@@ -615,9 +562,12 @@ async function reviewOn(
   const unmade = makeSessionDirectory(sessionDirectory);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
+  // The fetch that provides the commits, and the clone and checkout that make
+  // the snapshot from them, share one deadline.
+  const making = call();
   // A head the venue built, rather than one the repository holds, is readable
   // only through the object directories it names.
-  const provided = setup.venue.provideCommits(change, preReview.until);
+  const provided = setup.venue.provideCommits(change, making);
   if (provided.outcome === "failed") {
     return failed("harness", `no review ran: the commits of ${change.name} could not be provided: ${provided.reason}`);
   }
@@ -633,7 +583,7 @@ async function reviewOn(
       base: change.base,
       alternates: provided.alternates,
     },
-    preReview.until,
+    making,
   );
   if (snapshot.outcome === "failed") {
     if (snapshot.leftBehind !== undefined) opened.snapshot = snapshot.leftBehind;
@@ -644,7 +594,7 @@ async function reviewOn(
 
   // Read from the snapshot rather than downloaded, so no size of change is one
   // a venue refuses, and the diff is of the commit the reviewer reads.
-  const read = await readDiff(tree, preReview.until);
+  const read = await readDiff(tree, call());
   if ("unread" in read) {
     return failed("harness", `no review ran: the diff of ${change.name} could not be read: ${read.unread}`);
   }
@@ -684,10 +634,6 @@ async function reviewOn(
   const elapsedSeconds = Math.round((clock() - reviewStarted) / 100) / 10;
   writeResume(setup.adapter, sessionDirectory, directory, join(ownDirectory, "resume.txt"), setup.resumeUnwritten);
 
-  // Everything from here to the last post runs on the posting reserve, which
-  // starts as the review ends. A sleep moved that moment on by what it added.
-  const reserve = startPosting(reviewStarted + seconds * 1_000 + (review.sleep?.added ?? 0));
-
   const rulings = rulingsOn(
     review.outcome === "reviewed" ? handedOver : ruledOn(handedOver, review.verdicts),
     review.verdicts,
@@ -719,7 +665,7 @@ async function reviewOn(
     change,
     key,
     diff: read.diff,
-    reserve,
+    call,
     stopwatch,
     ruledAt,
   };
@@ -761,7 +707,7 @@ async function reviewOn(
     // A round with no cost counts nothing against the token bound.
     tokens: review.cost?.tokens ?? 0,
   };
-  const ended = endUnderLock(episode, setup.endsOn, tally, posting.reserve, {
+  const ended = endUnderLock(episode, setup.endsOn, tally, {
     round: recorded.rounds.length,
     lines: account.unpostedReplyNotes,
   });
@@ -798,8 +744,8 @@ async function reviewOn(
  * a branch with no pull request looks exactly like the harness working
  * normally, every round and forever.
  */
-function gate(venue: Venue, call: PreReview): Step<Change> {
-  const lookup = venue.readChange(call.directory, null, call.until);
+function gate(venue: Venue, directory: string, until: Deadline): Step<Change> {
+  const lookup = venue.readChange(directory, null, until);
   switch (lookup.outcome) {
     case "found":
       return { step: lookup.change };
@@ -946,9 +892,9 @@ function nothingDone(key: string): RoundAccount {
 function handOver(
   venue: Venue,
   change: Change,
-  call: PreReview,
+  until: Deadline,
 ): Step<{ readonly threads: readonly ReviewThread[]; readonly activity: string | null }> {
-  const listed = venue.listThreads(change, call.until);
+  const listed = venue.listThreads(change, until);
   if (listed.outcome !== "listed") {
     return {
       ended: failed(
@@ -1038,7 +984,7 @@ function makeSessionDirectory(directory: string): string | null {
 /**
  * Record what the round spent, before it posts anything.
  *
- * The posting that follows can run out of time or be stopped, and a round whose
+ * The posting that follows can fail or be stopped, and a round whose
  * cost was never recorded counts against neither the round cap nor the token
  * bound. A killed round's floor goes in for the same reason: what the
  * reviewer reported before it was stopped is what there is.
@@ -1068,10 +1014,7 @@ function keepCost(
       const spent = withSpend(current, review, measured) ?? current;
       return ruled ? recordRulings(spent, rulings) : spent;
     },
-    // Its own wait rather than what the reserve has left. A reserve the stop has
-    // nearly spent would leave too little to take the lock, and the cost is what
-    // the round cap and the token bound count.
-    { until: deadlineIn(STATE_LOCK_WAIT_MS) },
+    { until: lockWait() },
   );
   if (written.outcome === "failed") {
     // Nothing is posted on a state file that would not take the round. A round
@@ -1089,13 +1032,12 @@ function keepCost(
 }
 
 // Another writer holds the state lock for one read and one write. A wait longer
-// than this is a holder that has stopped, and waiting on would spend the posting
-// reserve.
+// than this is a holder that has stopped.
 const STATE_LOCK_WAIT_MS = 2_000;
 
-/** How long a write of the state file may wait for its lock, within `until`. */
-function lockWait(until: Deadline): Deadline {
-  return deadlineIn(Math.min(until.remaining(), STATE_LOCK_WAIT_MS));
+/** How long a write of the state file may wait for its lock. */
+function lockWait(): Deadline {
+  return deadlineIn(STATE_LOCK_WAIT_MS);
 }
 
 /**
@@ -1177,18 +1119,15 @@ function isRound(review: Review): boolean {
   return review.outcome !== "setup";
 }
 
-/** Where a round's review goes, and the deadline every call putting it there runs under. */
+/** Where a round's review goes, and what bounds each call putting it there. */
 type Posting = {
   readonly venue: Venue;
   readonly change: Change;
   readonly key: string;
   /** The change's diff, which decides where each finding's comment can hang. */
   readonly diff: string;
-  /**
-   * The posting reserve. One deadline over the whole part, and a call with
-   * nothing left on it is not made at all.
-   */
-  readonly reserve: Deadline;
+  /** A fresh deadline for one call. */
+  readonly call: () => Deadline;
   readonly stopwatch: Stopwatch;
   /** The round and commit the verdicts are ruled at, which a closing reply names. */
   readonly ruledAt: RuledAt;
@@ -1208,25 +1147,14 @@ type Posting = {
  * whether the reviewer's silence about a thread counts as a ruling on it.
  */
 function report(output: RoundOutput, ruleOn: readonly ReviewThread[], on: Posting): RoundAccount {
-  const call = { venue: on.venue, until: on.reserve, change: on.change };
-  // A thread takes a second call where the round replies on it, and a finding
-  // takes two, the thread and the read-back of its id.
-  const replies = rulingsReplied(ruleOn, output.verdicts).length;
-  const calls = ruleOn.length + replies + 2 * output.findings.length;
+  const sending = { venue: on.venue, until: on.call, change: on.change };
   // Nothing to put up makes no call, and a round that made none posted nothing.
-  const post = <T>(posting: () => T): T =>
-    calls === 0 ? posting() : timed(on.stopwatch, on.reserve, posting);
+  const calls = ruleOn.length + output.findings.length;
+  const post = <T>(posting: () => T): T => (calls === 0 ? posting() : timed(on.stopwatch, posting));
 
-  const verdicts = post(() =>
-    applyVerdicts(ruleOn, output.verdicts, on.ruledAt, { ...call, callMs: share(on.reserve, calls) }),
-  );
-
-  // One venue call opens a thread and reads back its id, so it takes both shares.
+  const verdicts = post(() => applyVerdicts(ruleOn, output.verdicts, on.ruledAt, sending));
   const findings = post(() =>
-    postFindings(
-      { findings: output.findings, diff: on.diff, change: on.change },
-      { ...call, callMs: share(on.reserve, output.findings.length) },
-    ),
+    postFindings({ findings: output.findings, diff: on.diff, change: on.change }, sending),
   );
 
   return {
@@ -1254,7 +1182,6 @@ function endUnderLock(
   episode: Episode,
   endsOn: (tally: RoundTally, queued: readonly QueuedRecord[]) => RoundEnd,
   tally: RoundTally,
-  until: Deadline,
   unposted: { readonly round: number; readonly lines: readonly string[] },
 ): { readonly ends: RoundEnd; readonly state: EpisodeState } | { readonly reason: string } {
   let ends: RoundEnd | undefined;
@@ -1273,7 +1200,7 @@ function endUnderLock(
       const clean = record.result === "exited" && record.exitStatus === 0 && ends.leftNotReviewed === null;
       return { ...kept, closeReported: true, ...(clean ? { cleanClose: { head: record.head, activity: record.activity, records: (kept.records ?? []).length } } : {}) };
     },
-    { until: lockWait(until) },
+    { until: lockWait() },
   );
   if (written.outcome === "failed") return { reason: written.reason };
   return ends === undefined ? { reason: "the state lock was never taken" } : { ends, state: written.state };
@@ -1283,9 +1210,8 @@ function endUnderLock(
  * The close of a round that reviewed, with the episode's summary comment on the
  * pull request.
  *
- * The comment goes up last, after the findings and the verdicts. A thread is what
- * the next reader works, and a comment that took the reserve from the threads would
- * report an episode whose findings never landed.
+ * The comment goes up last, after the findings and the verdicts, so that it
+ * reports what landed.
  *
  * `handedOver` is the listing this round made, which is where the headline of
  * every finding raised before this round is. The account carries the threads this
@@ -1304,7 +1230,7 @@ function closeAfterReview(
   on: Posting,
   leftNotReviewed: LeftNotReviewed | null,
 ): RoundConclusion {
-  const summary = timed(on.stopwatch, on.reserve, () => postEpisodeSummary(
+  const summary = timed(on.stopwatch, () => postEpisodeSummary(
     {
       change: on.change,
       rounds: state.rounds,
@@ -1317,7 +1243,7 @@ function closeAfterReview(
       leftNotReviewed,
     },
     on.venue,
-    on.reserve,
+    on.call(),
   ));
   return { outcome: "close", because, summary, ...account };
 }
@@ -1340,14 +1266,13 @@ function closeAfterReview(
 function closeBeforeReview(
   bound: StoppingBound,
   change: Change,
-  { setup, episode, key, preReview, posting, stopwatch }: Omit<AfterTheGate, "opened">,
+  { setup, episode, key, call, stopwatch }: Omit<AfterTheGate, "opened">,
 ): RoundConclusion {
-  const listing = handOver(setup.venue, change, preReview);
+  const listing = handOver(setup.venue, change, call());
   if ("ended" in listing) return listing.ended;
   const threads = listing.step.threads;
   const openThreads = threads.filter((thread) => !thread.isResolved).map((thread) => thread.id);
 
-  const reserve = posting();
   let left: LeftNotReviewed | null | undefined;
   const written = updateState(
     episode,
@@ -1355,7 +1280,7 @@ function closeBeforeReview(
       left = leftBeforeReview(current, bound, setup.state);
       return { ...current, closeReported: true };
     },
-    { until: lockWait(reserve) },
+    { until: lockWait() },
   );
   if (written.outcome === "failed") {
     return failed("harness", `the episode's close could not be recorded: ${written.reason}`);
@@ -1366,7 +1291,7 @@ function closeBeforeReview(
   const summary =
     state.rounds.length === 0 && threads.length === 0
       ? closedBeforeAnyRound
-      : timed(stopwatch, reserve, () =>
+      : timed(stopwatch, () =>
           postEpisodeSummary(
             {
               change,
@@ -1381,7 +1306,7 @@ function closeBeforeReview(
               leftNotReviewed: left ?? null,
             },
             setup.venue,
-            reserve,
+            call(),
           ),
         );
   return { outcome: "close", because: bound, summary, beforeReview: { openThreads }, ...account };
@@ -1401,10 +1326,9 @@ function supersededBy(
   now: StateKey,
   change: Change,
   threads: readonly ReviewThread[],
-  { setup, episode, key, posting, stopwatch }: Pick<AfterTheGate, "setup" | "episode" | "key" | "posting" | "stopwatch">,
+  { setup, episode, key, call, stopwatch }: Pick<AfterTheGate, "setup" | "episode" | "key" | "call" | "stopwatch">,
 ): RoundConclusion {
   const moved = { outcome: "superseded", key, by: now } as const;
-  const reserve = posting();
   let clean: Extract<StateRecord, { readonly result: "clean, episode open" }> | undefined;
   const written = updateState(
     episode,
@@ -1420,7 +1344,7 @@ function supersededBy(
       clean = record;
       return { ...current, closeReported: true, cleanClose: { head: record.head, activity: record.activity, records: records.length } };
     },
-    { until: lockWait(reserve) },
+    { until: lockWait() },
   );
   if (written.outcome === "failed") {
     return failed("harness", `whether the episode closes on ${now.head.slice(0, 7)} could not be recorded: ${written.reason}`);
@@ -1430,7 +1354,7 @@ function supersededBy(
   if (closing === undefined) return moved;
 
   const state = written.state;
-  const summary = timed(stopwatch, reserve, () =>
+  const summary = timed(stopwatch, () =>
     postEpisodeSummary(
       {
         change,
@@ -1443,7 +1367,7 @@ function supersededBy(
         leftNotReviewed: null,
       },
       setup.venue,
-      reserve,
+      call(),
     ),
   );
   return { ...moved, closing: { summary } };
@@ -1504,9 +1428,6 @@ type FailedReview = Exclude<Review, { readonly outcome: "reviewed" }>;
  * No summary comment either. Nothing here closed the episode, and counts taken
  * from a review that did not finish would read as one that did. The failure
  * comment that follows is what reports the round.
- *
- * The posting runs on the round's posting reserve, as a finished review's does,
- * and the failure comment after it runs on the same one.
  *
  * A reviewer that confirmed nothing before it failed leaves nothing to put up,
  * and no call is made.
@@ -1683,24 +1604,7 @@ function widestAttempt(state: EpisodeState): number {
   return Math.max(0, ...rounds, state.spentOutsideRounds.tokens);
 }
 
-/**
- * One call's fair share of what is left of the reserve, where `calls` is what the
- * phase is expected to make.
- *
- * A share and not the bound. The reserve is enforced as a deadline every call
- * runs under, and this only stops one slow call from spending what the rest of
- * the phase needs. The count is an estimate, and the read-back after a create
- * can page, so a phase may make more calls than its share was split for and the
- * deadline is what holds either way.
- *
- * Never zero: a bound that is not a positive number is read as no bound asked
- * for and falls back to the ceiling on a single call.
- */
-function share(reserve: Deadline, calls: number): number {
-  return Math.max(1, Math.floor(reserve.remaining() / Math.max(1, calls)));
-}
-
-/** A part's own length, or a smaller one asked for. It only lowers. */
+/** The round's own length for a call, or a smaller one asked for. It only lowers. */
 function lowered(asked: number | undefined, whole: number): number {
   if (asked === undefined || !Number.isFinite(asked) || asked <= 0) return whole;
   return Math.min(asked, whole);

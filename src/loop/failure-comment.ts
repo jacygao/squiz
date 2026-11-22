@@ -63,8 +63,8 @@ function failureReport(round: FailedRound): FailureReport {
 /**
  * Post the failure comment for `round` on `change`, once.
  *
- * `until` is the round's posting reserve, the one its salvaged findings were
- * posted under, and nothing is attempted where nothing is left of it.
+ * `until` is the call's own deadline, and nothing is attempted where nothing is
+ * left of it.
  */
 export function postFailure(venue: Venue, change: Change, round: FailedRound, until: Deadline): Posting {
   return venue.postFailure(change, renderFailure(failureReport(round)), until);

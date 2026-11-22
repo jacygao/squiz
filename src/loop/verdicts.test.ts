@@ -145,7 +145,7 @@ function refusing(thread: string): readonly Rule[] {
 }
 
 // Long enough that no test here reaches it.
-const anywhere: Sending = { venue: githubVenue, until: deadlineIn(600_000) };
+const anywhere: Sending = { venue: githubVenue, until: () => deadlineIn(600_000) };
 
 // The round and commit every verdict here is ruled at, which a closing reply names.
 const ruledAt = { round: 2, commit: "1b86987c4f0e2d6a9b3c5e7f8a1d2c3b4e5f6a7b" };
