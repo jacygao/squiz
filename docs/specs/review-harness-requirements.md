@@ -807,6 +807,10 @@ No requirement.
 
 ## Decisions
 
+### Contradictions
+
+- **10, what a local review calls itself:** keep L1240–1242 (R4.2.1, R4.2.2). A local change is `the working tree`, and its rerun is `squiz review` with no number. The `PR #local` and `squiz review local` sentence at L1375–1379 leaves the spec. It is bug #829.
+
 ### Features
 
 - **PQ1, squiz starts and drives a headless fixer: cut.** A caller with no live session, such as SWE-drill, runs the loop itself: it runs `squiz review`, starts its own fixer on the threads it prints when it exits 2, and stops at 0 or 3. That is the same loop a coding agent runs on the GitHub venue, so squiz keeps one way of working, and never starts an agent. Headless Runs' requirements leave the list, apart from what an interactive run also uses. SWE-drill moves to its own loop before squiz removes the code.
