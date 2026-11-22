@@ -256,8 +256,10 @@ records, in that update, the state its round reviewed. A trigger that comes
 after the close reads it before it queues anything, so no state queued while
 the summary is posted is stopped by a close it arrived before. A failed round
 that closes the episode (The round cap) also writes the close before it posts
-the summary, in the update that records every state queued behind it not
-reviewed, and that close is never clean.
+the summary. The same update records the state the round took as failed,
+carrying the close, and every state queued behind it as not reviewed, so a run
+that reads the state while the summary is posted is handed the close. That
+close is never clean.
 
 **A state left not reviewed is named by its short head commit, followed by "with
 different replies" where an earlier state has the same commit.** The earlier

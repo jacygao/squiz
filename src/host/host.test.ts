@@ -1237,6 +1237,33 @@ test("#416: a clean round closes nothing when a state is superseded by it after 
   assert.notEqual(ran.state?.closeReported, true, "the episode closed on a clean round a later round followed");
 });
 
+/**
+ * A run that reads the state while the summary is posted must find the failed
+ * close on the round's own state, or it reads a closed episode with nothing
+ * open and exits 0.
+ */
+test("#915: a failed round's state carries its close while the summary is posted", async () => {
+  let atSummary = "";
+  const ran = await host({
+    rounds: [EARLIER_ROUND],
+    config: { rounds: 2 },
+    unparsedFrom: 0,
+    records: atHead,
+    before: (fixture) => {
+      atSummary = join(fixture.binaries, "state-at-summary.json");
+      writeFileSync(join(fixture.binaries, "on-summary.sh"), `cp '${fixture.episode.stateFile}' '${atSummary}'\n`, "utf8");
+    },
+    after: () => {
+      const state = JSON.parse(readFileSync(atSummary, "utf8")) as EpisodeState;
+      const [taken] = recordsOf(state);
+      assert.ok(taken?.status === "failed", `the state read during the summary held ${JSON.stringify(taken)}`);
+      assert.deepEqual(taken.closed, { exitStatus: 3, openThreads: [], closedAt: "round cap" });
+    },
+  });
+
+  assert.ok(ran.kinds.includes("summary"), `gh was asked for ${ran.kinds.join(", ")}`);
+});
+
 test("#414: a failed round's close whose summary GitHub refuses keeps the reason on its record and in host.log", async () => {
   const ran = await host({
     rounds: [EARLIER_ROUND],

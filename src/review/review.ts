@@ -384,6 +384,9 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
       // A failed round that spent the last of the bounds closed the episode, which
       // a person takes from here, so its state is answered with the close.
       if (record.closed !== undefined) {
+        // A close with no round is the one the round wrote before posting its
+        // summary. The round host's record, with what the posting came to, follows.
+        if (record.round === undefined) return undefined;
         const closing: ClosedFirst = { ...record, closed: record.closed };
         return compose((threads) => closedUnreviewed(waiting, state.records ?? [], closing, threads));
       }
@@ -411,7 +414,10 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord, h
     if (closing !== undefined) return compose((threads) => roundResult(following, state, closing, threads));
     // The queue ended on a round that failed and closed the episode.
     const failed = failedClose(records);
-    if (failed !== undefined) return compose((threads) => closedUnreviewed(following, records, failed, threads));
+    if (failed !== undefined) {
+      // Until the round host records it, the close is still posting its summary.
+      return failed.round === undefined ? undefined : compose((threads) => closedUnreviewed(following, records, failed, threads));
+    }
     return closed(following, state);
   }
   if (records.some((record) => record.status === "queued" || record.status === "reviewing")) return undefined;

@@ -82,6 +82,7 @@ import {
 import {
   putRecord,
   sameState,
+  type ClosingBound,
   type ReviewerPlace,
   type ReviewerSession,
   type StateKey,
@@ -1252,12 +1253,23 @@ function closeOnFailure(
   on: Posting,
 ): Failed {
   const account = failure.salvaged ?? nothingDone(on.key);
+  const threads = [...settled(handedOver, account.verdicts.threads), ...threadsOpened(account.findings)];
+  const openThreads = threads.filter((thread) => !thread.isResolved).map((thread) => thread.id);
+  const closedAt: ClosingBound = by.bound === "token-bound" ? "token bound" : "round cap";
   let left: LeftNotReviewed | null = null;
   const written = updateState(
     episode,
     (current) => {
       left = leftBehind(current, by.bound, taken);
-      const states: readonly StateRecord[] = left?.states ?? [];
+      // The taken state carries the close from this update on, so a run that
+      // reads the state while the summary is posted never reads a clean close.
+      // The round host writes the record whole once the round has ended.
+      const own = taken === undefined ? undefined : (current.records ?? []).find((record) => sameState(record, taken));
+      const closing: readonly StateRecord[] =
+        own?.status === "reviewing"
+          ? [{ ...stateOf(own), status: "failed", reason: failure.reason, ownerNoted: own.owner !== undefined, closed: { exitStatus: 3, openThreads, closedAt } }]
+          : [];
+      const states: readonly StateRecord[] = [...closing, ...(left?.states ?? [])];
       // A round that was no round has no entry for its refused replies to go on.
       const kept = on.stopwatch.round === undefined ? current : recordUnpostedReplies(current, on.stopwatch.round, account.unpostedReplyNotes);
       return { ...kept, closeReported: true, records: states.reduce(putRecord, kept.records ?? []) };
@@ -1271,7 +1283,6 @@ function closeOnFailure(
   const state = written.state;
   const ruled = new Set(account.verdicts.threads.map((applied) => applied.thread));
   const unruled = standing(handedOver.filter((thread) => !ruled.has(thread.id)), state.rulings);
-  const threads = [...settled(handedOver, account.verdicts.threads), ...threadsOpened(account.findings)];
   // Copied, because the update's callback does not keep the narrowing.
   const leftNotReviewed: LeftNotReviewed | null = left;
   const summary = timed(on.stopwatch, () =>
@@ -1296,7 +1307,7 @@ function closeOnFailure(
     closed: {
       by,
       summary,
-      openThreads: threads.filter((thread) => !thread.isResolved).map((thread) => thread.id),
+      openThreads,
       leftNotReviewed,
     },
   };
@@ -1361,6 +1372,12 @@ function supersededBy(
     ),
   );
   return { ...moved, closing: { summary } };
+}
+
+/** A record's state and what the trigger knew of it, without where its review has got to. */
+function stateOf(record: StateRecord): Pick<StateRecord, "head" | "activity" | "owner" | "herdrWorkspace"> {
+  const { head, activity, owner, herdrWorkspace } = record;
+  return { head, activity, ...(owner === undefined ? {} : { owner }), ...(herdrWorkspace === undefined ? {} : { herdrWorkspace }) };
 }
 
 /**

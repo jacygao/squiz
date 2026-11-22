@@ -451,7 +451,7 @@ test("#915: a state reviewed clean whose queue ends on a failed round that close
     const reason = "the reviewer was killed at its 900-second bound, and the round recorded no findings";
     records(fixture, [
       { ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) },
-      { ...LATER, status: "failed", reason, ownerNoted: false, closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
+      { ...LATER, status: "failed", reason, ownerNoted: false, round: ran(3), closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
     ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
     const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }) }));
@@ -660,6 +660,7 @@ test("#915: a state whose failed round spent the last of the cap is handed the c
         status: "failed",
         reason: KILLED,
         ownerNoted: false,
+        round: ran(3),
         lines: ["the failure is posted on PR #41"],
         closed: { exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "round cap" },
       },
@@ -686,7 +687,7 @@ test("#915: a state queued behind a failed round that closed at the cap, with no
   await withWorktree(async (fixture) => {
     const taken: StateKey = { head: OWN.head, activity: "PRRC_older" };
     records(fixture, [
-      { ...taken, status: "failed", reason: KILLED, ownerNoted: false, closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
+      { ...taken, status: "failed", reason: KILLED, ownerNoted: false, round: ran(3), closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
       { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
     ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
 
@@ -710,6 +711,7 @@ const SPENT_BEFORE_ANY_ROUND: readonly StateRecord[] = [
     status: "failed",
     reason: COULD_NOT_RUN,
     ownerNoted: false,
+    round: ran(3),
     closed: { exitStatus: 3, openThreads: [], closedAt: "token bound", problems: [NO_SUMMARY] },
   },
 ];
@@ -1084,6 +1086,7 @@ test("a run on an episode a failed round closed, without its summary, prints the
         status: "failed",
         reason: KILLED,
         ownerNoted: false,
+        round: ran(3),
         closed: { exitStatus: 3, openThreads: [OPEN_THREAD.id], closedAt: "token bound", problems: [problem] },
       },
     ], { closeReported: true });
