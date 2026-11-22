@@ -1457,7 +1457,7 @@ function startedUnknown(fixture: Fixture): Triggered {
   return decided(fixture, { outcome: "queue", startHost: true }, [], { outcome: "unknown", reason: UNKNOWN_START });
 }
 
-test("a round host whose start is unknown, and which never takes the lock, exits 1 naming squiz status and host.log", async () => {
+test("a round host whose start is unknown, and which never takes the lock, exits 1 naming squiz status without a number, and host.log (#909)", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [queued(OWN)]);
     const started = Date.now();
@@ -1474,7 +1474,7 @@ test("a round host whose start is unknown, and which never takes the lock, exits
     assert.equal(
       printed.stderr,
       `squiz: no review ran: whether the round host for PR #41 started could not be told, and none has taken the review since: ${UNKNOWN_START}\n` +
-        "squiz: `squiz status 41` shows whether one takes it later, and .squiz/41/host.log holds what the host wrote\n" +
+        "squiz: `squiz status` shows whether one takes it later, and .squiz/41/host.log holds what the host wrote\n" +
         "squiz: put these lines in your report rather than running squiz review again\n",
     );
   });
