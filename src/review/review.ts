@@ -364,8 +364,17 @@ type Reviewed = Extract<StateRecord, { readonly status: "reviewed"; readonly res
 function settle(waiting: Waiting, state: EpisodeState): Settled | undefined {
   const records = state.records ?? [];
   const record = recordFor(records, waiting.own);
-  if (record === undefined) return state.closeReported === true ? closed(waiting, state) : undefined;
+  if (record === undefined) return state.closeReported === true && !closePosting(records) ? closed(waiting, state) : undefined;
   return settleRecord(waiting, state, record);
+}
+
+/**
+ * Whether a failed round's close is still posting its summary: written before
+ * the posting, with no round, until the round host records what it came to.
+ */
+function closePosting(records: readonly StateRecord[]): boolean {
+  const failed = failedClose(records);
+  return failed !== undefined && failed.round === undefined;
 }
 
 /**
@@ -447,6 +456,8 @@ function notReviewed(
     if (newer === undefined) return undefined;
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
   }
+  // A state the failed close left is answered once that close has its posting.
+  if (closePosting(records)) return undefined;
   const closing = closingRecord(records);
   const stopped = STOPPED_BY_THE_CLOSE.exec(record.reason);
   if (state.closeReported === true && closing !== undefined && stopped !== null) {

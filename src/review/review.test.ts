@@ -701,6 +701,21 @@ test("#915: a state queued behind a failed round that closed at the cap, with no
   });
 });
 
+test("#915: a state queued behind a failed round waits while that round's close is still posting its summary", async () => {
+  await withWorktree(async (fixture) => {
+    const taken: StateKey = { head: OWN.head, activity: "PRRC_older" };
+    records(fixture, [
+      // The close as the failed round writes it before posting, with no round yet.
+      { ...taken, status: "failed", reason: KILLED, ownerNoted: false, closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
+      { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
+    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, `the run did not wait for what the summary's posting came to: ${printed.stdout}${printed.stderr}`);
+  });
+});
+
 const NO_SUMMARY = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
 const COULD_NOT_RUN = "the reviewer could not run: the provider refused the credential";
 
