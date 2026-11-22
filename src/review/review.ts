@@ -58,6 +58,9 @@ const READ_BACK_FLOOR_MS = 10_000;
 // A host that started takes its lock within a second or two of starting.
 const HOST_START_MS = 10_000;
 
+// Each `ps` run that tells whether the round host still holds its lock.
+const HOST_CHECK_MS = 5_000;
+
 // GitHub reports a push within seconds. One it has not reported in a minute is
 // not one waiting longer will bring.
 const PUSH_REPORTED_MS = 60_000;
@@ -175,6 +178,13 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     if (found.outcome === "unreadable") return found.reason;
     return found.outcome === "read" ? found.state : { rounds: [], spentOutsideRounds: { dollars: 0, tokens: 0, messages: 0 } };
   };
+  // A failed close the round wrote before posting is replaced by its round host's
+  // record, unless that host has stopped, in which case nothing ever replaces it.
+  const observe = (state: EpisodeState): void => {
+    if (!provisionalClose(state.records ?? [])) return;
+    const boundMs = Math.max(1, Math.min(HOST_CHECK_MS, until.remaining()));
+    context = { ...context, hostGone: !hostRunning(episode.directory, request.presence ?? stillRunning, boundMs) };
+  };
   const finish = (settled: Settled, threads: readonly ReviewThread[]): Printed =>
     print(settled.kind === "result" ? settled.result : settled.compose(threads));
   const hostNamed = (): string => {
@@ -192,8 +202,9 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         // and a later episode replaced since.
         const state = triggered.read ?? read();
         if (typeof state === "string") return notRun(state);
+        observe(state);
         // A failed close still posting its summary is waited on, so its problems reach this run.
-        if (closePosting(state.records ?? [])) return undefined;
+        if (closePosting(state.records ?? [], context)) return undefined;
         return print(closedResult(context, state, threads));
       }
       case "host-unknown":
@@ -213,6 +224,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         if (typeof live === "string") return notRun(live);
         const state = holding(episode, live, context.own);
         if (typeof state === "string") return notRun(state);
+        observe(state);
         const settled = settle({ ...context, recorded: true }, state);
         return settled === undefined ? undefined : finish(settled, threads);
       }
@@ -225,7 +237,8 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         if (decision.outcome === "queue" && !triggered.queued) {
           const state = read();
           if (typeof state === "string") return notRun(state);
-          if (episodeOver(state, context.own) && !closePosting(state.records ?? [])) return print(closedResult(context, state, threads));
+          observe(state);
+          if (episodeOver(state, context.own) && !closePosting(state.records ?? [], context)) return print(closedResult(context, state, threads));
         }
         return undefined;
     }
@@ -241,6 +254,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
     if (typeof live === "string") return notRun(live);
     const state = holding(episode, live, context.own);
     if (typeof state === "string") return notRun(state);
+    observe(state);
     const settled = settle({ ...context, recorded: false }, state);
     if (settled !== undefined) {
       if (settled.kind === "result") return print(settled.result);
@@ -350,6 +364,11 @@ type Context = {
   readonly cap: number;
   readonly own: StateKey;
   readonly followUp: Change["followUp"];
+  /**
+   * True where no live process held the episode's host lock when the run last
+   * read a failed close its round host had not yet recorded.
+   */
+  readonly hostGone?: boolean;
 };
 
 /** Whether the run was handed a result already recorded, rather than one it waited for. */
@@ -366,17 +385,27 @@ type Reviewed = Extract<StateRecord, { readonly status: "reviewed"; readonly res
 function settle(waiting: Waiting, state: EpisodeState): Settled | undefined {
   const records = state.records ?? [];
   const record = recordFor(records, waiting.own);
-  if (record === undefined) return state.closeReported === true && !closePosting(records) ? closed(waiting, state) : undefined;
+  if (record === undefined) return state.closeReported === true && !closePosting(records, waiting) ? closed(waiting, state) : undefined;
   return settleRecord(waiting, state, record);
 }
 
 /**
- * Whether a failed round's close is still posting its summary: written before
- * the posting, with no round, until the round host records what it came to.
+ * Whether a failed round's close is the one the round wrote before posting its
+ * summary: it has no round until the round host records what the posting came to.
  */
-function closePosting(records: readonly StateRecord[]): boolean {
+function provisionalClose(records: readonly StateRecord[]): boolean {
   const failed = failedClose(records);
   return failed !== undefined && failed.round === undefined;
+}
+
+/** Whether a failed round's close is still posting its summary, under a round host that is running. */
+function closePosting(records: readonly StateRecord[], context: Pick<Context, "hostGone">): boolean {
+  return provisionalClose(records) && context.hostGone !== true;
+}
+
+/** The line for a failed close whose round host stopped before recording what its summary's posting came to. */
+function unrecordedSummary(context: Pick<Context, "name">): string {
+  return `the review of ${context.name} closed, and whether its summary was posted is not known: the round host stopped before recording it`;
 }
 
 /**
@@ -397,7 +426,7 @@ function settleRecord(waiting: Waiting, state: EpisodeState, record: StateRecord
       if (record.closed !== undefined) {
         // A close with no round is the one the round wrote before posting its
         // summary. The round host's record, with what the posting came to, follows.
-        if (record.round === undefined) return undefined;
+        if (closePosting(state.records ?? [], waiting)) return undefined;
         const closing: ClosedFirst = { ...record, closed: record.closed };
         return compose((threads) => closedUnreviewed(waiting, state.records ?? [], closing, threads));
       }
@@ -427,7 +456,7 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord, h
     const failed = failedClose(records);
     if (failed !== undefined) {
       // Until the round host records it, the close is still posting its summary.
-      return failed.round === undefined ? undefined : compose((threads) => closedUnreviewed(following, records, failed, threads));
+      return closePosting(records, following) ? undefined : compose((threads) => closedUnreviewed(following, records, failed, threads));
     }
     return closed(following, state);
   }
@@ -459,7 +488,7 @@ function notReviewed(
     return settleRecord({ ...waiting, recorded: false }, state, newer, hops + 1);
   }
   // A state the failed close left is answered once that close has its posting.
-  if (closePosting(records)) return undefined;
+  if (closePosting(records, waiting)) return undefined;
   const closing = closingRecord(records);
   const stopped = STOPPED_BY_THE_CLOSE.exec(record.reason);
   if (state.closeReported === true && closing !== undefined && stopped !== null) {
@@ -514,7 +543,7 @@ function closedUnreviewed(
     // The close records a problem only where its summary is not on the pull request.
     summarised: problems.length === 0,
     // Where the failure comment went follows what the close left failing.
-    problems: [...problems, ...(first.lines ?? [])],
+    problems: [...problems, ...(first.round === undefined ? [unrecordedSummary(waiting)] : []), ...(first.lines ?? [])],
   };
 }
 
@@ -612,7 +641,11 @@ function closedResult(context: Context, state: EpisodeState, threads: readonly R
     reopens: state.cleanClose !== undefined,
     rounds: state.rounds.length,
     threads: left,
-    problems: (closing === undefined ? first?.closed.problems : closing.problems) ?? [],
+    problems: [
+      ...((closing === undefined ? first?.closed.problems : closing.problems) ?? []),
+      // Printed only once the run found the round host gone, since one that runs is waited on.
+      ...(closing === undefined && first !== undefined && first.round === undefined ? [unrecordedSummary(context)] : []),
+    ],
   };
 }
 
@@ -665,7 +698,7 @@ function stillReviewing(context: Context, records: readonly StateRecord[]): Revi
   const record = recordFor(records, context.own);
   const commit = context.own.head.slice(0, 7);
   const about = { outcome: "reviewing" as const, key: context.key, name: context.name, rerun: context.rerun, summaryAt: context.summaryAt };
-  if (closePosting(records)) return { ...about, wait: "posting", commit };
+  if (closePosting(records, context)) return { ...about, wait: "posting", commit };
   const underway = records.find((held) => held.status === "reviewing" && !sameState(held, context.own));
   if (record?.status === "queued" && underway !== undefined) {
     return { ...about, wait: "queued", commit, reviewing: underway.head.slice(0, 7) };

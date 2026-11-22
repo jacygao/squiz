@@ -1959,6 +1959,13 @@ failed state it recorded. Where the round cap or the token bound closed it, the
 line ends `No round runs again in this worktree.` instead. Where threads are
 open, the line counts them, the run exits 3, and the threads follow.
 
+The one wait is for a failed round's close that is still posting its summary:
+the run waits until the round host records what the posting came to, then
+prints the close. Where no live process holds the episode's host lock, nothing
+will record it, so the run prints the close at once at exit 3, and stderr adds
+`squiz: the review of PR #41 closed, and whether its summary was posted is not
+known: the round host stopped before recording it`.
+
 The review could not run, exit 1. Each reason is one line on stderr, and § 8's
 line to stop ends the output. Where the round host's start cannot be told, the
 run waits on a live host. Where no host takes the review, the state stays

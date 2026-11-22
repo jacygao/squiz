@@ -701,23 +701,8 @@ test("#915: a state queued behind a failed round that closed at the cap, with no
   });
 });
 
-test("#915: a state queued behind a failed round waits while that round's close is still posting its summary", async () => {
-  await withWorktree(async (fixture) => {
-    const taken: StateKey = { head: OWN.head, activity: "PRRC_older" };
-    records(fixture, [
-      // The close as the failed round writes it before posting, with no round yet.
-      { ...taken, status: "failed", reason: KILLED, ownerNoted: false, closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" } },
-      { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
-    ], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
-
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
-
-    assert.equal(printed.exit, 4, `the run did not wait for what the summary's posting came to: ${printed.stdout}${printed.stderr}`);
-  });
-});
-
 /** The close a failed round wrote before posting its summary: no round yet, and no problems. */
-const POSTING_CLOSE: StateRecord = {
+const POSTING_CLOSE: Extract<StateRecord, { readonly status: "failed" }> = {
   ...OWN,
   activity: "PRRC_older",
   status: "failed",
@@ -726,11 +711,42 @@ const POSTING_CLOSE: StateRecord = {
   closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" },
 };
 
+const CLOSED_EPISODE = { closeReported: true, rounds: [ROUND, ROUND, ROUND] };
+const LEFT_BY_THE_CLOSE: StateRecord = { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND };
+const REFUSED_SUMMARY = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
+
+/** A round host that holds the episode's lock and is running, as the run is told. */
+function liveHost(fixture: Fixture): Pick<ReviewRequest, "presence"> {
+  mkdirSync(fixture.episode.directory, { recursive: true });
+  writeFileSync(join(fixture.episode.directory, "host.lock"), `${JSON.stringify({ pid: 4242, startedAt: 1 })}\n`);
+  return { presence: (identity) => (identity.pid === 4242 ? { outcome: "running" } : { outcome: "gone" }) };
+}
+
+/** The round host's own record of the close, with the summary GitHub refused, written partway through the run's wait. */
+function recordedLater(fixture: Fixture, others: readonly StateRecord[]): Promise<void> {
+  return sleep(POLL_MS * 3).then(() =>
+    records(fixture, [
+      { ...POSTING_CLOSE, round: ran(3), closed: { exitStatus: 3, openThreads: [], closedAt: "round cap", problems: [REFUSED_SUMMARY] } },
+      ...others,
+    ], CLOSED_EPISODE),
+  );
+}
+
+test("#915: a state queued behind a failed round waits while that round's close is still posting its summary", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE, LEFT_BY_THE_CLOSE], CLOSED_EPISODE);
+
+    const printed = await runReview({ ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }), ...liveHost(fixture) });
+
+    assert.equal(printed.exit, 4, `the run did not wait for what the summary's posting came to: ${printed.stdout}${printed.stderr}`);
+  });
+});
+
 test("#915: a run that arrives after a failed close waits while that close is still posting its summary, and says so", async () => {
   await withWorktree(async (fixture) => {
-    records(fixture, [POSTING_CLOSE], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
 
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 5) }));
+    const printed = await runReview({ ...request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 5) }), ...liveHost(fixture) });
 
     assert.equal(printed.exit, 4, `the run printed a close whose summary was still posting: ${printed.stdout}${printed.stderr}`);
     assert.equal(
@@ -740,23 +756,59 @@ test("#915: a run that arrives after a failed close waits while that close is st
   });
 });
 
-test("#915: a run waiting on a failed close's posting prints the summary's problem once the round host records it", async () => {
+test("#915: a state queued behind a failed close prints the summary's problem once the round host records it", async () => {
   await withWorktree(async (fixture) => {
-    const problem = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
-    const rest = { closeReported: true, rounds: [ROUND, ROUND, ROUND] };
-    records(fixture, [POSTING_CLOSE, { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND }], rest);
-    const recorded = sleep(POLL_MS * 3).then(() =>
-      records(fixture, [
-        { ...POSTING_CLOSE, round: ran(3), closed: { exitStatus: 3, openThreads: [], closedAt: "round cap", problems: [problem] } },
-        { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
-      ], rest),
-    );
+    records(fixture, [POSTING_CLOSE, LEFT_BY_THE_CLOSE], CLOSED_EPISODE);
+    const recorded = recordedLater(fixture, [LEFT_BY_THE_CLOSE]);
 
-    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 100) }));
+    const printed = await runReview({ ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 100) }), ...liveHost(fixture) });
     await recorded;
 
     assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
-    assert.ok(printed.stderr.includes(`squiz: ${problem}\n`), `the summary's problem did not reach the waiting run: ${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${REFUSED_SUMMARY}\n`), `the summary's problem did not reach the waiting run: ${printed.stderr}`);
+  });
+});
+
+test("#915: a run that arrives after a failed close prints the summary's problem once the round host records it", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
+    const recorded = recordedLater(fixture, []);
+
+    const printed = await runReview({ ...request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 100) }), ...liveHost(fixture) });
+    await recorded;
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${REFUSED_SUMMARY}\n`), `the summary's problem did not reach the run: ${printed.stderr}`);
+  });
+});
+
+test("#915: a run whose queue a failed close raced prints the summary's problem once the round host records it", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
+    const recorded = recordedLater(fixture, []);
+    // The trigger found the episode open, and the close was written before its queue.
+    const triggered = { ...decided(fixture, { outcome: "queue", startHost: false }), queued: false };
+
+    const printed = await runReview({ ...request(fixture, { triggered, until: deadlineIn(POLL_MS * 100) }), ...liveHost(fixture) });
+    await recorded;
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${REFUSED_SUMMARY}\n`), `the summary's problem did not reach the run: ${printed.stderr}`);
+  });
+});
+
+test("#915: a failed close whose round host stopped before recording it is printed at once, saying the summary's outcome is unknown", async () => {
+  await withWorktree(async (fixture) => {
+    // No process holds the host lock, so nothing will replace the close the round wrote.
+    records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 100) }));
+
+    assert.equal(printed.exit, 3, `a close whose host has stopped is waited on forever: ${printed.stdout}${printed.stderr}`);
+    assert.ok(
+      printed.stderr.includes("squiz: the review of PR #41 closed, and whether its summary was posted is not known: the round host stopped before recording it\n"),
+      printed.stderr,
+    );
   });
 });
 
