@@ -1344,15 +1344,16 @@ waiting gives up on its own after four times the bound on each call the start
 makes, without running the reviewer. Where the gate has not written its pid 15
 seconds after Herdr opened the pane, the start fails.
 
-**The reviewer's program is found on the round host's `PATH`, not the Herdr
-server's.** The server's `PATH` is that of whatever first started it, and the
-pane's process has it, so it may lack a directory the coding agent's has. A
-program named without a `/` is found on the `PATH` the round's variables set,
-or else the round host's own, which is the coding agent's, and Herdr is handed
-its absolute path. A program found on neither is a refusal: no pane opens, and
-the round goes on to tmux or a child, as it does wherever Herdr opens nothing.
-Where the program is gone by the time the gate runs, the gate says so and
-the start fails at once.
+**The reviewer runs on the round host's `PATH`, not the Herdr server's.** The
+server's `PATH` is that of whatever first started it, and may lack a directory
+the coding agent's has. The pane's `env` carries the `PATH` the round's
+variables set, or else the round host's own, which is the coding agent's, so
+it also reaches a program the reviewer's command runs by name, as the Copilot
+adapter's `sh` line runs `copilot`. A program named without a `/` is found on
+that `PATH` first, and Herdr is handed its absolute path. A program found on it
+nowhere is a refusal: no pane opens, and the round goes on to tmux or a child,
+as it does wherever Herdr opens nothing. Where the program is gone by the time
+the gate runs, the gate says so and the start fails at once.
 
 **tmux execs the reviewer itself.** Given two or more words after `--`, tmux
 runs them with no shell. A command of one word it would hand to its default
@@ -1369,7 +1370,7 @@ the GitHub variables under Tools, which come last so that no adapter can undo
 them. A child has them in its environment, a Herdr pane in `layout.apply`'s
 `env`, and a tmux window through `new-window -e`. An empty value arrives set and
 empty. Everything else the reviewer's environment holds is the Herdr or tmux
-server's, but for tmux's `PATH`.
+server's, but for its `PATH`.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits, and Herdr removes the pane and its tab.

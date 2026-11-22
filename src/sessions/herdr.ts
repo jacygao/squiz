@@ -50,7 +50,7 @@ export type PaneCommand = {
   readonly startsWithinMs: number;
   /** The workspace the tab opens in. Absent, it opens in the focused one. */
   readonly workspace?: string;
-  /** Set in the command's environment, over the Herdr server's own. */
+  /** Set in the command's environment, over the Herdr server's own and the caller's `PATH`. */
   readonly variables?: Readonly<Record<string, string>>;
 };
 
@@ -83,18 +83,22 @@ export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): P
   if (command.workspace !== undefined && !isHerdrWorkspace(command.workspace)) {
     return { outcome: "refused", reason: `${JSON.stringify(command.workspace)} is not a Herdr workspace id` };
   }
-  // The pane's process has the server's PATH, which may lack a directory the
-  // caller's has, so the program is found on the caller's.
-  const path = command.variables?.["PATH"] ?? options.environment["PATH"] ?? "";
-  const program = command.program.includes("/") ? command.program : onPath(command.program, path, command.directory);
+  // The pane's process would have the server's PATH, which may lack a directory
+  // the caller's has. So it is given the caller's, which also reaches any
+  // program the command runs by name, and the program is found on it first, so
+  // one that is on no directory of it opens no pane.
+  const path = command.variables?.["PATH"] ?? options.environment["PATH"];
+  const program =
+    command.program.includes("/") ? command.program : onPath(command.program, path ?? "", command.directory);
   if (program === undefined) return { outcome: "refused", reason: `there is no ${command.program} on the path` };
+  const variables = { ...(path === undefined ? {} : { PATH: path }), ...command.variables };
   let gate: string;
   try {
     gate = mkdtempSync(join(tmpdir(), "squiz-gate-"));
   } catch (cause) {
     return { outcome: "refused", reason: `no gate could be made to hold the command back: ${String(cause)}` };
   }
-  const started = startBehind(gate, { ...command, program }, options);
+  const started = startBehind(gate, { ...command, program, variables }, options);
   // An opened gate is the command's to remove, on its way to running.
   if (started.outcome !== "started") rmSync(gate, { recursive: true, force: true });
   return started;

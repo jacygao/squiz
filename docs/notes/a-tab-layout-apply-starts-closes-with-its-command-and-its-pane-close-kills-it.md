@@ -43,8 +43,8 @@ command even where it ignores `SIGHUP`.
   ignored it. The close is no help for a process in a session of its own, which
   this did not test.
 
-- **Find the reviewer's program on squiz's own `PATH`, and hand Herdr its
-  absolute path.** The pane's process had the server's `PATH` (`/usr/bin:/bin`
+- **Give the pane squiz's own `PATH` in `env`, and find the reviewer's program
+  on it before Herdr opens anything.** The pane's process had the server's `PATH` (`/usr/bin:/bin`
   for a server started with it), or the one `env` gave, and no shell's startup
   files ran. The server's environment is whatever started it: `herdr` spawns
   its server with `Command::new(current_exe()).arg("server")` and changes only

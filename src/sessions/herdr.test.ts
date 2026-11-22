@@ -98,7 +98,7 @@ type Call = { readonly method: string; readonly params: Record<string, unknown> 
 type FakeHerdr = {
   readonly options: HerdrOptions;
   readonly calls: () => readonly Call[];
-  /** Where `pi` is, on the only directory of the PATH the start is given. */
+  /** Where `pi` is, on the first directory of the PATH the start is given. */
   readonly pi: string;
 };
 
@@ -127,7 +127,9 @@ async function withFakeHerdr<T>(answers: Record<string, readonly Answer[]>, body
         .filter((line) => line !== "")
         .map((line) => JSON.parse(line) as Call);
     };
-    return body({ options: { environment: { HERDR_SOCKET_PATH: socket, PATH: directory }, boundMs: BOUND_MS }, calls, pi });
+    // The gate runs the system's commands by name, as on any PATH a caller has.
+    const environment = { HERDR_SOCKET_PATH: socket, PATH: `${directory}:/usr/bin:/bin` };
+    return body({ options: { environment, boundMs: BOUND_MS }, calls, pi });
   } finally {
     server?.kill("SIGKILL");
     // A gate the fake wrote into had no command to remove it once opened.
@@ -154,6 +156,13 @@ function paneArgv(calls: readonly Call[]): readonly string[] {
   const apply = calls.find((call) => call.method === "layout.apply");
   const root = apply?.params["root"] as { command?: string[] } | undefined;
   return root?.command ?? [];
+}
+
+/** The environment the pane was given, from the start's `layout.apply`. */
+function paneEnv(calls: readonly Call[]): Readonly<Record<string, string>> {
+  const apply = calls.find((call) => call.method === "layout.apply");
+  const root = apply?.params["root"] as { env?: Record<string, string> } | undefined;
+  return root?.env ?? {};
 }
 
 test("only an environment with HERDR_SOCKET_PATH set is inside Herdr", () => {
@@ -200,7 +209,7 @@ test("the tab is one layout.apply, whose pane execs the gate with no shell (#911
       assert.equal(apply?.method, "layout.apply");
       assert.deepEqual(rest, { tab_label: "squiz-test", focus: false });
       const { command: argv, ...pane } = root as { command: string[] };
-      assert.deepEqual(pane, { type: "pane", cwd: "/somewhere", env: variables, label: "squiz-test" });
+      assert.deepEqual(pane, { type: "pane", cwd: "/somewhere", env: { PATH: options.environment["PATH"], ...variables }, label: "squiz-test" });
       assert.deepEqual(argv.slice(0, 2), ["/bin/sh", "-c"]);
       assert.match(argv[3] ?? "", /squiz-gate-/u);
       assert.deepEqual(argv.slice(5), [pi, "--first", "two words"]);
@@ -223,19 +232,28 @@ test("every argument reaches the pane's argv as given, control characters too (#
   );
 });
 
-// The pane's process has the server's PATH, which may lack a directory the caller's has.
-test("the program is found on the caller's PATH, or the PATH its variables give, and reaches Herdr absolute (#911)", async () => {
+// The pane's process would have the server's PATH, which may lack a directory
+// the caller's has, for the program or for anything it runs by name.
+test("the program is found on the caller's PATH, or the PATH its variables give, and the pane gets that PATH (#911)", async () => {
   const answers = {
     "layout.apply": [layoutApplied("w1:p7", process.pid)],
     "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
   };
   await withFakeHerdr(answers, ({ options, calls, pi }) => {
-    const started = startInHerdrPane({ ...command, variables: { PATH: `/nowhere:${join(pi, "..")}` } }, {
+    const started = startInHerdrPane(command, options);
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    assert.equal(paneArgv(calls())[5], pi);
+    assert.equal(paneEnv(calls())["PATH"], options.environment["PATH"]);
+  });
+  await withFakeHerdr(answers, ({ options, calls, pi }) => {
+    const given = `/nowhere:${join(pi, "..")}`;
+    const started = startInHerdrPane({ ...command, variables: { PATH: given } }, {
       ...options,
       environment: { ...options.environment, PATH: "/nowhere" },
     });
     assert.equal(started.outcome, "started", JSON.stringify(started));
     assert.equal(paneArgv(calls())[5], pi);
+    assert.equal(paneEnv(calls())["PATH"], given);
   });
 });
 
@@ -333,11 +351,12 @@ test("a server with no workspace at all still refuses when one was named", async
 test("a socket no Herdr server answers on is refused", () => {
   const empty = mkdtempSync(join(tmpdir(), "squiz-sessions-herdr-none-"));
   try {
-    const started = startInHerdrPane(command, {
+    const started = startInHerdrPane({ ...command, program: process.execPath }, {
       environment: { HERDR_SOCKET_PATH: join(empty, "none.sock") },
       boundMs: BOUND_MS,
     });
     assert.equal(started.outcome, "refused", JSON.stringify(started));
+    assert.match("reason" in started ? started.reason : "", /no Herdr server answers at .*none\.sock/u);
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }

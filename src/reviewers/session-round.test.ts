@@ -680,6 +680,27 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     assert.equal(places[0].identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
   });
 
+  // As the Copilot adapter's line does: an `sh` that runs the reviewer by its bare name.
+  test("a reviewer an sh line runs by name, found only on squiz's PATH, still starts in a pane (#911)", async (t) => {
+    const tree = treeFor(t);
+    const noteFile = join(tree, "note.json");
+    const elsewhere = onlyOnSquizPath(t);
+    const stand = adapterOf({ inPane: finishingInAPane(noteFile), detached: "process.exit(3)" }, elsewhere.program);
+    const adapter: Adapter = {
+      ...stand,
+      argv: (invocation) => {
+        const line = stand.argv(invocation);
+        if (invocation.terminal !== "pane") return line;
+        return { ...line, command: "sh", args: ["-c", `exec ${elsewhere.program} "$0"`, ...line.args] };
+      },
+    };
+
+    const round = await runRound(adapter, invocationIn(tree), 40, { environment: elsewhere.on(environment), name: "squiz-142-r1" });
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.equal(noteIn(noteFile).tty, true, "the reviewer ran with no terminal, so not in the pane");
+  });
+
   test("a reviewer in a pane sees no GitHub credential the server carries", async (t) => {
     const tree = treeFor(t);
     const invocation = invocationIn(tree);
