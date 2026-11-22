@@ -716,6 +716,50 @@ test("#915: a state queued behind a failed round waits while that round's close 
   });
 });
 
+/** The close a failed round wrote before posting its summary: no round yet, and no problems. */
+const POSTING_CLOSE: StateRecord = {
+  ...OWN,
+  activity: "PRRC_older",
+  status: "failed",
+  reason: KILLED,
+  ownerNoted: false,
+  closed: { exitStatus: 3, openThreads: [], closedAt: "round cap" },
+};
+
+test("#915: a run that arrives after a failed close waits while that close is still posting its summary, and says so", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [POSTING_CLOSE], { closeReported: true, rounds: [ROUND, ROUND, ROUND] });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "closed" }), until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, `the run printed a close whose summary was still posting: ${printed.stdout}${printed.stderr}`);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz has closed the review of PR #41 and is still posting its summary. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
+test("#915: a run waiting on a failed close's posting prints the summary's problem once the round host records it", async () => {
+  await withWorktree(async (fixture) => {
+    const problem = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
+    const rest = { closeReported: true, rounds: [ROUND, ROUND, ROUND] };
+    records(fixture, [POSTING_CLOSE, { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND }], rest);
+    const recorded = sleep(POLL_MS * 3).then(() =>
+      records(fixture, [
+        { ...POSTING_CLOSE, round: ran(3), closed: { exitStatus: 3, openThreads: [], closedAt: "round cap", problems: [problem] } },
+        { ...OWN, status: "not reviewed", reason: BEFORE_A_ROUND },
+      ], rest),
+    );
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 100) }));
+    await recorded;
+
+    assert.equal(printed.exit, 3, `${printed.stdout}${printed.stderr}`);
+    assert.ok(printed.stderr.includes(`squiz: ${problem}\n`), `the summary's problem did not reach the waiting run: ${printed.stderr}`);
+  });
+});
+
 const NO_SUMMARY = "the review of PR #41 closed without its summary: gh: HTTP 502 Bad Gateway";
 const COULD_NOT_RUN = "the reviewer could not run: the provider refused the credential";
 

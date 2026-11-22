@@ -1948,6 +1948,7 @@ Still reviewing, exit 4: the run prints one of these lines after the path.
 - Its state is queued behind an older one's round: ``Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run `squiz review 41` again to wait for it.``
 - Its state was reviewed clean and a later one is queued: ``Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.``
 - Its state was superseded (§ 3 The state file): ``Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.``
+- A failed round closed the episode and is still posting its summary (§ 3 The round cap), which every run on the episode waits for so that what the posting came to reaches its stderr: ``Squiz has closed the review of PR #41 and is still posting its summary. Run `squiz review 41` again to wait for it.``
 
 A run on an episode that has already closed prints the close, whatever the round
 cap or the token bound would now allow. The line names the head the close was

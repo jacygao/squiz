@@ -84,9 +84,11 @@ type ClosedOpen = RoundResult & {
  *   behind it, so the episode has not closed.
  * - `superseded`: the pull request moved on to `reviewing` before a round took
  *   the run's state.
+ * - `posting`: a failed round has closed the review, and its summary is still
+ *   being posted.
  */
 type StillReviewing = Named & { readonly outcome: "reviewing" } & (
-    | { readonly wait: "under review"; readonly commit: string }
+    | { readonly wait: "under review" | "posting"; readonly commit: string }
     | { readonly wait: "queued" | "clean" | "superseded"; readonly commit: string; readonly reviewing: string }
   );
 
@@ -320,6 +322,8 @@ function stillReviewing(result: StillReviewing): string {
   switch (result.wait) {
     case "under review":
       return `Squiz is still reviewing ${result.name} at ${result.commit}. ${again}`;
+    case "posting":
+      return `Squiz has closed the review of ${result.name} and is still posting its summary. ${again}`;
     case "queued":
       return `Squiz is reviewing ${result.name} at ${result.reviewing} first, and ${result.commit} is next. ${again}`;
     case "clean":

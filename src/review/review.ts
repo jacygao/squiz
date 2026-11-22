@@ -192,6 +192,8 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         // and a later episode replaced since.
         const state = triggered.read ?? read();
         if (typeof state === "string") return notRun(state);
+        // A failed close still posting its summary is waited on, so its problems reach this run.
+        if (closePosting(state.records ?? [])) return undefined;
         return print(closedResult(context, state, threads));
       }
       case "host-unknown":
@@ -223,7 +225,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         if (decision.outcome === "queue" && !triggered.queued) {
           const state = read();
           if (typeof state === "string") return notRun(state);
-          if (episodeOver(state, context.own)) return print(closedResult(context, state, threads));
+          if (episodeOver(state, context.own) && !closePosting(state.records ?? [])) return print(closedResult(context, state, threads));
         }
         return undefined;
     }
@@ -663,6 +665,7 @@ function stillReviewing(context: Context, records: readonly StateRecord[]): Revi
   const record = recordFor(records, context.own);
   const commit = context.own.head.slice(0, 7);
   const about = { outcome: "reviewing" as const, key: context.key, name: context.name, rerun: context.rerun, summaryAt: context.summaryAt };
+  if (closePosting(records)) return { ...about, wait: "posting", commit };
   const underway = records.find((held) => held.status === "reviewing" && !sameState(held, context.own));
   if (record?.status === "queued" && underway !== undefined) {
     return { ...about, wait: "queued", commit, reviewing: underway.head.slice(0, 7) };
