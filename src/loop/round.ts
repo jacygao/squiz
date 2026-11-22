@@ -561,9 +561,12 @@ async function reviewOn(
   const unmade = makeSessionDirectory(sessionDirectory);
   if (unmade !== null) return failed("harness", `no review ran: ${unmade}`);
 
+  // The fetch that provides the commits, and the clone and checkout that make
+  // the snapshot from them, share one deadline.
+  const making = call();
   // A head the venue built, rather than one the repository holds, is readable
   // only through the object directories it names.
-  const provided = setup.venue.provideCommits(change, call());
+  const provided = setup.venue.provideCommits(change, making);
   if (provided.outcome === "failed") {
     return failed("harness", `no review ran: the commits of ${change.name} could not be provided: ${provided.reason}`);
   }
@@ -579,7 +582,7 @@ async function reviewOn(
       base: change.base,
       alternates: provided.alternates,
     },
-    call(),
+    making,
   );
   if (snapshot.outcome === "failed") {
     if (snapshot.leftBehind !== undefined) opened.snapshot = snapshot.leftBehind;
