@@ -79,10 +79,9 @@ none for Copilot. Copilot's runtime library names `gh auth token` and an
 `AuthInfo::GhCli` login source. `~/.copilot/config.json` holds no
 `logged_in_users`.
 
-**This contradicts § 5 Tools**, which says the round leaves alone "Copilot's own
-login in the system's credential store". On this machine Copilot has no login
-of its own. It signs in with `gh`'s, which it reads by running `gh auth token`,
-so a round whose `PATH` has no `gh` would have no model credential.
+**On this machine Copilot has no login of its own.** It signs in with `gh`'s,
+which it reads by running `gh auth token`, so a round whose `PATH` has no `gh`
+would have no model credential.
 
 2026-11-22: a login of Copilot's own does exist on a machine that ran
 `copilot login`, and reaches a round only through the two fields
