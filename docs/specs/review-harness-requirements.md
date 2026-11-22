@@ -193,6 +193,7 @@ No requirement. Headless runs were cut with PQ1, PQ3 and PQ5 (#912).
 - **R5.3.5, R5.7.2, R5.8.3, R5.8.6** Nothing from the tree under review or the repository's local config reaches the reviewer but `AGENTS.md` (and, for `pi`, `CLAUDE.md`): not the repository's hooks, filters or `core.autocrlf`, not the tree's `.pi/` configuration, and not its Copilot hooks, MCP servers, instruction files, skills or agents. No `pi` extension and no MCP server runs but squiz's own, Copilot's built-in GitHub MCP server is off, and the charter is the Copilot reviewer's system prompt, which a same-named agent in the tree cannot override. From the user's own Copilot configuration only the default model and the signed-in user reach it. (L1893–1905, L1913–1915, L2234–2237, L2314–2316, L2321–2337; also L2067–2070, L2117)
 - **R5.3.10** squiz removes the snapshot once the round has recorded its result, whatever the result, and before it takes the next queued state. It removes nothing but the snapshot and the directories that removing it emptied, and does not need the worktree to exist. (L1945–1950)
 - **R5.3.11** A snapshot that cannot be removed stays on disk, the round's result stands, and `host.log` gets a line like `2026-10-07T04:10:09.623Z round 1: the snapshot at /tmp/squiz-501/44df…-142/rounds/1/tree could not be removed: EACCES: …; it stays on disk until it is deleted`. (L1952–1959; also L3794)
+- **R5.3.8** Squiz refuses to make a snapshot where `squiz-<uid>` is a link, is owned by another user, or is writable by group or others, and the round fails before the review. (L1933–1937)
 
 ### 5.4 Tools
 
@@ -272,6 +273,7 @@ No requirement of its own. The charter ships with squiz and is handed to the rev
 
 - **R6.2.1** Summary format: heading `**Squiz review — 3 rounds, 7 findings**`; counts line; spend line; reviewer line; `**Needs a person**` list; `**Rounds**` list; `**Notes**` list, as in the L2927–2950 example. (L2927–2950; also L67)
 - **R6.2.3, R6.2.4, R6.2.7, R6.2.8** The spend line leads with the tokens, which every round with a cost carries: total tokens, the round count and each round's tokens, then dollars where the reviewer's CLI priced the model, as `48,200 tokens over 3 rounds: 20,100, 16,400, 11,700 · $0.0134`. A Copilot round carries AI credits to two decimals in place of dollars (`… · 0.84 AI credits`), and with both kinds the line gives both totals, each covering its rounds. A floor reads "at least", on its own round and every total, as `At least 36,500 tokens over 2 rounds: 20,100, at least 16,400 · at least $0.0105`. Costed rounds with no completed message read `No spend was reported over N rounds`. The reviewer line names the reviewer CLI each round ran and the models the run reported, never the configured `model`, and a run that reported none reads "an unknown model". (L2814–2817, L3006–3008, L3010–3018, L3030–3038, L2816–2817, L2972–2974, L3041–3044; also L2277)
+- **R6.2.5** A round that completed no assistant message has its cost shown as unknown, not zero, including a floor round, whose neighbouring totals stay marked. The wording is the code's. (L3018–3019, L3038–3039)
 - **R6.2.6** A round with no cost has no figure in the spend line; the line covers rounds with a cost and says how many (`18,200 tokens over 1 of 2 rounds · 0.36 AI credits`). With no round costed, there is no spend line. (L3021–3028)
 - **R6.2.9** Where every round ran the same reviewer on the same models, they are named once: ``Reviewed by `copilot` on `gpt-5-mini` and `claude-haiku-4.5` ``. (L3046–3052)
 - **R6.2.10** Where rounds differ, each model is named with its rounds under the reviewer that ran them, in first-named order, a two-model round under both: ``Reviewed by `pi` on `openai/gpt-5-mini` in rounds 1 and 2, and by `copilot` on `gpt-5-mini` in round 3``. (L3054–3061)
@@ -529,6 +531,8 @@ No requirement.
 ### Owner's calls on the applied list
 
 - **§ 9's file structure: not in the spec.** The `src/` layout and module organisation drift with every code change, so R9.0.1 and R9.2.1–R9.2.4 stay off the list, and the § 9 rewrite changes `CLAUDE.md` to stop saying § 9 fixes the layout.
+- **R5.3.8, the snapshot directory's safety: kept.** It is a guarantee a person relies on.
+- **R6.2.5, a round with no completed message: kept.** Its cost shows as unknown, not zero. The exact wording is the code's.
 
 ### Features
 
@@ -550,9 +554,7 @@ The features, merges, details, Doubtful entries, contradictions and homes above 
 
 ## Open for the owner
 
-- **R9.0.1, R9.1.2, R9.1.3, R9.2.1–R9.2.4:** dropped as project rules, but `CLAUDE.md` says § 9 fixes the erasable-syntax rule and the `src/` layout. Keep them in § 9, or move them into `CLAUDE.md`?
-- **R5.3.8:** dropped as a detail. Squiz refuses a snapshot where `squiz-<uid>` is a link, another user's, or writable by others. Should the rewrite still state that guarantee?
-- **R6.2.5:** dropped with its Doubtful entry. A round that completed no assistant message shows as unknown rather than zero in the spend line, and no example says what is printed. Specify the text, or leave it to the code?
+All three are answered, under Decisions, Owner's calls on the applied list.
 
 ## Not a requirement but needs a home
 
