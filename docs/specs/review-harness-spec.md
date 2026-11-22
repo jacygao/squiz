@@ -734,13 +734,25 @@ round host writes the note all the same, and a socket the stop recorded has
 nothing listening by then, so the note stays waiting. Squiz starts no coding
 agent of its own. A caller with no live session runs the fix loop itself around
 `squiz review`, which waits for the round and prints the threads it left open
-(§ 7), as a coding agent working a pull request does:
+(§ 7), as a coding agent working a pull request does. It hands the threads on
+at exit 2, runs the command again at exit 4, stops at 0 and 3, and stops with
+the status on any other. The output goes outside the worktree, where the local
+venue would review it as part of the change:
 
 ```bash
-until squiz review > threads.txt; code=$?; [ $code -eq 0 ] || [ $code -eq 3 ]; do
-  claude -p --resume "$SESSION" "$(cat threads.txt)"
+out=$(mktemp)
+while :; do
+  squiz review 41 > "$out"; code=$?
+  case $code in
+    0|3) break ;;
+    2) claude -p --resume "$SESSION" "$(cat "$out")" || exit ;;
+    4) ;;
+    *) exit "$code" ;;
+  esac
 done
 ```
+
+Under the local venue the command is `squiz review`, with no number.
 
 
 ### Parallel coding agents
