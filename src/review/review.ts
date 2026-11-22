@@ -307,7 +307,7 @@ async function reviewUnder(request: ReviewRequest, worktree: string, until: Dead
         outcome: "not run",
         key,
         reason: `whether the round host for ${context.name} started could not be told, and none has taken the review since: ${startUnknown}`,
-        problems: [`\`squiz status ${key}\` shows whether one takes it later, and ${relative(episode.worktree, join(episode.directory, "host.log"))} holds what the host wrote`],
+        problems: [`\`squiz status\` shows whether one takes it later, and ${relative(episode.worktree, join(episode.directory, "host.log"))} holds what the host wrote`],
       });
     }
     if (until.passed()) return print(stillReviewing(context, state.records ?? []));
