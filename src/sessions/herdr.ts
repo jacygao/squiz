@@ -24,9 +24,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { identityOf, type ProcessIdentity } from "./process.ts";
 
@@ -43,7 +43,7 @@ export type PaneCommand = {
   readonly directory: string;
   /** The tab's label, and the pane's. */
   readonly name: string;
-  /** The executable, found on the path of the Herdr server's environment. */
+  /** The executable, found on the path `variables` or the caller's environment gives. */
   readonly program: string;
   readonly arguments: readonly string[];
   /** How long the gate may take to start running once Herdr has opened the pane. */
@@ -83,13 +83,18 @@ export function startInHerdrPane(command: PaneCommand, options: HerdrOptions): P
   if (command.workspace !== undefined && !isHerdrWorkspace(command.workspace)) {
     return { outcome: "refused", reason: `${JSON.stringify(command.workspace)} is not a Herdr workspace id` };
   }
+  // The pane's process has the server's PATH, which may lack a directory the
+  // caller's has, so the program is found on the caller's.
+  const path = command.variables?.["PATH"] ?? options.environment["PATH"] ?? "";
+  const program = command.program.includes("/") ? command.program : onPath(command.program, path, command.directory);
+  if (program === undefined) return { outcome: "refused", reason: `there is no ${command.program} on the path` };
   let gate: string;
   try {
     gate = mkdtempSync(join(tmpdir(), "squiz-gate-"));
   } catch (cause) {
     return { outcome: "refused", reason: `no gate could be made to hold the command back: ${String(cause)}` };
   }
-  const started = startBehind(gate, command, options);
+  const started = startBehind(gate, { ...command, program }, options);
   // An opened gate is the command's to remove, on its way to running.
   if (started.outcome !== "started") rmSync(gate, { recursive: true, force: true });
   return started;
@@ -178,6 +183,20 @@ function startBehind(gate: string, command: PaneCommand, options: HerdrOptions):
     return abandon(pane, `the gate could not be opened: ${String(cause)}`, options);
   }
   return { outcome: "started", pane, leader: leader.identity };
+}
+
+/** The first executable file named `program` in a directory of `path`, as a shell would find it. */
+function onPath(program: string, path: string, directory: string): string | undefined {
+  for (const entry of path.split(":")) {
+    const candidate = resolve(directory, entry, program);
+    try {
+      accessSync(candidate, constants.X_OK);
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Not here, so the next directory is looked in.
+    }
+  }
+  return undefined;
 }
 
 /** Close a pane a start opened and could not finish, and say why the start failed. */

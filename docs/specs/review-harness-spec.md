@@ -1341,17 +1341,27 @@ never writes its pid is a start that failed, however long the pane stays open.
 
 The round host removes the gate directory of a start that failed. A gate left
 waiting gives up on its own after four times the bound on each call the start
-makes, without running the reviewer. Where the reviewer's program is not on the
-path of the Herdr server's environment, the gate says so and the start fails at
-once. Where the gate has not written its pid 15 seconds after Herdr opened the
-pane, the start fails.
+makes, without running the reviewer. Where the gate has not written its pid 15
+seconds after Herdr opened the pane, the start fails.
+
+**The reviewer's program is found on the round host's `PATH`, not the Herdr
+server's.** The server's `PATH` is that of whatever first started it, and the
+pane's process has it, so it may lack a directory the coding agent's has. A
+program named without a `/` is found on the `PATH` the round's variables set,
+or else the round host's own, which is the coding agent's, and Herdr is handed
+its absolute path. A program found on neither is a refusal: no pane opens, and
+the round goes on to tmux or a child, as it does wherever Herdr opens nothing.
+Where the program is gone by the time the gate runs, the gate says so and
+the start fails at once.
 
 **tmux execs the reviewer itself.** Given two or more words after `--`, tmux
 runs them with no shell. A command of one word it would hand to its default
 shell, so the round host gives it as `/bin/sh -c 'exec "$0"' <program>`, which
 reads no startup file and becomes the program with the same pid. tmux reads an
 argument ending in `;` as the end of a command, so the round host writes that
-`;` as `\;`, which tmux reads back as the `;`.
+`;` as `\;`, which tmux reads back as the `;`. tmux starts the window's command
+with the `PATH` of the `tmux` command that opened the window, which is the
+round host's.
 
 **The variables the round sets reach the reviewer on every backend, over any
 value the backend's own environment gives them.** They are the adapter's, and
@@ -1359,7 +1369,7 @@ the GitHub variables under Tools, which come last so that no adapter can undo
 them. A child has them in its environment, a Herdr pane in `layout.apply`'s
 `env`, and a tmux window through `new-window -e`. An empty value arrives set and
 empty. Everything else the reviewer's environment holds is the Herdr or tmux
-server's, its `PATH` among it.
+server's, but for tmux's `PATH`.
 
 **The pane closes when the review ends, and the session stays resumable.** tmux
 closes a window when its command exits, and Herdr removes the pane and its tab.

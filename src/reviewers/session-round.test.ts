@@ -252,6 +252,22 @@ function privateTmux(t: TestContext): TmuxServer {
   };
 }
 
+/**
+ * A stand-in reviewer in a directory of its own, which runs the Node script its
+ * first argument names. `on` puts the directory first on an environment's PATH,
+ * so only squiz's PATH has it, never a pane server's.
+ */
+function onlyOnSquizPath(t: TestContext): {
+  readonly program: string;
+  readonly on: (environment: Record<string, string | undefined>) => Record<string, string | undefined>;
+} {
+  const directory = mkdtempSync(join(tmpdir(), "squiz-elsewhere-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const program = "squiz-reviewer-elsewhere";
+  writeFileSync(join(directory, program), `#!/bin/sh\nexec '${process.execPath}' "$1"\n`, { mode: 0o755 });
+  return { program, on: (environment) => ({ ...environment, PATH: `${directory}:${environment["PATH"] ?? ""}` }) };
+}
+
 const tmuxInstalled = spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
 
 /**
@@ -351,6 +367,25 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     );
     assert.equal(round.outcome, "reviewed", accountOf(round));
     assert.equal(readFileSync(join(tree, "allow-all.json"), "utf8"), '""');
+  });
+
+  test("a reviewer found only on squiz's PATH, not the server's, still starts in a window (#911)", async (t) => {
+    const server = privateTmux(t);
+    const tree = treeFor(t);
+    const noteFile = join(tree, "note.json");
+    const elsewhere = onlyOnSquizPath(t);
+    const places: SessionPlace[] = [];
+
+    const round = await runRound(
+      adapterOf({ inPane: finishingInAPane(noteFile), detached: "process.exit(3)" }, elsewhere.program),
+      invocationIn(tree),
+      30,
+      { environment: elsewhere.on(server.environment), name: "squiz-142-r1", started: (place) => places.push(place) },
+    );
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.ok(places[0]?.backend === "tmux", `the reviewer started in ${JSON.stringify(places[0])}`);
+    assert.equal(places[0].identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
   });
 
   test("a reviewer in a window sees no GitHub credential the server carries", async (t) => {
@@ -579,7 +614,8 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
       await new Promise((settle) => setTimeout(settle, 100));
     }
     assert.ok(existsSync(socket), `the private Herdr server made no socket at ${socket}`);
-    environment = { ...base, HOME: home, HERDR_SOCKET_PATH: socket };
+    // The round finds `pi` on its own PATH, so the fake is first there too.
+    environment = { ...base, HOME: home, HERDR_SOCKET_PATH: socket, PATH: `${fakes}:${base["PATH"] ?? ""}` };
     herdr(["workspace", "create", "--cwd", home]);
   });
 
@@ -622,6 +658,26 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     );
     assert.equal(round.outcome, "reviewed", accountOf(round));
     assert.equal(readFileSync(join(tree, "allow-all.json"), "utf8"), '""');
+  });
+
+  // A person's server is started from wherever they first ran Herdr, so its
+  // PATH may lack a directory the coding agent's has.
+  test("a reviewer found only on squiz's PATH, not the server's, still starts in a pane (#911)", async (t) => {
+    const tree = treeFor(t);
+    const noteFile = join(tree, "note.json");
+    const elsewhere = onlyOnSquizPath(t);
+    const places: SessionPlace[] = [];
+
+    const round = await runRound(
+      adapterOf({ inPane: finishingInAPane(noteFile), detached: "process.exit(3)" }, elsewhere.program),
+      invocationIn(tree),
+      40,
+      { environment: elsewhere.on(environment), name: "squiz-142-r1", started: (place) => places.push(place) },
+    );
+
+    assert.equal(round.outcome, "reviewed", accountOf(round));
+    assert.ok(places[0]?.backend === "herdr", `the reviewer started in ${JSON.stringify(places[0])}`);
+    assert.equal(places[0].identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
   });
 
   test("a reviewer in a pane sees no GitHub credential the server carries", async (t) => {

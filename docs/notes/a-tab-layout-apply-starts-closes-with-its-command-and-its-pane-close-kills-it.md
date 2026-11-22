@@ -20,6 +20,7 @@ command even where it ignores `SIGHUP`.
 - Whether `pane.process_info` on an argv pane reports the command as
   `shell_pid` and as the foreground process group.
 - Whether `pane close` on a live argv pane signals its process.
+- Which `PATH` an argv pane's process has, and where the server got it.
 
 ## Decisions
 
@@ -41,6 +42,17 @@ command even where it ignores `SIGHUP`.
   returned, 289 ms after the call, and so was a member of its group that also
   ignored it. The close is no help for a process in a session of its own, which
   this did not test.
+
+- **Find the reviewer's program on squiz's own `PATH`, and hand Herdr its
+  absolute path.** The pane's process had the server's `PATH` (`/usr/bin:/bin`
+  for a server started with it), or the one `env` gave, and no shell's startup
+  files ran. The server's environment is whatever started it: `herdr` spawns
+  its server with `Command::new(current_exe()).arg("server")` and changes only
+  a few variables, with no login shell. A server first started from somewhere
+  without a profile's directories cannot find a `pi` that only the profile puts
+  on the path. A bare program name the server cannot find makes `layout.apply`
+  refuse with `layout_apply_failed`, but behind the gate the gate's
+  `command -v` is what fails, after the pane has opened.
 
 ## Needs your input
 

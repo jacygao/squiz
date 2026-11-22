@@ -95,7 +95,12 @@ require("node:net").createServer((connection) => {
 `;
 
 type Call = { readonly method: string; readonly params: Record<string, unknown> };
-type FakeHerdr = { readonly options: HerdrOptions; readonly calls: () => readonly Call[] };
+type FakeHerdr = {
+  readonly options: HerdrOptions;
+  readonly calls: () => readonly Call[];
+  /** Where `pi` is, on the only directory of the PATH the start is given. */
+  readonly pi: string;
+};
 
 /** Each call as `<method> <pane_id>`, the pane left off where there is none. */
 const named = (calls: readonly Call[]): string[] =>
@@ -107,6 +112,8 @@ async function withFakeHerdr<T>(answers: Record<string, readonly Answer[]>, body
   let server: ChildProcess | undefined;
   try {
     writeFileSync(join(directory, "answers.json"), JSON.stringify(answers), "utf8");
+    const pi = join(directory, "pi");
+    writeFileSync(pi, "#!/bin/sh\n", { mode: 0o755 });
     server = spawn(process.execPath, ["-e", FAKE_SERVER, directory, socket], { stdio: "ignore" });
     for (let tries = 0; tries < 200 && !existsSync(socket); tries += 1) {
       await new Promise((settle) => setTimeout(settle, 25));
@@ -120,7 +127,7 @@ async function withFakeHerdr<T>(answers: Record<string, readonly Answer[]>, body
         .filter((line) => line !== "")
         .map((line) => JSON.parse(line) as Call);
     };
-    return body({ options: { environment: { HERDR_SOCKET_PATH: socket }, boundMs: BOUND_MS }, calls });
+    return body({ options: { environment: { HERDR_SOCKET_PATH: socket, PATH: directory }, boundMs: BOUND_MS }, calls, pi });
   } finally {
     server?.kill("SIGKILL");
     // A gate the fake wrote into had no command to remove it once opened.
@@ -183,7 +190,7 @@ test("the tab is one layout.apply, whose pane execs the gate with no shell (#911
       "layout.apply": [layoutApplied("w1:p7", process.pid)],
       "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
     },
-    ({ options, calls }) => {
+    ({ options, calls, pi }) => {
       const variables = { SESSION_MARK: "it's $HOME", GH_TOKEN: "" };
       const started = startInHerdrPane({ ...command, variables }, options);
       assert.equal(started.outcome, "started", JSON.stringify(started));
@@ -196,7 +203,7 @@ test("the tab is one layout.apply, whose pane execs the gate with no shell (#911
       assert.deepEqual(pane, { type: "pane", cwd: "/somewhere", env: variables, label: "squiz-test" });
       assert.deepEqual(argv.slice(0, 2), ["/bin/sh", "-c"]);
       assert.match(argv[3] ?? "", /squiz-gate-/u);
-      assert.deepEqual(argv.slice(5), ["pi", "--first", "two words"]);
+      assert.deepEqual(argv.slice(5), [pi, "--first", "two words"]);
     },
   );
 });
@@ -208,12 +215,36 @@ test("every argument reaches the pane's argv as given, control characters too (#
       "layout.apply": [layoutApplied("w1:p7", process.pid)],
       "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
     },
-    ({ options, calls }) => {
+    ({ options, calls, pi }) => {
       const started = startInHerdrPane({ ...command, arguments: awkward }, options);
       assert.equal(started.outcome, "started", JSON.stringify(started));
-      assert.deepEqual(paneArgv(calls()).slice(5), ["pi", ...awkward]);
+      assert.deepEqual(paneArgv(calls()).slice(5), [pi, ...awkward]);
     },
   );
+});
+
+// The pane's process has the server's PATH, which may lack a directory the caller's has.
+test("the program is found on the caller's PATH, or the PATH its variables give, and reaches Herdr absolute (#911)", async () => {
+  const answers = {
+    "layout.apply": [layoutApplied("w1:p7", process.pid)],
+    "pane.process_info": [processInfo("w1:p7", process.pid, process.pid)],
+  };
+  await withFakeHerdr(answers, ({ options, calls, pi }) => {
+    const started = startInHerdrPane({ ...command, variables: { PATH: `/nowhere:${join(pi, "..")}` } }, {
+      ...options,
+      environment: { ...options.environment, PATH: "/nowhere" },
+    });
+    assert.equal(started.outcome, "started", JSON.stringify(started));
+    assert.equal(paneArgv(calls())[5], pi);
+  });
+});
+
+test("a program on no directory of the PATH is refused, and Herdr is never called (#911)", async () => {
+  await withFakeHerdr({ "layout.apply": [layoutApplied("w1:p7", process.pid)] }, ({ options, calls }) => {
+    const started = startInHerdrPane({ ...command, program: "squiz-no-such-reviewer" }, options);
+    assert.deepEqual(started, { outcome: "refused", reason: "there is no squiz-no-such-reviewer on the path" });
+    assert.deepEqual(calls(), []);
+  });
 });
 
 test("a gate that lets its command run leaves no directory behind (#453)", async () => {
@@ -512,8 +543,11 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     return { ...base, HOME: home, ...extra };
   };
 
+  // The start's PATH holds only the fakes and the system's directories.
+  const herdrPath = spawnSync("/bin/sh", ["-c", "command -v herdr"], { encoding: "utf8" }).stdout.trim();
+
   const herdr = (args: readonly string[]): { status: number | null; output: string } => {
-    const result = spawnSync("herdr", args, {
+    const result = spawnSync(herdrPath, args, {
       encoding: "utf8",
       env: options.environment as NodeJS.ProcessEnv,
       timeout: BOUND_MS,
@@ -530,7 +564,6 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
     home = mkdtempSync("/tmp/sqh-");
     fakes = join(home, "bin");
     mkdirSync(fakes);
-    const herdrPath = spawnSync("/bin/sh", ["-c", "command -v herdr"], { encoding: "utf8" }).stdout.trim();
     // Stands in for the agent: it writes its pid, adds it to a list of runs
     // beside it, and writes its SESSION_MARK where a third argument names a file
     // for it. It tells Herdr it is a `pi` in the state AGENT_STATE names, idle
@@ -561,7 +594,7 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
       await new Promise((settle) => setTimeout(settle, 100));
     }
     assert.ok(existsSync(socket), `the private Herdr server made no socket at ${socket}`);
-    options = { environment: environmentFor({ HERDR_SOCKET_PATH: socket }), boundMs: BOUND_MS };
+    options = { environment: environmentFor({ HERDR_SOCKET_PATH: socket, PATH: `${fakes}:/usr/bin:/bin` }), boundMs: BOUND_MS };
   });
 
   after(() => {
@@ -617,14 +650,14 @@ describe("against a private Herdr server", { skip: herdrInstalled ? false : "her
 
   // The pane exists from the moment Herdr answers, so it says nothing about
   // whether the command ever ran.
-  test("a pane whose command is not on the server's path failed, and its tab is gone (#911)", () => {
+  test("a pane whose command is not there failed, and its tab is gone (#911)", () => {
     ensureWorkspace();
     const tabs = (): number => JSON.parse(herdr(["tab", "list"]).output).result.tabs.length;
     const before = tabs();
-    const started = startInHerdrPane({ ...fakeCommand("squiz-absent", "", 0), program: "squiz-no-such-reviewer" }, options);
+    const started = startInHerdrPane({ ...fakeCommand("squiz-absent", "", 0), program: join(home, "squiz-no-such-reviewer") }, options);
 
     assert.equal(started.outcome, "failed", JSON.stringify(started));
-    assert.match("reason" in started ? started.reason : "", /found no squiz-no-such-reviewer/u);
+    assert.match("reason" in started ? started.reason : "", /found no \/.*\/squiz-no-such-reviewer/u);
     assert.equal("paneLeftOpen" in started, false, JSON.stringify(started));
     assert.equal(tabs(), before, "the tab is still open");
   });
