@@ -383,7 +383,7 @@ test("with copilot both the reviewer and installed, the coding agent's row says 
 
   assert.deepEqual(
     printed.stdout.split("\n").filter((line) => /copilot/iu.test(line) && !/cannot listen/u.test(line)),
-    ["copilot 1.2.0, experimental features on", `Reviewer copilot 1.2.0 (${squizFile()}), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-6-astra`],
+    ["copilot 1.2.0, experimental features on", `Reviewer copilot 1.2.0 (${squizFile()}), model gpt-6-astra, Copilot's default. Signed in with Copilot's own login; the check spent one request on gpt-6-astra`],
   );
 });
 
@@ -541,7 +541,7 @@ test("with copilot as the reviewer, the row names Copilot and its default model,
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot"}') });
 
-  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.92 (${squizFile()}), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-6-astra`);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.92 (${squizFile()}), model gpt-6-astra, Copilot's default. Signed in with Copilot's own login; the check spent one request on gpt-6-astra`);
   assert.doesNotMatch(printed.stdout, /^Reviewer pi/mu);
   assert.equal(printed.exit, 0);
 });
@@ -549,7 +549,7 @@ test("with copilot as the reviewer, the row names Copilot and its default model,
 test("Copilot's default is COPILOT_MODEL where the environment sets it", () => {
   const row = reviewerRow({ ...EVERY_FAKE, copilot: COPILOT }, repository('{"reviewer":"copilot"}'), { COPILOT_MODEL: "claude-sonnet-5" });
 
-  assert.equal(row.line, `Reviewer copilot 1.0.92 (${squizFile()}), model claude-sonnet-5, Copilot's default. Signed in; the check spent one request on claude-sonnet-5`);
+  assert.equal(row.line, `Reviewer copilot 1.0.92 (${squizFile()}), model claude-sonnet-5, Copilot's default. Signed in with Copilot's own login; the check spent one request on claude-sonnet-5`);
 });
 
 test("with copilot as the reviewer and no model anywhere, the model is unknown", () => {
@@ -557,7 +557,7 @@ test("with copilot as the reviewer and no model anywhere, the model is unknown",
 
   assert.equal(
     row.line,
-    `Reviewer copilot 1.0.92 (${squizFile()}), model unknown: neither .squiz.json nor Copilot's settings name one. Signed in; the check spent one request on the model Copilot falls back to`,
+    `Reviewer copilot 1.0.92 (${squizFile()}), model unknown: neither .squiz.json nor Copilot's settings name one. Signed in with Copilot's own login; the check spent one request on the model Copilot falls back to`,
   );
 });
 
@@ -578,7 +578,7 @@ test("a model .squiz.json names leaves Copilot's own settings unread, as a round
 
   const printed = squizDoctor({ ...base, directory: repository('{"reviewer":"copilot","model":"gpt-5-mini"}') });
 
-  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.92 (${squizFile()}), model gpt-5-mini, from .squiz.json. Signed in; the check spent one request on gpt-5-mini`);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.92 (${squizFile()}), model gpt-5-mini, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-5-mini`);
   assert.equal(printed.exit, 0);
 });
 
@@ -624,7 +624,7 @@ function copilotSigningIn(record: string, answer: string): string {
   ].join("\n");
 }
 
-type SignIn = { readonly line: string; readonly exit: number; readonly started: string[]; readonly directory: string };
+type SignIn = { readonly line: string; readonly exit: number; readonly started: string[]; readonly directory: string; readonly printed: string };
 
 /**
  * The reviewer's line where `.squiz.json` names Copilot and `copilot` answers a
@@ -638,12 +638,14 @@ function signInRow(
   squizJson = '{"reviewer":"copilot","model":"gpt-6-astra"}',
   copilotSettings?: string,
   copilotConfig?: string,
+  defaultToken?: string,
 ): SignIn {
   made += 1;
   const record = join(scratch, `copilot-record-${made}`);
   const base = context({ ...EVERY_FAKE, copilot: copilotSigningIn(record, answer) }, overrides);
   if (copilotSettings !== undefined) settingsAt(String(base.environment.HOME), ".copilot/settings.json", copilotSettings);
   if (copilotConfig !== undefined) settingsAt(String(base.environment.HOME), ".copilot/config.json", copilotConfig);
+  if (defaultToken !== undefined) settingsAt(String(base.environment.HOME), ".config/squiz/copilot-token", defaultToken);
   const directory = repository(squizJson);
   const environment = { ...base.environment, GH_TOKEN: "gho_users_own", GH_CONFIG_DIR: join(scratch, "users-gh") };
   const printed = squizDoctor({ ...base, directory, environment });
@@ -654,7 +656,7 @@ function signInRow(
   } catch {
     started = [];
   }
-  return { line, exit: printed.exit, started, directory };
+  return { line, exit: printed.exit, started, directory, printed: `${printed.stdout}${printed.stderr}` };
 }
 
 function valueOf(started: readonly string[], name: string): string | undefined {
@@ -693,7 +695,7 @@ To authenticate, you can use any of the following methods:
 test("a Copilot that answers the prompt is signed in, and the line says the check spent a request", () => {
   const row = signInRow("echo OK");
 
-  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-6-astra`);
+  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra`);
   assert.equal(row.exit, 0);
 });
 
@@ -708,6 +710,44 @@ test("#895: the sign-in check signs in with the token in copilotTokenFile, and f
   assert.match(missing.line, /\. Its sign-in could not be checked: the Copilot token file .*no-token could not be read: /u);
   assert.equal(missing.exit, 1);
   assert.deepEqual(missing.started, [], "Copilot was asked with no token");
+});
+
+const PLANTED = "gho_planted914";
+const ASTRA = JSON.stringify({ reviewer: "copilot", model: "gpt-6-astra" });
+const signedInLine = (source: string): string =>
+  `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in with ${source}; the check spent one request on gpt-6-astra`;
+
+test("#914: the sign-in row names the token file copilotTokenFile names as its source, over the default file", () => {
+  const tokenFile = join(scratch, "named-token-914");
+  writeFileSync(tokenFile, "gho_named914\n");
+  const row = signInRow("echo OK", {}, JSON.stringify({ reviewer: "copilot", model: "gpt-6-astra", copilotTokenFile: tokenFile }), undefined, undefined, `${PLANTED}\n`);
+  assert.equal(row.line, signedInLine(`the token in copilotTokenFile, ${tokenFile}`));
+  assert.equal(valueOf(row.started, "COPILOT_GITHUB_TOKEN"), "gho_named914");
+});
+
+test("#914: with no copilotTokenFile, the sign-in check signs in with the default file's token, names the file, and prints no token", () => {
+  const row = signInRow("echo OK", {}, ASTRA, undefined, undefined, `${PLANTED}\n`);
+  assert.equal(valueOf(row.started, "COPILOT_GITHUB_TOKEN"), PLANTED);
+  assert.match(row.line, /Signed in with the token in the default file, \/.*\/\.config\/squiz\/copilot-token; the check spent one request on gpt-6-astra$/u);
+  assert.equal(row.exit, 0);
+  assert.ok(!row.printed.includes(PLANTED), row.printed);
+});
+
+test("#914: with no copilotTokenFile and no default file, the sign-in row says it used Copilot's own login", () => {
+  const row = signInRow("echo OK", {}, ASTRA);
+  assert.equal(row.line, signedInLine("Copilot's own login"));
+  assert.equal(valueOf(row.started, "COPILOT_GITHUB_TOKEN") ?? "", "");
+});
+
+test("#914: a default file that cannot be used is a warning naming it, and the check runs on Copilot's own login without the token", () => {
+  const row = signInRow("echo OK", {}, ASTRA, undefined, undefined, `${PLANTED} ${PLANTED}\n`);
+  assert.match(
+    row.line,
+    /Signed in with Copilot's own login; the check spent one request on gpt-6-astra: warning: the Copilot token file \/.*\/\.config\/squiz\/copilot-token holds something other than one token of letters, digits and _$/u,
+  );
+  assert.equal(row.exit, 0);
+  assert.equal(valueOf(row.started, "COPILOT_GITHUB_TOKEN") ?? "", "");
+  assert.ok(!row.printed.includes(PLANTED), row.printed);
 });
 
 test("the sign-in is checked with one prompt on the model .squiz.json configures (#771)", () => {
@@ -726,7 +766,7 @@ test("with no model in .squiz.json, the sign-in prompt runs on Copilot's default
     row.started.filter((line) => line.startsWith("argument=")),
     ["argument=-p", "argument=Reply with the single word OK.", "argument=--model", "argument=claude-sonnet-5", "argument=--no-ask-user"],
   );
-  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model claude-sonnet-5, Copilot's default. Signed in; the check spent one request on claude-sonnet-5`);
+  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model claude-sonnet-5, Copilot's default. Signed in with Copilot's own login; the check spent one request on claude-sonnet-5`);
 });
 
 test("with no model anywhere, the sign-in prompt names none and runs on what Copilot falls back to, as a round does (#771)", () => {
@@ -739,7 +779,7 @@ test("with no model anywhere, the sign-in prompt names none and runs on what Cop
   assert.equal(valueOf(row.started, "COPILOT_MODEL"), "", "COPILOT_MODEL was not set empty, so one in the user's environment could reach the prompt");
   assert.equal(
     row.line,
-    `Reviewer copilot 1.0.93 (${squizFile()}), model unknown: neither .squiz.json nor Copilot's settings name one. Signed in; the check spent one request on the model Copilot falls back to`,
+    `Reviewer copilot 1.0.93 (${squizFile()}), model unknown: neither .squiz.json nor Copilot's settings name one. Signed in with Copilot's own login; the check spent one request on the model Copilot falls back to`,
   );
 });
 
@@ -788,7 +828,7 @@ test("a copilot found through a relative PATH entry is the one sent the sign-in 
 
   const printed = squizDoctor({ ...base, directory, environment: { ...base.environment, PATH: `tools:${String(base.environment.PATH)}` } });
 
-  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-6-astra`);
+  assert.equal(reviewerLine(printed.stdout), `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra`);
 });
 
 test("the sign-in check's scratch directory is gone once the row is printed", () => {
@@ -834,7 +874,7 @@ test("a sign-in check that outlasts its bound fails the row, and leaves no scrat
 test("the sign-in check is bounded by its own bound, not a version probe's", () => {
   const row = signInRow("/bin/sleep 1\necho OK", { boundMs: 300 });
 
-  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-6-astra`);
+  assert.equal(row.line, `Reviewer copilot 1.0.93 (${squizFile()}), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra`);
 });
 
 test("a .squiz.json the configuration refuses is reported as refused, naming the setting, and is not checked as pi", () => {

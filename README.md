@@ -100,6 +100,7 @@ its own:
 | `tokens` | 10,000,000 | Tokens one round may spend, 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `openai/gpt-5-mini` for `pi`, `gpt-5-mini` for Copilot. Up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting with a letter, a digit or `@`. None runs it on the CLI's own default |
+| `copilotTokenFile` | none | The absolute path of a file holding the token a Copilot reviewer signs in with. None reads `~/.config/squiz/copilot-token` where it exists, and otherwise leaves Copilot on its own login |
 
 This one reviews with Copilot on a chosen model:
 
@@ -114,6 +115,25 @@ A value outside its range, or a key not in the table, is refused with an error
 naming it. Nothing checks that the reviewer's model differs from the coding
 agent's. Where Copilot writes and reviews, or its default model is the one
 Claude Code runs, set `model` to one the coding agent does not use.
+
+### Signing the Copilot reviewer in with a token
+
+A Copilot reviewer signs in with your `copilot login` where it finds one. On a
+machine with no login, put a token in a file instead:
+
+```bash
+mkdir -p ~/.config/squiz
+printf '%s\n' "$TOKEN" > ~/.config/squiz/copilot-token
+chmod 600 ~/.config/squiz/copilot-token
+```
+
+Squiz reads that file when `.squiz.json` names no `copilotTokenFile`, and says
+nothing where it does not exist. To keep the token elsewhere, name its file in
+`copilotTokenFile`. A file that setting names and squiz cannot read fails the
+review, while a default file it cannot read is a warning in `squiz doctor`. The
+file holds the token alone, and must sit outside the repository, where the
+reviewer cannot read it. `COPILOT_GITHUB_TOKEN` is no substitute: Copilot leaves
+it out of the environment its hooks run in.
 
 ## Check the setup
 
@@ -131,12 +151,13 @@ Node 24.15.0
 tmux 3.7b
 Herdr 0.9.3
 squiz link: none on PATH. Not required in Claude Code, whose own shell runs squiz; for another coding agent, run squiz init
-Reviewer copilot 1.0.93 (/Users/jacy/squiz/.squiz.json), model gpt-6-astra, Copilot's default. Signed in; the check spent one request on gpt-6-astra
+Reviewer copilot 1.0.93 (/Users/jacy/squiz/.squiz.json), model gpt-6-astra, Copilot's default. Signed in with Copilot's own login; the check spent one request on gpt-6-astra
 ```
 
 The last line names the reviewer and the model it will run on, read from the
 `.squiz.json` it names. For a Copilot reviewer, it checks the sign-in by sending one
-prompt to that model, which spends one request at that model's rate. Where the Copilot
+prompt to that model, which spends one request at that model's rate, and says
+whether it signed in with a token file or Copilot's own login. Where the Copilot
 CLI is installed, a line after Claude Code's says whether its experimental
 features are on, and warns where they are off.
 

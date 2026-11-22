@@ -34,6 +34,11 @@ export type Plan = {
    * plan afresh, so a test can lower one between runs.
    */
   readonly config?: Partial<Pick<Config, "rounds" | "tokens">>;
+  /**
+   * Run the real Copilot adapter in place of the planned starts, so whatever
+   * `copilot` is on `PATH` is the reviewer.
+   */
+  readonly copilot?: boolean;
 };
 
 const [number = "", planFile = ""] = process.argv.slice(2);
@@ -74,5 +79,10 @@ const adapter: Adapter = {
 await runHost({
   worktree: process.cwd(),
   key: number,
-  round: { venue: githubVenue, config: { ...defaultConfig, timeout: 60, ...plan.config }, adapter, charterFile: plan.charterFile },
+  round: {
+    venue: githubVenue,
+    config: { ...defaultConfig, timeout: 60, ...plan.config, ...(plan.copilot === true ? { reviewer: "copilot" as const } : {}) },
+    adapter: plan.copilot === true ? adapterFor("copilot") : adapter,
+    charterFile: plan.charterFile,
+  },
 });

@@ -55,8 +55,9 @@ export type Invocation = {
    */
   readonly model: string | null;
   /**
-   * The file `.squiz.json`'s `copilotTokenFile` names, where it names one. The
-   * Copilot adapter signs in with the token in it, and every other ignores it.
+   * The token file in use: the one `.squiz.json`'s `copilotTokenFile` names, or
+   * else the default file where it holds one token. The Copilot adapter signs
+   * in with the token in it, and every other ignores it.
    */
   readonly copilotTokenFile?: string;
   /**

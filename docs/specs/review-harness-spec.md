@@ -1629,9 +1629,9 @@ The credential each CLI needs for its model is left alone: `pi`'s provider key,
 such as `DEEPSEEK_API_KEY`, and Copilot's login. Copilot signs in from the first
 of these it finds:
 
-- `COPILOT_GITHUB_TOKEN`. Where `.squiz.json` names a `copilotTokenFile`, the
-  line sets it from that file, over any value the round host has. Otherwise it
-  is left set where the round host has it.
+- `COPILOT_GITHUB_TOKEN`. Where a token file is in use, the line sets it from
+  that file, over any value the round host has. Otherwise it is left set where
+  the round host has it.
 - A login of its own, from `copilot login` or `/login`. Its token is in the
   system's credential store. Copilot finds it through `loggedInUsers` and
   `lastLoggedInUser` in `<COPILOT_HOME>/config.json`, so the adapter copies
@@ -1642,15 +1642,27 @@ of these it finds:
 **A Copilot run's hooks never see `COPILOT_GITHUB_TOKEN`.** Copilot leaves it and
 `GITHUB_TOKEN` out of the environment it gives its hooks, so a round host that a
 Copilot run's hook started does not have it, and nor does anything the round
-host starts. `copilotTokenFile` is how a token reaches the reviewer there.
-Tested on Copilot 1.0.112.
+host starts. A token file is how a token reaches the reviewer there. Tested on
+Copilot 1.0.112.
+
+**The token file is the one `.squiz.json` names, or else the default file.**
+
+| File | Used where | Where it cannot be used |
+|---|---|---|
+| The `copilotTokenFile` in `.squiz.json` | `.squiz.json` names one | The round fails at setup, with a reason naming the file |
+| `~/.config/squiz/copilot-token` | `.squiz.json` names none, and the file exists | The round runs as if the file did not exist |
+
+With neither, no token file is in use. `~` is the home directory of the user
+squiz runs as: `HOME`, or the system's record of it where `HOME` is unset or
+empty. A file cannot be used where it cannot be read, is empty, or holds
+anything but one token. A default file that does not exist is passed over
+without a word, and one that exists and cannot be used is a warning in `squiz
+doctor` (§ 7 The setup check).
 
 **The token is read into the environment of the Copilot it signs in, and
 nowhere else.** The reviewer's line reads the file in its shell, so a pane's
 line carries the file's path and never the token. The round's setup reads it
-first, and a file that cannot be read, or holds anything but one token, fails
-the round at setup with a reason naming the file. No log, record or reason holds
-the token.
+first. No log, record, reason, summary or failure comment holds the token.
 
 A user who signs Copilot in through `GH_TOKEN` or `GITHUB_TOKEN` alone has no
 model credential in the round, and nothing here handles that.
@@ -1913,6 +1925,9 @@ The adapter for the GitHub Copilot CLI, which a project chooses with
   been measured.
 - **Set the reasoning effort on every run**: `thinking` as it is, and `off` as
   `none`.
+- **Sign Copilot in from the token file, where one is in use**: the
+  `copilotTokenFile` that `.squiz.json` names, or else
+  `~/.config/squiz/copilot-token` where it exists and holds one token (Tools).
 - **Start the reporting server the adapter ships**, with `SQUIZ_REPORTS` and
   `SQUIZ_SNAPSHOT` in the `env` of its MCP configuration.
 - **Append the run's usage to the report file only where Copilot exits 0 by
@@ -3277,13 +3292,20 @@ Where the model is unknown, the prompt carries no `--model` and runs on whatever
 Copilot falls back to, as the round does. It runs with the variables a round
 gives a Copilot reviewer, under a `COPILOT_HOME` given who the user is signed in
 as, as a round's is, and with `COPILOT_MODEL` set empty, so it passes wherever a
-round could start. Where `.squiz.json` names a `copilotTokenFile`, the prompt
-signs in with its token, and a file that cannot be read fails the row without
-running Copilot. It is bounded at 60 seconds. A model the account cannot use
-fails it, with the reason Copilot prints:
+round could start. It signs in from the token file a round would use (§ 5
+Tools), and the line says which source it signed in with: the token in
+`copilotTokenFile`, the token in the default file, or Copilot's own login. A
+`copilotTokenFile` that cannot be used fails the row without running Copilot. A
+default file that exists and cannot be used is a warning naming it, and the
+prompt runs on Copilot's own login, as the round does. The token is never
+printed. The prompt is bounded at 60 seconds. A model the account cannot use
+fails the row, with the reason Copilot prints:
 
 ```
-Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in; the check spent one request on gpt-6-astra
+Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra
+Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with the token in copilotTokenFile, /run/secrets/copilot; the check spent one request on gpt-6-astra
+Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with the token in the default file, /Users/ana/.config/squiz/copilot-token; the check spent one request on gpt-6-astra
+Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra: warning: the Copilot token file /Users/ana/.config/squiz/copilot-token is empty
 Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-7, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: Model "gpt-7" from --model flag is not available.
 ```
 
@@ -3794,18 +3816,19 @@ worktree is a configuration that cannot be read.
 | `tokens` | 10,000,000 | Tokens one round may spend, settable 100,000 to 10,000,000 |
 | `thinking` | `medium` | How hard the reviewer thinks, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `model` | none | The model the reviewer runs on, in its CLI's spelling: `provider/id` for `pi`, such as `openai/gpt-5-mini`, and the model's name for Copilot, such as `gpt-5-mini`. None runs the reviewer on the user's own default (§ 5 Adapters) |
-| `copilotTokenFile` | none | The absolute path of a file holding the token that the reviewer's Copilot signs in with, such as `/run/secrets/copilot`. None leaves Copilot to find its own login (§ 5 Tools) |
+| `copilotTokenFile` | none | The absolute path of a file holding the token that the reviewer's Copilot signs in with, such as `/run/secrets/copilot`. None reads the token from `~/.config/squiz/copilot-token` where that file exists, and otherwise leaves Copilot to find its own login (§ 5 Tools) |
 
 `copilotTokenFile` is an absolute path of up to 4,096 characters, none of them a
-control character. The file holds the token alone, of letters, digits and `_`,
-and spaces, tabs and line ends around it are dropped. It is read where a Copilot reviewer starts, and `squiz doctor`
-signs in with it, so it must be readable by the user squiz runs as. It belongs
-outside the repository, where the reviewer cannot read it. A value that is not
+control character. The file it names, and the default file, each hold the token
+alone, of letters, digits and `_`, and spaces, tabs and line ends around it are
+dropped. Either is read where a Copilot reviewer starts, and `squiz doctor`
+signs in with it, so it must be readable by the user squiz runs as. Each
+belongs outside the repository, where the reviewer cannot read it. A value that is not
 such a path is refused with an error that leaves the value out, since a token
 written there by mistake would otherwise be printed:
 
 ```
-/work/squiz/.squiz.json: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for Copilot's own login
+/work/squiz/.squiz.json: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for ~/.config/squiz/copilot-token or Copilot's own login
 ```
 
 `model` is up to 200 letters, digits and `.` `_` `:` `/` `@` `+` `-`, starting

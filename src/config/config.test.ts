@@ -102,7 +102,7 @@ test("#895: copilotTokenFile reads an absolute path, and refuses anything else w
   assert.equal(load(`{"copilotTokenFile": "/run/secrets/copilot token"}`).copilotTokenFile, "/run/secrets/copilot token");
   for (const contents of [`{"copilotTokenFile": "gho_madeup123"}`, `{"copilotTokenFile": "secrets/copilot"}`, `{"copilotTokenFile": ""}`, `{"copilotTokenFile": null}`, `{"copilotTokenFile": "/a\\nb"}`, `{"copilotTokenFile": 1}`]) {
     const message = rejection(contents).message;
-    assert.match(message, /: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for Copilot's own login$/u, contents);
+    assert.match(message, /: "copilotTokenFile" must be the absolute path of a file holding a token for Copilot; leave "copilotTokenFile" out for ~\/\.config\/squiz\/copilot-token or Copilot's own login$/u, contents);
     assert.doesNotMatch(message, /gho_|secrets/u, `the refusal repeats what was written: ${message}`);
   }
 });

@@ -1126,3 +1126,85 @@ test("#852: commits not yet pushed leave the run on the head GitHub reports, and
     assert.equal(started(fixture), 1);
   });
 });
+
+/**
+ * A `copilot` that records the token in its environment beside itself, then
+ * fails as a Copilot with no login does, or finishes a review with nothing
+ * found, as the `copilot-mode` file beside it says.
+ */
+const COPILOT = String.raw`"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const here = path.dirname(process.argv[1]);
+const argv = process.argv.slice(2);
+const after = (flag) => argv[argv.indexOf(flag) + 1];
+fs.writeFileSync(path.join(here, "copilot-token-seen"), process.env.COPILOT_GITHUB_TOKEN ?? "unset");
+if (fs.readFileSync(path.join(here, "copilot-mode"), "utf8").trim() === "fail") {
+  process.stderr.write("Error: No authentication information found.\n");
+  process.exit(1);
+}
+const [server] = Object.values(JSON.parse(after("--additional-mcp-config")).mcpServers);
+fs.appendFileSync(server.env.SQUIZ_REPORTS, JSON.stringify({ type: "finish" }) + "\n");
+fs.writeFileSync(after("--usage-output-file"), JSON.stringify({ totalNanoAiu: 5, modelMetrics: { "gpt-6-astra": { requests: { count: 1 }, usage: { inputTokens: 10, outputTokens: 2 } } } }));
+`;
+
+const PLANTED = "gho_planted914";
+
+type CopilotRound = { readonly printed: Awaited<ReturnType<typeof review>>; readonly log: string; readonly seen: string; readonly comments: readonly string[] };
+
+/**
+ * One `squiz review` whose round runs the real Copilot adapter, under a HOME of
+ * the test's own whose default token file holds `tokenFile`. The test's HOME
+ * is put back afterwards, so no test reads the user's own token file.
+ */
+async function copilotRound(tokenFile: string, mode: "fail" | "pass"): Promise<CopilotRound> {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "squiz-review-e2e-home-")));
+  mkdirSync(join(home, ".config", "squiz"), { recursive: true });
+  writeFileSync(join(home, ".config", "squiz", "copilot-token"), tokenFile, "utf8");
+  const originalHome = process.env["HOME"];
+  process.env["HOME"] = home;
+  let ran: CopilotRound | undefined;
+  try {
+    await withPullRequest([], async (fixture) => {
+      const bin = join(fixture.worktree, "..", "bin");
+      standIn(bin, "copilot", COPILOT, "node");
+      writeFileSync(join(bin, "copilot-mode"), mode, "utf8");
+      const plan = JSON.parse(readFileSync(fixture.planFile, "utf8")) as Plan;
+      writeFileSync(fixture.planFile, JSON.stringify({ ...plan, copilot: true }), "utf8");
+      const printed = await review(fixture);
+      const seenFile = join(bin, "copilot-token-seen");
+      ran = { printed, log: hostLog(fixture.episode), seen: existsSync(seenFile) ? readFileSync(seenFile, "utf8") : "never started", comments: fixture.gh().issueComments };
+    });
+  } finally {
+    if (originalHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = originalHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+  assert.ok(ran !== undefined);
+  return ran;
+}
+
+function assertNoToken(ran: CopilotRound): void {
+  const outputs = { stdout: ran.printed.stdout, stderr: ran.printed.stderr, "host.log": ran.log, comments: ran.comments.join("\n") };
+  for (const [name, output] of Object.entries(outputs)) assert.ok(!output.includes(PLANTED), `the token is in ${name}:\n${output}`);
+}
+
+for (const mode of ["fail", "pass"] as const) {
+  test(`#914: a Copilot round signs in with the default token file, and the token reaches no output when the reviewer ${mode === "fail" ? "fails" : "finds nothing"}`, async () => {
+    const ran = await copilotRound(`${PLANTED}\n`, mode);
+
+    assertNoToken(ran);
+    assert.equal(ran.printed.exit, mode === "fail" ? 1 : 0, `${ran.printed.stdout}${ran.printed.stderr}\n${ran.log}`);
+    assert.equal(ran.seen, PLANTED, "Copilot was not signed in from the default file");
+    assert.match(ran.comments[0] ?? "", mode === "fail" ? /^\*\*Squiz review failed/u : /\*\*Rounds\*\*/u, "the round posted no comment to search");
+  });
+}
+
+test("#914: a default token file that cannot be used does not fail the round, which runs Copilot without its token", async () => {
+  const ran = await copilotRound(`${PLANTED} ${PLANTED}\n`, "pass");
+
+  assertNoToken(ran);
+  assert.equal(ran.printed.exit, 0, `${ran.printed.stdout}${ran.printed.stderr}\n${ran.log}`);
+  assert.notEqual(ran.seen, "never started");
+  assert.ok(!ran.seen.includes(PLANTED), "Copilot was given the unusable file's contents");
+});

@@ -24,7 +24,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { configFileName, defaultConfig, projectConfigIn, type Config } from "../config/config.ts";
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
-import { carryLogins, copilotHome, copilotToken, userSettings } from "../sessions/copilot-settings.ts";
+import { carryLogins, copilotHome, copilotToken, tokenSource, userSettings } from "../sessions/copilot-settings.ts";
 import { mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
@@ -567,12 +567,17 @@ function withThinking(line: string, config: Config, context: DoctorContext): Row
  * wherever a round could start. With no `model` it names
  * none, and runs on whatever Copilot falls back to, as the round would. It runs
  * in that temporary directory rather than the repository, so no project file
- * reaches Copilot, and the directory is removed afterwards. Where `.squiz.json`
- * names a `copilotTokenFile`, it signs in with that token, as a round does.
+ * reaches Copilot, and the directory is removed afterwards. It signs in from the
+ * token file a round would use, and the line names that source.
  */
 function copilotSignIn(line: string, model: string | undefined, config: Config, context: DoctorContext): Row {
-  const signedIn = config.copilotTokenFile === null ? undefined : copilotToken(config.copilotTokenFile);
+  const source = tokenSource(config.copilotTokenFile, context.environment);
+  const signedIn = source.source === "login" ? undefined : copilotToken(source.file);
   if (signedIn !== undefined && "problem" in signedIn) return { level: "failed", line: `${line}. Its sign-in could not be checked: ${signedIn.problem}` };
+  const from =
+    source.source === "named" ? `the token in copilotTokenFile, ${source.file}`
+    : source.source === "default" ? `the token in the default file, ${source.file}`
+    : "Copilot's own login";
   let scratch: string;
   try {
     scratch = mkdtempSync(join(tmpdir(), "squiz-doctor-"));
@@ -600,7 +605,9 @@ function copilotSignIn(line: string, model: string | undefined, config: Config, 
       withIndentedDetail,
     );
     if (asked.outcome === "answered") {
-      return { level: "present", line: `${line}. Signed in; the check spent one request on ${model ?? "the model Copilot falls back to"}` };
+      const signed = `${line}. Signed in with ${from}; the check spent one request on ${model ?? "the model Copilot falls back to"}`;
+      const unused = source.source === "login" ? source.problem : undefined;
+      return unused === undefined ? { level: "present", line: signed } : { level: "warning", line: `${signed}: warning: ${unused}` };
     }
     const reason = asked.outcome === "absent" ? "copilot vanished from PATH" : asked.reason;
     return { level: "failed", line: `${line}. Its sign-in check failed: ${reason}` };
