@@ -17,7 +17,7 @@
 import type { Finding } from "../findings/finding.ts";
 import type { ThreadStatus } from "../findings/status.ts";
 import { readThread } from "../findings/thread.ts";
-import { locationOf, type ClassifiedThread, type CountedStatus } from "./classify.ts";
+import { locationOf, type ClassifiedThread } from "./classify.ts";
 import { costOf, type RoundRecord, type RulingCounts } from "./episode-state.ts";
 import type { Failed, Noted, PostedFindings } from "./post-findings.ts";
 import type { ClosingReason } from "./round-decision.ts";
@@ -52,6 +52,11 @@ export type ClosedEpisode = {
    */
   readonly because: ClosingReason | null;
   /**
+   * True where the round that closed the episode failed, which leaves the review
+   * unfinished. Absent where it reviewed, or where no round closed it.
+   */
+  readonly failed?: boolean;
+  /**
    * The queued states the close recorded not reviewed, and the bound that
    * stopped them. `null` where nothing was queued.
    */
@@ -70,24 +75,17 @@ const marker = "**Squiz review — ";
 
 /**
  * What the counts line names each thread as, in the order it names them, each
- * under the word it is printed with.
+ * under the word it is printed with. Every status is printed, even at zero.
  *
  * A record of every status, so that one added to the union has to be given a
  * place here for this to compile. The record's order is the line's order.
  */
-const countedAs: Readonly<Record<CountedStatus, string>> = {
+const countedAs: Readonly<Record<ThreadStatus, string>> = {
   fixed: "Fixed",
   withdrawn: "Withdrawn",
   open: "Open",
   disputed: "Disputed",
-  resolved: "Resolved, ruling unknown",
 };
-
-/**
- * The four statuses every thread can end in, which the line prints even at
- * zero. The rest are printed only where some thread has them.
- */
-const alwaysCounted: ReadonlySet<CountedStatus> = new Set<ThreadStatus>(["fixed", "withdrawn", "open", "disputed"]);
 
 /**
  * The comment's body for `episode`, with no trailing newline.
@@ -139,10 +137,8 @@ function rulingsGiven(ruled: RulingCounts): string | null {
 function tally(episode: ClosedEpisode): string {
   const rounds = counted(episode.rounds.length, "round");
   const findings = counted(countRaised(episode), "finding");
-  const statuses = (Object.entries(countedAs) as [CountedStatus, string][])
-    .map(([status, word]) => ({ status, word, count: howMany(episode.threads, status) }))
-    .filter(({ status, count }) => count > 0 || alwaysCounted.has(status))
-    .map(({ word, count }) => `${word} ${count}`)
+  const statuses = (Object.entries(countedAs) as [ThreadStatus, string][])
+    .map(([status, word]) => `${word} ${howMany(episode.threads, status)}`)
     .join(" · ");
   const spend = renderSpendLine(episode.rounds.map(costOf));
   const reviewedBy = renderReviewerLine(episode.rounds);
@@ -242,7 +238,7 @@ function notes(episode: ClosedEpisode): readonly string[] {
     ].map((note) => `- ${note}`),
     ...unreadNotes(episode.rounds),
     ...cutShort(episode.rounds),
-    ...closedEarly(episode.because, episode.leftNotReviewed),
+    ...closedEarly(episode.because, episode.leftNotReviewed, episode.failed === true),
   ];
   if (lines.length === 0) return [];
   return [`**Notes**\n\n${lines.join("\n")}`];
@@ -343,8 +339,8 @@ export function notRaisedAgain(records: readonly StateRecord[], again: readonly 
 
 /**
  * What a close that ran no reviewer lists of the findings no thread holds: those
- * `last`, the last round to reach its end, raised, and before them each earlier
- * round's that it did not raise again.
+ * `last`, the round it closes on, raised, and before them each earlier round's
+ * that it did not raise again.
  */
 export function leftByTheLastReview(records: readonly StateRecord[], last: StateRecord | undefined): readonly string[] {
   if (last?.status !== "reviewed") return [];
@@ -486,12 +482,24 @@ function where(finding: Finding): string | undefined {
  * A bound that stopped a queued state is a note even where nothing was left
  * open, because no other line of the comment says that state was never read.
  * The line then names the bound from `left`, since `because` names none.
+ *
+ * A bound a failed round spent is a note whatever is open, because the round
+ * that would have finished the review never ran. That line says a person needs
+ * to look.
  */
 function closedEarly(
   because: ClosingReason | null,
   left: LeftNotReviewed | null,
+  failed: boolean,
 ): readonly string[] {
   const closedAtBound = because === "round-cap" || because === "token-bound";
+  if (failed && closedAtBound) {
+    const unreviewed = left === null ? "" : ` Squiz did not review ${eitherOf(namedStates(left.after, left.states))}.`;
+    const bound = because === "round-cap" ? "the round cap" : "the token bound";
+    return [
+      `- The budget ran out before the review could be completed: the last attempt failed, and spent the last of ${bound}.${unreviewed} A person needs to look at this change.`,
+    ];
+  }
   if (left === null) {
     if (!closedAtBound) return [];
     return [`- The episode ended at ${boundName(because)} rather than with nothing left open`];

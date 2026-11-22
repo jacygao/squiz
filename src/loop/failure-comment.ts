@@ -12,6 +12,7 @@
  */
 
 import { renderFailure, type ClosedBy, type FailureReport } from "./failure-body.ts";
+import type { EpisodeSummary } from "./post-summary.ts";
 import type { Deadline } from "../reviewers/deadline.ts";
 import type { Change, Posting, Venue } from "../venues/venue.ts";
 import { unthreadedNotes } from "./summary-body.ts";
@@ -26,8 +27,8 @@ export type FailedRound = {
     readonly unappliedNotes: readonly string[];
     readonly unpostedReplyNotes: readonly string[];
   };
-  /** The bound that leaves the episode no round after this one, absent where one remains. */
-  readonly closed?: ClosedBy;
+  /** The close the round reached, absent where a round remains. */
+  readonly closed?: { readonly by: ClosedBy; readonly summary: EpisodeSummary };
 };
 
 /**
@@ -37,14 +38,16 @@ export type FailedRound = {
  * A line break in the reason becomes a space, so the comment's first line and the
  * stderr line are each one line and still the same string.
  */
-function failureReport(round: FailedRound): FailureReport {
+function failureReport(round: FailedRound, summaryAt: string): FailureReport {
   const salvaged = round.salvaged?.findings ?? { outcomes: [] };
   const outcomes = salvaged.outcomes;
-  // A failed round posts no summary, so the closing replies it could not post are listed here.
+  // A failed round that closes nothing posts no summary, so the closing replies it could not post are listed here.
   const unapplied = [...(round.salvaged?.unpostedReplyNotes ?? []), ...(round.salvaged?.unappliedNotes ?? [])];
   return {
     reason: round.reason.replace(/\s*[\n\r\v\f\u0085\u2028\u2029]\s*/gu, " ").trim(),
-    ...(round.closed === undefined ? {} : { closed: round.closed }),
+    ...(round.closed === undefined
+      ? {}
+      : { closed: { by: round.closed.by, ...(round.closed.summary.outcome === "posted" ? { summaryAt } : {}) } }),
     ...(unapplied.length === 0 ? {} : { unapplied }),
     ...(outcomes.length === 0
       ? {}
@@ -67,5 +70,5 @@ function failureReport(round: FailedRound): FailureReport {
  * left of it.
  */
 export function postFailure(venue: Venue, change: Change, round: FailedRound, until: Deadline): Posting {
-  return venue.postFailure(change, renderFailure(failureReport(round)), until);
+  return venue.postFailure(change, renderFailure(failureReport(round, change.summaryAt)), until);
 }

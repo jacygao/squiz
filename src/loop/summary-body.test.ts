@@ -491,6 +491,23 @@ test("the token bound names the state it left not reviewed, after threads were l
   );
 });
 
+test("#915: a failed round that spent the token bound says the budget ran out, names the state it left not reviewed, and asks for a person", () => {
+  const comment = renderSummary({
+    ...quiet,
+    because: "token-bound",
+    failed: true,
+    leftNotReviewed: { bound: "token-bound", after: reviewed, states: [stopped(later, "the token bound")] },
+  });
+  assert.ok(
+    comment.endsWith(
+      "**Notes**\n\n" +
+        "- The budget ran out before the review could be completed: the last attempt failed, and spent the last of the token bound." +
+        " Squiz did not review 8d21a4f. A person needs to look at this change.",
+    ),
+    `the summary does not say the budget ran out: ${comment}`,
+  );
+});
+
 /**
  * The close is `nothing-open`, which alone is no note. The cap still stopped the
  * queued state, and the note is the only place a person learns of it.

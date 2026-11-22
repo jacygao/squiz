@@ -24,6 +24,8 @@ export type PlannedStart = {
   readonly holdSeconds?: number;
   /** What the reviewer says on stderr before it exits 1 having completed no message, in place of a review. */
   readonly fails?: string;
+  /** True where the reviewer's output cannot be read as a review, which fails the round after it has spent its tokens. */
+  readonly unreadable?: boolean;
 };
 
 export type Plan = {
@@ -64,6 +66,9 @@ const adapter: Adapter = {
     for await (const chunk of stdout) void chunk;
     if (current.fails !== undefined) {
       return { cost: { dollars: 0, tokens: 0, messages: 0 }, result: { kind: "incomplete", reason: "the reviewer completed no message" } };
+    }
+    if (current.unreadable === true) {
+      return { cost: { dollars: 0.01, tokens: 1200, messages: 1 }, result: { kind: "unparsed", reason: "the last message was not a review" } };
     }
     return {
       cost: { dollars: 0.01, tokens: 1200, messages: 1 },

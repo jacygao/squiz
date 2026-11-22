@@ -136,25 +136,25 @@ export type StateRecord = Shared &
         readonly round?: FinishedRound;
         /** What `squiz review` prints on stderr after the reason: where the failure comment went. */
         readonly lines?: readonly string[];
+        /** The close, where the round spent the last of the round cap or the token bound. */
+        readonly closed?: ClosedOnFailure;
       }
     | {
         readonly status: "not reviewed";
         readonly reason: string;
         /** The state that superseded this one, where one did. `reason` names it for a person, and only by its commit. */
         readonly supersededBy?: StateKey;
-        /** The close, on the state the round host took and found the episode's bound spent on. */
-        readonly closed?: ClosedBeforeReview;
       }
   );
 
 /**
- * The close of an episode whose round cap or token bound was spent before a
- * round took the state, as `squiz review` prints it.
+ * The close of an episode whose last round failed, having spent the last of the
+ * round cap or the token bound, as `squiz review` prints it.
  */
-export type ClosedBeforeReview = {
+export type ClosedOnFailure = {
   /** No round reviewed the state, so it is 3 whatever is open. */
   readonly exitStatus: 3;
-  /** The node ids of the reviewer's threads open as the close listed them. */
+  /** The node ids of the reviewer's threads the failed round left open. */
   readonly openThreads: readonly string[];
   readonly closedAt: ClosingBound;
   /** What failed without changing the close, a line each. */
@@ -233,16 +233,23 @@ export function recordFrom(entry: unknown): ReadRecord {
       const kept = round.round === undefined ? {} : { round: round.round };
       const lines = entry["lines"];
       if (lines !== undefined && !isLines(lines)) return { problem: `has "lines" as ${render(lines)} rather than an array of lines` };
-      return { record: { ...shared, status, reason, ownerNoted: noted, ...kept, ...(lines === undefined ? {} : { lines }) } };
+      const closed = entry["closed"] === undefined ? { closed: undefined } : closedFrom(entry["closed"]);
+      if ("problem" in closed) return closed;
+      return {
+        record: {
+          ...shared,
+          status,
+          reason,
+          ownerNoted: noted,
+          ...kept,
+          ...(lines === undefined ? {} : { lines }),
+          ...(closed.closed === undefined ? {} : { closed: closed.closed }),
+        },
+      };
     }
     case "not reviewed": {
       const reason = entry["reason"];
       if (!isText(reason)) return { problem: `has "reason" as ${render(reason)}` };
-      if (entry["closed"] !== undefined) {
-        const closed = closedFrom(entry["closed"]);
-        if ("problem" in closed) return closed;
-        return { record: { ...shared, status, reason, closed: closed.closed } };
-      }
       const by = entry["supersededBy"];
       if (by === undefined) return { record: { ...shared, status, reason } };
       const byHead = isObject(by) ? by["head"] : undefined;
@@ -393,7 +400,7 @@ function reviewedFrom(entry: Record<string, unknown>, shared: Shared): ReadRecor
   return { record: { ...shared, status: "reviewed", result, exitStatus, openThreads, ...bound, ...kept } };
 }
 
-function closedFrom(found: unknown): { readonly closed: ClosedBeforeReview } | { readonly problem: string } {
+function closedFrom(found: unknown): { readonly closed: ClosedOnFailure } | { readonly problem: string } {
   if (!isObject(found)) return { problem: `has "closed" as ${render(found)}` };
   const exitStatus = found["exitStatus"];
   if (exitStatus !== 3) {

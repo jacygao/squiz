@@ -24,12 +24,12 @@ test("#544: a failed round that left no round under the cap says the review clos
   const body = renderFailure({
     reason: REASON,
     salvaged: { threaded: 2, reported: 2 },
-    closed: { bound: "round-cap", roundsRun: 3, cap: 3 },
+    closed: { by: { bound: "round-cap", roundsRun: 3, cap: 3 }, summaryAt: "on the pull request" },
   });
   assert.equal(
     body.split("\n\n")[1],
     "Both findings are posted as threads. The review is closed: it has run 3 rounds, and the round cap allows 3. " +
-      "No round runs again. A new commit or reply, or running `squiz review`, posts its summary.",
+      "No round runs again. Its summary is on the pull request.",
   );
   assert.doesNotMatch(body, /retries/u, "no retry is coming");
 });
@@ -37,19 +37,19 @@ test("#544: a failed round that left no round under the cap says the review clos
 test("#544: a failed round that reached the token bound says the review closed at the bound", () => {
   const body = renderFailure({
     reason: REASON,
-    closed: { bound: "token-bound", tokens: 10_000_000, roundsRun: 2 },
+    closed: { by: { bound: "token-bound", tokens: 10_000_000, roundsRun: 2 }, summaryAt: "on the pull request" },
   });
   assert.equal(
     body.split("\n\n")[1],
     "The review is closed: it reached the token bound of 10,000,000 tokens. " +
-      "No round runs again. A new commit or reply, or running `squiz review`, posts its summary.",
+      "No round runs again. Its summary is on the pull request.",
   );
 });
 
-test("an episode closed at the token bound before any round ran promises no summary", () => {
+test("#915: a failed round whose close has no summary posted promises none", () => {
   const body = renderFailure({
     reason: REASON,
-    closed: { bound: "token-bound", tokens: 400_000, roundsRun: 0 },
+    closed: { by: { bound: "token-bound", tokens: 400_000, roundsRun: 0 } },
   });
   assert.equal(
     body.split("\n\n")[1],

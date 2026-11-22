@@ -88,8 +88,8 @@ function hasOpenThreads(count: number): boolean {
  * A tally the reviewer reports rather than a price something else put on it, so
  * a model no catalogue can price is bounded exactly like one it can.
  *
- * Exported because the same comparison rules on a round before it starts, from
- * the figures the episode's state file holds.
+ * Exported because the same comparison rules on a failed attempt, from the
+ * figures the episode's state file holds once it has recorded its spend.
  */
 export function tokenBoundIsReached(tokens: number, bound: number): boolean {
   return tokens >= bound;

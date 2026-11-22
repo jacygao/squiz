@@ -30,15 +30,18 @@ export type FailureReport = {
    */
   readonly salvaged?: { readonly threaded: number; readonly reported: number };
   /**
-   * The bound that leaves the episode no round after this one. Absent where a
-   * round remains, which is the only case a new commit or reply retries.
+   * The close the round reached, where it spent the last of the round cap or the
+   * token bound. `summaryAt` says where the summary is, and is absent where it
+   * was not posted. Absent where a round remains, which is the only case a new
+   * commit or reply retries.
    */
-  readonly closed?: ClosedBy;
+  readonly closed?: { readonly by: ClosedBy; readonly summaryAt?: string };
 };
 
 /**
- * Why no round runs after the failed one. `roundsRun` counts the episode's
- * rounds, this one included where it was a round.
+ * Why no round runs after the failed one, which closed the episode.
+ * `roundsRun` counts the episode's rounds, this one included where it was a
+ * round.
  */
 export type ClosedBy =
   | { readonly bound: "round-cap"; readonly roundsRun: number; readonly cap: number }
@@ -56,7 +59,7 @@ export function renderFailure(report: FailureReport): string {
   const next =
     report.closed === undefined
       ? ["The review is still open.", "A new commit or reply, or running `squiz review` again, retries it."]
-      : closedLines(report.closed, "A new commit or reply, or running `squiz review`, posts its summary.");
+      : closedLines(report.closed.by, report.closed.summaryAt);
   const blocks = [`${marker}${report.reason}**`, [...counted, ...next].join(" ")];
   const items = [...(report.unthreaded ?? []), ...(report.unapplied ?? [])];
   if (items.length > 0) blocks.push(items.map((item) => `- ${item}`).join("\n"));
@@ -65,18 +68,15 @@ export function renderFailure(report: FailureReport): string {
 
 /**
  * What a closed episode's report says in place of the retry, as sentences.
- * `summary` says what posts the summary, in the words its reader acts on.
- *
- * The next firing finds the bound spent and closes the episode without a
- * reviewer, posting the summary. An episode that ran no round may have no thread
- * for a summary to count, so it is promised none.
+ * `summaryAt` is where the summary is, as the change words it, and is absent
+ * where the summary was not posted.
  */
-export function closedLines(closed: ClosedBy, summary: string): string[] {
+export function closedLines(closed: ClosedBy, summaryAt: string | undefined): string[] {
   const why =
     closed.bound === "round-cap"
       ? `it has run ${closed.roundsRun} ${closed.roundsRun === 1 ? "round" : "rounds"}, and the round cap allows ${closed.cap}`
       : `it reached the token bound of ${grouped(closed.tokens)} tokens`;
-  return [`The review is closed: ${why}.`, "No round runs again.", ...(closed.roundsRun === 0 ? [] : [summary])];
+  return [`The review is closed: ${why}.`, "No round runs again.", ...(summaryAt === undefined ? [] : [`Its summary is ${summaryAt}.`])];
 }
 
 /** How many of the salvaged findings are threads on the pull request, as a sentence. */
