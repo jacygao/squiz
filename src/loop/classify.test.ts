@@ -36,6 +36,7 @@ function onFile(file: string, headline: string): FileFinding {
 function onTheChange(headline: string): ChangeFinding {
   return {
     scope: "change",
+    file: "src/ui/card.ts",
     severity: "low",
     headline,
     reasoning: ["The defect, in one bullet."],
@@ -358,38 +359,12 @@ test("a finding nothing threaded is not classified", () => {
   );
 });
 
-// A general thread squiz listed back and nobody ruled on is a finding still open, never one fixed.
-test("#889: a general thread listed back with no ruling stays open, as a finding about the change as a whole", () => {
-  const general: ReviewThread = {
-    id: "G1",
-    isResolved: false,
-    isOutdated: false,
-    path: "",
-    anchor: { at: "change" },
-    comments: [comment(renderComment(onTheChange("The approach is wrong")))],
-  };
-  const classified = classifyAtClose({ ...quiet, handedOver: [general], verdicts: rulings({ G1: null }) });
-  assert.deepEqual(classified, [{ status: "open", headline: "The approach is wrong", location: undefined }]);
-});
-
-test("#889: a general thread the round opened is open, as a finding about the change as a whole", () => {
-  const classified = classifyAtClose({
-    ...quiet,
-    findings: posted(threaded(onTheChange("The approach is wrong"), "change", "G2")),
-  });
-  assert.deepEqual(classified, [{ status: "open", headline: "The approach is wrong", location: undefined }]);
-});
-
-test("a threaded finding naming no file is not classified", () => {
+test("#913: a finding about the change as a whole the round opened is an open thread on its file", () => {
   const classified = classifyAtClose({
     ...quiet,
     findings: posted(threaded(onTheChange("The approach is wrong"), "file", "PRRT_new")),
   });
-  assert.deepEqual(
-    classified,
-    [],
-    "there is nowhere to say the thread is, and the router opens no thread for such a finding",
-  );
+  assert.deepEqual(classified, [{ status: "open", headline: "The approach is wrong", location: "src/ui/card.ts" }]);
 });
 
 test("a thread on a line is located as file:line, and one on a file by its file", () => {

@@ -75,12 +75,7 @@ type Kind =
   | "unresolve"
   | "reply"
   | "summary"
-  | "failure"
-  | "conversation"
-  | "general"
-  | "minimize"
-  | "unminimize"
-  | "generalreply";
+  | "failure";
 
 /** What the fake answers each kind of call with. A kind with no answer exits 1. */
 type Answers = Partial<Record<Kind, string>>;
@@ -726,9 +721,6 @@ async function writeFake(
   locks: Partial<Record<Kind, string>>,
 ): Promise<void> {
   standIn(directory, "gh", GH_SCRIPT);
-  // Every listing reads the conversation as well as the review threads, and a
-  // pull request with no general thread on it is the case nearly every test is.
-  await writeFile(join(directory, "answer-conversation"), NO_CONVERSATION, "utf8");
   for (const [kind, answer] of Object.entries(answers)) {
     await writeFile(join(directory, `answer-${kind}`), answer, "utf8");
   }
@@ -761,10 +753,6 @@ const GH_SCRIPT = [
   // Before the resolve: one spelling is inside the other.
   "  *'unresolveReviewThread'*) kind=unresolve ;;",
   "  *'resolveReviewThread'*) kind=resolve ;;",
-  // Before the listing, whose fields both mutations read back.
-  "  *'unminimizeComment'*) kind=unminimize ;;",
-  "  *'minimizeComment'*) kind=minimize ;;",
-  "  *'isMinimized'*) kind=conversation ;;",
   // The read-back that follows a create reaches the threads from the comment.
   "  *'PullRequestReviewComment'*) kind=lookup ;;",
   "  *'reviewThreads(first:100'*) kind=threads ;;",
@@ -773,8 +761,6 @@ const GH_SCRIPT = [
   // whole of the difference between a comment on the pull request and a comment
   // on a line of its diff. The failure comment goes to the same path, and its
   // marker is what tells it from the summary.
-  "  *'/issues/'*'/comments'*'squiz:thread'*) kind=general ;;",
-  "  *'/issues/'*'/comments'*'squiz:reply'*) kind=generalreply ;;",
   "  *'/issues/'*'/comments'*'Squiz review failed'*) kind=failure ;;",
   "  *'/issues/'*'/comments'*) kind=summary ;;",
   "  *'--method POST'*) kind=create ;;",
@@ -837,20 +823,6 @@ const PR_LIST = JSON.stringify([
 function included(status: string, body: string): string {
   return `HTTP/2.0 ${status}\nContent-Type: application/json; charset=utf-8\r\n\r\n${body}`;
 }
-
-/** A pull request's conversation as the general listing reads it back. */
-function conversation(comments: readonly unknown[]): string {
-  return included("200 OK", JSON.stringify({ data: { node: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: comments } } } }));
-}
-
-const NO_CONVERSATION = conversation([]);
-
-/** The conversation comment a general finding was posted as. */
-const GENERAL_POSTED = included("201 Created", JSON.stringify({
-  id: 2140876777,
-  node_id: "IC_kwDOUEd2qM7q-777",
-  html_url: `https://github.com/o/r/pull/${PULL_REQUEST}#issuecomment-2140876777`,
-}));
 
 /** The comment GitHub created, and the thread the read-back finds it in. */
 const CREATED = included("201 Created", JSON.stringify({
@@ -1025,10 +997,11 @@ const POSTING: Answers = {
   summary: SUMMARY_POSTED,
 };
 
-/** A finding about the change as a whole, which names no file and no line. */
+/** A finding about the change as a whole, which names the file it most concerns. */
 function aboutTheChange(headline: string): Finding {
   return {
     scope: "change",
+    file: "src/ui/card.ts",
     severity: "high",
     headline,
     reasoning: ["Nothing calls the scheduler."],
@@ -1037,70 +1010,18 @@ function aboutTheChange(headline: string): Finding {
 }
 
 // #880's round 1: a finding about the change as a whole reached no thread, and closed the review clean.
-test("#889: a round whose only finding is about the change as a whole leaves its thread open, and closes nothing", async () => {
+test("#913: a round whose only finding is about the change as a whole opens a thread on the file it names, and closes nothing", async () => {
   const ran = await runInFixture({
-    answers: { ...POSTING, general: GENERAL_POSTED },
+    answers: POSTING,
     reviewer: reviews({ findings: [aboutTheChange("All seven new exported helpers lack the required tests")] }),
   });
 
   assert.equal(ran.conclusion.outcome, "block", `concluded ${JSON.stringify(ran.conclusion)}`);
   assert.ok(ran.conclusion.outcome === "block");
-  assert.deepEqual(ran.conclusion.posted, ["G1"]);
+  assert.deepEqual(ran.conclusion.posted, ["PRRT_new"]);
+  const created = JSON.parse(ran.calls.find((call) => call.kind === "create")?.body ?? "{}");
+  assert.deepEqual([created.path, created.subject_type, created.line], ["src/ui/card.ts", "file", undefined]);
   assert.ok(!ran.kinds.includes("summary"), "a round that left a thread open posted a summary");
-});
-
-/** General thread G1 on the conversation, as an earlier round posted it. */
-const G1_ON_CONVERSATION = conversation([
-  {
-    id: "IC_g1",
-    databaseId: 2140876001,
-    author: { login: "squiz-bot" },
-    body: "**Squiz reviewer · high — The retry queue duplicates the scheduler**\n\n- Nothing calls the scheduler.\n\n<sub>Squiz thread G1</sub> <!-- squiz:thread G1 -->",
-    createdAt: "2026-10-05T07:13:05Z",
-    isMinimized: false,
-  },
-]);
-
-const G1_REPLIED = included("201 Created", JSON.stringify({ id: 2140876002 }));
-
-test("#889: a general thread ruled fixed is replied on and hidden as resolved, and the episode closes", async () => {
-  const ran = await runInFixture({
-    rounds: [EARLIER_ROUND],
-    answers: {
-      ...POSTING,
-      conversation: G1_ON_CONVERSATION,
-      generalreply: G1_REPLIED,
-      minimize: included("200 OK", JSON.stringify({ data: { minimizeComment: { minimizedComment: { isMinimized: true } } } })),
-    },
-    reviewer: reviews({ verdicts: [{ thread: "G1", verdict: "fixed" }] }),
-  });
-
-  assert.match(ran.invocations[0]?.prompt ?? "", /### G1\n\nNot resolved\. On the change as a whole\./u);
-  assert.equal(ran.conclusion.outcome, "close", `concluded ${JSON.stringify(ran.conclusion)}`);
-  assert.deepEqual(ran.state?.rulings, { G1: "fixed" });
-  assert.ok(ran.kinds.includes("generalreply") && ran.kinds.includes("minimize"), `made ${ran.kinds.join(", ")}`);
-});
-
-// A comment GitHub will not hide is a verdict not applied, never a failed round or a lost ruling.
-test("#889: a general thread whose comment GitHub will not hide keeps its ruling, and the round's outcome stands", async () => {
-  const ran = await runInFixture({
-    rounds: [EARLIER_ROUND],
-    answers: {
-      ...POSTING,
-      conversation: G1_ON_CONVERSATION,
-      generalreply: G1_REPLIED,
-      minimize: included("200 OK", JSON.stringify({ data: { minimizeComment: null }, errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }] })),
-    },
-    reviewer: reviews({ verdicts: [{ thread: "G1", verdict: "fixed" }] }),
-  });
-
-  assert.equal(ran.conclusion.outcome, "block", `concluded ${JSON.stringify(ran.conclusion)}`);
-  assert.ok(ran.conclusion.outcome === "block");
-  assert.ok(ran.kinds.includes("minimize"), `GitHub was never asked to hide the comment: ${ran.kinds.join(", ")}`);
-  assert.deepEqual(ran.state?.rulings, { G1: "fixed" }, "the ruling was not kept");
-  assert.deepEqual(ran.conclusion.unappliedNotes, [
-    "About the change as a whole: The retry queue duplicates the scheduler (ruled fixed, and the thread could not be resolved)",
-  ]);
 });
 
 test("the first round of a first episode posts its finding, is handed no thread, and blocks", async () => {
@@ -1111,7 +1032,7 @@ test("the first round of a first episode posts its finding, is handed no thread,
 
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "create", "lookup"],
+    ["prlist", "threads", "create", "lookup"],
     "the listing is one call and the round makes it once: a pull request with no thread of the reviewer's is answered by asking, not by assuming",
   );
   assert.equal(ran.conclusion.outcome, "block");
@@ -1159,7 +1080,7 @@ test("a second episode's first round is handed the threads already on the pull r
     }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "unresolve", "reply"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "unresolve", "reply"]);
   const prompt = ran.invocations[0]?.prompt ?? "";
   assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
   assert.match(prompt, /### PRRT_two\n\nResolved\./u);
@@ -1194,7 +1115,7 @@ test("a person's thread is not handed over, and an episode closes with one still
 
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "summary"],
+    ["prlist", "threads", "summary"],
     "a person's thread was resolved or re-opened, so the reviewer's judgement was applied to a comment it was never shown",
   );
   assert.equal(
@@ -1234,7 +1155,7 @@ test("a verdict naming a person's thread is reported unapplied and reaches nothi
 
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "summary"],
+    ["prlist", "threads", "summary"],
     "the verdict closed a person's thread, which is the reviewer's judgement applied to a comment it was never handed",
   );
   assert.ok(ran.conclusion.outcome === "close");
@@ -1266,7 +1187,7 @@ test("a resolved thread of the reviewer's own is handed over, and a verdict re-o
     reviewer: reviews({ verdicts: [{ thread: "PRRT_closed", verdict: "open", reason: "Still wrong." }] }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "unresolve", "reply"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "unresolve", "reply"]);
   assert.equal(ran.conclusion.outcome, "block");
 });
 
@@ -1314,7 +1235,7 @@ test("a later round hands over the reviewer's threads with their state and appli
     }),
   });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "unresolve", "reply"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "unresolve", "reply"]);
   const prompt = ran.invocations[0]?.prompt ?? "";
   assert.match(prompt, /### PRRT_one\n\nNot resolved\./u);
   assert.match(prompt, /### PRRT_two\n\nResolved\./u);
@@ -1371,7 +1292,7 @@ test("a last round posts one comment carrying the summary it composed", async ()
   assert.ok(ran.conclusion.outcome === "close");
   assert.equal(ran.conclusion.because, "round-cap");
   assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "summary"]);
   assert.equal(
     ran.state?.closeReported,
     true,
@@ -1505,7 +1426,7 @@ test("a summary gh refused does not turn the close into a failed round", async (
     "the reason GitHub gave is what the failure pointer has to carry",
   );
   // No reply answer either, and a reply that failed still resolves its thread.
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "summary"]);
   assert.deepEqual(
     ran.conclusion.verdicts.threads.map((applied) => applied.outcome),
     ["closed"],
@@ -1695,7 +1616,7 @@ test("a reviewer killed at its bound is a failed round and not an empty review",
   assert.match(ran.conclusion.reason, /killed at its 1-second bound/u);
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "failure"],
+    ["prlist", "threads", "failure"],
     "a round with no review posts nothing but its failure comment",
   );
   assert.deepEqual(
@@ -1714,7 +1635,7 @@ test("a reviewer nothing can be read from is reported unavailable", async () => 
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "unavailable");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "failure"]);
   assert.deepEqual(
     untimed(ran.state)?.rounds,
     [{ dollars: 0.02, tokens: 600, messages: 2 }],
@@ -1810,7 +1731,7 @@ test("a round posts the findings the reviewer reported before it failed, whateve
       ["PRRT_new"],
       `${failure} discarded the finding the reviewer had already confirmed`,
     );
-    assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup", "failure"]);
+    assert.deepEqual(ran.kinds, ["prlist", "threads", "create", "lookup", "failure"]);
     assert.match(ran.conclusion.reason, /kept the 1 finding the reviewer had reported/u);
     assert.deepEqual(
       untimed(ran.state)?.rounds ?? [],
@@ -1865,7 +1786,7 @@ test("the verdicts a failed round reported are applied, and no other thread is t
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "reply", "resolve", "failure"],
+    ["prlist", "threads", "reply", "resolve", "failure"],
     "the closed thread the reviewer never ruled on was re-opened, which reads a review that stopped early as a ruling that it is still wrong",
   );
   assert.deepEqual(
@@ -1896,7 +1817,7 @@ test("a round that reported nothing before it failed posts only its failure comm
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.equal(ran.conclusion.salvaged, undefined, "there was nothing for the round to salvage");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "failure"]);
 });
 
 test("a branch with no pull request runs nothing, and names the branch and where it looked", async () => {
@@ -2028,7 +1949,7 @@ test("a pull request of 300 changed files reaches its review, and GitHub is neve
 
   assert.equal(ran.conclusion.outcome, "block", JSON.stringify(ran.conclusion));
   assert.equal(ran.invocations.length, 1);
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup"], "the round asked GitHub for the diff");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "create", "lookup"], "the round asked GitHub for the diff");
 });
 
 test("the prompt lists the changed files and carries no diff, and a finding threads on a line the change made", async () => {
@@ -2238,7 +2159,7 @@ test("a review that ran its whole bound still posts its findings", async () => {
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.equal(ran.conclusion.salvaged?.findings.outcomes[0]?.outcome, "threaded");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "create", "lookup", "failure"]);
 });
 
 /**
@@ -2300,7 +2221,7 @@ test("#916: a reviewer stopped a minute past its bound still has its findings an
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
   assert.equal(ran.conclusion.salvaged?.findings.outcomes[0]?.outcome, "threaded");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "create", "lookup", "failure"]);
 });
 
 /**
@@ -2345,7 +2266,7 @@ test("a cap already spent closes the episode before a reviewer is started", asyn
   // The state file this fixture wrote records no close, which is what an
   // interruption between the cost and the close leaves. The round lists the
   // threads and posts the summary the close owes.
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
   assert.deepEqual(ran.conclusion.summary, { outcome: "posted" });
   assert.equal(ran.state?.rounds.length, 3, "and no fourth round is appended to the count");
 });
@@ -2384,7 +2305,7 @@ test("a cap lowered after a round blocked lists the threads and posts the summar
   assert.ok(closed.conclusion.outcome === "close");
   assert.equal(closed.conclusion.because, "round-cap");
   assert.equal(closed.invocations.length, 0, "a cap already spent starts no reviewer");
-  assert.deepEqual(closed.kinds, ["prlist", "threads", "conversation", "summary"]);
+  assert.deepEqual(closed.kinds, ["prlist", "threads", "summary"]);
   assert.deepEqual(closed.conclusion.summary, { outcome: "posted" });
   assert.deepEqual(closed.conclusion.beforeReview?.openThreads, ["PRRT_new"]);
   assert.equal(closed.state?.closeReported, true);
@@ -2689,7 +2610,7 @@ test("a bound spent before any round ran, with no thread of the reviewer's, clos
 
   assert.ok(ran.conclusion.outcome === "close");
   assert.equal(ran.conclusion.because, "token-bound");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation"], "a summary was posted for an episode with nothing to report");
+  assert.deepEqual(ran.kinds, ["prlist", "threads"], "a summary was posted for an episode with nothing to report");
   assert.deepEqual(ran.conclusion.summary, {
     outcome: "never-composed",
     reason: "the episode closed before any round ran",
@@ -2966,7 +2887,7 @@ test("a cap already spent whose close could not be recorded posts nothing, and t
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "harness");
   assert.match(ran.conclusion.reason, /^the episode's close could not be recorded: .*could not be written/u);
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation"], "nothing is posted after a close that was not recorded");
+  assert.deepEqual(ran.kinds, ["prlist", "threads"], "nothing is posted after a close that was not recorded");
   assert.notEqual(ran.state?.closeReported, true);
 
   const again = await runInFixture({
@@ -3290,7 +3211,7 @@ test("a snapshot that cannot be made runs no review, and what the add left is re
   assert.equal(ran.conclusion.failure, "harness");
   assert.match(ran.conclusion.reason, /^no review ran: the snapshot could not be made at /u);
   assert.deepEqual(ran.invocations, [], "no reviewer starts without its snapshot");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "failure"]);
   assert.deepEqual(ran.snapshotsLeft, [], "what the failed add made is removed with the round");
   assert.equal(ran.worktreesLeft.length, 1, `git still lists a snapshot: ${ran.worktreesLeft.join(", ")}`);
 });
@@ -3348,7 +3269,7 @@ test("a cost that could not be recorded posts none of the findings", async () =>
   assert.match(ran.conclusion.reason, /nothing the reviewer found was posted/u);
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "failure"],
+    ["prlist", "threads", "failure"],
     "nothing the reviewer found is posted on a state file that would not take the round",
   );
 });
@@ -3458,7 +3379,7 @@ test("a round that posted nothing records no posting time", async () => {
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads"]);
   assert.equal(ran.state?.rounds.length, 1);
   assert.equal(ran.state?.rounds[0]?.postingSeconds, undefined);
 });
@@ -3513,7 +3434,7 @@ test("a failed round posts one failure comment after what it salvaged, naming th
   assert.ok(ran.conclusion.outcome === "failed");
   assert.deepEqual(
     ran.kinds,
-    ["prlist", "threads", "conversation", "create", "lookup", "failure"],
+    ["prlist", "threads", "create", "lookup", "failure"],
     "the failure comment goes up after the salvaged findings, and once",
   );
   assert.match(ran.calls.at(-1)?.argv ?? "", /issues\/142\/comments/u);
@@ -3573,6 +3494,7 @@ test("a failed round's comment counts the findings that landed, not the ones rep
 test("a killed round's findings that no thread holds are listed in its failure comment (#357)", async () => {
   const wholeChange: Finding = {
     scope: "change",
+    file: "src/ui/card.ts",
     severity: "medium",
     headline: "The retry queue duplicates the scheduler",
     reasoning: ["Nothing calls the scheduler."],
@@ -3599,11 +3521,10 @@ test("a killed round's findings that no thread holds are listed in its failure c
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
   const body = failureBody(ran);
-  assert.match(body, /\n1 of the 3 findings the reviewer reported is posted as a thread\./u);
-  assert.match(
-    body,
-    /\n\n- `src\/cache\.ts:12` — The cache is never cleared \(no thread could be opened for it\)\n- About the change as a whole: The retry queue duplicates the scheduler \(raised, and its comment could not be posted\)$/u,
-  );
+  // The finding about the change as a whole is on a thread of the one file the diff touches.
+  assert.match(body, /\n2 of the 3 findings the reviewer reported are posted as threads\./u);
+  assert.match(body, /\n\n- `src\/cache\.ts:12` — The cache is never cleared \(no thread could be opened for it\)$/u);
+
 });
 
 test("a round that could post none of its findings lists them in its failure comment (#357)", async () => {
@@ -3672,7 +3593,7 @@ test("a caller that asks for no failure comment gets none, and the round is fail
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "create", "lookup"]);
   assert.equal(ran.conclusion.failureComment, undefined);
 });
 
@@ -3743,7 +3664,7 @@ test("a last round names in its summary each ruling it could not apply (#605)", 
   });
 
   assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "unresolve", "reply", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "unresolve", "reply", "summary"]);
   const summary = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
   assert.match(
     summary,
@@ -3773,7 +3694,7 @@ test("a failed round names each ruling it could not apply in its failure comment
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "failure"]);
   assert.match(
     failureBody(ran),
     /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the thread could not be resolved\)\n- A ruling of withdrawn on thread `PRRT_invented`, which was not handed to the reviewer, was not applied$/u,
@@ -3822,7 +3743,7 @@ test("a round replies on each thread it closes before resolving it, and records 
   });
 
   assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "reply", "resolve", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "reply", "resolve", "summary"]);
   const recorded = ran.state?.rounds[1];
   // The fixture's own commit, which the pull request's head was rewritten to.
   const short = (recorded?.head ?? "").slice(0, 7);
@@ -3861,7 +3782,7 @@ test("a closing reply GitHub refuses still resolves the thread, and the summary 
 
   assert.ok(ran.conclusion.outcome === "close", `the round did not close: ${JSON.stringify(ran.conclusion)}`);
   assert.equal(ran.conclusion.because, "nothing-open", "the refused reply undid the verdict");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "summary"]);
   const summary = sent(ran.calls.find((call) => call.kind === "summary")?.body ?? "");
   assert.match(summary, /^Fixed 1 · Withdrawn 0 · Open 0 · Disputed 0$/mu);
   assert.match(
@@ -3930,7 +3851,7 @@ test("a failed round names in its failure comment each closing reply it could no
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "reply", "resolve", "failure"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "reply", "resolve", "failure"]);
   assert.match(
     failureBody(ran),
     /\n\n- `src\/ui\/card\.ts:88` — The name says nothing\. \(ruled fixed, and the reviewer's reply could not be posted on its thread\)$/u,

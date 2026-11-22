@@ -210,7 +210,7 @@ function postReply(args: readonly string[]): HookExit {
     return 0;
   }
 
-  const action = target.venue.reply(id, renderReply(body), until, target.change);
+  const action = target.venue.reply(id, renderReply(body), until);
   if (action.outcome !== "acted") {
     reportFailure(`nothing replied in ${id}: ${action.reason}`);
     return 0;

@@ -34,14 +34,14 @@ export type RecordOptions = UpdateOptions;
 /** What a new thread hangs on: one line of its file, or the file as a whole. */
 export type NewAnchor = { readonly at: "line"; readonly line: number } | { readonly at: "file" };
 
-/** Where a new thread goes: on a file, or on the change as a whole, which names none. */
-export type Placed = { readonly path: string; readonly anchor: NewAnchor } | { readonly anchor: { readonly at: "change" } };
+/** Where a new thread goes: the file, and what of it the thread hangs on. */
+export type Placed = { readonly path: string; readonly anchor: NewAnchor };
 
 export type Opened =
   | { readonly outcome: "opened"; readonly threadId: string; readonly commentId: string; readonly url: string }
   | Failed;
 
-/** A thread as `threads.json` holds it. One about the change as a whole holds no `path`. */
+/** A thread as `threads.json` holds it. */
 type StoredThread = {
   readonly id: string;
   readonly isResolved: boolean;
@@ -239,17 +239,9 @@ function threadFrom(entry: unknown): StoredThread | string {
   const { id, path, anchor, isResolved, comments } = entry;
   if (typeof id !== "string" || !/^T[1-9][0-9]*$/u.test(id)) return "has no id of the form T1";
   if (typeof isResolved !== "boolean") return "does not say whether it is resolved";
-  let placed: Placed;
-  if (isObject(anchor) && anchor["at"] === "change") {
-    // A path beside it would be a file the thread is not about.
-    if (path !== undefined) return "is about the change as a whole and names a path";
-    placed = { anchor: { at: "change" } };
-  } else {
-    if (typeof path !== "string") return "has no path";
-    const read = anchorFrom(anchor);
-    if (read === undefined) return "has no anchor of a line, a file or the change";
-    placed = { path, anchor: read };
-  }
+  if (typeof path !== "string") return "has no path";
+  const read = anchorFrom(anchor);
+  if (read === undefined) return "has no anchor of a line or a file";
   if (!Array.isArray(comments) || comments.length === 0) return "has no comments";
   const stored: StoredComment[] = [];
   for (const comment of comments) {
@@ -258,7 +250,7 @@ function threadFrom(entry: unknown): StoredThread | string {
     if (typeof commentId !== "string" || !/^C[1-9][0-9]*$/u.test(commentId)) return "has a comment with no id of the form C1";
     stored.push({ id: commentId, body: comment["body"] });
   }
-  return { id, ...placed, isResolved, comments: stored };
+  return { id, path, anchor: read, isResolved, comments: stored };
 }
 
 function anchorFrom(anchor: unknown): NewAnchor | undefined {
@@ -274,7 +266,8 @@ function reviewThreadOf(thread: StoredThread): ReviewThread {
     id: thread.id,
     isResolved: thread.isResolved,
     isOutdated: false,
-    path: "path" in thread ? thread.path : "",
+    path: thread.path,
+
     anchor: thread.anchor,
     comments: thread.comments.map((comment) => ({
       id: comment.id,

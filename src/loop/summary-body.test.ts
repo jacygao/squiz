@@ -14,7 +14,7 @@ import type { ClassifiedThread } from "./classify.ts";
 import type { RoundRecord, RoundWork, Timings } from "./episode-state.ts";
 import type { FindingOutcome, PostedFindings } from "./post-findings.ts";
 import type { RoundCost } from "../reviewers/adapter.ts";
-import { renderSummary, unappliedNotes, unpostedReplyNotes, type ClosedEpisode } from "./summary-body.ts";
+import { renderSummary, unappliedNotes, unpostedReplyNotes, unthreadedNotes, type ClosedEpisode } from "./summary-body.ts";
 import type { ReviewThread } from "../venues/venue.ts";
 
 /** A round of `pi` on one model, which is what most tests here need and none is about. */
@@ -47,7 +47,7 @@ const body = {
 } as const;
 
 function onTheChange(headline: string): ChangeFinding {
-  return { scope: "change", headline, ...body };
+  return { scope: "change", file: "src/ui/card.ts", headline, ...body };
 }
 
 function onLine(file: string, line: number, headline: string): LineFinding {
@@ -170,7 +170,7 @@ test("the episode renders as the specification shows", () => {
       "**Notes**",
       "",
       "- About the change as a whole: the retry queue duplicates the scheduler already in" +
-        " `packages/sync/src/scheduler.ts`, which nothing calls",
+        " `packages/sync/src/scheduler.ts`, which nothing calls (no thread could be opened for it)",
       "- The review was cut short by the 900-second time bound in round 2, and the round kept only the findings it had reported by then",
     ].join("\n"),
   );
@@ -219,7 +219,8 @@ test("the first line opens with the summary's marker and not the reviewer's", ()
 });
 
 // Raised, in Notes, and carrying none of the four statuses.
-test("a finding about the change as a whole counts and carries no status", () => {
+test("a finding about the change as a whole that no file could hold counts and carries no status", () => {
+
   const comment = renderSummary({
     ...quiet,
     findings: posted(noted(onTheChange("the feature is already in `src/scheduler.ts`"))),
@@ -243,7 +244,7 @@ test("a finding about the change as a whole counts and carries no status", () =>
       "",
       "**Notes**",
       "",
-      "- About the change as a whole: the feature is already in `src/scheduler.ts`",
+      "- About the change as a whole: the feature is already in `src/scheduler.ts` (no thread could be opened for it)",
     ].join("\n"),
   );
 });
@@ -304,7 +305,7 @@ test("an earlier round's findings no thread holds are counted and named in Notes
       "**Notes**",
       "",
       "- `src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)",
-      "- About the change as a whole: The retry queue duplicates the scheduler",
+      "- About the change as a whole: The retry queue duplicates the scheduler (no thread could be opened for it)",
     ].join("\n"),
   );
 });
@@ -385,17 +386,6 @@ test("the unsettled findings keep the order they were classified in", () => {
       ["- `src/a.ts:1` — First (disputed)", "- `src/c.ts:3` — Third (open)"].join("\n"),
     ),
     `the unsettled findings were reordered: ${comment}`,
-  );
-});
-
-test("#889: an open thread about the change as a whole needs a person, named as about the change", () => {
-  const comment = renderSummary({
-    ...quiet,
-    threads: [{ status: "open", headline: "The retry queue duplicates the scheduler", location: undefined }],
-  });
-  assert.ok(
-    comment.includes("**Needs a person**\n\n- The change as a whole — The retry queue duplicates the scheduler (open)"),
-    comment,
   );
 });
 
@@ -591,6 +581,11 @@ test("an episode closed by no bound at all notes none", () => {
  * left it out would read as a review that found nothing there. The summary
  * carries the failure because GitHub was reachable: it posted this comment.
  */
+test("#913: a finding about the change as a whole whose comment could not be posted is named as about the change, not by its file", () => {
+  const notes = unthreadedNotes(posted({ outcome: "failed", finding: onTheChange("The retry queue duplicates the scheduler"), reason: "gh answered HTTP 502" }));
+  assert.deepEqual(notes, ["About the change as a whole: The retry queue duplicates the scheduler (raised, and its comment could not be posted)"]);
+});
+
 test("a finding whose comment could not be posted is counted and named in Notes", () => {
   const comment = renderSummary({
     ...quiet,

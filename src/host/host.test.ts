@@ -56,7 +56,7 @@ const queueRacer = fileURLToPath(new URL("../testing/queue-racer.ts", import.met
 /** The file under review at the base, ninety-one lines. */
 const BASE_CARD = Array.from({ length: 91 }, (_, at) => `// line ${at + 1}\n`).join("");
 
-type Kind = "prlist" | "diff" | "node" | "threads" | "conversation" | "general" | "create" | "lookup" | "summary" | "failure";
+type Kind = "prlist" | "diff" | "node" | "threads" | "create" | "lookup" | "summary" | "failure";
 
 /** One state of the pull request, queued, with the owner its trigger recorded where it had one. */
 function queued(head: string, activity: string | null = null, owner?: Owner): StateRecord {
@@ -382,11 +382,6 @@ function prList(listed: number, head: string, base: string): string {
   ]);
 }
 
-/** The pull request's conversation comments, as the general listing reads them back. */
-function CONVERSATION(comments: readonly unknown[]): string {
-  return included("200 OK", JSON.stringify({ data: { node: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: comments } } } }));
-}
-
 function answers(listed: number): Partial<Record<Kind, string>> {
   return {
     node: included("200 OK", JSON.stringify({ number: listed, node_id: "PR_pull" })),
@@ -413,11 +408,6 @@ function answers(listed: number): Partial<Record<Kind, string>> {
         },
       }),
     ),
-    conversation: CONVERSATION([]),
-    general: included(
-      "201 Created",
-      JSON.stringify({ id: 23, node_id: "IC_23", html_url: `https://github.com/o/r/pull/${listed}#issuecomment-23` }),
-    ),
     summary: included(
       "201 Created",
       JSON.stringify({ id: 21, node_id: "IC_21", html_url: `https://github.com/o/r/pull/${listed}#issuecomment-21` }),
@@ -442,8 +432,6 @@ const GH_SCRIPT = [
   'case "$request" in',
   "  *'PullRequestReviewComment'*) kind=lookup ;;",
   "  *'reviewThreads(first:100'*) kind=threads ;;",
-  "  *'isMinimized'*) kind=conversation ;;",
-  "  *'/issues/'*'/comments'*'squiz:thread'*) kind=general ;;",
   "  *'/issues/'*'/comments'*'Squiz review failed'*) kind=failure ;;",
   "  *'/issues/'*'/comments'*) kind=summary ;;",
   "  *'--method POST'*) kind=create ;;",
@@ -1151,7 +1139,7 @@ test("a host that finds the cap spent posts the summary, and records the close o
   });
 
   assert.equal(ran.started, 0, "a cap already spent starts no reviewer");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
   const reason = "the episode closed at the round cap before a round took this state";
   const [taken, behind] = recordsOf(ran.state);
   assert.deepEqual(taken, {
@@ -1172,7 +1160,7 @@ test("a host that finds the cap spent posts the summary, and records the close o
 test("#844: a host that finds the bound spent before any round ran, with no thread of the reviewer's, records the close at exit 3 with its missing summary", async () => {
   const ran = await host({ records: atHead, config: { tokens: 1000 }, before: (fixture) => spendOutsideRounds(fixture.episode, 1000) });
 
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads"]);
   const [taken] = recordsOf(ran.state);
   assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
   assert.deepEqual(taken.closed, {
@@ -1270,7 +1258,7 @@ test("#414: a close before any review whose summary GitHub refuses keeps the rea
   });
 
   const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "summary"]);
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "summary"]);
   const [taken] = recordsOf(ran.state);
   assert.ok(taken?.status === "not reviewed", `recorded as ${JSON.stringify(taken)}`);
   assert.deepEqual(taken.closed?.problems, [line]);
@@ -1304,11 +1292,6 @@ test("a reviewed round's record counts the threads its findings opened", async (
   assert.equal(record.newFindings, 1);
 });
 
-/** A finding about the change as a whole, which opens a general thread. */
-function aboutTheChange(headline: string): Finding {
-  return { scope: "change", severity: "medium", headline, reasoning: ["Two schedulers drift apart."], suggestedFix: "Use the one there is." };
-}
-
 /** A finding on a file the change does not touch, which no thread can hold. */
 function unanchored(headline: string): Finding {
   return { scope: "line", file: "src/cache.ts", line: 12, severity: "medium", headline, reasoning: ["Nothing evicts an entry."], suggestedFix: "Evict on write." };
@@ -1324,18 +1307,6 @@ test("#606: a round that leaves threads open records each finding no thread hold
   assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
   assert.equal(record.exitStatus, 2);
   assert.deepEqual(record.unthreaded, ["`src/cache.ts:12` — The cache is never cleared (no thread could be opened for it)"]);
-});
-
-test("#889: a round whose finding about the change as a whole is on its thread records it on no list of findings no thread holds", async () => {
-  const ran = await host({
-    records: atHead,
-    findings: [[finding("The name says nothing."), aboutTheChange("The retry queue duplicates the scheduler")]],
-  });
-
-  const [record] = recordsOf(ran.state);
-  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
-  assert.deepEqual(record.openThreads, ["PRRT_new", "G1"]);
-  assert.equal(record.unthreaded, undefined);
 });
 
 test("#606: a round that closes the episode records no finding no thread holds, because its summary names them", async () => {
@@ -2060,7 +2031,6 @@ function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; reado
     listThreads: () => ({ outcome: "listed", threads: [EARLIER_THREAD] }),
     openThread: posted,
     openFileThread: posted,
-    openGeneralThread: posted,
     reply: () => ({ outcome: "acted" }),
     resolve: () => ({ outcome: "acted" }),
     reopen: () => ({ outcome: "acted" }),

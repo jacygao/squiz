@@ -52,13 +52,14 @@ export function readFinding(value: unknown): Reading<Finding> {
       return { value: { ...body.value, scope: "file", file } };
     }
     case "change": {
-      if (record["file"] !== undefined) {
-        return { reason: "is scoped to the change and carries a file" };
+      const file = textOf(record["file"]);
+      if (file === null) {
+        return { reason: "is scoped to the change and carries no file. Name the changed file it most concerns" };
       }
       if (record["line"] !== undefined) {
         return { reason: "is scoped to the change and carries a line" };
       }
-      return { value: { ...body.value, scope: "change" } };
+      return { value: { ...body.value, scope: "change", file } };
     }
     default:
       return { reason: "names no scope of line, file or change" };

@@ -26,6 +26,7 @@ const refusing: ReportFile = {
 
 const finding = {
   scope: "change",
+  file: "src/ui/card.ts",
   severity: "low",
   headline: "The retry has no bound",
   reasoning: ["Nothing stops the loop once the network is gone."],

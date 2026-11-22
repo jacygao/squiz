@@ -1,10 +1,6 @@
 /**
  * The router: where each finding's comment goes, a thread anchored to a changed
- * line, a thread on a file as a whole, or general: on no file and no line.
- *
- * A general finding scoped to the change is a thread of its own, on the change
- * as a whole. One that names a place the diff does not carry is a line of text
- * in the summary comment.
+ * line, a thread on a file as a whole, or a line of text in the summary comment.
  *
  * The pull request is the whole record of a review, so a finding that routes
  * nowhere leaves no trace anywhere at all. A thread is worth more than a line of
@@ -12,7 +8,7 @@
  * takes the summary only when the diff carries nowhere to hang a thread.
  */
 
-import { type ChangedLines, DiffParseError, parseDiff, touchesFile, touchesLine } from "./diff.ts";
+import { type ChangedLines, DiffParseError, filesNamed, parseDiff, touchesFile, touchesLine } from "./diff.ts";
 import type { ChangeFinding, FileFinding, Finding, LineFinding } from "./finding.ts";
 
 /** A finding that becomes a review comment thread on the line it names. */
@@ -22,16 +18,19 @@ export type InlineRouting = {
 };
 
 /**
- * A finding the reviewer scoped to a file, which becomes a thread on that file.
+ * A finding the reviewer scoped to a file, or to the change as a whole, which
+ * becomes a thread on the file it names.
  *
- * `unplacedAnchor` is declared absent rather than left out. Leaving it out bars
- * only a fresh object literal, so a routing built elsewhere and widened to
- * `Routing` would still carry a location no finding of this shape ever had.
+ * `unplacedAnchor` and `namedFile` are declared absent rather than left out.
+ * Leaving them out bars only a fresh object literal, so a routing built
+ * elsewhere and widened to `Routing` would still carry a location no finding of
+ * this shape ever had.
  */
 export type FileRouting = {
   readonly placement: "file";
-  readonly finding: FileFinding;
+  readonly finding: FileFinding | ChangeFinding;
   readonly unplacedAnchor?: never;
+  readonly namedFile?: never;
 };
 
 /**
@@ -46,17 +45,22 @@ export type DegradedRouting = {
   readonly placement: "file";
   readonly finding: LineFinding;
   readonly unplacedAnchor: string;
+  readonly namedFile?: never;
 };
 
 /**
- * A finding the reviewer scoped to the change as a whole, which names no file.
+ * A finding about the change as a whole whose file the diff does not name, on
+ * the first file the diff does name.
  *
- * `unplacedAnchor` is declared absent for the reason `FileRouting` gives.
+ * The finding's `file` is the one the thread hangs on, and `namedFile` the one
+ * the reviewer named, which the comment writes into its body so that a reader
+ * can tell why the thread is where it is.
  */
-export type ChangeRouting = {
-  readonly placement: "general";
+export type MovedRouting = {
+  readonly placement: "file";
   readonly finding: ChangeFinding;
   readonly unplacedAnchor?: never;
+  readonly namedFile: string;
 };
 
 /**
@@ -65,36 +69,48 @@ export type ChangeRouting = {
  *
  * The location is carried as text because the summary writes it into its Notes:
  * `file:line` for a finding scoped to a line, and the file alone for one scoped
- * to a file. Required rather than optional: a general finding naming no location
- * is one a person cannot act on.
+ * to a file. Required rather than optional: a note naming no location is one a
+ * person cannot act on.
  */
 export type UnplacedRouting = {
-  readonly placement: "general";
+  readonly placement: "noted";
   readonly finding: LineFinding | FileFinding;
   readonly unplacedAnchor: string;
+};
+
+/**
+ * A finding about the change as a whole that no file can hold, because the diff
+ * carries none or could not be read. Its note is about the change as a whole,
+ * so it carries no location.
+ */
+export type UnplacedChangeRouting = {
+  readonly placement: "noted";
+  readonly finding: ChangeFinding;
+  readonly unplacedAnchor?: never;
 };
 
 export type Routing =
   | InlineRouting
   | FileRouting
   | DegradedRouting
-  | ChangeRouting
-  | UnplacedRouting;
+  | MovedRouting
+  | UnplacedRouting
+  | UnplacedChangeRouting;
 
 /** One round's findings, each routed, and the diff failure where there was one. */
 export type Routed = {
   readonly routings: readonly Routing[];
   /**
-   * Why the diff could not be read, where it could not. Every finding naming a
-   * location routes general in that case, and this is the only thing that tells
-   * that apart from a diff that was read and carried neither the line nor the
-   * file.
+   * Why the diff could not be read, where it could not. Every finding is noted
+   * in that case, and this is the only thing that tells that apart from a diff
+   * that was read and carried neither the line nor the file.
    */
   readonly unreadableDiff?: Error;
 };
 
 /**
- * Route each finding to an inline thread, to a thread on its file, or general.
+ * Route each finding to an inline thread, to a thread on a file, or to the
+ * summary's notes.
  *
  * `scope` is the reviewer's judgement about what the finding is about, and is
  * never overridden here. The one decision this makes is whether the diff carries
@@ -105,7 +121,7 @@ export type Routed = {
  * inline findings together would take it back.
  *
  * Nothing here throws, and no finding is dropped. A diff that cannot be read
- * routes every finding general and is reported in `unreadableDiff`.
+ * notes every finding and is reported in `unreadableDiff`.
  */
 export function routeFindings(findings: readonly Finding[], diff: string): Routed {
   let changed: ChangedLines;
@@ -115,17 +131,29 @@ export function routeFindings(findings: readonly Finding[], diff: string): Route
     // Every throw is caught, not only `DiffParseError`. A round whose findings
     // never reach the pull request is the failure this must not have, and a
     // parser that threw something else still failed to read the diff.
-    return { routings: findings.map(general), unreadableDiff: asError(error) };
+    return { routings: findings.map(noted), unreadableDiff: asError(error) };
   }
-  return { routings: findings.map((finding) => routeOne(finding, changed)) };
+  // A file thread needs no line, so a deleted file and an unaltered rename hold
+  // one too, though neither has a line to anchor to.
+  const named = [...new Set([...filesNamed(diff), ...changed.keys()])];
+  return { routings: findings.map((finding) => routeOne(finding, changed, named)) };
 }
 
-function routeOne(finding: Finding, changed: ChangedLines): Routing {
-  if (finding.scope === "change") return { placement: "general", finding };
+function routeOne(finding: Finding, changed: ChangedLines, named: readonly string[]): Routing {
+  if (finding.scope === "change") {
+    if (named.includes(finding.file)) return { placement: "file", finding };
+    // A finding about the change as a whole is about every file of it, so any
+    // file the diff names holds it. Only a thread keeps it open for a later
+    // round to rule on.
+    const [first] = named;
+    if (first === undefined) return noted(finding);
+    return { placement: "file", finding: { ...finding, file: first }, namedFile: finding.file };
+  }
+
 
   if (finding.scope === "file") {
     if (touchesFile(changed, finding.file)) return { placement: "file", finding };
-    return general(finding);
+    return noted(finding);
   }
 
   // Only a line the change added is anchored to. GitHub would take a context
@@ -136,7 +164,7 @@ function routeOne(finding: Finding, changed: ChangedLines): Routing {
   if (touchesFile(changed, finding.file)) {
     return { placement: "file", finding, unplacedAnchor: locationOf(finding) };
   }
-  return general(finding);
+  return noted(finding);
 }
 
 /**
@@ -145,9 +173,9 @@ function routeOne(finding: Finding, changed: ChangedLines): Routing {
  * An unreadable diff sends every finding here, a file-scoped one included: a
  * diff that could not be read is not evidence that GitHub would take the file.
  */
-function general(finding: Finding): ChangeRouting | UnplacedRouting {
-  if (finding.scope === "change") return { placement: "general", finding };
-  return { placement: "general", finding, unplacedAnchor: locationOf(finding) };
+function noted(finding: Finding): UnplacedRouting | UnplacedChangeRouting {
+  if (finding.scope === "change") return { placement: "noted", finding };
+  return { placement: "noted", finding, unplacedAnchor: locationOf(finding) };
 }
 
 /** Where the finding said the defect is, as the text a comment carries. */

@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
+import type { Finding } from "../../findings/finding.ts";
 import { ownerNote } from "../../host/owner-note.ts";
+import { postFindings } from "../../loop/post-findings.ts";
 import type { Owner, StateRecord } from "../../loop/state-record.ts";
 import { composeReview, type ReviewResult } from "../../review/output.ts";
 import { deadlineIn } from "../../reviewers/deadline.ts";
@@ -258,33 +260,39 @@ test("threads opened on the change are listed from threads.json, replied to, res
   );
 });
 
-test("#889: a thread about the change as a whole is held in threads.json with no file and no line, and is replied to and resolved by its id", (t) => {
+test("#913: a finding about the change as a whole is a thread on the file it names in threads.json, replied to and resolved by its id", (t) => {
   const worktree = worktreeIn(t);
   localVenue.recordStart(worktree, deadlineIn(30_000));
   const change = changeIn(worktree);
   const until = deadlineIn(30_000);
+  const finding: Finding = {
+    scope: "change",
+    file: "kept.txt",
+    severity: "high",
+    headline: "The change duplicates the scheduler",
+    reasoning: ["Two schedulers drift apart."],
+    suggestedFix: "Use the one there is.",
+  };
+  const diff = "diff --git a/kept.txt b/kept.txt\nindex 0000001..0000002 100644\n--- a/kept.txt\n+++ b/kept.txt\n@@ -1 +1 @@\n-old\n+new\n";
 
-  localVenue.openFileThread(change, "kept.txt", "**Squiz reviewer · low — B**", until);
-  const opened = localVenue.openGeneralThread(change, "**Squiz reviewer · high — The change duplicates the scheduler**", until);
-  assert.deepEqual(opened.outcome === "posted" ? [opened.threadId, opened.commentId] : opened, ["T2", "C2"]);
-
-  const stored = JSON.parse(readFileSync(join(worktree, ".squiz", "local", "threads.json"), "utf8")).threads[1];
-  assert.deepEqual(Object.keys(stored).toSorted(), ["anchor", "comments", "id", "isResolved"], "the thread names a file");
-  assert.deepEqual(stored.anchor, { at: "change" });
+  const posted = postFindings({ findings: [finding], diff, change }, { venue: localVenue, until: () => until });
+  assert.deepEqual(posted.outcomes.map((outcome) => (outcome.outcome === "threaded" ? [outcome.placement, outcome.threadId] : outcome)), [["file", "T1"]]);
+  const stored = JSON.parse(readFileSync(join(worktree, ".squiz", "local", "threads.json"), "utf8")).threads[0];
+  assert.deepEqual([stored.path, stored.anchor], ["kept.txt", { at: "file" }], "the finding is not on a thread of the file it names");
 
   const previous = process.cwd();
   process.chdir(worktree);
   try {
-    assert.deepEqual(localVenue.reply("T2", "**Squiz coding agent**\n\nIt runs on the scheduler now.", until), { outcome: "acted" });
-    assert.deepEqual(localVenue.resolve("T2", until), { outcome: "acted" });
+    assert.deepEqual(localVenue.reply("T1", "**Squiz coding agent**\n\nIt runs on the scheduler now.", until), { outcome: "acted" });
+    assert.deepEqual(localVenue.resolve("T1", until), { outcome: "acted" });
   } finally {
     process.chdir(previous);
   }
   const listed = localVenue.listThreads(change, until);
-  const thread = listed.outcome === "listed" ? listed.threads[1] : undefined;
+  const thread = listed.outcome === "listed" ? listed.threads[0] : undefined;
   assert.deepEqual(
     thread === undefined ? listed : [thread.id, thread.path, thread.anchor, thread.isResolved, thread.comments.map((comment) => comment.id)],
-    ["T2", "", { at: "change" }, true, ["C2", "C3"]],
+    ["T1", "kept.txt", { at: "file" }, true, ["C1", "C2"]],
   );
 });
 

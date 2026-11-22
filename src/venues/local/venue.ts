@@ -60,9 +60,6 @@ export const localVenue: Venue = {
   openFileThread(change, path, body, until) {
     return posting(openThread(localDirectory(worktreeOf(change)), { path, anchor: { at: "file" } }, body, { until }));
   },
-  openGeneralThread(change, body, until) {
-    return posting(openThread(localDirectory(worktreeOf(change)), { anchor: { at: "change" } }, body, { until }));
-  },
   // Ids count up from T1 in every worktree, so an id names a thread only in
   // the worktree it is used in.
   reply(threadId, body, until) {

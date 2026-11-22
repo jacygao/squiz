@@ -177,6 +177,40 @@ export function touchesFile(changed: ChangedLines, file: string): boolean {
 }
 
 /**
+ * Every file a diff that `parseDiff` read names, in the diff's order: each one
+ * `parseDiff` keys, and each deleted file and unaltered rename it does not.
+ *
+ * A rename is named as the file is now called. An entry whose name cannot be
+ * read is left out, as `parseDiff` leaves it out.
+ */
+export function filesNamed(diff: string): readonly string[] {
+  const named: string[] = [];
+  let name: string | null = null;
+  // Only an entry's headers name it. A hunk line can read like a header.
+  let inHeaders = false;
+  const end = (): void => {
+    if (name !== null && !named.includes(name)) named.push(name);
+  };
+  for (const line of splitLines(diff)) {
+    if (line.startsWith("diff --git ")) {
+      end();
+      name = sameNameOf(line);
+      inHeaders = true;
+    } else if (!inHeaders) {
+      continue;
+    } else if (line.startsWith("@@")) {
+      inHeaders = false;
+    } else if (line.startsWith("rename to ")) {
+      name = pathOf(line.slice("rename to ".length));
+    } else if (line.startsWith("+++ ")) {
+      name = newSidePathOf(line) ?? name;
+    }
+  }
+  end();
+  return named;
+}
+
+/**
  * What a file entry's headers say, while it has shown no `+++` of its own.
  *
  * `changed` is true once a header shows the file was added, or that its content

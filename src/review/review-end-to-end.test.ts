@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +39,7 @@ import { squizStatus } from "./status.ts";
 const NUMBER = 41;
 const BRANCH = "feature-a";
 const FILE = "src/ui/card.ts";
+const squiz = fileURLToPath(new URL("../../bin/squiz", import.meta.url));
 const hostFixture = fileURLToPath(new URL("../testing/host-fixture.ts", import.meta.url));
 const runner = fileURLToPath(new URL("../testing/review-runner.ts", import.meta.url));
 const originalPath = process.env["PATH"] ?? "";
@@ -70,7 +71,7 @@ function http(status, value) {
 function threadNode(thread) {
   return {
     id: thread.id, isResolved: thread.isResolved, isOutdated: false, path: thread.path,
-    line: thread.line, originalLine: thread.line, subjectType: "LINE",
+    line: thread.line, originalLine: thread.line, subjectType: thread.subjectType ?? "LINE",
     comments: {
       pageInfo: { hasNextPage: false, endCursor: null },
       nodes: thread.comments.map((c) => ({ id: c.id, databaseId: c.databaseId, author: { login: "squiz" }, body: c.body, createdAt: c.createdAt })),
@@ -115,10 +116,6 @@ function answer(body) {
       const nodes = state.threads.map((t) => ({ id: t.id, comments: { nodes: [{ databaseId: t.comments[0].databaseId }] } }));
       return http("200 OK", { data: { node: { pullRequest: { reviewThreads: page(nodes) } } } });
     }
-    // The conversation, which holds no general thread in these runs.
-    if (query.includes("isMinimized")) {
-      return http("200 OK", { data: { node: { comments: page([]) } } });
-    }
     if (query.includes("$pullRequest")) {
       return http("200 OK", { data: { node: { reviewThreads: page(state.threads.map(threadNode)) } } });
     }
@@ -147,6 +144,7 @@ function answer(body) {
     const n = state.threads.length + 1;
     state.threads.push({
       id: "PRRT_" + n, isResolved: false, path: posted.path, line: posted.line,
+      subjectType: posted.subject_type === "file" ? "FILE" : "LINE",
       comments: [{ id: "PRRC_" + n, databaseId: 9000 + n, body: posted.body, createdAt: "2026-10-05T07:13:05Z" }],
     });
     save();
@@ -177,7 +175,7 @@ type GhState = {
   readonly draft?: boolean;
   /** The base commit, which the change is diffed against. */
   readonly base: string;
-  threads: { id: string; isResolved: boolean; path?: string; line?: number; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
+  threads: { id: string; isResolved: boolean; path?: string; line?: number; subjectType?: "LINE" | "FILE"; comments: { id: string; databaseId: number; body: string; createdAt: string }[] }[];
   readonly issueComments: string[];
   /** Whether GitHub refuses every review comment the round creates. */
   readonly rejectCreate?: boolean;
@@ -1207,4 +1205,37 @@ test("#914: a default token file that cannot be used does not fail the round, wh
   assert.equal(ran.printed.exit, 0, `${ran.printed.stdout}${ran.printed.stderr}\n${ran.log}`);
   assert.notEqual(ran.seen, "never started");
   assert.ok(!ran.seen.includes(PLANTED), "Copilot was given the unusable file's contents");
+});
+
+test("#913: a round whose only finding is about the change as a whole leaves a thread on the file it names open, which squiz reply answers and the next round rules on", async () => {
+  const change: Finding = {
+    scope: "change",
+    file: FILE,
+    severity: "medium",
+    headline: "The change duplicates the scheduler",
+    reasoning: ["Two schedulers drift apart."],
+    suggestedFix: "Use the one there is.",
+  };
+  const starts: PlannedStart[] = [
+    { findings: [change], verdicts: [] },
+    { findings: [], verdicts: [{ thread: "PRRT_1", verdict: "fixed" }] },
+  ];
+  await withPullRequest(starts, async (fixture) => {
+    const first = await review(fixture);
+    assert.equal(first.exit, 2, `a finding about the whole change left nothing open (#889):\n${first.stdout}${first.stderr}\n${hostLog(fixture.episode)}`);
+    const [thread] = fixture.gh().threads;
+    assert.equal(thread?.path, FILE, `the finding was not posted on the file it names: ${JSON.stringify(fixture.gh())}`);
+    assert.equal(thread.subjectType, "FILE", "the finding was posted on a line rather than on the file");
+    assert.match(first.stdout, /^PRRT_1 src\/ui\/card\.ts \(whole file\) medium — The change duplicates the scheduler$/mu);
+
+    const replied = spawnSync(squiz, ["reply", "PRRT_1", "There is one scheduler now."], { cwd: fixture.worktree, encoding: "utf8" });
+    assert.equal(replied.stdout, "replied in PRRT_1 on #41\n", replied.stderr);
+    fixture.push();
+
+    const second = await review(fixture);
+    assert.equal(second.exit, 0, `${second.stdout}${second.stderr}\n${hostLog(fixture.episode)}`);
+    const comments = fixture.gh().threads[0]?.comments.map((comment) => comment.body.split("\n", 1)[0]);
+    assert.deepEqual(comments, ["**Squiz reviewer · medium — The change duplicates the scheduler**", "**Squiz coding agent**", "**Squiz reviewer · fixed**"]);
+    assert.equal(fixture.gh().threads[0]?.isResolved, true, "the next round's ruling was not applied to the thread");
+  });
 });

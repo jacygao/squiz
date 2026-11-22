@@ -137,6 +137,7 @@ function finding(headline: string): Finding {
 function generalFinding(headline: string): Finding {
   return {
     scope: "change",
+    file: "src/ui/card.ts",
     severity: "medium",
     headline,
     reasoning: ["The scheduler already does this."],
@@ -277,7 +278,7 @@ test("the composed body carries the counts, the spend, what needs a person and t
         "",
         "**Notes**",
         "",
-        "- About the change as a whole: The queue duplicates the scheduler",
+        "- About the change as a whole: The queue duplicates the scheduler (no thread could be opened for it)",
         "- The episode ended at its round cap rather than with nothing left open, and did not review 8d21a4f",
       ].join("\n"),
     );
