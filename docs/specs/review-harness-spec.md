@@ -3682,9 +3682,9 @@ worktree is a configuration that cannot be read.
 with a letter, a digit or `@`. An empty string is refused rather than read as
 none.
 
-`copilotTokenFile` is an absolute path of up to 4,096 characters, none of them a
-control character. The file it names, and the default file, each hold the token
-alone, of letters, digits and `_`, and the whitespace around it is dropped.
+`copilotTokenFile` is an absolute path of up to 4,096 characters. The file it
+names, and the default file, each hold the token alone, of letters, digits and
+`_`, and the spaces, tabs and line ends around it are dropped.
 Either file is read where a Copilot reviewer starts, and by `squiz doctor`. A
 value that is not such a path is refused with an error that leaves the value
 out:
