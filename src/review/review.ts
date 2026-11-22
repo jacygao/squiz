@@ -408,8 +408,11 @@ type Reviewed = Extract<StateRecord, { readonly status: "reviewed"; readonly res
 /** What the run's state has reached, or `undefined` while it is queued or under review. */
 function settle(waiting: Waiting, state: EpisodeState): Settled | undefined {
   const records = state.records ?? [];
+  // Every run on the episode waits while a failed close posts its summary,
+  // whatever its own record says, so what the posting came to reaches it.
+  if (closePosting(records, waiting)) return undefined;
   const record = recordFor(records, waiting.own);
-  if (record === undefined) return state.closeReported === true && !closePosting(records, waiting) ? closed(waiting, state) : undefined;
+  if (record === undefined) return state.closeReported === true ? closed(waiting, state) : undefined;
   return settleRecord(waiting, state, record);
 }
 

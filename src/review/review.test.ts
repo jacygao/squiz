@@ -742,6 +742,20 @@ test("#915: a state queued behind a failed round waits while that round's close 
   });
 });
 
+test("#915: a run on an earlier state with its own result waits while a later failed close is still posting its summary", async () => {
+  await withWorktree(async (fixture) => {
+    // A left threads open, and B, queued behind it, failed at the cap.
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(2) },
+      POSTING_CLOSE,
+    ], CLOSED_EPISODE);
+
+    const printed = await runReview({ ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), threads: [OPEN_THREAD], until: deadlineIn(POLL_MS * 5) }), ...liveHost(fixture) });
+
+    assert.equal(printed.exit, 4, `the run read its own result while the episode's close was still posting: ${printed.stdout}${printed.stderr}`);
+  });
+});
+
 test("#915: a run that arrives after a failed close waits while that close is still posting its summary, and says so", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [POSTING_CLOSE], CLOSED_EPISODE);
