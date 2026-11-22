@@ -1780,28 +1780,32 @@ reviewer". An episode that ran no round has no reviewer line.
 
 ## 7. Commands
 
-Everything the harness ships to be run is a subcommand of one binary, `squiz`,
-run from a shell. Squiz ships no slash command: the setup check is
-`squiz doctor`.
+Everything squiz ships to be run is a subcommand of one binary, `squiz`. Squiz
+ships no slash command, and the setup check is `squiz doctor`.
 
 ### The `squiz` binary
 
-A coding agent in Claude Code, and a command a person types after `!` in a
-Claude Code session, run `squiz` by name, because the plugin's `bin/` is on the
-Bash tool's `PATH`. Every other shell, Copilot's included, runs it by name
-through the link `squiz init` makes in a directory already on its `PATH`.
+In Claude Code, the coding agent's Bash tool and a command a person types after
+`!` run `squiz` by name. Every other shell, Copilot's included, runs it through
+the link `squiz init` makes.
 
 | Command | Run by | What it does |
 |---|---|---|
-| `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews pull request `<number>` once for each head commit and each new reply on the reviewer's threads, waits for the review, and prints what is open. Under the local venue it is `squiz review`, with no number, and reviews the working tree it is run in (§ 4). |
-| `squiz status` | A person, a coordinator | Lists the reviews running and finished in every worktree of the repository. |
-| `squiz init` | A person | Links `squiz` onto `PATH`, for coding agents other than Claude Code. |
-| `squiz doctor` | A person | Prints a line per dependency, saying it is present or naming what is missing or unauthenticated, and exits 1 where a required one is not usable (The setup check). |
-| `squiz version` | A person | Prints the version and the `bin/squiz` path of the squiz that answers, as `squiz 0.1.0 /Users/ana/squiz/bin/squiz`. `squiz --version` is the same command. |
-| `squiz hook` | Claude Code, Copilot | The entry point for `Stop`, `SubagentStop`, `SessionStart`, `SubagentStart` and `UserPromptSubmit`, named in `hooks.json`. A stop queues the review of the change in the payload's `cwd` and returns. A start hands that `cwd` to the venue's `recordStart`, and a prompt hands it and the prompt to the venue's `recordPrompt`. § 3 The hooks sets out all three. |
-| `squiz host <number>` | A trigger, never a person | The round host (§ 3). |
-| `squiz threads` | The coding agent | Lists the open threads on the pull request for the current branch. Each line carries the thread's identifier, where the thread is, and the severity and headline of the finding on it. |
-| `squiz reply <id> <text>` | The coding agent | Replies in a thread. |
+| `squiz review <number>` | The coding agent, a coordinator, a CI job | Reviews the pull request, waits for the review, and prints what is open. Under the local venue it takes no number (§ 4). |
+| `squiz status` | A person, a coordinator | Lists the reviews recorded in every worktree of the repository. |
+| `squiz init` | A person | Links `squiz` onto `PATH`, and allows its commands in Claude Code's user settings. |
+| `squiz doctor` | A person | Checks each dependency (The setup check). |
+| `squiz version` | A person | Prints the version and path of the squiz that answers. `squiz --version` is the same command. |
+| `squiz hook` | Claude Code, Copilot | The hooks' entry point (§ 3 The hooks). |
+| `squiz host <number>` | A trigger, never a person | The round host (§ 3 The round host). |
+| `squiz threads` | The coding agent | Lists the open threads of the change. |
+| `squiz reply <id> <text>` | The coding agent | Replies on a thread. |
+
+`squiz threads` lists the open threads of the change in the worktree it runs
+in. Under the GitHub venue that is the open pull request whose head is the
+branch checked out there. Under the local venue it is the threads in that
+worktree's `.squiz/local/`, and the heading reads `<n> open threads on the
+working tree`:
 
 ```
 3 open threads on #185
@@ -1810,74 +1814,58 @@ PRRT_kwDOUEd2qM6mPuVO scratch/paging/pages.ts:34 high — pageAt starts every pa
 PRRT_kwDOUEd2qM6mPuWa scratch/paging/cursor.ts (whole file) medium — Paging duplicates the cursor the API already returns
 ```
 
-A thread whose first comment carries none of § 2 Identity's markers was opened by
-a person rather than by the reviewer. It is no finding, and its line is the
-identifier and the location alone. A thread on a file as a whole, a finding
-about the change as a whole among them, is located as the file and
-`(whole file)`.
+Each line is the thread's identifier, its location, and the severity and
+headline of the finding on it. The identifier leads the line undecorated, so
+the line splits into identifier and rest at the first space. A thread on a file
+as a whole is located as the file and `(whole file)`. A thread whose first
+comment carries none of § 2 Identity's markers was opened by a person. It is no
+finding, and its line is the identifier and the location alone.
 
-`<id>` is whatever `squiz threads` printed for that thread. It leads the line,
-undecorated, so a line splits into the identifier and the rest at the first
-space. Under the GitHub venue every id is a `PRRT_` node id. `squiz threads`
-lists review threads alone, so a conversation comment is never one of them.
-`squiz reply` hands any other id to GitHub as it does a thread's, posts
-nothing, and prints what GitHub answered:
+`squiz reply <id> <text>` replies as the coding agent on a thread `squiz threads`
+printed, in the same change. It refuses an id the change holds no thread for,
+and posts nothing:
 
 ```
-squiz: nothing replied in G1: GitHub reported a GraphQL error: Could not resolve to a node with the global id of 'G1'
+squiz: nothing replied in T9: threads.json holds no thread "T9"
 ```
-
 
 ### `squiz review`
 
-`squiz review <number>` runs from the worktree pull request `<number>`'s branch is
-checked out in. Under the local venue it is `squiz review`, run in the worktree
-it reviews (§ 4). It acts on the record for the pull request's state as § 3 The
-state file sets out, and waits for the review within one deadline for the whole
-invocation (§ 8). The exit status says what the coding agent does next:
+`squiz review <number>` acts on the record of the pull request's current state
+(§ 3 The state file) and waits for its review within the deadline § 8 sets.
+Under the local venue it is `squiz review`, run in the worktree it reviews, and
+every message names the change, its rerun and where the summary is as § 4 The
+contract sets out. The exit status says what happened:
 
-| Exit | What it means | What the coding agent does |
-|---|---|---|
-| 0 | A round reviewed this state, and nothing of this review is open. The episode is closed, and its summary is on the pull request. Or the pull request is a draft, and no review runs until it is marked ready for review. | Finishes. |
-| 2 | Threads are open, and rounds remain. | Works the threads, pushes what it changed and replies, and runs the command again. |
-| 3 | The round cap or the token bound closed the episode with threads still open, and they are printed. Or it closed the episode before a round reviewed this state, and the output says so. | Finishes, and says what is open, or that the state was not reviewed. A person takes it from here. |
-| 4 | Still reviewing. The run's deadline came before the review of this state was done, before the review of a state queued behind a clean one, or before the review of the state that superseded this one. The round goes on in the round host. | Runs the command again. |
-| Anything else | The review could not run. | Reports the lines on stderr. |
+| Exit | What it means |
+|---|---|
+| 0 | A round reviewed this state and nothing is open. The episode is closed, and its summary is posted. Or the pull request is a draft. |
+| 1 | The review could not run. |
+| 2 | Threads are open, and rounds remain. |
+| 3 | The round cap or the token bound closed the episode with threads open. Or it closed the episode without a round reviewing this state, whatever is open. |
+| 4 | The review goes on in the round host, and the run's wait ended first. |
 
-**Exit 0 is given only for a state a round reviewed.** A close at the round cap
-or the token bound that answers for a state no round reviewed exits 3, whatever
-is open: the state the close was reached on before a round took it, a state
-queued behind the closing round, and a new commit or reply after the close. The
-run waiting on such a state and every later run on it exit 3 alike. A state
-superseded by one a round reviewed is answered by that state's result (§ 3 The
-state file).
+These are the only statuses `squiz review` gives. A caller reads any other, such
+as a crash or a command that could not start, as 1. Apart from a draft, exit 0
+is given only for a state a round reviewed. A state answered with 3 is answered
+with 3 for the run waiting on it and for every later run.
 
-Exit 4 is neither an outcome nor a failure. Every status outside the table reads
-as 1 does, so a command that could not be started, or crashed past the
-harness's own trap, is never read as a result.
+A run that exits 0, 2, 3 or 4 prints its outcome on stdout. A run that exits 1
+prints nothing on stdout. stderr carries what failed (§ 8 The command's stderr),
+and the line § 10 Configuration gives where no `.squiz.json` is found.
 
-**stdout carries the outcome and stderr carries what failed.** A run that exits 0,
-2, 3 or 4 prints its outcome on stdout, and § 8 The command's stderr sets out what
-it adds on stderr. A run that exits 1 prints nothing on stdout. A run whose main
-worktree holds no `.squiz.json` adds one line before any other on stderr, saying
-the defaults are in use, whatever its exit (§ 10 Configuration).
-
-**The first line names a file holding the whole output**, because Claude Code can
-hand the agent less than the command printed. A run that exits 0, 2, 3 or 4
-writes everything it prints on stdout to `.squiz/<number>/review.txt`, replaced
-on every run, and prints that path first. A run on a draft prints its one line
-alone, and writes no file. A file that cannot be written leaves the outcome and
-its status as they are, and stderr adds one line:
+A run that exits 0, 2, 3 or 4 writes everything it prints on stdout to
+`.squiz/<number>/review.txt`, replacing it on every run, and prints that path
+first. Where the file cannot be written, the outcome and the exit stand, and
+stderr adds:
 
 ```
 squiz: the output could not be written to /work/squiz/.squiz/41/review.txt: EACCES: permission denied
 ```
 
-Each open thread is printed as its `squiz threads` line, followed by the thread's
-comments indented by two spaces. The first comment is given without its first
-line, which the `squiz threads` line already carries.
-
-Threads open, exit 2:
+Every number and every thread in the output is as it stands on the pull request.
+Each open thread is printed as its `squiz threads` line, followed by its comments
+indented two spaces, the first without its first line. Threads open, exit 2:
 
 ```
 Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
@@ -1909,415 +1897,221 @@ Fix what applies in /work/squiz, and reply on each thread with
 you disagree. Commit and push what you changed, then run `squiz review 41` again.
 ```
 
-A run handed a result it did not produce says so in the line after the path, and
-prints the threads as they stand on the pull request now:
+A run handed a result it did not produce heads it `Squiz already reviewed PR #41
+at 3f9c2e0: round 1 of 3, 2 new findings.`, and prints the threads as they stand
+on the pull request now.
+
+Nothing open, exit 0: the heading is `Squiz reviewed PR #41 at 8d21a4f: round 2
+of 3, no new findings.`, and the paragraph after it is `Nothing is open. The
+review is closed, and its summary is on the pull request.`
+
+A draft, exit 0: the run prints only `PR #41 is a draft. Squiz reviews it once
+it is marked ready for review, so there is nothing to wait for.`, and writes no
+file. The hooks write nothing for a draft. Once it is marked ready for review,
+the next trigger queues its state as any other.
+
+Closed with threads open, exit 3: after the round's heading, the paragraph is
+``The round cap is reached. The review is closed with 1 thread open, and its
+summary is on the pull request. A person takes it from here, so do not run
+`squiz review 41` again.``, and the open threads follow. Where the token bound
+closed the episode, the paragraph begins "The token bound is reached".
+
+Closed before a round reviewed the run's state, exit 3: a line after the
+round's heading says why, as `Squiz did not review PR #41 at 8d21a4f: the
+episode closed at the round cap, after reviewing 3f9c2e0.`, and the paragraph
+says "with nothing open" where nothing is.
+
+Still reviewing, exit 4: the run prints one of these lines after the path.
+
+- Its state's round is running: ``Squiz is still reviewing PR #41 at 3f9c2e0. Run `squiz review 41` again to wait for it.``
+- Its state is queued behind an older one's round: ``Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run `squiz review 41` again to wait for it.``
+- Its state was reviewed clean and a later one is queued: ``Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.``
+- Its state was superseded (§ 3 The state file): ``Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.``
+
+A run on an episode that has already closed prints the close, whatever the round
+cap or the token bound would now allow. The line names the head the close was
+reached on, as `Squiz's review of PR #41 closed at 3f9c2e0 after 2 rounds, with
+nothing open. Only a new head commit starts another review in this worktree.` A
+clean close is printed this way, with exit 0, only for its own head and for a
+failed state it recorded. Where the round cap or the token bound closed it, the
+line ends `No round runs again in this worktree.` instead. Where threads are
+open, the line counts them, the run exits 3, and the threads follow.
+
+The review could not run, exit 1. Each reason is one line on stderr, and § 8's
+line to stop ends the output. Where the round host's start cannot be told, the
+run waits on a live host. Where no host takes the review, the state stays
+queued and the run prints:
 
 ```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz already reviewed PR #41 at 3f9c2e0: round 1 of 3, 2 new findings.
-```
-
-Nothing open, exit 0:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz reviewed PR #41 at 8d21a4f: round 2 of 3, no new findings.
-
-Nothing is open. The review is closed, and its summary is on the pull request.
-```
-
-A draft, exit 0. The line is the whole output:
-
-```
-PR #41 is a draft. Squiz reviews it once it is marked ready for review, so there is nothing to wait for.
-```
-
-Closed with threads open, exit 3:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz reviewed PR #41 at 77e0f19: round 3 of 3, no new findings.
-
-The round cap is reached. The review is closed with 1 thread open, and its summary
-is on the pull request. A person takes it from here, so do not run
-`squiz review 41` again.
-
-PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
-  …
-```
-
-Where the token bound closed the episode, the second paragraph begins "The token
-bound is reached" instead.
-
-Closed before a round reviewed the run's state, exit 3. The line saying why the
-state was not reviewed comes after the heading of the close, as § 3 The state
-file shows, and the second paragraph says "with nothing open" where nothing is:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz reviewed PR #41 at 3f9c2e0: round 3 of 3, no new findings.
-Squiz did not review PR #41 at 8d21a4f: the episode closed at the round cap, after reviewing 3f9c2e0.
-
-The round cap is reached. The review is closed with nothing open, and its summary
-is on the pull request. A person takes it from here, so do not run
-`squiz review 41` again.
-```
-
-A close reached before any round took the run's state has no round to head it,
-so the line saying why is the heading. Where the close has no summary on the pull
-request, the paragraph does not claim one:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz did not review PR #41 at 3f9c2e0: the episode closed at the token bound before a round took this state.
-
-The token bound is reached. The review is closed with nothing open. A person takes
-it from here, so do not run `squiz review 41` again.
-```
-
-Still reviewing, exit 4. A run whose deadline arrived while its state's round
-ran:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz is still reviewing PR #41 at 3f9c2e0. Run `squiz review 41` again to wait for it.
-```
-
-A run whose state is queued behind the round of an older one:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz is reviewing PR #41 at 3f9c2e0 first, and 8d21a4f is next. Run `squiz review 41` again to wait for it.
-```
-
-A run whose own state was reviewed clean while a later one was queued, and whose
-wait ran out before the episode closed. Exit 0 and the line about the summary
-come only with the close itself:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.
-```
-
-A run whose own state was superseded before a round took it (§ 3 The state
-file), and whose wait ran out before the newer state's round ended. The newer
-state is named as the reason for superseding names it:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz is reviewing PR #41 at 8d21a4f instead of 3f9c2e0. Run `squiz review 41` again to wait for it.
-```
-
-A run on an episode that has already closed prints the close. The line names
-the head of the state the close was reached on, because it can be another head
-than the one the run read. A clean close exits 0, and is printed this way only
-for its own head and for a failed state it recorded, since any other state starts
-a new episode or is reported from its record (§ 3 The state file):
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz's review of PR #41 closed at 3f9c2e0 after 2 rounds, with nothing open. Only a new head commit starts another review in this worktree.
-```
-
-Where the round cap or the token bound closed it, the line ends "No round runs
-again in this worktree." Where it closed with threads open, exit 3, the line
-counts them and the threads follow, each as exit 3 prints it:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz's review of PR #41 closed at 77e0f19 after 3 rounds, with 2 threads open. No round runs again in this worktree.
-
-PRRT_kwDOL7tYbc5abcd2 packages/sync/src/session.ts:57 medium — Clock skew is read as token expiry
-  …
-```
-
-Such a close exits 0 for a state a round reviewed where nothing is open, and 3
-otherwise. Where no round reviewed the run's state, a line saying why comes
-first. It names the state as the run that waited on it was told. A state that
-arrived after the close is given the reason "the episode closed at the round
-cap, after reviewing" the head the closing round reviewed, or "the episode
-closed at the round cap before a round took this state" where no round closed
-it, with "the token bound" in place of "the round cap" where that closed it:
-
-```
-Full output, to read where this is cut short: /work/squiz/.squiz/41/review.txt
-Squiz did not review PR #41 at 9a4b1c7: the episode closed at the round cap, after reviewing 3f9c2e0.
-Squiz's review of PR #41 closed at 3f9c2e0 after 3 rounds, with nothing open. No round runs again in this worktree.
-```
-
-The review could not run, exit 1, on stderr. Every exit-1 output ends with the
-line that tells the coding agent to stop:
-
-```
+squiz: no review ran: whether the round host for PR #41 started could not be told, and none has taken the review since: the intermediate process exited 1: spawn node ENOENT
+squiz: `squiz status` shows whether one takes it later, and .squiz/41/host.log holds what the host wrote
 squiz: put these lines in your report rather than running squiz review again
 ```
 
-A round that failed prints the reason its failure comment gives, then where the
-comment went:
+The other reasons take the same form:
 
-```
-squiz: review failed: the reviewer was killed at its 900-second bound, and the round kept the 2 findings the reviewer had reported; the reviewer's 21 messages took about 43 seconds each
-squiz: the failure is posted on PR #41
-squiz: put these lines in your report rather than running squiz review again
-```
+- A failed round prints `squiz: review failed: <reason>`, with the reason its
+  failure comment gives (§ 8 The failure comment), then `squiz: the failure is
+  posted on PR #41`.
+- A run that failed before any round, or could not reach GitHub, prints
+  `squiz: no review ran: <why>`, as `squiz: no review ran: PR #41 is closed`.
+- A run after this worktree pushed waits up to 60 seconds, or until its
+  deadline where that comes first, for GitHub to report a head containing the
+  pushed commit, and acts on that head. Where GitHub does not, the run queues
+  nothing and prints `squiz: no review ran: PR #41 still has 3f9c2e0 as its head
+  after 60 seconds, though this worktree pushed 8d21a4f to it`. Commits not
+  pushed, a head pushed from elsewhere, and a branch with no push destination
+  are taken as GitHub reports them. The hooks never wait.
 
-A round that left threads open and
-has findings that no thread holds keeps exit 2, and prints each on stderr as
-§ 6's Notes write it, after the line counting any it could not post:
+A round that left threads open and has findings no thread holds keeps exit 2.
+On stderr it prints the count it could not post, where any failed to post, then
+each finding as § 6's Notes write it:
 
 ```
 squiz: round 1 could not post 1 of its 3 findings to PR #41
 squiz: round 1 raised this on no thread: `src/sync/queue.ts:90` — The queue is never drained (no thread could be opened for it)
-squiz: round 1 raised this on no thread: `src/cache.ts:12` — The cache is never cleared (raised, and its comment could not be posted)
 ```
-
-A round that could post none of its findings prints the same way as a failed
-round:
-
-```
-squiz: review failed: round 2 found 3 findings and could not post them to PR #41
-squiz: the failure is posted on PR #41
-squiz: put these lines in your report rather than running squiz review again
-```
-
-A run that failed before any round, or could not reach GitHub, prints one line
-saying why, then the line to stop. The lines saying why:
-
-```
-squiz: no review ran: PR #41's head is "feature-a", and "/work/squiz" has "main" checked out
-squiz: no review ran: PR #41 is closed
-squiz: no review ran: whether round host 4242 for PR #41 is still running could not be told: ps did not answer within 2000ms
-```
-
-A round host whose start cannot be told is waited on once a live process holds
-`.squiz/<number>/host.lock`. Where none holds it within 10 seconds, or by the
-run's deadline where that comes first, the run exits 1 saying where to look:
-
-```
-squiz: no review ran: whether the round host for PR #41 started could not be told, and none has taken the review since: the intermediate process exited 1: spawn node ENOENT
-squiz: `squiz status 41` shows whether one takes it later, and .squiz/41/host.log holds what the host wrote
-squiz: put these lines in your report rather than running squiz review again
-```
-
-**A run straight after a push waits for GitHub to report the pushed commit.**
-GitHub can go on reporting the pull request's old head for some seconds after a
-push lands, while the branch's remote-tracking ref, `@{push}`, already names the
-new commit. Where the head GitHub reports does not contain `@{push}`, and the
-repository has that head, the run decides on nothing. It asks GitHub again once a
-second, for up to 60 seconds, and acts on the first head it reports that does
-contain the pushed commit. Commits not yet pushed leave `@{push}` where GitHub
-already has it, a head this repository lacks was pushed from elsewhere, and a
-branch with no push destination has no `@{push}`, so each is taken as GitHub
-reports it. The hooks do not wait, and trigger on the head GitHub reports. Where
-GitHub has not reported the push after 60 seconds, or by the run's deadline where
-that comes first, the run exits 1:
-
-```
-squiz: no review ran: PR #41 still has 3f9c2e0 as its head after 60 seconds, though this worktree pushed 8d21a4f to it
-squiz: put these lines in your report rather than running squiz review again
-```
-
-Every number and every thread in the output is computed from what the round read
-back from the pull request, so the coding agent can check each one there.
 
 ### `squiz status`
 
-`squiz status` lists every review recorded in any worktree of the repository,
-one line per pull request state, newest first. It starts nothing and asks
+`squiz status` takes no argument. It lists every review recorded in any worktree
+of the repository, one line per pull request state. It starts nothing and asks
 nothing of GitHub.
 
 ```
-PR    Commit   Replies  State      Started           Elapsed  Result                                      Session           Worktree                          Resume
-#41   9e01b2c  OmQx7a   queued     —                 —        —                                           —                 .claude/worktrees/agent-a5336e10  —
-#41   8d21a4f  OmQx7a   reviewing  07:13:05          3m 12s   —                                           tmux squiz-41-r3  .claude/worktrees/agent-a5336e10  —
-#41   3f9c2e0  OmQx7a   reviewed   07:06:02          2m 40s   1 thread open                               tmux squiz-41-r2  .claude/worktrees/agent-a5336e10  pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
-#38   a1b2c3d  —        failed     2026-10-04 06:40  8m 00s   the reviewer was stopped at the time bound  detached          .claude/worktrees/agent-a077fff7  pi --session-dir .squiz/38/rounds/1/session --session 0193f1a0-2c4b-7e9d-8f3a-1b6c5d7e9f02
+PR   Commit   Replies  State      Started           Elapsed  Result                                                                       Session           Worktree                          Resume
+#41  9e01b2c  OmQx7a   queued     —                 —        —                                                                            —                 .claude/worktrees/agent-a5336e10  —
+#41  8d21a4f  OmQx7a   reviewing  07:13:05          3m 12s   —                                                                            tmux squiz-41-r3  .claude/worktrees/agent-a5336e10  —
+#41  3f9c2e0  OmQx7a   reviewed   07:06:02          2m 40s   1 thread open                                                                tmux squiz-41-r2  .claude/worktrees/agent-a5336e10  pi --session-dir .squiz/41/rounds/2/session --session 0193f2c4-7d1e-7b52-9c1a-5e2f4d8a6b31
+#39  77e0f19  —        reviewed   2026-10-04 07:20  4m 05s   1 thread open, review closed at the token bound, 2 of 5 findings not posted  detached          .claude/worktrees/agent-a3c91e07  pi --session-dir .squiz/39/rounds/3/session --session 0193f1b2-4d6e-7a1c-9b3f-2c8d5e7f9a14
+  the review of PR #39 closed without its summary: gh: HTTP 502 Bad Gateway
+#38  a1b2c3d  —        failed     2026-10-04 06:40  8m 00s   the reviewer was stopped at the time bound                                   detached          .claude/worktrees/agent-a077fff7  pi --session-dir .squiz/38/rounds/1/session --session 0193f1a0-2c4b-7e9d-8f3a-1b6c5d7e9f02
 ```
 
 Each column holds:
 
-- **Replies:** the latest activity the state was read with, as the last six
-  characters of its identifier, or `—` for none.
-- **State:** the record's status, with two readings of a reviewing record. One
-  whose round host has gone, by its pid and start time, is `killed` until a
-  recovery records it failed. One whose host cannot be told running or gone is
-  `reviewing`, and its Result is "the round host could not be checked:", then
-  why. A state the episode closed before reviewing is `not reviewed`.
-- **Started:** when the round started, in local time. A round started today
-  shows the time of day, and one started on another day shows the date and the
-  minute. A reviewing record shows its reviewer's start once the reviewer has
-  started, and its round host's start before then.
-- **Elapsed:** the time so far for a review that is running, and the time from
-  start to end for one that finished. A killed review, a state no round has
-  started, and a state that failed before a round took it show `—`.
+- **PR:** the change's key, as § 4 The contract prints it.
+- **Replies:** the last six characters of the identifier of the latest activity
+  the state was read with, or `—` for none.
+- **State:** the record's status. A reviewing record whose round host has gone
+  is `killed`. One whose host cannot be told running or gone is `reviewing`,
+  and its Result is "the round host could not be checked:", then why. A state
+  the episode closed before reviewing is `not reviewed`.
+- **Started:** in local time, the time of day for a round started today, and
+  the date and minute otherwise. A reviewing record shows its reviewer's start
+  once the reviewer has started, and its round host's start before then.
+- **Elapsed:** the time so far for a running review, and from start to end for
+  a finished one. A killed review, a state no round started, and a state that
+  failed before a round took it show `—`.
 - **Result:** for a failed state, the reason its failure comment gives. For a
   state not reviewed, why not. For a reviewed state, how many of the reviewer's
-  threads it left open, and "review closed" where it closed the episode. Where
-  the round cap or the token bound closed it with threads open, "review closed
-  at the round cap" or "at the token bound". Where GitHub refused some of the
-  round's findings, the count follows, as "2 of 5 findings not posted".
-- **Session:** the backend and the label of the reviewer's tab or window,
-  `squiz-<number>-r<k>` as § 5 The reviewer session opens it, with `k` the
-  round's number its record keeps. A record that keeps no `k` shows the backend
-  alone. A detached reviewer is `detached`, and a state with no reviewer
-  started is `—`.
-- **Worktree:** the worktree's path relative to the main worktree, `.` for the
-  main worktree itself.
-- **Resume:** the content of the round's `rounds/<k>/resume.txt` once the round
-  is over, or `—`.
+  threads are left open, then "review closed", "review closed at the round cap"
+  or "review closed at the token bound" where it closed the episode, then the
+  count of findings GitHub refused, as "2 of 5 findings not posted". Only the
+  count is shown. The round's record and `squiz review`'s stderr hold each one.
+- **Session:** the backend and the label `squiz-<number>-r<k>` (§ 5 The
+  reviewer session). A record that keeps no `k` shows the backend alone. A
+  detached reviewer is `detached`, and a state with no reviewer started is `—`.
+- **Worktree:** the path relative to the main worktree, `.` for the main
+  worktree itself.
+- **Resume:** the round's `resume.txt` once the round is over, or `—`.
 
-The order is newest first by what the records carry:
+Every cell is one line: a line break, with the whitespace around it, prints as
+one space. A reviewed state's problems, the failures that did not change its
+outcome, follow its line, one line each, indented two spaces, and never widen a
+column.
 
-1. Episodes with a state queued or under review come first.
-2. Then episodes by the latest start or end time any of their records carries.
-3. Then by the higher pull request number.
+The lines are ordered by:
 
-Within an episode, the newest state comes first, in the reverse of the order the
-state file keeps them. A closed episode a later one replaced, in
-`episodes/<n>/` (§ 3 The state file), is listed as an episode of its own, in the
-same order, under the same PR column and worktree. Its Resume is read from
+1. Episodes with a state queued or under review first.
+2. Then the latest start or end time any of the episode's records carries.
+3. Then the higher pull request number.
+
+Within an episode, the newest state comes first. A closed episode a later one
+replaced, in `episodes/<n>/` (§ 3 The state file), is listed as an episode of
+its own under the same PR and worktree, with its Resume read from
 `episodes/<n>/rounds/<k>/resume.txt`.
 
-Every cell is one line. A line break in a reason, with the whitespace around it,
-is printed as one space, so each state keeps its one line.
-
-**A reviewed state's problems follow its line, one line each, indented by two
-spaces.** These are what failed without changing the round's outcome, such as a
-summary that could not be posted. Each is one line by the same rule as a cell,
-and none of them widens a column:
-
-```
-PR    Commit   Replies  State     Started           Elapsed  Result                                                                       Session   Worktree                          Resume
-#39   77e0f19  —        reviewed  2026-10-04 07:20  4m 05s   1 thread open, review closed at the token bound, 2 of 5 findings not posted  detached  .claude/worktrees/agent-a3c91e07  pi --session-dir .squiz/39/rounds/3/session --session 0193f1b2-4d6e-7a1c-9b3f-2c8d5e7f9a14
-  the review of PR #39 closed without its summary: gh: HTTP 502 Bad Gateway
-```
-
-The record keeps how many findings were not posted, and not which. Where the
-round closed the episode, its summary's Notes lists each one, as § 6 sets out.
-Where the round left threads open and the episode with them, nothing lists them.
-
-A state file that cannot be read gets a line of its own on stderr, naming the
-pull request, the worktree and what was wrong, and every other worktree is still
-listed. So does an `episodes/` directory that is there and cannot be listed. A worktree git lists that is gone from disk holds no records and prints
-nothing. Where nothing is recorded anywhere, stdout says so:
-
-```
-No review is recorded in any worktree of this repository.
-```
-
-That line is printed only where every state file was read. Where one could not
-be and no other state was listed, stdout is empty, so an unread record is never
-taken for none.
+A state file that cannot be read, or an `episodes/` directory that cannot be
+listed, gets a line on stderr naming the pull request, the worktree and what
+was wrong, and every other worktree is still listed. A worktree git lists that
+is gone from disk prints nothing. Where nothing is recorded and every state file
+was read, stdout is `No review is recorded in any worktree of this repository.`
+Where a state file could not be read and nothing else was listed, stdout is
+empty.
 
 ### `squiz init`
 
-`squiz init` does two things, and prints a line for each:
+`squiz init` links `squiz` onto `PATH` and allows its commands in Claude Code's
+user settings, printing a line for each. It runs inside a repository or outside
+one, and writes nothing in the repository.
 
-1. It links `squiz` into a directory already on `PATH`, for a coding agent whose
-   shell does not have the plugin's `bin/` on its `PATH`.
-2. It allows the coding agent's three `squiz` commands in Claude Code's user
-   settings, so that no project has to.
+```
+squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz, in place of /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, an earlier version of this install
+squiz: allowed Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *) in /Users/ana/.claude/settings.json
+```
 
-It exits 0 where the link is in place afterwards and 1 otherwise, with the
-link's line on stderr. A settings file it could not change puts its line on
-stderr too, and leaves the exit as the link set it. It writes nothing in the
-repository it is run from, and runs outside one as well.
+Its exit status is the link's alone: 0 where the link is in place afterwards,
+and 1 otherwise, with the link's line on stderr. A settings file it could not
+change puts its line on stderr too, and leaves the exit as the link set it.
 
-#### The link
+**The link** goes in `~/.local/bin`, or else `~/bin`: the first of the two that
+is on `PATH` and is a writable directory. No directory is created and no shell
+startup file is edited. The link holds the real path of the running
+`bin/squiz`. A squiz is a `bin/squiz` whose plugin's `.claude-plugin/plugin.json`
+names it `squiz`.
 
-- **The link's target is this squiz:** the real path of the `bin/squiz` that is
-  running, every symlink resolved, so the link holds an absolute path.
-- **The directory is `~/.local/bin`, or else `~/bin`:** the first of the two
-  that is on `PATH`, is a directory, and can be written to. No other directory
-  on `PATH` is used, even a writable one. `squiz init` creates no directory and
-  edits no shell startup file.
-- **Every `squiz` already on `PATH` is read first,** in each of its
-  directories, with an empty or relative entry read from the working directory
-  as a shell would. Nothing named `squiz` that is not this squiz is replaced, or
-  shadowed by a link put ahead of it, so that no coding agent changes which
-  `squiz` another runs:
+Every `squiz` already on `PATH` is read first, and decides the outcome. Nothing
+named `squiz` that is not this squiz is replaced, or shadowed by a link put
+ahead of it.
 
 | Already on `PATH` | `squiz init` |
 |---|---|
-| A link to this squiz | Changes nothing, and says so |
-| A link to another version of the same plugin-cache install, `plugins/cache/<marketplace>/squiz/<version>/bin/squiz`, whether or not that version is still there | Moves the link to this version, wherever it is on `PATH` |
-| This squiz's own `bin/` | Ignores it, as only Claude Code's shell has it |
-| A link to another squiz checkout or install | Makes no link, names it, and says to remove it and run `squiz init` again to use this one |
-| Another squiz's own `bin/`, as Claude Code puts an enabled plugin's | Makes no link, and says to run `squiz init` by name in that session, so the link points at the squiz Claude Code uses |
-| Anything else named `squiz`, or a link to something missing | Makes no link, names it, and leaves it alone |
-| Nothing, and neither directory can take the link | Makes no link, and says to add `~/.local/bin` to `PATH` |
+| A link to this squiz | Changes nothing, and says so. |
+| A link to another version of the same plugin-cache install, `plugins/cache/<marketplace>/squiz/<version>/bin/squiz`, whether or not that version is still there | Moves the link to this version, wherever it is on `PATH`. |
+| This squiz's own `bin/`, which Claude Code puts on its shell's `PATH` for an enabled plugin | Ignores it. |
+| A link to another squiz checkout or install | Makes no link, names it, and says to remove it and run `squiz init` again. |
+| Another squiz's own `bin/` | Makes no link, and says to run `squiz init` by name in that session. |
+| Anything else named `squiz`, or a link to something missing | Makes no link, names it, and leaves it alone. |
+| Nothing, and neither directory can take the link | Makes no link, and says to add `~/.local/bin` to `PATH`. |
 
-A squiz is a `bin/squiz` whose plugin's `.claude-plugin/plugin.json` names it
-`squiz`.
+**The permission rules** are `Bash(squiz review *)`, `Bash(squiz threads)` and
+`Bash(squiz reply *)`, added to `permissions.allow` in the `settings.json` of
+Claude Code's configuration directory. That directory is `$CLAUDE_CONFIG_DIR`
+where it is set and not empty, and `~/.claude` otherwise. Where
+`CLAUDE_CONFIG_DIR` is set, `~/.claude` is never used.
 
-```
-squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz
-squiz: /Users/ana/.local/bin/squiz already links to this squiz; nothing changed
-squiz: linked /Users/ana/.local/bin/squiz to /Users/ana/.claude/plugins/cache/tools/squiz/0.2.0/bin/squiz, in place of /Users/ana/.claude/plugins/cache/tools/squiz/0.1.0/bin/squiz, an earlier version of this install
-squiz: made no link: /Users/ana/.local/bin/squiz links to another squiz, /Users/ana/dev/squiz/bin/squiz. To use this one instead, remove /Users/ana/.local/bin/squiz and run squiz init again
-squiz: made no link: neither /Users/ana/.local/bin nor /Users/ana/bin is a directory on PATH that you can write to. Add /Users/ana/.local/bin to PATH, creating it if it does not exist, then run squiz init again
-```
-
-#### The permission rules
-
-`squiz init` adds these three rules to `permissions.allow` in the
-`settings.json` Claude Code reads its user settings from:
-
-```
-Bash(squiz review *)
-Bash(squiz threads)
-Bash(squiz reply *)
-```
-
-- **The file is in Claude Code's configuration directory:**
-  `$CLAUDE_CONFIG_DIR` where that is set and not empty, and `~/.claude`
-  otherwise. Where `CLAUDE_CONFIG_DIR` is set, `~/.claude` is never used.
-- **Where that directory does not exist, nothing is written,** and the
-  directory is not created. The line, on stdout, says Claude Code's
-  configuration was not found and names the directory. A `CLAUDE_CONFIG_DIR`
-  that is not an absolute path, or no `CLAUDE_CONFIG_DIR` and no `HOME`, writes
-  nothing either, with the line on stderr.
-- **Inside the directory, a missing file, `permissions` object or `allow` list
-  is created.**
-- **Only a missing rule is added,** after the rules already there. Every other
-  key and rule keeps its value, and a file that already has all three is not
-  written.
-- **A file squiz cannot read as settings is left as it is:** one that cannot be
-  read, is not JSON, is not a JSON object, or whose `permissions` is not an
-  object or `permissions.allow` not a list. The line names the file and says
-  which.
-- **The file is replaced whole,** by a file written beside it and renamed over
-  it, holding the settings as JSON indented by two spaces. A symlinked
-  `settings.json` is written at its target, and stays a link.
-
-Copilot is left as it is. Its tool approvals come only from the `--allow-tool`
-flags a session starts with.
-
-```
-squiz: allowed Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *) in /Users/ana/.claude/settings.json
-squiz: allowed Bash(squiz reply *) in /Users/ana/.claude/settings.json
-squiz: /Users/ana/.claude/settings.json already allows Bash(squiz review *), Bash(squiz threads) and Bash(squiz reply *); nothing changed
-squiz: allowed nothing in /Users/ana/.claude/settings.json: it is not JSON (Expected property name or '}' in JSON at position 2 (line 1 column 3))
-squiz: allowed nothing in /Users/ana/.claude/settings.json: its permissions.allow is not a list
-squiz: allowed nothing: Claude Code's configuration was not found at /Users/ana/.claude
-```
+- Only the rules missing are added, after those already there. Every other key
+  and rule keeps its value. A missing file, `permissions` object or `allow` list
+  is created, and a file already holding all three rules is not written.
+- A file that cannot be read, is not JSON, is not a JSON object, or whose
+  `permissions` is not an object or `permissions.allow` not a list is left as it
+  is. The line names the file and says which, as `squiz: allowed nothing in
+  /Users/ana/.claude/settings.json: its permissions.allow is not a list`.
+- A `settings.json` that is a symlink is written at its target, and stays a
+  symlink.
+- Where the configuration directory does not exist, nothing is written or
+  created, and the line on stdout says Claude Code's configuration was not found
+  there, as `squiz: allowed nothing: Claude Code's configuration was not found
+  at /Users/ana/.claude`. A `CLAUDE_CONFIG_DIR` that is not an absolute path, or
+  neither it nor `HOME` set, writes nothing, with the line on stderr.
+- A file already holding all three prints `squiz:
+  /Users/ana/.claude/settings.json already allows Bash(squiz review *),
+  Bash(squiz threads) and Bash(squiz reply *); nothing changed`.
 
 ### `squiz version`
 
-`squiz version` prints one line, and exits 0:
+`squiz version` and `squiz --version` print one line, and exit 0:
 
 ```
 squiz 0.1.0 /Users/ana/squiz/bin/squiz
 ```
 
-The version is the one in `.claude-plugin/plugin.json` of the squiz that runs,
-and the path is the real path of that squiz's `bin/squiz`, with every symlink
-followed. Both are found from the running squiz, never from the working
-directory or from `PATH`, so a `squiz` on `PATH` that runs another install
-prints that install's version.
-
-Where `plugin.json` cannot be read, is not JSON, names another plugin or names
-no version, it prints nothing on stdout, says why on stderr, and exits 1:
+The version is the one in the running squiz's `.claude-plugin/plugin.json`, and
+the path is the real path of its `bin/squiz`. Neither is read from the working
+directory or from `PATH`. Where `plugin.json` cannot be read, is not JSON, names
+another plugin or names no version, the command prints nothing on stdout, says
+why on stderr, and exits 1:
 
 ```
 squiz: the version of this squiz could not be read: /Users/ana/squiz/.claude-plugin/plugin.json could not be read: ENOENT: no such file or directory, open '/Users/ana/squiz/.claude-plugin/plugin.json'
@@ -2325,8 +2119,8 @@ squiz: the version of this squiz could not be read: /Users/ana/squiz/.claude-plu
 
 ### The setup check
 
-`squiz doctor` is run by a person, from a shell, inside a repository or outside
-one. It prints one line per dependency, and exits 1 where any line failed:
+`squiz doctor` runs inside a repository or outside one. It prints one line per
+dependency, and exits 1 where any line failed:
 
 ```
 git 2.51.0
@@ -2346,110 +2140,56 @@ Each line is at one of three levels, and only `failed` changes the exit status:
 | Level | Meaning |
 |---|---|
 | present | Usable, or an optional tool that is absent |
-| warning | Something a person should see, which squiz runs without |
+| warning | Seen, and squiz runs without it |
 | failed | A required dependency is missing, unusable or unauthenticated |
 
-It starts every tool in the directory it was run from, and writes nothing but
-the temporary directory of Copilot's sign-in prompt, which it removes.
-
-**Each tool is found on `PATH` and started once to ask its version**, within 15
-seconds, and only a version read from its output makes it present. An optional
-tool that is found and cannot be run is a warning.
-
-The rows, in the order they print:
+A tool answers where it is found on `PATH` and prints its version when asked.
+The rows print in this order:
 
 | Row | Required | Present where |
 |---|---|---|
 | `git` | Yes | It answers. |
 | The venue | Yes | `.squiz.json` reads as a round reads it. |
-| `gh` | Under the GitHub venue | It answers, and `gh auth status --json` reports an account whose check succeeded. `gh auth token` is not used, because it can print a token `gh` itself does not use. |
-| Claude Code | Only where `copilot` is missing or cannot be run, since either can be the coding agent | It answers. |
-| Copilot as a coding agent | No, and printed only where `copilot` is on `PATH` | It answers, its experimental features are on, and its extension's socket path fits. |
+| `gh` | Under the GitHub venue | It answers, and `gh auth status --json` reports an account whose check succeeded. |
+| Claude Code | Only where `copilot` is missing or cannot be run | It answers. |
+| Copilot as a coding agent | No, and printed only where `copilot` is on `PATH` | It answers, `"experimental"` is `true` in `<COPILOT_HOME>/settings.json`, and its socket path fits (§ 10 Getting started). |
 | Node | Yes | The Node running squiz is 24 or later. |
 | tmux, Herdr | No | It answers. |
-| The `squiz` link | No, and never a failure | `PATH` holds a link to this squiz, read as `squiz init` reads it. Anything `squiz init` would refuse or change is a warning. |
-| Copilot's copies of squiz | No, and printed only where Copilot has one | Each copy under `<COPILOT_HOME>/installed-plugins/` is this squiz's version. A different one is a warning naming the older, since Copilot's hook runs its own copy and two versions would write one state file. |
-| The reviewer | Yes | `.squiz.json` reads as a round reads it, the reviewer's CLI answers, for Copilot the sign-in prompt succeeds, and for `pi` the model runs at the configured thinking level. |
+| The `squiz` link | No, and never a failure | `PATH` holds a link to this squiz. Anything `squiz init` would refuse or change is a warning. |
+| Copilot's copies of squiz | No, and printed only where Copilot has one | Each copy under `<COPILOT_HOME>/installed-plugins/` is this squiz's version. Each copy at another version is a warning. |
+| The reviewer | Yes | Its CLI answers, its model and sign-in check pass as below, and for `pi` the model runs at the configured thinking level. |
 
-**The venue is the one `venue` names in `.squiz.json`**, read as § 4 Choosing
-the venue sets out, or GitHub outside a repository. Its row names the file as
-the reviewer's row does, below, and under the local venue says that `gh` is not
-required:
+The venue's row and the reviewer's row name the main worktree's `.squiz.json`
+after the venue or version, as `(/work/squiz/.squiz.json)` where it was read and
+`(no /work/squiz/.squiz.json)` where it was not. Under the local venue the row is
+`Venue local (/work/squiz/.squiz.json): reviews run on the working tree, and gh
+is not required`.
 
-```
-Venue github (no /work/squiz/.squiz.json)
-Venue local (/work/squiz/.squiz.json): reviews run on the working tree, and gh is not required
-Venue: .squiz.json refused: /work/squiz/.squiz.json: "venue" is "lcoal", but it must be "github" or "local"
-```
+The reviewer is the one `reviewer` names in `.squiz.json`, or `pi` outside a
+repository or without the file. Its row names the model a round would run on:
+`model` from `.squiz.json`, or else the user's default from the reviewer CLI's
+own settings, or else unknown. CLI settings that cannot be read are a warning
+for `pi` and a failure for Copilot.
 
-**The reviewer is the one `reviewer` names in `.squiz.json`**, read from the
-main worktree as § 10 Configuration sets out, or `pi` outside a repository or
-where the file does not exist. The row names the file's path after the version,
-as `(/work/squiz/.squiz.json)` where it was read and `(no /work/squiz/.squiz.json)`
-where it was not. A git that refuses for any other reason than this being no
-repository fails the row.
+For `pi`, wherever the row names a model, it ends with the thinking level a
+round runs at, read without a model request. A level that matches the
+configured one ends the line, as `; thinking medium`. A level that differs is a
+warning naming the configured level, the level it runs at and the levels the
+model offers. A level `pi` does not report is a warning with the reason.
 
-**The row names the model a round would run on:** `model` from `.squiz.json`,
-or else the user's default from the reviewer CLI's own settings, as § 5 sets out
-for each adapter. Where neither names one, the model is unknown. Settings that
-cannot be read are a warning for `pi`, which starts without them, and a failure
-for Copilot, whose round fails on them.
-
-**For `pi`, the row ends with the thinking level a round runs at**, wherever it
-names a model. `pi` runs a model at the nearest level that model offers, looking
-above the configured level first, and says nothing. DeepSeek V4 Pro offers off,
-high and max, so `medium` runs at high. The check starts `pi` in RPC mode, with
-the round's level and model and with the project untrusted, and asks for the
-level it settled on and the levels the model offers:
-
-```
-pi --mode rpc --no-session --no-approve --no-extensions --thinking medium --model deepseek/deepseek-v4-pro
-{"id":"levels","type":"get_available_thinking_levels"}
-{"id":"state","type":"get_state"}
-```
-
-`pi` answers both before any prompt, so the check makes no model request. A
-level that matches ends the line, as `; thinking medium`. A level that differs
-is a warning naming the configured level, the level it runs at and the levels
-the model offers. A level `pi` does not report is a warning with the reason.
-
-**Copilot's sign-in is checked with one prompt, which spends one request on the
-model the row names**, since no `copilot` command reports a sign-in without
-reaching the model:
-
-```
-copilot -p "Reply with the single word OK." --model gpt-6-astra --no-ask-user
-```
-
-Where the model is unknown, the prompt carries no `--model` and runs on whatever
-Copilot falls back to, as the round does. It runs with the variables a round
-gives a Copilot reviewer, under a `COPILOT_HOME` given who the user is signed in
-as, as a round's is, and with `COPILOT_MODEL` set empty, so it passes wherever a
-round could start. It signs in from the token file a round would use (§ 5
-Tools), and the line says which source it signed in with: the token in
+For Copilot, sign-in is checked by one prompt, which spends one request on the
+model the row names, or names no model where it is unknown. The prompt runs as
+a round's reviewer would run, signing in from the token file a round would use
+(§ 5 Tools), and the row says which source it signed in with: the token in
 `copilotTokenFile`, the token in the default file, or Copilot's own login. A
 `copilotTokenFile` that cannot be used fails the row without running Copilot. A
 default file that exists and cannot be used is a warning naming it, and the
-prompt runs on Copilot's own login, as the round does. Where that prompt fails,
-the failed row names the default file it passed over. The token is never
-printed. The prompt is bounded at 60 seconds. A model the account cannot use
-fails the row, with the reason Copilot prints:
+prompt runs on Copilot's own login. A model the account cannot use fails the
+row, with the reason Copilot prints. The token is never printed:
 
 ```
-Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra
-Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with the token in copilotTokenFile, /run/secrets/copilot; the check spent one request on gpt-6-astra
-Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with the token in the default file, /Users/ana/.config/squiz/copilot-token; the check spent one request on gpt-6-astra
 Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-6-astra, from .squiz.json. Signed in with Copilot's own login; the check spent one request on gpt-6-astra: warning: the Copilot token file /Users/ana/.config/squiz/copilot-token is empty
-Reviewer copilot 1.0.105 (/Users/ana/app/.squiz.json), model gpt-7, from .squiz.json. Its sign-in check failed: copilot exited 1: Error: Model "gpt-7" from --model flag is not available.
 ```
-
-No prompt is sent where the reviewer is `pi`, or for Copilot as a coding agent.
-
-**Copilot's experimental features are on** where `"experimental"` is `true` in
-the user's own `<COPILOT_HOME>/settings.json`, since a session without them is
-never woken by its review (§ 10 Getting started). **Its socket path fits** where
-`<COPILOT_HOME>/session-state/<session id>/squiz.sock` is at most 104 bytes on
-macOS and 108 on Linux.
 
 ## 8. Failure modes
 
