@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -126,8 +126,8 @@ type Setup = {
   readonly stateSource?: string;
   /** What the episode's lock holds before the round starts, where it is there. */
   readonly lockSource?: string;
-  readonly postingMs?: number;
-  readonly preReviewMs?: number;
+  /** A deadline for each call below the round's own. */
+  readonly callMs?: number;
   /** Whether a failed round posts its failure comment, where the caller says. */
   readonly postsFailure?: boolean;
   /** The round's clock, where the test moves it rather than leaving it to the load. */
@@ -291,26 +291,12 @@ function hangs(cost: RoundCost, reported: Partial<RoundOutput> = {}): Reviewer {
 /** What a reviewer that reported nothing has reported. */
 const nothingReported: RoundOutput = { findings: [], verdicts: [] };
 
-/**
- * A clock that stands still until the test moves it.
- *
- * Once `since` is set it runs on from `at` in real time, for a stop that has to
- * take as long as it really takes.
- */
-type Clock = { at: number; since?: number; readonly now: () => number };
+/** A clock that stands still until the test moves it. */
+type Clock = { at: number; readonly now: () => number };
 
 function stoppedClock(): Clock {
-  const clock: Clock = {
-    at: 0,
-    now: () => (clock.since === undefined ? clock.at : clock.at + Date.now() - clock.since),
-  };
+  const clock: Clock = { at: 0, now: () => clock.at };
   return clock;
-}
-
-/** Set `clock` running in real time from `atMs`. */
-function runFrom(clock: Clock, atMs: number): void {
-  clock.at = atMs;
-  clock.since = Date.now();
 }
 
 /**
@@ -328,86 +314,6 @@ function hangsUntil(clock: Clock, atMs: number, findings: readonly Finding[] = [
     parse: async (stdout, progressSoFar): Promise<ParsedRun> => {
       clock.at = atMs;
       return hangs(ANSWER_COST, { findings }).parse(stdout, progressSoFar);
-    },
-  };
-}
-
-/**
- * A shell that ignores the signal that would stop it, and the file it creates
- * once its trap is set.
- */
-function holding(): { readonly args: readonly string[]; readonly trapped: string } {
-  const trapped = join(mkdtempSync(join(tmpdir(), "squiz-holds-")), "trapped");
-  return {
-    // The wait is short and repeated, because a shell blocked in one long sleep
-    // reaches its trap only once that sleep is over.
-    args: ["-c", `trap '' TERM; : > "$1"; while :; do sleep 0.2; done`, "sh", trapped],
-    trapped,
-  };
-}
-
-/**
- * Wait for the reviewer's trap, then set `clock` running from the review's bound.
- *
- * A signal that arrives before the trap stops the reviewer at once, and the round
- * then spends nothing stopping it. The clock stands still until the trap is set,
- * so the bound cannot pass first however slowly the reviewer starts.
- */
-async function holdsFrom(trapped: string, clock: Clock, boundMs: number): Promise<void> {
-  // A guard against a reviewer that never started. Nothing the test decides waits on it.
-  const givesUpAt = Date.now() + 30_000;
-  while (!existsSync(trapped)) {
-    if (Date.now() > givesUpAt) assert.fail("the reviewer never set its trap");
-    await new Promise((settle) => setTimeout(settle, 10));
-  }
-  rmSync(dirname(trapped), { recursive: true, force: true });
-  runFrom(clock, boundMs);
-}
-
-/**
- * A reviewer that answers inside its bound and then holds on through the round's
- * cleanup.
- *
- * It finishes its review at once, so the round holding the declaration is left
- * with findings to post. It then ignores the signal that would stop it, so the
- * round spends the grace and the kill after the moment the review had to be
- * over by, which is `boundMs` on `clock`.
- */
-function answersThenHolds(clock: Clock, boundMs: number, findings: readonly Finding[]): Reviewer {
-  const shell = holding();
-  return {
-    command: "/bin/sh",
-    args: shell.args,
-    parse: async (reports, progressSoFar): Promise<ParsedRun> => {
-      progressSoFar?.({
-        cost: ANSWER_COST,
-        findings,
-        verdicts: [],
-        refusals: 0,
-        finished: true,
-        broken: undefined,
-      });
-      await holdsFrom(shell.trapped, clock, boundMs);
-      return reviews({ findings }).parse(reports, progressSoFar);
-    },
-  };
-}
-
-/**
- * A reviewer that reports findings and then ignores both its bound, `boundMs` on
- * `clock`, and the signal that would stop it.
- *
- * The round spends the grace and the kill after the moment the review had to be
- * over by, and that comes out of the posting reserve.
- */
-function reportsThenHolds(clock: Clock, boundMs: number, cost: RoundCost, findings: readonly Finding[]): Reviewer {
-  const shell = holding();
-  return {
-    command: "/bin/sh",
-    args: shell.args,
-    parse: async (reports, progressSoFar): Promise<ParsedRun> => {
-      await holdsFrom(shell.trapped, clock, boundMs);
-      return hangs(cost, { findings }).parse(reports, progressSoFar);
     },
   };
 }
@@ -627,8 +533,7 @@ async function runInFixture(setup: Setup): Promise<Ran> {
       // Nothing is ever queued here, so the round's end is the cap's and the
       // token bound's alone, decided as the round host decides it.
       endsOn: endsOnFor({ head, activity: null }, config),
-      ...(setup.postingMs === undefined ? {} : { postingMs: setup.postingMs }),
-      ...(setup.preReviewMs === undefined ? {} : { preReviewMs: setup.preReviewMs }),
+      ...(setup.callMs === undefined ? {} : { callMs: setup.callMs }),
       ...(setup.postsFailure === undefined ? {} : { postsFailure: setup.postsFailure }),
       ...(setup.clock === undefined ? {} : { now: setup.clock.now }),
       ...(held === undefined ? {} : { held: { key: String(PULL_REQUEST), lock: held } }),
@@ -1994,41 +1899,6 @@ test("a round that reported nothing before it failed posts only its failure comm
   assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "failure"]);
 });
 
-/**
- * The posting a failed round does runs on the posting reserve, exactly as a
- * finished review's does.
- *
- * The reviewer here reports a finding, runs past its bound, and then ignores the
- * signal that would stop it, so the round spends the grace and the kill past the
- * moment the review had to be over by. That comes out of the reserve, which is
- * smaller here than the grace alone.
- */
-test("a salvaged round's reserve loses what stopping the reviewer took past its bound", async () => {
-  const clock = stoppedClock();
-  const ran = await runInFixture({
-    clock,
-    postingMs: 500,
-    config: { timeout: 2 },
-    answers: POSTING,
-    reviewer: reportsThenHolds(clock, 2_000, ANSWER_COST, [finding("The flag is never read")]),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.equal(ran.conclusion.failure, "timed-out");
-  assert.deepEqual(
-    ran.kinds.filter((kind) => kind === "create"),
-    [],
-    "the stop spent the reserve, so no call was left to make",
-  );
-  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
-  assert.equal(outcome?.outcome, "failed", "a round that could not post is never a clean round");
-  assert.match(
-    outcome?.outcome === "failed" ? outcome.reason : "",
-    /ran out before this call was made/u,
-    "the reserve was gone before the posting started, and the round says so rather than reporting a comment it never wrote",
-  );
-});
-
 test("a branch with no pull request runs nothing, and names the branch and where it looked", async () => {
   const ran = await runInFixture({
     answers: { prlist: "[]" },
@@ -2190,60 +2060,6 @@ test("a round none of whose findings could be posted fails, and never closes as 
   assert.equal(ran.kinds.includes("summary"), false, "a summary was posted for a round that handed nothing over");
 });
 
-test("the posting reserve bounds every call the round makes after the review", async () => {
-  const ran = await runInFixture({
-    postingMs: 2,
-    answers: POSTING,
-    reviewer: reviews({ findings: [finding("The flag is never read")] }),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed", `the round concluded ${ran.conclusion.outcome}`);
-  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
-  assert.equal(outcome?.outcome, "failed");
-  assert.match(
-    outcome?.outcome === "failed" ? outcome.reason : "",
-    /did not answer within|ran out before this call was made/u,
-    "a round that kept posting past the reserve would have no bound on its posting at all",
-  );
-});
-
-/**
- * The reviewer answers at once and the round then spends the grace and the kill
- * stopping it, which lands past the moment the review had to be over by. The
- * reserve is counted from that moment, so the overrun comes out of it rather
- * than being added to the round.
- *
- * The summary is on the same terms as the findings. It is the last thing the round
- * would send, so it is the first thing a spent reserve costs.
- */
-test("a review whose stop ran past its bound leaves the posting what is left of the reserve", async () => {
-  const clock = stoppedClock();
-  const ran = await runInFixture({
-    clock,
-    // A bound the reviewer's own cleanup runs past by more than the reserve.
-    config: { timeout: 1 },
-    postingMs: 500,
-    answers: POSTING,
-    reviewer: answersThenHolds(clock, 1_000, [finding("The flag is never read")]),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed", "a round that could not post is never a clean round");
-  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
-  assert.equal(outcome?.outcome, "failed");
-  assert.match(
-    outcome?.outcome === "failed" ? outcome.reason : "",
-    /ran out before this call was made/u,
-    "the reserve was gone before the posting started, and the round says so rather than reporting a comment it never wrote",
-  );
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation"], "the stop spent the reserve, so no call was left to make");
-  assert.ok(ran.conclusion.failureComment?.posting.outcome === "failed", "the failure comment was posted past the reserve");
-  assert.match(
-    ran.conclusion.failureComment.posting.reason,
-    /ran out before this call was made/u,
-    "the round has to say why its failure went unposted for the pointer to name it",
-  );
-});
-
 /**
  * A reviewer that the machine sleeps through for `sleptMs` once the round is
  * watching its bound, then runs on for `awakeMs` more, and returns `findings`.
@@ -2267,20 +2083,18 @@ function sleptThrough(clock: Clock, sleptMs: number, awakeMs: number, findings: 
 
 /**
  * The review ends past the moment its bound first named, because the bound was
- * moved on by the sleep. The reserve counts from the moved moment, so the sleep
- * is not taken off the posting as a stop that overran.
+ * moved on by the sleep, so the reviewer is not killed for it.
  */
-test("a round the machine slept through keeps its whole posting reserve (#665)", async () => {
+test("a round the machine slept through finishes its review and posts it (#665)", async () => {
   const clock = stoppedClock();
   const ran = await runInFixture({
     clock,
     config: { timeout: 10 },
-    postingMs: 1_000,
     answers: POSTING,
     reviewer: sleptThrough(clock, 8_000, 4_000, [finding("The flag is never read")]),
   });
 
-  assert.equal(ran.conclusion.outcome, "block", "the sleep was taken off the posting reserve, so nothing was posted");
+  assert.equal(ran.conclusion.outcome, "block", "the sleep was counted against the reviewer's bound");
   assert.ok(ran.conclusion.outcome === "block");
   assert.deepEqual(ran.conclusion.posted, ["PRRT_new"]);
 });
@@ -2289,14 +2103,12 @@ test("a round the machine slept through keeps its whole posting reserve (#665)",
 const OFFERED_PAGES = 30;
 
 /**
- * The calls before the review are bounded as a part rather than one at a time.
- *
- * The listing pages, so the part makes a number of calls nobody knows in
- * advance, and a bound per call lets every one of them have the whole of one.
+ * The threads listing is one call however many pages it makes, so its pages
+ * share its deadline rather than having the whole of one each.
  */
-test("the calls before the review share one deadline, and the part ends inside it", async () => {
+test("a threads listing that pages is bounded as one call, and ends inside its deadline", async () => {
   const ran = await runInFixture({
-    preReviewMs: 1_000,
+    callMs: 1_000,
     delays: { prlist: "0.2", threads: "0.5" },
     // A round the listing runs for, which is every round after the first.
     rounds: [EARLIER_ROUND],
@@ -2311,18 +2123,18 @@ test("the calls before the review share one deadline, and the part ends inside i
   assert.equal(ran.conclusion.failure, "harness");
   assert.match(ran.conclusion.reason, /^no review ran:/u);
   assert.match(ran.conclusion.reason, /could not be reached|ran out/u);
-  assert.equal(ran.invocations.length, 0, "a part that ran out of time starts no reviewer");
+  assert.equal(ran.invocations.length, 0, "a listing that ran out of time starts no reviewer");
   const pages = ran.kinds.filter((kind) => kind === "threads").length;
   assert.ok(
     pages < OFFERED_PAGES,
-    `the listing took all ${pages} pages it was offered, so each call was bounded and none of them together`,
+    `the listing took all ${pages} pages it was offered, so each page was bounded and none of them together`,
   );
   // Far above the deadline and far below what the same calls cost bounded one at
   // a time, which is 15 seconds of listing alone. A tight wall-clock budget here
   // passes alone and fails under a suite running its files at once.
   assert.ok(
     ran.elapsedMs < 8_000,
-    `the round took ${ran.elapsedMs}ms, which is a part spending its calls' bounds one after another`,
+    `the round took ${ran.elapsedMs}ms, which is a listing spending its pages' bounds one after another`,
   );
 });
 
@@ -2335,7 +2147,7 @@ test("a pull request lookup that ran out of time fails the round rather than rea
   const ran = await runInFixture({
     // Long enough for the branch lookup before it, which the deadline bounds too,
     // and far short of the pull request lookup's delay.
-    preReviewMs: 1_500,
+    callMs: 1_500,
     delays: { prlist: "5" },
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
@@ -2352,9 +2164,9 @@ test("a pull request lookup that ran out of time fails the round rather than rea
  * returns reads the same in the conclusion as one that stopped git on time, so
  * only the elapsed time tells the two apart.
  */
-test("a branch lookup that hangs is stopped at the deadline before the review (#432)", async () => {
+test("a branch lookup that hangs is stopped at its deadline (#432)", async () => {
   const ran = await runInFixture({
-    preReviewMs: 500,
+    callMs: 500,
     branchLookupSleeps: "6",
     answers: POSTING,
     reviewer: reviews({ findings: [finding("The flag is never read")] }),
@@ -2414,12 +2226,7 @@ test("a round killed at its bound says what squiz saw of the reviewer's messages
   );
 });
 
-/**
- * The posting reserve is counted from the end of the review rather than from the
- * start of the round. Counted from the start, a review that ran its whole bound
- * would leave nothing to post its findings in.
- */
-test("a review that ran its whole bound still has the posting reserve to post in", async () => {
+test("a review that ran its whole bound still posts its findings", async () => {
   const clock = stoppedClock();
   const ran = await runInFixture({
     clock,
@@ -2435,24 +2242,65 @@ test("a review that ran its whole bound still has the posting reserve to post in
 });
 
 /**
- * Stopping the reviewer runs after the review's deadline. What it takes past
- * that comes out of the posting reserve rather than being added to the round.
+ * The GitHub venue, with each thread it opens taking `ms` on `clock` once GitHub
+ * has answered. The fake `gh` answers at once, and this is what makes the posting
+ * slow on the round's clock.
  */
-test("time spent stopping the reviewer past its bound comes out of the posting reserve", async () => {
+function slowToOpen(clock: Clock, ms: number): Venue {
+  return {
+    ...githubVenue,
+    openThread: (...args) => {
+      const posting = githubVenue.openThread(...args);
+      clock.at += ms;
+      return posting;
+    },
+  };
+}
+
+test("#916: a round whose posting takes minutes still posts every finding", async () => {
+  const clock = stoppedClock();
+  const ran = await runInFixture({
+    clock,
+    // Four threads at forty seconds each, which is over twice the minute the
+    // posting once had.
+    venue: slowToOpen(clock, 40_000),
+    answers: POSTING,
+    reviewer: reviews({
+      findings: [
+        finding("The flag is never read"),
+        finding("The card renders twice"),
+        finding("The title is never escaped"),
+        finding("The handler is bound on every render"),
+      ],
+    }),
+  });
+
+  assert.ok(ran.conclusion.outcome === "block", `the round concluded ${JSON.stringify(ran.conclusion)}`);
+  assert.deepEqual(
+    ran.conclusion.findings.outcomes.map((outcome) => outcome.outcome),
+    ["threaded", "threaded", "threaded", "threaded"],
+    "a finding was reported unposted because the posting ran long",
+  );
+  assert.equal(ran.kinds.filter((kind) => kind === "create").length, 4);
+});
+
+/**
+ * Stopping the reviewer runs after the moment the review had to be over by, and
+ * a stop that overruns takes nothing from the posting after it.
+ */
+test("#916: a reviewer stopped a minute past its bound still has its findings and its failure comment posted", async () => {
   const clock = stoppedClock();
   const ran = await runInFixture({
     clock,
     config: { timeout: 900 },
     answers: FAILING,
-    // Sixty-one seconds past the bound, which is more than the whole reserve.
     reviewer: hangsUntil(clock, 961_000, [finding("The flag is never read")]),
   });
 
   assert.ok(ran.conclusion.outcome === "failed");
   assert.equal(ran.conclusion.failure, "timed-out");
-  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation"], "the stop spent the reserve, so nothing was posted");
-  const outcome = ran.conclusion.salvaged?.findings.outcomes[0];
-  assert.match(outcome?.outcome === "failed" ? outcome.reason : "", /ran out before this call was made/u);
+  assert.equal(ran.conclusion.salvaged?.findings.outcomes[0]?.outcome, "threaded");
+  assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup", "failure"]);
 });
 
 /**
@@ -3181,9 +3029,9 @@ test("a round priced at nothing is bounded by its tokens all the same", async ()
   assert.equal(ran.invocations.length, 0);
 });
 
-test("a read-back that pages is stopped by the reserve, not by its own page limit", async () => {
+test("a read-back that pages is stopped by its call's deadline, not by its own page limit", async () => {
   const ran = await runInFixture({
-    postingMs: 500,
+    callMs: 500,
     delays: { lookup: "0.1" },
     answers: { ...POSTING, lookup: paging("cursor-spare") },
     // Nineteen pages that name no thread, and a twentieth that names it. A
@@ -3197,19 +3045,19 @@ test("a read-back that pages is stopped by the reserve, not by its own page limi
   const lookups = ran.kinds.filter((kind) => kind === "lookup").length;
   assert.ok(
     lookups < 20,
-    `the read-back made all ${lookups} of its pages, so the reserve bounded each request and none of them together`,
+    `the read-back made all ${lookups} of its pages, so the deadline bounded each request and none of them together`,
   );
   assert.ok(ran.conclusion.outcome === "close");
   const outcome = ran.conclusion.findings.outcomes[0];
   assert.equal(
     outcome?.outcome,
     "threaded",
-    "the create completed, and an outcome already completed is kept when the reserve runs out",
+    "the create completed, and an outcome already completed is kept when the deadline passes",
   );
   assert.equal(
     outcome?.outcome === "threaded" ? outcome.threadId : "unread",
     null,
-    "the pages that would have named the thread were past the reserve, so nothing can be addressed to it",
+    "the pages that would have named the thread were past the deadline, so nothing can be addressed to it",
   );
 });
 
@@ -3826,23 +3674,6 @@ test("a caller that asks for no failure comment gets none, and the round is fail
   assert.ok(ran.conclusion.outcome === "failed");
   assert.deepEqual(ran.kinds, ["prlist", "threads", "conversation", "create", "lookup"]);
   assert.equal(ran.conclusion.failureComment, undefined);
-});
-
-test("a failed round whose posting time is spent attempts no failure comment, and says why", async () => {
-  const clock = stoppedClock();
-  const ran = await runInFixture({
-    clock,
-    postingMs: 500,
-    config: { timeout: 2 },
-    answers: FAILING,
-    reviewer: reportsThenHolds(clock, 2_000, ANSWER_COST, [finding("The flag is never read")]),
-  });
-
-  assert.ok(ran.conclusion.outcome === "failed");
-  assert.deepEqual(ran.kinds.filter((kind) => kind === "failure"), []);
-  const comment = ran.conclusion.failureComment?.posting;
-  assert.equal(comment?.outcome, "failed");
-  assert.match(comment?.outcome === "failed" ? comment.reason : "", /ran out before this call was made/u);
 });
 
 /**

@@ -86,9 +86,8 @@ export type EpisodeClose = {
 /**
  * Compose the summary for `closing` and post it on the pull request, once.
  *
- * `until` is the round's posting margin, and the call is not made at all where
- * nothing is left of it: a call made past the end of the reserve would run the
- * round past its bound. The summary is lost in that case, which is what the
+ * `until` is the call's own deadline, and the call is not made at all where
+ * nothing is left of it. The summary is lost in that case, which is what the
  * caller reports.
  */
 export function postEpisodeSummary(closing: EpisodeClose, venue: Venue, until: Deadline): Posting {

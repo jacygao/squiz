@@ -14,19 +14,18 @@
 import { renderClosingReply, renderOpenReason, type RuledAt } from "../findings/comment.ts";
 import { defaultVerdict, type Verdict } from "../findings/status.ts";
 import type { ThreadVerdict } from "../reviewers/adapter.ts";
-import { shareOf, type Deadline } from "../reviewers/deadline.ts";
+import type { Deadline } from "../reviewers/deadline.ts";
 import type { Change, ThreadAction, Venue } from "../venues/venue.ts";
 
 /**
- * Where a round's calls go, the deadline they share, each call's part of it
- * where a caller sets one, and the change the threads are on where the caller
- * holds it.
+ * Where a round's calls go, what makes each call's own deadline, and the change
+ * the threads are on where the caller holds it.
  */
-export type Sending = { readonly venue: Venue; readonly until: Deadline; readonly callMs?: number; readonly change?: Change };
+export type Sending = { readonly venue: Venue; readonly until: () => Deadline; readonly change?: Change };
 
-/** The deadline one call runs under. */
+/** A fresh deadline for one call. */
 export function deadlineOf(call: Sending): Deadline {
-  return call.callMs === undefined ? call.until : shareOf(call.until, call.callMs);
+  return call.until();
 }
 
 /**

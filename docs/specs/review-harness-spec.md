@@ -1436,8 +1436,8 @@ commit is the one GitHub reports as the pull request's head. Where the
 repository does not have it, or the commit GitHub reports as the pull request's
 base, because either was pushed from elsewhere, the round host fetches the
 missing ones into the repository first in one fetch, writing no ref and no
-`FETCH_HEAD`. The fetch, the clone and the checkout run in the part of the round
-before the review, under its 30 seconds (§ 8 The review budget).
+`FETCH_HEAD`. The fetch, the clone and the checkout share one deadline of 30
+seconds (§ 8 The review budget).
 
 **The snapshot names the base in a ref of its own**, `refs/squiz/base`, which the
 round host writes in the clone after the checkout:
@@ -1543,8 +1543,8 @@ reviewer has started. Before then, the record's round number gives the same path
   `git prune`, or a `gc.pruneExpire` of `now` deletes a fetched head commit no
   ref reaches, and the history tools then fail. An ordinary `git gc` keeps it for
   two weeks. The round does not guard against pruning.
-- **A repository whose checkout spends the 30 seconds before the review cannot
-  be reviewed.**
+- **A repository whose fetch, clone and checkout take more than 30 seconds
+  together cannot be reviewed.**
 
 ### Tools
 
@@ -2148,7 +2148,7 @@ A verdict carries three fields:
 | `open` | The defect is still there. | Re-opens the thread, or leaves it open, and replies on it with the reason |
 
 **Every ruling a round gives on a thread is a reply on that thread.** The round
-posts the replies in the posting reserve, before the round ends. Each opens with
+posts the replies before the round ends. Each opens with
 the reviewer's marker and the verdict, so it is read as the reviewer's own and is
 never activity that starts another round. A thread the reviewer keeps open gets
 its reason every round it keeps it open, after the thread is put in its state:
@@ -2546,8 +2546,8 @@ it records its end, and its posting time once posting ends:
   both runs.
 - `cutShortAtSeconds` is the time bound the round ran under, present only where
   the bound ended a review the reviewer had not finished.
-- `postingSeconds` is the wall clock from the first call of the posting reserve to
-  the last, to a tenth of a second. It is absent where the round posted nothing,
+- `postingSeconds` is the wall clock from the round's first call after the review
+  to its last, to a tenth of a second. It is absent where the round posted nothing,
   and where the round was stopped before posting ended.
 - `floor` is `true` where the round's cost is a floor (§ 5, The `pi` adapter),
   and absent where it is a total. A Copilot round never carries it.
@@ -3363,7 +3363,7 @@ The last column names the surfaces each path reaches.
 | GitHub does not report a push | `squiz review` asks again for up to 60 seconds, and then exits 1 naming the head GitHub reports and the commit the worktree pushed, as § 7 `squiz review` shows. Nothing is queued for either head. A hook triggers on the head GitHub reports. | `squiz review` stderr |
 | GitHub is unreachable | Exit 1 and nothing is posted, the failure comment included. Nothing is stored to retry. Where the episode ends having posted nothing, stderr says so. A trigger whose calls cannot reach GitHub queues nothing. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | `gh` cannot be run at all | Exit 1, nothing posted, the failure comment included, and no review runs. stderr names the call that needed it and says `gh` could not be run. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
-| The calls before the review run out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within the part is this row too. The failure comment and stderr say which call had nothing left, where the posting reserve can still reach GitHub. A lookup that ran out of time is never read as a branch with no pull request. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
+| A call before the review runs out of time | Exit 1, and no review runs. A snapshot that the fetch, the clone and the checkout could not make within their 30 seconds is this row too. The failure comment and stderr say which call ran out of time, where GitHub can still be reached. A lookup that ran out of time is never read as a branch with no pull request. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The threads on the pull request cannot all be listed | Exit 1, and no review runs. The failure comment and stderr say so. The pages that arrived are dropped, because a reviewer handed a subset rules on a subset. A trigger whose listing fails queues nothing. | Failure comment, `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | A verdict cannot be applied | A verdict whose mutation GitHub refuses leaves its thread as it was handed over, a general thread whose comment GitHub will not hide or show included, and the round counts the thread that way. A verdict naming a thread that was not handed over, and a second verdict for one thread, are not sent. The round's outcome stands. stderr names each with its thread, what the reviewer ruled, and why it was not applied, which for a refused mutation is what GitHub answered. `squiz status` does the same for a round that reviewed. The summary that closes the episode, and the failure comment of a round that failed, name each as § 6 What the comment carries shows, without GitHub's answer. Nothing is retried. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | Some comments post and others fail | The comments that landed stay, the round exits as its outcome says, and stderr says how many could not be posted. A later round makes the rest again. A round that closes the episode lists each in its summary's Notes, and a round that fails lists each in its failure comment. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
@@ -3371,12 +3371,11 @@ The last column names the surfaces each path reaches.
 | The reply on a thread the round closes cannot be posted | The thread is resolved all the same, and the verdict stands. The round's outcome stands. stderr names the thread and what GitHub answered, and so does `squiz status` for a round that reviewed. The round records the line in its entry of the state file, and the summary that closes the episode names it in Notes, without GitHub's answer, whichever round it was. A round that fails names it in its failure comment instead. Nothing is retried, because no later round closes the thread again. | `squiz review` stderr, `squiz status`, summary's Notes, failure comment |
 | A round that leaves threads open has findings no thread holds | A finding the harness could anchor to neither a line nor a file, and one whose comment could not be posted, reach no thread, and a round that leaves threads open posts no summary. The round's record keeps each. `squiz review` prints each on stderr, and the summary that closes the episode lists each, with the round that raised it where no later round raised it again (§ 6). | `squiz review` stderr, summary's Notes |
 | No finding posts | A round that found findings and posted none of them is a failed round, whatever its verdicts did: exit 1, recorded failed with the reason "round 2 found 3 findings and could not post them to PR #41", and a failure comment where GitHub takes one. It posts no summary and does not close the episode. A new commit, a new reply or a run of `squiz review` retries it where a round remains, and closes the episode where none does, as The failure comment below says. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
-| The posting reserve runs out before the findings are posted | Exit 1, and the findings are reported on stderr as unposted rather than as comments that landed. No failure comment is posted, because the reserve it would be posted in is spent. Nothing is attempted past the end of the reserve. | `squiz review` stderr, `squiz status`, `host.log` |
 | The round's spend cannot be written | Exit 1, and nothing the reviewer found is posted. The failure comment and stderr say nothing was posted, and give the underlying error. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The round's end cannot be written to the episode's state | Exit 1, and no summary is posted, because the end, and the close where the round closes the episode, is written before the summary. The findings and verdicts the round posted stand, and the failure comment and stderr name the write that failed. The episode then reads as one still open, and the next run reviews the pull request again. A close reached before any review fails the same way, with nothing posted but the failure comment. | Failure comment, `squiz review` stderr, `squiz status`, `host.log` |
 | The round's result cannot be recorded | The round host could not write what the round reached, after the round posted it. The host names the result and the reason, and exits. What the round posted stands. The reviewing record still names the host, so once the host has exited `squiz status` shows the round killed. A `squiz review` already waiting on the round sees no result and exits 4 at its deadline. A later run exits 1 saying the host stopped before its round ended, unless the round had closed the episode, which it then prints as closed. | `host.log`, `squiz status` |
 | A round's posting time or resume command cannot be written | The round's result stands. A round with no resume command shows `—` under Resume in `squiz status`. | `host.log` |
-| The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub answered or that the reserve was spent. Nothing is retried, because a second attempt would be a second comment. `squiz review` prints the line for the run that waited on the close, and for every later run on the closed episode, whether the close came after a review or before one. `squiz status` prints it under the line of a round that reviewed. `host.log` holds it after the close's own line, for a close before the review as well as after one. | `squiz review` stderr, `squiz status`, `host.log` |
+| The summary comment cannot be posted | The close is a close still rather than a round the harness failed, and the command exits 0 or 3 as the close does. stderr says the episode closed without its summary, and names what GitHub answered. Nothing is retried, because a second attempt would be a second comment. `squiz review` prints the line for the run that waited on the close, and for every later run on the closed episode, whether the close came after a review or before one. `squiz status` prints it under the line of a round that reviewed. `host.log` holds it after the close's own line, for a close before the review as well as after one. | `squiz review` stderr, `squiz status`, `host.log` |
 | The episode closes before any round ran | An episode whose failed attempts spent the token bound before any round reaches this. It closes as § 6 says, and exits 3 because no round reviewed the state: with the summary and the open threads where those attempts left any of the reviewer's threads, and with a line on stderr where they left none. | Summary's Notes, `squiz review` stderr |
 | The harness itself throws | A throw in a command is trapped at its top level, which writes one line on stderr. A throw inside a round fails the round: it is recorded failed with the throw as its reason, and posts no failure comment. `squiz review` exits 1. The hook exits 0, as it does on every path. A throw in the round host outside a round ends the host, and the round it held reads as killed. | `squiz review` stderr, `squiz status`, `host.log`, hook stderr |
 | No wake reaches the owner of the work | The note stays in `.squiz/<number>/notes/`. The owner learns the result from `squiz review` or `squiz status`, and the pull request holds it. A note that cannot be written is reported the same way. | `host.log` |
@@ -3429,10 +3428,9 @@ thread for a summary to count, so its comment ends at "No round runs again."
 The reason on the first line is the reason the command prints on stderr, word for
 word, as § 7 shows.
 
-The failure comment is posted in the posting reserve, after the salvaged findings,
-under the same deadline. It is never edited, and each failed round posts its own.
-Where GitHub cannot be reached, or the reserve is spent, nothing is posted, and
-stderr is the only channel.
+The failure comment is posted after the salvaged findings. It is never edited,
+and each failed round posts its own. Where GitHub cannot be reached, nothing is
+posted, and stderr is the only channel.
 
 A run that ends at the gate posts no failure comment. A run that waited for
 another's round, or was handed a result already recorded, posts nothing of its
@@ -3475,8 +3473,7 @@ messages as well as its findings, both read from the same moment of the run.
 
 **What a failed round salvaged goes on the pull request, and the round is a
 failed round still.** The findings the reviewer confirmed are posted and the
-verdicts it reported are applied, in the posting reserve and under the same
-deadline a finished review's posting runs under. A finding no thread can hold is
+verdicts it reported are applied, as a finished review's are. A finding no thread can hold is
 listed in the failure comment. None of that decides what the
 round became. The outcome is the reviewer's own, the cost is the floor the
 failure left, and the round neither hands threads back to the coding agent nor
@@ -3485,27 +3482,26 @@ closes the episode over what it managed to put up.
 A failed round that confirmed nothing has no findings to post and no verdicts to
 apply. It still posts its failure comment under § 8.
 
-**A round runs in the round host, so no caller's timeout bounds it.** It has
-three parts, each bounded on its own:
+**A round runs in the round host, so no caller's timeout bounds it.** The time
+bound is on the review alone. Before the review and after it, each call the round
+makes has 30 seconds of its own, and the round makes every call it has, however
+long the ones before it took:
 
-| Part | How long | What runs in it |
-|---|---|---|
-| Before the review | At most 30 seconds | The pull request lookup, the threads listing, the fetch, clone and checkout that make the snapshot, and the diff read from it |
-| The review | The time bound | The reviewer |
-| Posting | A reserve of 60 seconds | The findings, the verdicts, the summary comment and the failure comment |
+- **Before the review**: the pull request lookup, the threads listing, the
+  snapshot's fetch, clone and checkout together, and the diff read from it.
+- **After the review**: each verdict, each reply, each finding's thread and the
+  read-back of its id, the summary comment and the failure comment.
+
+A call that pages, as the threads listing and a thread's read-back do, is one
+call, and its pages share its 30 seconds.
 
 **Time the machine sleeps during the review is added back to the time bound.**
 While the reviewer runs, the round host reads the clock at least every 250
 milliseconds. A gap of more than 5 seconds between two reads is time the machine
 slept, and the moment the review has to be over by moves on by that gap. At most
 the time bound itself is added back in one round, so no review runs longer than
-twice its bound. The other two parts, and `squiz review`'s wait, count sleep as
-they count any other time.
-
-Stopping the reviewer runs after the moment the review had to be over by, and a
-reviewer that ignores the signal spends the grace and the kill there. That overrun comes out of the
-posting reserve: a round whose reserve is spent by the time it has findings
-posts nothing and says so.
+twice its bound. The calls outside the review, and `squiz review`'s wait, count
+sleep as they count any other time.
 
 **`squiz review` waits within one deadline of 540 seconds**, counted from the
 moment it starts, which keeps it under the 600 seconds Claude Code gives a shell
@@ -3517,12 +3513,10 @@ command. Everything the run does counts against it.
 - **A run whose deadline arrives first exits 4.** Its state is queued or under
   review, so the round goes on, and the next run returns it.
 
-**A part is one deadline every call inside it runs under, and a call with
-nothing left on it is not made at all.**
-
 **No single call to GitHub may take more than 30 seconds**, and this bound is not
-configurable. A call that reaches either bound is treated as GitHub being
-unreachable, so the round exits 1 and the comments that landed stay.
+configurable. A call that reaches it, or whose pages reach their call's 30
+seconds, is treated as GitHub being unreachable: the round exits 1, and the
+comments that landed stay.
 
 **The token bound is on one round rather than on the episode.** A round whose
 tokens reached it closes the episode. The episode's own ceiling follows from the

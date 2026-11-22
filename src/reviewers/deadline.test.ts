@@ -238,7 +238,7 @@ test("a sleep that ends as the watch is cancelled is still added back (#665)", (
   cancel();
   assert.equal(bound.slept(), 8_000, "the gap since the last look was dropped when the watch was cancelled");
   clock = 14_000;
-  assert.ok(!bound.passed(), "the review ended inside its awake time, and the posting reserve counts from there");
+  assert.ok(!bound.passed(), "the review ended inside its awake time");
 });
 
 /** Long enough for a watch to look again, whose looks are at most 250 ms apart. */
