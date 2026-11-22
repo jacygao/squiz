@@ -810,6 +810,7 @@ No requirement.
 ### Contradictions
 
 - **10, what a local review calls itself:** keep L1240–1242 (R4.2.1, R4.2.2). A local change is `the working tree`, and its rerun is `squiz review` with no number. The `PR #local` and `squiz review local` sentence at L1375–1379 leaves the spec. It is bug #829.
+- **12, whether the reviewer can reach a GitHub login:** accept the gap and state it. A `gh` the reviewer starts finds no login in its variables or its configuration, but `gh auth token` can still read the keychain login, which is the login Copilot's fallback signs in with (L2089–2091, #529). L2057 is corrected to say so.
 
 ### Features
 
