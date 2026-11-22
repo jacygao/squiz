@@ -8,6 +8,10 @@ recheck-when: Copilot CLI changes how `--plugin-dir` hooks fire in a folder it d
 
 # A `copilot -p` run is reviewed and fixed after it exits, and nothing calls GitHub
 
+**2026-11-22:** squiz no longer starts a fixer, and § 3 no longer has its
+headless runs, handoff or markers. What follows records them as they stood
+when this was measured.
+
 A `copilot -p` coding agent ran suss's flags in a scratch repository: no remote,
 one base commit, and `.squiz.json` naming `"venue": "local"`, `"reviewer":
 "copilot"` and `"fixer": "copilot"`. Squiz was loaded from this repository's

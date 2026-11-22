@@ -19,8 +19,6 @@ const owner = {
   sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb",
   subagent: "a402ef8f56c1b2ed1",
   messagingSocket: "/tmp/claude-501/messaging-60517e1f.sock",
-  lastMessage: "The change is on the branch, and the tests pass.",
-  transcript: "/Users/someone/.claude/projects/-work-squiz/60517e1f/subagents/agent-a402ef8f56c1b2ed1.jsonl",
 };
 
 /** What every reviewed record carries: its round, and how many threads its findings opened. */
@@ -132,33 +130,6 @@ const everyState: readonly StateRecord[] = [
     newFindings: 1,
     unthreaded: ["About the change as a whole: The retry queue duplicates the scheduler"],
   },
-  // #803: a round that handed its threads to a fixer, in each way the start can go.
-  {
-    head,
-    activity: null,
-    status: "reviewed",
-    result: "exited",
-    exitStatus: 2,
-    openThreads: ["T1"],
-    ...reviewed,
-    fixer: { outcome: "started", agent: "claude", process: { pid: 4200, startedAt: 1_791_000_161 } },
-  },
-  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "exited", agent: "copilot", pid: 4201 } },
-  // #876: a fixer started in a session squiz named, and one that resumed it.
-  {
-    head,
-    activity: null,
-    status: "reviewed",
-    result: "exited",
-    exitStatus: 2,
-    openThreads: ["T1"],
-    ...reviewed,
-    fixer: { outcome: "started", agent: "claude", process: { pid: 4200, startedAt: 1_791_000_161 }, session: { id: "561adfe1", resumed: true } },
-  },
-  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "exited", agent: "copilot", pid: 4201, session: { id: "561adfe1", resumed: false } } },
-  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "failed", agent: "claude", reason: "spawn claude ENOENT" } },
-  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "not started", reason: "no handoff was written" } },
-  { head, activity: null, status: "reviewed", result: "exited", exitStatus: 2, openThreads: ["T1"], ...reviewed, fixer: { outcome: "unknown", agent: "copilot", reason: "the intermediate process did not answer within 5000ms" } },
   {
     head,
     activity: reply,
@@ -190,21 +161,6 @@ const everyState: readonly StateRecord[] = [
     },
   },
 ];
-
-test("#859: a Copilot subagent's owner reads back with its parent's transcript", () => {
-  const record: StateRecord = {
-    head,
-    activity: null,
-    status: "queued",
-    owner: {
-      sessionId: "af7a1b25-6bdc-459f-99e1-5c3ab2513f83",
-      subagent: "dcc0b994-3d65-4ad3-92f3-ccf70b8232d5",
-      lastMessage: "PONG",
-      parentTranscript: "/Users/someone/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl",
-    },
-  };
-  assert.deepEqual(recordFrom(JSON.parse(JSON.stringify(record))), { record });
-});
 
 function roundShape(round: FinishedRound | undefined): string {
   if (round === undefined) return "with no round";
@@ -241,9 +197,6 @@ const malformed: readonly [string, unknown][] = [
   ["an owner that is not an object", { head, activity: null, status: "queued", owner: "me" }],
   ["an owner with no session", { head, activity: null, status: "queued", owner: { subagent: "a1" } }],
   ["an owner whose socket is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", messagingSocket: 3 } }],
-  ["an owner whose last message is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", lastMessage: { text: "done" } } }],
-  ["an owner whose transcript is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", transcript: 3 } }],
-  ["#859: an owner whose parent's transcript is not a string", { head, activity: null, status: "queued", owner: { sessionId: "s", subagent: "a1", parentTranscript: 3 } }],
   ["an empty Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: "" }],
   ["a numeric Herdr workspace", { head, activity: null, status: "queued", herdrWorkspace: 2 }],
   // The round host puts it on a herdr command line, where this would be read as a flag.
@@ -331,17 +284,6 @@ const malformed: readonly [string, unknown][] = [
   ["findings no thread holds that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], unthreaded: [1] }],
   ["problems that are not strings", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], problems: [1] }],
   ["failure lines that are not strings", { head, activity: null, status: "failed", reason: "r", ownerNoted: false, lines: "posted" }],
-  // #803: a fixer read wrongly is a running fixer missed, and a second one started beside it.
-  ["#803: a fixer that is not an object", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: "started" }],
-  ["#803: a fixer with an unknown outcome", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "running", agent: "claude", pid: 1 } }],
-  ["#803: a started fixer with no process", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "claude" } }],
-  ["#803: a started fixer of an unknown agent", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "pi", process: { pid: 2, startedAt: 2 } } }],
-  ["#803: an exited fixer with no pid", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "exited", agent: "copilot" } }],
-  ["#803: a fixer that failed with no reason", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "failed", agent: "claude" } }],
-  // #876: a resume read as a fresh start is a failed resume the host never falls back from.
-  ["#876: a started fixer whose session has no id", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "started", agent: "claude", process: { pid: 2, startedAt: 2 }, session: { resumed: true } } }],
-  ["#876: a started fixer whose session does not say whether it resumed", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "exited", agent: "claude", pid: 2, session: { id: "561adfe1", resumed: "yes" } } }],
-  ["#803: a fixer that failed naming no agent", { head, activity: null, ...reviewed, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [], fixer: { outcome: "failed", reason: "spawn claude ENOENT" } }],
   ["a failed record with no reason", { head, activity: null, status: "failed", ownerNoted: true }],
   // Read as no, the owner gets a second note. Read as yes, a first note is never sent.
   ["a failed record not saying whether its owner was noted", { head, activity: null, status: "failed", reason: "r" }],

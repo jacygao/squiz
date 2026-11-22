@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { deadlineIn } from "../../reviewers/deadline.ts";
 import { standIn } from "../../testing/stand-in.ts";
 import type { Change } from "../venue.ts";
-import { FIXER_FOLLOW_UP, githubVenue } from "./venue.ts";
+import { githubVenue } from "./venue.ts";
 
 /** One answer of the fake `gh`: what it prints, and how it exits. */
 type Answer = { readonly stdout?: string; readonly stderr?: string; readonly status?: number };
@@ -150,7 +150,6 @@ const foreign: Change = {
   rerun: "squiz review 142",
   summaryAt: "on the pull request",
   followUp,
-  fixerFollowUp: FIXER_FOLLOW_UP,
   base: BASE,
   head: HEAD,
   description: "",
@@ -173,7 +172,6 @@ test("readChange finds the open pull request whose head the worktree has checked
           "you disagree. Commit and push what you changed, then run `squiz review 142` again.",
         ].join("\n"),
       );
-      assert.equal(change.fixerFollowUp, FIXER_FOLLOW_UP);
       assert.equal(change.base, BASE);
       assert.equal(change.head, HEAD);
       assert.equal(change.description, "## Intent\n\nWhat this is for.");

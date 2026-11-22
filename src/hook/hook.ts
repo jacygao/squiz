@@ -5,15 +5,13 @@
  * A stop queues the change's state for the round host and returns. It never
  * runs a round and never waits on one. A start hands the worktree to the
  * venue's `recordStart`, and a prompt hands its text to the venue's
- * `recordPrompt`, and neither does anything else. A prompt squiz gave a
- * session it started is not handed on. Every firing exits 0, on every
+ * `recordPrompt`, and neither does anything else. Every firing exits 0, on every
  * path: a non-zero exit is the one thing that stops the coding agent finishing
  * its turn. What it could not do, and a branch with no pull request, it says in
  * one line on stderr. Exiting 0 in silence over a failure would read as a state
  * queued, or a base recorded.
  */
 
-import { FIXER_VARIABLE } from "../host/fixer.ts";
 import { trigger, type TriggerRequest, type Triggered } from "../host/trigger.ts";
 import type { Owner } from "../loop/state-record.ts";
 import { deadlineIn } from "../reviewers/deadline.ts";
@@ -62,8 +60,7 @@ export async function runHook(call: HookCall): Promise<HookExit> {
       return 0;
     }
     if (firing.event === "UserPromptSubmit") {
-      const squizStarted = environment[FIXER_VARIABLE];
-      if (squizStarted === undefined || squizStarted === "") recordPrompt(firing.directory, firing.prompt);
+      recordPrompt(firing.directory, firing.prompt);
       return 0;
     }
 
@@ -122,19 +119,10 @@ function recordPrompt(directory: string, prompt: string): void {
 }
 
 function ownerOf(firing: Extract<Firing, { readonly owner: unknown }>): Owner {
-  const subagent =
-    firing.event === "SubagentStop"
-      ? {
-          subagent: firing.subagent,
-          ...(firing.parentTranscript === undefined ? {} : { parentTranscript: firing.parentTranscript }),
-        }
-      : {};
   return {
     sessionId: firing.owner.sessionId,
-    ...subagent,
+    ...(firing.event === "SubagentStop" ? { subagent: firing.subagent } : {}),
     ...(firing.owner.socket === undefined ? {} : { messagingSocket: firing.owner.socket }),
-    ...(firing.lastMessage === undefined ? {} : { lastMessage: firing.lastMessage }),
-    ...(firing.transcript === undefined ? {} : { transcript: firing.transcript }),
   };
 }
 

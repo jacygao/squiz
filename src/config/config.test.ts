@@ -48,7 +48,7 @@ function rejection(contents: string): ConfigError {
   return rejectionOf(() => load(contents), contents);
 }
 
-test("an absent .squiz.json is not an error, and yields the ten defaults", () => {
+test("an absent .squiz.json is not an error, and yields the eight defaults", () => {
   assert.deepEqual(load(null), {
     venue: "github",
     reviewer: "pi",
@@ -57,13 +57,11 @@ test("an absent .squiz.json is not an error, and yields the ten defaults", () =>
     tokens: 10_000_000,
     thinking: "medium",
     model: null,
-    fixer: null,
-    fixerCommands: [],
     copilotTokenFile: null,
   });
 });
 
-test("a .squiz.json with no keys yields the same ten defaults", () => {
+test("a .squiz.json with no keys yields the same eight defaults", () => {
   assert.deepEqual(load("{}"), { ...defaultConfig });
 });
 
@@ -76,7 +74,7 @@ test("the loaded defaults are a fresh object, so a caller cannot alter them", ()
 test("every setting the file names is read", () => {
   assert.deepEqual(
     load(
-      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini", "fixer": "copilot", "fixerCommands": ["node"], "copilotTokenFile": "/run/secrets/copilot"}`,
+      `{"venue": "local", "reviewer": "copilot", "rounds": 5, "timeout": 90, "tokens": 400000, "thinking": "high", "model": "gpt-5-mini", "copilotTokenFile": "/run/secrets/copilot"}`,
     ),
     {
       venue: "local",
@@ -86,8 +84,6 @@ test("every setting the file names is read", () => {
       tokens: 400_000,
       thinking: "high",
       model: "gpt-5-mini",
-      fixer: "copilot",
-      fixerCommands: ["node"],
       copilotTokenFile: "/run/secrets/copilot",
     },
   );
@@ -111,51 +107,10 @@ test("#895: copilotTokenFile reads an absolute path, and refuses anything else w
   }
 });
 
-test("#803: fixer names claude or copilot, is none where the file leaves it out, and refuses anything else", () => {
-  assert.equal(load(`{}`).fixer, null);
-  assert.equal(load(`{"fixer": "claude"}`).fixer, "claude");
-  assert.equal(load(`{"fixer": "copilot"}`).fixer, "copilot");
-  for (const contents of [`{"fixer": "pi"}`, `{"fixer": ""}`, `{"fixer": null}`, `{"fixer": true}`, `{"fixer": "Claude"}`]) {
-    assert.match(rejection(contents).message, /: "fixer" is .*, but it must be "claude" or "copilot"; leave "fixer" out for a session that is woken$/u, contents);
+test("#910: fixer and fixerCommands are refused as keys that are not settings, since squiz starts no fixer", () => {
+  for (const contents of [`{"fixer": "claude"}`, `{"fixer": "copilot", "fixerCommands": ["node"]}`, `{"fixerCommands": ["node"]}`]) {
+    assert.match(rejection(contents).message, /: "fixer(Commands)?" is not a setting, and the settings are /u, contents);
   }
-});
-
-test("#864: fixerCommands is none where the file leaves it out, and reads a list of command names", () => {
-  assert.deepEqual(load(`{"fixer": "claude"}`).fixerCommands, []);
-  assert.deepEqual(load(`{"fixer": "claude", "fixerCommands": ["node", "npm", "python3", "cargo-nextest", "g++"]}`).fixerCommands, ["node", "npm", "python3", "cargo-nextest", "g++"]);
-});
-
-test("#864: fixerCommands refuses anything but a list of bare command names, so no grant is wider than one command", () => {
-  const refused = [
-    `"node"`,
-    `[]`,
-    `null`,
-    `[""]`,
-    `[1]`,
-    // A wildcard, a pattern or a CLI's own grant syntax would reach the CLI as a wider grant than one command.
-    `["*"]`,
-    `["node *"]`,
-    `["node:*"]`,
-    `["node --test"]`,
-    `["shell(node)"]`,
-    `["Bash(node:*)"]`,
-    `["/usr/bin/node"]`,
-    `["-p"]`,
-    `["node", "node"]`,
-    JSON.stringify(Array.from({ length: 17 }, (_, n) => `tool${n}`)),
-  ];
-  for (const value of refused) {
-    const contents = `{"fixer": "claude", "fixerCommands": ${value}}`;
-    assert.match(
-      rejection(contents).message,
-      /: "fixerCommands" is .*, but it must be a list of 1 to 16 different command names, each up to 64 letters, digits and \. _ \+ -, starting with a letter or a digit; leave "fixerCommands" out for none$/u,
-      contents,
-    );
-  }
-});
-
-test("#864: fixerCommands is refused where no fixer is named, since nothing would be granted them", () => {
-  assert.match(rejection(`{"fixerCommands": ["node"]}`).message, /: "fixerCommands" names commands for a fixer, but "fixer" names none$/u);
 });
 
 test("#838: a linked worktree takes the venue from the main worktree's .squiz.json, never its own", () => {
@@ -377,7 +332,7 @@ test("a file that does not hold a JSON object is refused", () => {
 test("a key that is not a setting is refused rather than ignored", () => {
   const error = rejection(`{"round": 5}`);
   assert.match(error.message, /"round" is not a setting/);
-  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking", "model", "fixer", "fixerCommands" and "copilotTokenFile"/);
+  assert.match(error.message, /"reviewer", "rounds", "timeout", "tokens", "thinking", "model" and "copilotTokenFile"/);
 });
 
 test("a .squiz.json that is there and cannot be read is not read as absent", () => {

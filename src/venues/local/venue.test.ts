@@ -108,14 +108,6 @@ test("the change is the working tree against its base, named for the worktree, a
     ].join("\n"),
   );
   assert.doesNotMatch(change.followUp, /commit|push/iu);
-  assert.equal(
-    change.fixerFollowUp,
-    [
-      `Fix what applies in ${worktree}, and reply on each thread with`,
-      `\`(cd ${quoted} && squiz reply <id> <text>)\` to say what you changed or why`,
-      "you disagree. Nothing needs committing: squiz reviews the working tree as it stands.",
-    ].join("\n"),
-  );
   assert.equal(change.base, start);
   assert.notEqual(change.head, start);
   assert.equal(change.description, "Make the queue retry.\n");
@@ -136,8 +128,8 @@ test("#826: every command the change gives runs squiz in the worktree, and leave
   mkdirSync(bin);
   writeFileSync(join(bin, "squiz"), `#!/bin/sh\necho "squiz ran in $(pwd -P)"\n`, { mode: 0o755 });
 
-  const commands = [change.rerun, ...commandsIn(change.followUp), ...commandsIn(change.fixerFollowUp)];
-  assert.equal(commands.length, 4, `the follow-ups do not give their three commands:\n${change.followUp}\n${change.fixerFollowUp}`);
+  const commands = [change.rerun, ...commandsIn(change.followUp)];
+  assert.equal(commands.length, 3, `the follow-up does not give its two commands:\n${change.followUp}`);
   for (const shell of ["/bin/sh", "bash"]) {
     for (const command of commands) {
       const runnable = command.replace("<id> <text>", "T1 fixed");
@@ -327,7 +319,7 @@ test("a call whose deadline has passed is not made, and fails", (t) => {
 
 const PROMPT = "Extend the parser. Requirement: keys are lowercased, and the last one wins.";
 
-test("#870: a worktree with no description.md is described by the first prompt recorded in it, marked as the run's prompt", (t) => {
+test("#870: a worktree with no description.md is described by the first prompt recorded in it", (t) => {
   const worktree = worktreeIn(t);
   localVenue.recordStart(worktree, deadlineIn(30_000));
 
@@ -336,7 +328,6 @@ test("#870: a worktree with no description.md is described by the first prompt r
 
   const change = changeIn(worktree);
   assert.equal(change.description, PROMPT, "a later prompt replaced the first");
-  assert.equal(change.descriptionFrom, "prompt");
   assert.equal(readFileSync(join(worktree, ".squiz", "local", "prompt.md"), "utf8"), PROMPT);
   assert.equal(git(worktree, ["status", "--porcelain", "--untracked-files=all"]), "", "the prompt became part of the change");
 });
@@ -350,13 +341,11 @@ test("#870: a description.md the caller wrote is the description, whether it cam
   localVenue.recordPrompt(worktree, PROMPT, deadlineIn(30_000));
   const before = changeIn(worktree);
   assert.equal(before.description, "Make the queue retry.\n");
-  assert.equal("descriptionFrom" in before, false);
   assert.equal(readFileSync(written, "utf8"), "Make the queue retry.\n");
 
   writeFileSync(written, "");
   const emptied = changeIn(worktree);
   assert.equal(emptied.description, "", "an empty description.md lost to the prompt");
-  assert.equal("descriptionFrom" in emptied, false);
 });
 
 // A guard for existing behaviour: with neither file, the change has no description.
@@ -366,7 +355,6 @@ test("a worktree with no description.md and no prompt has no description", (t) =
 
   const change = changeIn(worktree);
   assert.equal(change.description, "");
-  assert.equal("descriptionFrom" in change, false);
 });
 
 test("#870: a prompt in no git worktree records nothing, and says why", (t) => {

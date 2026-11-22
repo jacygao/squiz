@@ -25,7 +25,6 @@ import { processesNaming, stopEveryNaming } from "../sessions/leftovers.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { CLAUDE_CODE_STOP, COPILOT_STOP, COPILOT_SUBAGENT_STOP, withCwd } from "../sessions/stop-payloads.ts";
 import { CLAUDE_CODE_PROMPT, COPILOT_PROMPT, COPILOT_SUBAGENT_PROMPT } from "../sessions/prompt-payloads.ts";
-import { fixerEnvironment } from "../host/fixer.ts";
 
 const hookModule = new URL("./hook.ts", import.meta.url).href;
 const triggerModule = new URL("../host/trigger.ts", import.meta.url).href;
@@ -266,7 +265,7 @@ test("a Stop firing queues the state, owned by the session and its socket, and s
       {
         head: HEAD,
         activity: null,
-        owner: { sessionId: SESSION_ID, messagingSocket: SOCKET, lastMessage: "The change is on the branch." },
+        owner: { sessionId: SESSION_ID, messagingSocket: SOCKET },
         herdrWorkspace: "w2",
         status: "queued",
       },
@@ -274,7 +273,7 @@ test("a Stop firing queues the state, owned by the session and its socket, and s
   });
 });
 
-test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent, with its last message and transcript", async () => {
+test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
       payload: subagentStopPayload(place.worktree),
@@ -286,34 +285,7 @@ test("a SubagentStop firing queues the state, owned by the parent session, its s
       {
         head: HEAD,
         activity: null,
-        owner: {
-          sessionId: SESSION_ID,
-          subagent: AGENT_ID,
-          messagingSocket: SOCKET,
-          lastMessage: "The change is on the branch.",
-          transcript: AGENT_TRANSCRIPT,
-        },
-        status: "queued",
-      },
-    ]);
-  });
-});
-
-test("#802: a SubagentStop with no last_assistant_message queues the state with the rest of its owner, and says nothing", async () => {
-  // A hook that threw on the missing field would exit 0 with nothing queued,
-  // which reads like a branch with no pull request but for this record and the
-  // empty stderr.
-  await withPlace(async (place) => {
-    const payload = JSON.parse(subagentStopPayload(place.worktree)) as Record<string, unknown>;
-    delete payload["last_assistant_message"];
-    const fired = await fire(place, { payload: JSON.stringify(payload), environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
-
-    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
-    assert.deepEqual(recordsIn(place), [
-      {
-        head: HEAD,
-        activity: null,
-        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET, transcript: AGENT_TRANSCRIPT },
+        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET },
         status: "queued",
       },
     ]);
@@ -385,15 +357,7 @@ test("Copilot's recorded SubagentStop, fired from outside any worktree, queues f
     const fired = await fire(place, { payload, environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
 
     assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
-    assert.deepEqual(recordsIn(place), [
-      // Copilot's payload carries no agent_transcript_path, and the subagent's events are in its parent's.
-      {
-        head: HEAD,
-        activity: null,
-        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, lastMessage: "PONG", parentTranscript: `/copilot-home/session-state/${SESSION_ID}/events.jsonl` },
-        status: "queued",
-      },
-    ]);
+    assert.deepEqual(recordsIn(place), [{ head: HEAD, activity: null, owner: { sessionId: SESSION_ID, subagent: AGENT_ID }, status: "queued" }]);
   });
 });
 
@@ -481,7 +445,7 @@ test("a Copilot Stop queues the state owned by the session, and records no socke
       {
         head: HEAD,
         activity: null,
-        owner: { sessionId: COPILOT_PARENT, transcript: `/Users/someone/.copilot/session-state/${COPILOT_PARENT}/events.jsonl` },
+        owner: { sessionId: COPILOT_PARENT },
         status: "queued",
       },
     ]);
@@ -505,7 +469,7 @@ test("a Copilot Stop records the socket squiz's extension listens on beside the 
 
       assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
       assert.deepEqual(recordsIn(place), [
-        { head: HEAD, activity: null, owner: { sessionId: COPILOT_PARENT, messagingSocket: socket, transcript: join(directory, "events.jsonl") }, status: "queued" },
+        { head: HEAD, activity: null, owner: { sessionId: COPILOT_PARENT, messagingSocket: socket }, status: "queued" },
       ]);
     } finally {
       await new Promise((resolve) => extension.close(resolve));
@@ -799,7 +763,7 @@ test("a Stop under the local venue queues the working tree's state in .squiz/loc
     };
     assert.equal(state.records.length, 1);
     assert.equal(state.records[0]?.status, "queued");
-    assert.deepEqual(state.records[0]?.owner, { sessionId: SESSION_ID, lastMessage: "The change is on the branch." });
+    assert.deepEqual(state.records[0]?.owner, { sessionId: SESSION_ID });
     assert.notEqual(state.records[0]?.head, headOf(place.worktree), "the head is the built commit, not the worktree's HEAD");
     assert.equal(existsSync(join(place.bin, "calls.log")), false, "the local venue ran gh");
   });
@@ -811,10 +775,9 @@ function escaped(text: string): string {
 
 const CAPTURED_CLAUDE_SESSION = "1525f1a6-f15f-4e61-b7cd-3e0ddc344528";
 const CAPTURED_COPILOT_SESSION = "af7a1b25-6bdc-459f-99e1-5c3ab2513f83";
-const CAPTURED_COPILOT_TRANSCRIPT = `/Users/jacy/.copilot/session-state/${CAPTURED_COPILOT_SESSION}/events.jsonl`;
 
-test("#859: Claude Code 2.1.321's Stop queues the state with the session's final message and transcript, and says nothing", async () => {
-  // A hook that threw on the new fields would exit 0 with nothing queued, which
+test("#859: Claude Code 2.1.321's Stop queues the state owned by its session, and says nothing", async () => {
+  // A hook that threw on the payload would exit 0 with nothing queued, which
   // reads like a branch with no pull request but for this record and the empty stderr.
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: withCwd(CLAUDE_CODE_STOP, place.worktree), environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
@@ -824,30 +787,25 @@ test("#859: Claude Code 2.1.321's Stop queues the state with the session's final
       {
         head: HEAD,
         activity: null,
-        owner: {
-          sessionId: CAPTURED_CLAUDE_SESSION,
-          messagingSocket: SOCKET,
-          lastMessage: "DONE",
-          transcript: (JSON.parse(CLAUDE_CODE_STOP) as Record<string, unknown>)["transcript_path"],
-        },
+        owner: { sessionId: CAPTURED_CLAUDE_SESSION, messagingSocket: SOCKET },
         status: "queued",
       },
     ]);
   });
 });
 
-test("#859: Copilot 1.0.110's Stop queues the state with the session's transcript and no final message, and says nothing", async () => {
+test("#859: Copilot 1.0.110's Stop queues the state owned by its session, and says nothing", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: withCwd(COPILOT_STOP, place.worktree), environment: { COPILOT_CLI: "1" } });
 
     assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [
-      { head: HEAD, activity: null, owner: { sessionId: CAPTURED_COPILOT_SESSION, transcript: CAPTURED_COPILOT_TRANSCRIPT }, status: "queued" },
+      { head: HEAD, activity: null, owner: { sessionId: CAPTURED_COPILOT_SESSION }, status: "queued" },
     ]);
   });
 });
 
-test("#859: Copilot 1.0.110's SubagentStop queues the state naming the parent's events.jsonl, and says nothing", async () => {
+test("#859: Copilot 1.0.110's SubagentStop queues the state owned by the parent session and the subagent, and says nothing", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, { payload: withCwd(COPILOT_SUBAGENT_STOP, place.worktree), environment: { COPILOT_CLI: "1" } });
 
@@ -856,46 +814,27 @@ test("#859: Copilot 1.0.110's SubagentStop queues the state naming the parent's 
       {
         head: HEAD,
         activity: null,
-        owner: {
-          sessionId: CAPTURED_COPILOT_SESSION,
-          subagent: "dcc0b994-3d65-4ad3-92f3-ccf70b8232d5",
-          lastMessage: "PONG",
-          parentTranscript: CAPTURED_COPILOT_TRANSCRIPT,
-        },
+        owner: { sessionId: CAPTURED_COPILOT_SESSION, subagent: "dcc0b994-3d65-4ad3-92f3-ccf70b8232d5" },
         status: "queued",
       },
     ]);
   });
 });
 
-test("#859: a Stop with a malformed final message queues the state with its transcript, and says nothing", async () => {
-  await withPlace(async (place) => {
-    const transcript = `/transcripts/${SESSION_ID}.jsonl`;
-    const payload = stopPayload(place.worktree, { last_assistant_message: { text: "done" }, transcript_path: transcript });
-    const fired = await fire(place, { payload, environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
-
-    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
-    assert.deepEqual(recordsIn(place), [
-      { head: HEAD, activity: null, owner: { sessionId: SESSION_ID, messagingSocket: SOCKET, transcript }, status: "queued" },
-    ]);
-  });
-});
-
 // A guard for existing behaviour: the first stop to queue a state owns it, and
-// a subagent's SubagentStop fires before its parent's Stop, so the handoff shows
-// the subagent's report for that state.
-test("#859: a Stop after a SubagentStop for the same state leaves the subagent's report on the record", async () => {
+// a subagent's SubagentStop fires before its parent's Stop.
+test("#859: a Stop after a SubagentStop for the same state leaves the subagent as its owner", async () => {
   await withPlace(async (place) => {
     const environment = { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET };
-    const first = await fire(place, { payload: subagentStopPayload(place.worktree, { last_assistant_message: "The subagent's report." }), environment });
-    const second = await fire(place, { payload: stopPayload(place.worktree, { last_assistant_message: "The parent's report." }), environment });
+    const first = await fire(place, { payload: subagentStopPayload(place.worktree), environment });
+    const second = await fire(place, { payload: stopPayload(place.worktree), environment });
 
     assert.deepEqual([first.stderr, second.stderr], ["", ""]);
     assert.deepEqual(recordsIn(place), [
       {
         head: HEAD,
         activity: null,
-        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET, lastMessage: "The subagent's report.", transcript: AGENT_TRANSCRIPT },
+        owner: { sessionId: SESSION_ID, subagent: AGENT_ID, messagingSocket: SOCKET },
         status: "queued",
       },
     ]);
@@ -945,20 +884,6 @@ test("#870: a later prompt, in the same session or another, leaves the first one
       assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     }
     assert.equal(readFileSync(promptFileIn(place), "utf8"), CAPTURED_PROMPT, "a later prompt replaced the first");
-  });
-});
-
-// The fixer is a session too, started on squiz's own prompt, in the worktree whose run it works for.
-test("#870: a session squiz started as the fixer records nothing, under either CLI", async () => {
-  await withPlace(async (place) => {
-    squizJsonIn(place.worktree, LOCAL);
-    for (const [payload, cli] of [[CLAUDE_CODE_PROMPT, {}], [COPILOT_PROMPT, { COPILOT_CLI: "1" }]] as const) {
-      const environment = fixerEnvironment({ ...cli, PATH: "/usr/bin" }) as Record<string, string>;
-      const fired = await fire(place, { payload: withCwd(payload, place.worktree), environment, trigger: { as: "recording" } });
-
-      assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
-      assert.equal(existsSync(promptFileIn(place)), false, "the fixer's prompt was recorded as the run's");
-    }
   });
 });
 

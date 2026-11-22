@@ -3,9 +3,8 @@
  * describes the change where nobody wrote `description.md`.
  *
  * Only the first is kept. A later prompt in the same session, a second session,
- * or a resume asks for something narrower than the run did, and the fixer a
- * headless run hands its findings to has nothing else to tell what the run was
- * asked for. The prompt is kept apart from `description.md`, so that what a
+ * or a resume asks for something narrower than the run did, and the reviewer
+ * has nothing else to tell what the run was asked for. The prompt is kept apart from `description.md`, so that what a
  * caller wrote is never overwritten and always wins.
  *
  * Nothing here throws. Each failure comes back as a reason.

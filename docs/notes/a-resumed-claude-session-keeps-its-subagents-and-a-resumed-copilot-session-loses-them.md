@@ -8,6 +8,10 @@ recheck-when: Claude Code or Copilot CLI change what `--resume` restores, Copilo
 
 # A resumed Claude session keeps its subagents, and a resumed Copilot session loses them
 
+**2026-11-22:** squiz no longer starts a fixer, and § 3 no longer has its
+headless runs, handoff or markers. What follows records them as they stood
+when this was measured.
+
 ## Intent
 
 - Whether `claude -p --resume` and `copilot -p --resume` restore the transcript

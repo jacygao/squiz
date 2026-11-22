@@ -110,13 +110,11 @@ function reasonFrom(read: FiringRead): string {
   return reason;
 }
 
-test("on Stop, the owner is the session itself, with its socket, and its final message and transcript", () => {
+test("on Stop, the owner is the session itself, with its socket", () => {
   assert.deepEqual(firingIn(readFiring(stopText(), WITH_SOCKET)), {
     event: "Stop",
     directory: DIRECTORY,
     owner: { sessionId: SESSION_ID, socket: SOCKET },
-    lastMessage: SECRET,
-    transcript: `/transcripts/${SESSION_ID}.jsonl`,
   });
 });
 
@@ -128,45 +126,8 @@ test("on SubagentStop, the owner is the dispatching session, with its socket, an
     directory: DIRECTORY,
     owner: { sessionId: SESSION_ID, socket: SOCKET },
     subagent: AGENT_ID,
-    lastMessage: SECRET,
-    transcript: `/transcripts/${SESSION_ID}/subagents/agent-${AGENT_ID}.jsonl`,
   });
 });
-
-test("a SubagentStop with no last_assistant_message is still read whole, with its transcript", () => {
-  // An older CLI, or another runtime, sends no last message. Nothing else about
-  // the firing depends on it.
-  const text = subagentStopText();
-  const { last_assistant_message: _dropped, ...rest } = JSON.parse(text) as Record<string, unknown>;
-
-  assert.deepEqual(firingIn(readFiring(JSON.stringify(rest), WITH_SOCKET)), {
-    event: "SubagentStop",
-    directory: DIRECTORY,
-    owner: { sessionId: SESSION_ID, socket: SOCKET },
-    subagent: AGENT_ID,
-    transcript: `/transcripts/${SESSION_ID}/subagents/agent-${AGENT_ID}.jsonl`,
-  });
-});
-
-test("a SubagentStop whose last message or transcript is not a non-empty string is read without it, rather than refused", () => {
-  for (const value of [null, 7, "", { text: "done" }]) {
-    const firing = firingIn(readFiring(subagentStopText({ last_assistant_message: value, agent_transcript_path: value }), WITH_SOCKET));
-
-    assert.deepEqual(firing, {
-      event: "SubagentStop",
-      directory: DIRECTORY,
-      owner: { sessionId: SESSION_ID, socket: SOCKET },
-      subagent: AGENT_ID,
-    }, `read with both fields as ${JSON.stringify(value)}`);
-  }
-});
-
-test("a SubagentStop's transcript is kept only as an absolute path", () => {
-  const firing = firingIn(readFiring(subagentStopText({ agent_transcript_path: "subagents/agent.jsonl" }), WITH_SOCKET));
-
-  assert.equal("transcript" in firing, false, `a relative transcript path was kept: ${JSON.stringify(firing)}`);
-});
-
 
 test("an environment with no messaging socket gives an owner with no socket", () => {
   for (const environment of [{}, { CLAUDE_CODE_MESSAGING_SOCKET: undefined }]) {
@@ -220,8 +181,6 @@ test("a Stop names no subagent, whatever agent fields it carries", () => {
       event: "Stop",
       directory: DIRECTORY,
       owner: { sessionId: SESSION_ID, socket: SOCKET },
-      lastMessage: SECRET,
-      transcript: `/transcripts/${SESSION_ID}.jsonl`,
     });
   }
 });
@@ -318,19 +277,15 @@ test("under Copilot, a Stop for the session's own turn is owned by the session, 
     event: "Stop",
     directory: "/work/repo",
     owner: { sessionId: COPILOT_PARENT },
-    transcript: COPILOT_TRANSCRIPT,
   });
 });
 
 test("under Copilot, a SubagentStop is owned by the parent session, with no socket, and names the subagent", () => {
-  // Copilot's carries a last message and no agent_transcript_path.
   assert.deepEqual(firingIn(readFiring(copilotSubagentStopText(), UNDER_COPILOT)), {
     event: "SubagentStop",
     directory: "/work/repo",
     owner: { sessionId: COPILOT_PARENT },
     subagent: COPILOT_SUBAGENT,
-    lastMessage: SECRET,
-    parentTranscript: COPILOT_TRANSCRIPT,
   });
 });
 
@@ -349,8 +304,6 @@ test("a Claude Code Stop is read whatever session its transcript's file name giv
       event: "Stop",
       directory: DIRECTORY,
       owner: { sessionId: SESSION_ID, socket: SOCKET },
-      lastMessage: SECRET,
-      transcript: path,
     });
   }
 });
@@ -401,12 +354,10 @@ test("under Copilot, the owner's socket is the one squiz's extension listens on 
       const stop = transcriptUnder(home, COPILOT_PARENT, copilotStopText(COPILOT_PARENT));
       const subagentStop = transcriptUnder(home, COPILOT_PARENT, copilotSubagentStopText());
 
-      const transcript = join(home, "session-state", COPILOT_PARENT, "events.jsonl");
       assert.deepEqual(firingIn(await readFiringWithSocket(stop, UNDER_COPILOT)), {
         event: "Stop",
         directory: "/work/repo",
         owner: { sessionId: COPILOT_PARENT, socket: path },
-        transcript,
       });
       // A subagent runs inside its parent's process, so the parent's extension is the one to wake.
       assert.deepEqual(firingIn(await readFiringWithSocket(subagentStop, UNDER_COPILOT)), {
@@ -414,8 +365,6 @@ test("under Copilot, the owner's socket is the one squiz's extension listens on 
         directory: "/work/repo",
         owner: { sessionId: COPILOT_PARENT, socket: path },
         subagent: COPILOT_SUBAGENT,
-        lastMessage: SECRET,
-        parentTranscript: transcript,
       });
     } finally {
       await closed(server);
@@ -572,60 +521,29 @@ test("a start carrying no usable cwd is unreadable, since the worktree is resolv
   }
 });
 
-test("#859: Claude Code 2.1.321's Stop is read with the session's final message and transcript", () => {
+test("#859: Claude Code 2.1.321's Stop is read as owned by its session, with its socket", () => {
   assert.deepEqual(firingIn(readFiring(CLAUDE_CODE_STOP, WITH_SOCKET)), {
     event: "Stop",
     directory: "/private/tmp/claude-501/-Users-jacy-Documents-Dev-squiz/b40470cd-5c98-41d6-a7ef-16382cebe8d8/scratchpad/issue-859/repo",
     owner: { sessionId: "1525f1a6-f15f-4e61-b7cd-3e0ddc344528", socket: SOCKET },
-    lastMessage: "DONE",
-    transcript: "/Users/jacy/.claude/projects/-private-tmp-claude-501--Users-jacy-Documents-Dev-squiz-b40470cd-5c98-41d6-a7ef-16382cebe8d8-scratchpad-issue-859-repo/1525f1a6-f15f-4e61-b7cd-3e0ddc344528.jsonl",
   });
 });
 
-test("#859: Copilot 1.0.110's Stop, which carries no final message, is read with the session's transcript alone", () => {
+test("#859: Copilot 1.0.110's Stop is read as owned by its session, with no socket", () => {
   assert.deepEqual(firingIn(readFiring(COPILOT_STOP, UNDER_COPILOT)), {
     event: "Stop",
     directory: "/private/tmp/claude-501/-Users-jacy-Documents-Dev-squiz/b40470cd-5c98-41d6-a7ef-16382cebe8d8/scratchpad/issue-859/repo",
     owner: { sessionId: "af7a1b25-6bdc-459f-99e1-5c3ab2513f83" },
-    transcript: "/Users/jacy/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl",
   });
 });
 
-test("#859: a Stop whose final message or transcript is malformed is read without that field alone", () => {
-  for (const value of [null, 7, "", { text: "done" }, "relative/transcript.jsonl"]) {
-    const message = firingIn(readFiring(stopText({ last_assistant_message: value }), WITH_SOCKET));
-    assert.deepEqual(message, {
-      event: "Stop",
-      directory: DIRECTORY,
-      owner: { sessionId: SESSION_ID, socket: SOCKET },
-      ...(typeof value === "string" && value !== "" ? { lastMessage: value } : {}),
-      transcript: `/transcripts/${SESSION_ID}.jsonl`,
-    }, `read with the last message as ${JSON.stringify(value)}`);
-
-    const transcript = firingIn(readFiring(stopText({ transcript_path: value }), WITH_SOCKET));
-    assert.deepEqual(transcript, {
-      event: "Stop",
-      directory: DIRECTORY,
-      owner: { sessionId: SESSION_ID, socket: SOCKET },
-      lastMessage: SECRET,
-    }, `read with the transcript as ${JSON.stringify(value)}`);
-  }
-});
-
-test("#859: Copilot 1.0.110's SubagentStop names the parent's events.jsonl as where the subagent's events are", () => {
+test("#859: Copilot 1.0.110's SubagentStop is read as owned by the parent session, naming the subagent", () => {
   assert.deepEqual(firingIn(readFiring(COPILOT_SUBAGENT_STOP, UNDER_COPILOT)), {
     event: "SubagentStop",
     directory: "/private/tmp/claude-501/-Users-jacy-Documents-Dev-squiz/b40470cd-5c98-41d6-a7ef-16382cebe8d8/scratchpad/issue-859/repo",
     owner: { sessionId: "af7a1b25-6bdc-459f-99e1-5c3ab2513f83" },
     subagent: "dcc0b994-3d65-4ad3-92f3-ccf70b8232d5",
-    lastMessage: "PONG",
-    parentTranscript: "/Users/jacy/.copilot/session-state/af7a1b25-6bdc-459f-99e1-5c3ab2513f83/events.jsonl",
   });
-});
-
-// A guard for existing behaviour: Claude Code's transcript_path is the parent's, and its subagent has a transcript of its own.
-test("a Claude Code SubagentStop names no parent's transcript", () => {
-  assert.equal("parentTranscript" in firingIn(readFiring(subagentStopText(), WITH_SOCKET)), false);
 });
 
 const PROMPT_REPO = "/private/tmp/claude-501/-Users-jacy-Documents-Dev-squiz/b40470cd-5c98-41d6-a7ef-16382cebe8d8/scratchpad/issue-870/repo";
