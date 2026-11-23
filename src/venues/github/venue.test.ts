@@ -353,6 +353,39 @@ test("readChange is none on a detached HEAD", async () => {
   });
 });
 
+test("#781: readChange gives up on a git that hangs on the branch lookup at its deadline, and kills that git", async () => {
+  await withRepository(async (worktree) => {
+    await withFakeGh([], async (gh) => {
+      const binaries = await mkdtemp(join(tmpdir(), "squiz-venue-git-"));
+      const previous = process.env["PATH"];
+      try {
+        // The script execs into the sleep, so the pid it records is the one
+        // the lookup started, and the one that must be gone afterwards.
+        const recorded = join(binaries, "pid");
+        standIn(binaries, "git", ["#!/bin/sh", `echo $$ > ${quote(recorded)}`, "exec sleep 10", ""].join("\n"));
+        process.env["PATH"] = `${binaries}:${previous ?? ""}`;
+
+        const began = Date.now();
+        const lookup = githubVenue.readChange(worktree, null, deadlineIn(500));
+        const took = Date.now() - began;
+
+        assert.deepEqual(lookup, {
+          outcome: "failed",
+          reason: "the current branch could not be resolved: git ran out of the time it was given",
+        });
+        assert.ok(took < 3_000, `the lookup ran ${took}ms past a 500ms deadline`);
+        assert.equal(gh.calls(), 0, "nothing is asked of GitHub for a branch that was never named");
+        const pid = Number.parseInt(read(recorded), 10);
+        assert.ok(pid > 0, "the hanging git never ran");
+        assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, `the hung git ${pid} was left running`);
+      } finally {
+        process.env["PATH"] = previous;
+        await rm(binaries, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
 test("readChange fails, with gh's reason, where the lookup could not be made", async () => {
   await withRepository(async (worktree) => {
     await withFakeGh([{ stderr: "HTTP 401: Bad credentials\n", status: 1 }], () => {

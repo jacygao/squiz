@@ -30,20 +30,20 @@ const DETACHED = 1;
  * cannot tell that from a branch of that name.
  *
  * `until` bounds the call: git is killed at it, and the answer is a `failed`
- * that says the time ran out. Without one the call runs as long as git does.
+ * that says the time ran out.
  *
  * Never throws. A git that is missing or that failed comes back as `failed`,
  * carrying the reason as a single line.
  */
-export function currentBranch(directory: string, until?: Deadline): BranchLookup {
-  if (until?.passed() === true) return failed(RAN_OUT);
+export function currentBranch(directory: string, until: Deadline): BranchLookup {
+  if (until.passed()) return failed(RAN_OUT);
 
   const result = spawnSync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
     cwd: directory,
     encoding: "utf8",
     // A timeout of zero is no timeout at all, so a deadline with nothing left
     // still bounds the call.
-    ...(until === undefined ? {} : { timeout: Math.max(1, until.remaining()) }),
+    timeout: Math.max(1, until.remaining()),
   });
 
   if (result.error !== undefined) {
