@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { deadlineIn } from "../reviewers/deadline.ts";
 import { currentBranch } from "./branch.ts";
 
 /** Run git in `directory`, and fail the test rather than the fixture. */
@@ -50,7 +51,7 @@ test("the branch checked out in the directory is the one that comes back", async
   await withTemporaryDirectory((directory) => {
     commitOn(directory, "review/the-gate");
 
-    assert.deepEqual(currentBranch(directory), { outcome: "branch", name: "review/the-gate" });
+    assert.deepEqual(currentBranch(directory, deadlineIn(10_000)), { outcome: "branch", name: "review/the-gate" });
   });
 });
 
@@ -62,7 +63,7 @@ test("the branch resolves the same from a subdirectory of the worktree", async (
     const inside = join(directory, "src", "deep");
     await mkdir(inside, { recursive: true });
 
-    assert.deepEqual(currentBranch(inside), { outcome: "branch", name: "review/the-gate" });
+    assert.deepEqual(currentBranch(inside, deadlineIn(10_000)), { outcome: "branch", name: "review/the-gate" });
   });
 });
 
@@ -71,7 +72,7 @@ test("a branch name carrying shell metacharacters comes back as it was written",
     const branch = "evil/$(id);rm-rf&`x`";
     commitOn(directory, branch);
 
-    assert.deepEqual(currentBranch(directory), { outcome: "branch", name: branch });
+    assert.deepEqual(currentBranch(directory, deadlineIn(10_000)), { outcome: "branch", name: branch });
   });
 });
 
@@ -80,13 +81,13 @@ test("a detached HEAD is no branch, and that is not a failure", async () => {
     commitOn(directory, "main");
     git(directory, "checkout", "--quiet", "--detach");
 
-    assert.deepEqual(currentBranch(directory), { outcome: "detached" });
+    assert.deepEqual(currentBranch(directory, deadlineIn(10_000)), { outcome: "detached" });
   });
 });
 
 test("a directory that is no repository is a failure carrying git's own words", async () => {
   await withTemporaryDirectory((directory) => {
-    const result = currentBranch(directory);
+    const result = currentBranch(directory, deadlineIn(10_000));
 
     assert.equal(result.outcome, "failed");
     assert.match(
@@ -103,7 +104,7 @@ test("a git that is not installed is a failure", async () => {
     // the lookup to a default one, which is where git actually is.
     process.env["PATH"] = directory;
     try {
-      const result = currentBranch(directory);
+      const result = currentBranch(directory, deadlineIn(10_000));
 
       assert.equal(result.outcome, "failed");
       assert.match(result.outcome === "failed" ? result.reason : "", /git could not be run/u);
