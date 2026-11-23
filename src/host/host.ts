@@ -664,9 +664,8 @@ function notReviewed(key: Omit<QueuedRecord, "status">, reason: string): NotRevi
  * A failed record, marked noted wherever it has an owner.
  *
  * The mark goes in with the failure, before the note is written, so a note that
- * then cannot be written leaves it set. The state is queued again only by
- * `squiz review`, which records no owner, so a retry that fails again gets no
- * second note.
+ * then cannot be written leaves it set. A failed state is queued again with no
+ * owner, so a retry that fails again gets no second note.
  */
 function failedRecord(key: Omit<QueuedRecord, "status">, reason: string): Extract<StateRecord, { readonly status: "failed" }> {
   return { ...key, status: "failed", reason, ownerNoted: key.owner !== undefined };

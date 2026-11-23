@@ -162,9 +162,12 @@ export function trigger(request: TriggerRequest): Triggered {
   let queued = false;
   if (decision.outcome === "queue") {
     const workspace = request.environment["HERDR_WORKSPACE_ID"];
+    // A retry records no owner, so a state that fails again is not noted again.
+    // The `squiz review` that retries it reports the result itself.
+    const owner = record?.status === "failed" ? undefined : request.owner;
     const fresh: StateRecord = {
       ...state,
-      ...(request.owner === undefined ? {} : { owner: request.owner }),
+      ...(owner === undefined ? {} : { owner }),
       // Any other value would leave the record unreadable to every later trigger.
       ...(workspace !== undefined && isHerdrWorkspace(workspace) ? { herdrWorkspace: workspace } : {}),
       status: "queued",

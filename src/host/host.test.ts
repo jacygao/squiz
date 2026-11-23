@@ -43,6 +43,7 @@ import { openThread } from "../venues/local/record.ts";
 import type { Change, ReviewThread, Venue } from "../venues/venue.ts";
 import { runHost, type HostEnd, type HostSetup } from "./host.ts";
 import { takeEpisodeHostLock } from "./lock.ts";
+import { trigger, type Triggered } from "./trigger.ts";
 
 const BRANCH = "review-me";
 const PULL_REQUEST = 142;
@@ -1676,8 +1677,8 @@ test("a failed state with no owner recorded is recorded as not noted", async () 
   assert.deepEqual(ran.notes, {});
 });
 
-test("a state that fails, is queued again by squiz review and fails again gets one note", async () => {
-  let requeued = false;
+test("#417: a state that fails, is queued again by squiz review's trigger with an owner, and fails again gets one note", async () => {
+  let requeued: Triggered | undefined;
   const ran = await host({
     records: (fixture) => [queued(fixture.head(), null, MAIN)],
     listedNumber: 143,
@@ -1686,17 +1687,27 @@ test("a state that fails, is queued again by squiz review and fails again gets o
         const written = updateState(episode, change, options);
         const read = readState(episode);
         const [record] = read.outcome === "read" ? recordsOf(read.state) : [];
-        if (!requeued && record?.status === "failed") {
-          requeued = true;
-          // As `squiz review` queues a failed state again: with no owner, because it records none.
-          queueNow(episode, queued(record.head));
+        if (requeued === undefined && record?.status === "failed") {
+          // The trigger finds the change on the fake venue, because the host's
+          // `gh` answers with another pull request so that every round fails.
+          requeued = trigger({
+            directory: episode.worktree,
+            trigger: "review",
+            key: String(PULL_REQUEST),
+            venue: fakeVenue({ listThreads: () => ({ outcome: "listed", threads: [] }) }).venue,
+            owner: MAIN,
+            environment: {},
+            until: deadlineIn(5_000),
+            presence: () => ({ outcome: "running" }),
+            host: () => ({ command: process.execPath, args: ["--eval", ""] }),
+          });
         }
         return written;
       },
     },
   });
 
-  assert.equal(requeued, true, "the fixture never queued the failed state again");
+  assert.ok(requeued?.outcome === "decided" && requeued.queued, `the trigger did not queue the failed state again: ${JSON.stringify(requeued)}`);
   assert.equal(ran.log.match(/ failed: /gu)?.length, 2, `the state should have failed twice; the log says:\n${ran.log}`);
   assert.equal(ran.notes[MAIN.sessionId]?.length, 1, `notes/ holds ${JSON.stringify(ran.notes)}`);
 });

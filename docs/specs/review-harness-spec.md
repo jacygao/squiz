@@ -120,9 +120,10 @@ Each state's record has one of five statuses:
 | Reviewed, or not reviewed | Nothing. `squiz review` returns that result, with the threads as they stand now. |
 
 **Only `squiz review` retries a failed state, never a hook.** The retry is queued
-behind every state already queued or recorded. A retry that fails again posts its
-failure comment and exits 1, writes no second note to the owner, and its stderr
-tells the coding agent not to run the command again (§ 7 `squiz review`).
+behind every state already queued or recorded, and records no owner, whatever
+owner the run knows: no note reports its result. A retry that fails again posts
+its failure comment and exits 1, and its stderr tells the coding agent not to run
+the command again (§ 7 `squiz review`).
 
 **Each state gets at most one review.** Repeated triggers for a state already
 queued or under review post one set of threads and at most one summary. An

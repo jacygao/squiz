@@ -484,20 +484,21 @@ test("a queued state a live host holds starts nothing", async () => {
   });
 });
 
-test("a hook leaves a failed state failed, and squiz review queues it again", async () => {
+test("#417: a hook leaves a failed state failed, and squiz review queues it again with no owner, whatever owner it is given", async () => {
   await withFixture(async (fixture) => {
-    const failed: StateRecord = { ...state, status: "failed", reason: "the round host died", ownerNoted: true };
+    const owner = { sessionId: "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb" };
+    const failed: StateRecord = { ...state, owner, status: "failed", reason: "the round host died", ownerNoted: true };
     seed(fixture.episode, { records: [failed] });
 
-    const byHook = decided(trigger(request(fixture)));
+    const byHook = decided(trigger(request(fixture, { owner })));
     assert.deepEqual(byHook.decision, { outcome: "left-failed" });
     assert.deepEqual(records(fixture.episode), [failed]);
     assert.deepEqual(byHook.host, { outcome: "not started" });
 
-    const byReview = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER) })));
+    const byReview = decided(trigger(request(fixture, { trigger: "review", key: String(NUMBER), owner })));
     assert.deepEqual(byReview.decision, { outcome: "queue", startHost: true });
     assert.equal(byReview.queued, true);
-    assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }]);
+    assert.deepEqual(records(fixture.episode), [{ ...state, status: "queued" }], "a retry's owner would be noted of a failure it already was");
     await eventually(() => hostsThatTook(fixture).length === 1, "the started host taking the lock");
   });
 });
