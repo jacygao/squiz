@@ -6,7 +6,7 @@ import { test, type TestContext } from "node:test";
 
 import { standIn } from "../../testing/stand-in.ts";
 import type { ThinkingAsked } from "../adapter.ts";
-import { runsAt } from "./thinking.ts";
+import { readBack, runsAt } from "./thinking.ts";
 
 /** What pi 0.85.1 answers in RPC mode for DeepSeek V4 Pro asked for `medium`, cut to the fields read. */
 const DEEPSEEK_MEDIUM = [
@@ -102,6 +102,21 @@ test("a pi that answers without its state leaves the level unknown, rather than 
   const { asked } = fixture(t, "0.85.1\n");
 
   assert.deepEqual(runsAt(asked), { outcome: "unknown", reason: "pi did not report its thinking level" });
+});
+
+/**
+ * What `spawnSync` returns when `pi` exits before reading the commands written
+ * to it. A stand-in cannot exit before Node's write lands, except under load,
+ * so the result is built by hand.
+ */
+function closedEarly(status: number, stdout: string, stderr = "") {
+  const error = Object.assign(new Error("spawnSync pi EPIPE"), { code: "EPIPE" });
+  return { pid: 1, output: [null, stdout, stderr], stdout, stderr, status, signal: null, error };
+}
+
+test("#947: a pi that exits before reading its commands is read by what it printed, not reported as never started", () => {
+  assert.deepEqual(readBack(closedEarly(0, "0.85.1\n"), 10_000), { outcome: "unknown", reason: "pi did not report its thinking level" });
+  assert.deepEqual(readBack(closedEarly(1, "", "Error: bad flag\n"), 10_000), { outcome: "unknown", reason: "pi exited 1: Error: bad flag" });
 });
 
 test("a level pi reports that squiz has no name for leaves the level unknown, naming it", (t) => {
