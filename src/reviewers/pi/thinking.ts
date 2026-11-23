@@ -11,7 +11,7 @@
  * Nothing here throws.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 
 import type { Thinking } from "../../config/config.ts";
 import type { RunsAt, ThinkingAsked } from "../adapter.ts";
@@ -51,9 +51,15 @@ export function runsAt(asked: ThinkingAsked): RunsAt {
       stdio: ["pipe", "pipe", "pipe"],
     },
   );
-  if (ran.error !== undefined) {
-    const code = "code" in ran.error ? ran.error.code : undefined;
-    if (code === "ETIMEDOUT") return unknown(`pi did not answer within ${asked.boundMs / 1_000} seconds`);
+  return readBack(ran, asked.boundMs);
+}
+
+/** Read the level from what `runsAt`'s `pi` returned. */
+export function readBack(ran: SpawnSyncReturns<string>, boundMs: number): RunsAt {
+  const code = ran.error !== undefined && "code" in ran.error ? ran.error.code : undefined;
+  // EPIPE is a pi that started and exited before reading its commands, so what it printed is the answer.
+  if (ran.error !== undefined && code !== "EPIPE") {
+    if (code === "ETIMEDOUT") return unknown(`pi did not answer within ${boundMs / 1_000} seconds`);
     return unknown(`pi could not be started: ${ran.error.message}`);
   }
   if (ran.status !== 0) {
