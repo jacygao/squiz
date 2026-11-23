@@ -541,6 +541,9 @@ untracked file that `.gitignore` does not exclude.
 - A worktree of the same repository nested in the working tree, such as a
   subagent's under `.claude/worktrees/`, is left out unless the base has its
   path. A submodule, or a separate repository, stays in the tree as a gitlink.
+- A `.squiz.json` at the worktree's root is left out where it is untracked and
+  the base has none. A tracked one, or one the base has, is in the change like
+  any other file.
 - Two builds of the same tree against the same base give the same commit, so an
   unchanged tree is an unchanged state and is not reviewed again.
 

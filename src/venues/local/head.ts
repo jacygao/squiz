@@ -12,6 +12,7 @@
 import { copyFileSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { configFileName } from "../../config/config.ts";
 import { makeStateDirectory } from "../../loop/state-directory.ts";
 import type { Deadline } from "../../reviewers/deadline.ts";
 import { runGit, withoutGitVariables } from "../../worktree/git.ts";
@@ -51,7 +52,9 @@ export function headObjects(worktree: string): string {
  *
  * The tree is what `git add --all` in the worktree would stage, the worktree's
  * own ignore rules and filters applied, less any worktree of the same
- * repository inside it, in a copy of its index named for this process. The copy is removed however the build ends.
+ * repository inside it, and less a `.squiz.json` at its root that neither its
+ * index nor the base has. It is built in a copy of the worktree's index named
+ * for this process, and the copy is removed however the build ends.
  */
 export function buildHead(worktree: string, base: string, until: Deadline): HeadBuild {
   if (!FULL_COMMIT_NAME.test(base)) return failed(`${JSON.stringify(base)} is not a full commit name`);
@@ -118,10 +121,16 @@ function commitWorkingTree(
   // in the worktree and can write anything. Every command that writes the
   // copy takes all three.
   const isolated = ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false", "-c", "core.hooksPath=/dev/null"];
+  const tracked = runGit(worktree, ["--literal-pathspecs", "ls-files", "-z", "--", configFileName], { until, env });
+  if (!tracked.ran) return failed(`whether ${configFileName} is tracked could not be told: ${tracked.reason}`);
   const added = runGit(worktree, [...isolated, "add", "--all"], { until, env });
   if (!added.ran) return failed(`the working tree could not be staged: ${added.reason}`);
   const left = leaveOutWorktrees(worktree, base, commonDirectory, isolated, env, until);
   if (left !== undefined) return failed(left);
+  if (tracked.stdout === "") {
+    const unconfigured = leaveOutConfiguration(worktree, base, isolated, env, until);
+    if (unconfigured !== undefined) return failed(unconfigured);
+  }
   const tree = runGit(worktree, [...isolated, "write-tree"], { until, env });
   if (!tree.ran) return failed(`the working tree's tree could not be written: ${tree.reason}`);
 
@@ -184,6 +193,32 @@ function leaveOutWorktrees(
     env,
   });
   if (!removed.ran) return `the worktrees in the working tree could not be left out: ${removed.reason}`;
+  return undefined;
+}
+
+/**
+ * Remove from the index copy the `.squiz.json` that `git add --all` took from
+ * the worktree's root, where the base has none. Squiz's own configuration, left
+ * untracked, is not part of the work, and a reviewer shown it asks for it to go.
+ * The caller calls this only where the worktree's index does not track it.
+ *
+ * Returns why it could not, or nothing once it has.
+ */
+function leaveOutConfiguration(
+  worktree: string,
+  base: string,
+  isolated: readonly string[],
+  env: NodeJS.ProcessEnv,
+  until: Deadline,
+): string | undefined {
+  const listed = runGit(worktree, ["--literal-pathspecs", "ls-tree", "-z", "--name-only", base, "--", configFileName], { until, env });
+  if (!listed.ran) return `whether the base has ${configFileName} could not be told: ${listed.reason}`;
+  if (listed.stdout !== "") return undefined;
+  const removed = runGit(worktree, ["--literal-pathspecs", ...isolated, "update-index", "--force-remove", "--", configFileName], {
+    until,
+    env,
+  });
+  if (!removed.ran) return `${configFileName} could not be left out: ${removed.reason}`;
   return undefined;
 }
 
