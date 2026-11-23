@@ -514,6 +514,67 @@ test("threads that cannot be listed after the round exit 1 with the reason, and 
   });
 });
 
+/** A deadline held at `remainingMs` left until `spend` is called, and passed after. */
+function heldDeadline(remainingMs: number): Deadline & { readonly spend: () => void } {
+  let spent = false;
+  return {
+    passed: () => spent,
+    remaining: () => (spent ? 0 : remainingMs),
+    whenPassed: (act) => {
+      if (spent) act();
+      return () => {};
+    },
+    spend: () => {
+      spent = true;
+    },
+  };
+}
+
+/** A listing that, like `gh`, runs out of time where it is given less than it needs. */
+const listingNeeding = (neededMs: number, threads: readonly ReviewThread[]): Venue["listThreads"] => (_change, until) =>
+  until.remaining() < neededMs ? { outcome: "failed", reason: "gh ran out of the time it was given" } : { outcome: "listed", threads };
+
+test("#422: a result reached with 2 seconds of the deadline left still has its threads listed and printed", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(1) },
+    ], { rounds: [ROUND] });
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: heldDeadline(2_000) }),
+      venue: venueListing(listingNeeding(9_000, [OPEN_THREAD])),
+    });
+
+    assert.equal(printed.exit, 2, `the listing was not given its 10 seconds: ${printed.stderr}`);
+    assert.match(printed.stdout, /^PRRT_kwDOL7tYbc5abcd1 /mu);
+  });
+});
+
+test("#422: a listing that runs out of time exits 1 with the line, not 4, though the run's deadline passed during it", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [
+      { ...OWN, status: "reviewed", result: "exited", exitStatus: 2, openThreads: [OPEN_THREAD.id], newFindings: 1, round: ran(1) },
+    ], { rounds: [ROUND] });
+    const until = heldDeadline(2_000);
+
+    const printed = await runReview({
+      ...request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until }),
+      venue: venueListing(() => {
+        until.spend();
+        return { outcome: "failed", reason: "gh ran out of the time it was given" };
+      }),
+    });
+
+    assert.equal(printed.exit, 1, printed.stdout);
+    assert.equal(printed.stdout, "");
+    assert.equal(
+      printed.stderr,
+      "squiz: the threads on PR #41 could not all be listed to print the review of 3f9c2e0: gh ran out of the time it was given\n" +
+        "squiz: put these lines in your report rather than running squiz review again\n",
+    );
+  });
+});
+
 /** A close at the round cap with nothing open, which left OWN, queued behind LATER's round, not reviewed. */
 const LEFT_BY_THE_CAP: readonly StateRecord[] = [
   { ...LATER, status: "reviewed", result: "exited", exitStatus: 0, openThreads: [], newFindings: 0, round: ran(3) },
