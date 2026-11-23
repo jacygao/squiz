@@ -36,7 +36,7 @@ recheck-when: the reviewer's charter or model changes, a review starts splitting
   | #784 | #595 | `extension.mjs` | The socket is created before the `SIGTERM` handler, so a signal in between leaves it behind |
   | #825 | #812 | `src/venues/local/head.ts` | `git add --all` over the working tree stages a subagent's worktree under `.claude/worktrees/` as a gitlink |
 
-  Run each case twice: once at its full original size, and once trimmed to the files in the table. Squiz catching the trimmed case and missing the full one shows that splitting would have caught it. Missing both shows a defect splitting does not reach.
+  Run each case at its full original size and trimmed to the files in the table, several times at each size with the same reviewer, model and charter. A single run proves nothing, because one defect either way is inside run-to-run variation. Squiz catching the trimmed case clearly more often than the full one says splitting would have caught it. Missing both about equally says splitting does not reach it.
 - **Repeat the method on `swe-drill`, but widen which fixes it starts from.** Starting from bug issues found fixes reliably. Blame found an origin visible in the diff for only 12 of the 33 fixes. The rest were design gaps no single pull request introduced, or origins blame did not reach.
 
 ## Needs your input
