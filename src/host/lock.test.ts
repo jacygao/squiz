@@ -271,3 +271,14 @@ test("a host that exits releases its lock", { timeout: 30_000 }, async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("#770: a lock taken where its directory must already be makes nothing where the directory has gone", () => {
+  withDirectory((root) => {
+    const gone = join(root, "worktree", ".squiz", "38");
+
+    const taking = takeHostLock(gone, { boundMs: BOUND_MS, self: ownIdentity(), existing: true });
+
+    assert.equal(taking.outcome, "unknown", `a lock was ${taking.outcome} in a directory that had gone`);
+    assert.equal(existsSync(join(root, "worktree")), false, "taking the lock made the worktree again");
+  });
+});

@@ -16,7 +16,7 @@ import { runGit } from "../../worktree/git.ts";
 import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venue.ts";
 import type { GhCall } from "./gh.ts";
 import { postFileThread, postThread, type ThreadPosting as GitHubThreadPosting } from "./post-thread.ts";
-import { findPullRequestForBranch, findPullRequestNodeId, type PullRequest } from "./pull-request.ts";
+import { findPullRequestForBranch, findPullRequestNodeId, pullRequestEnd, type PullRequest } from "./pull-request.ts";
 import { postIssueComment, postSummary } from "./summary.ts";
 import { reopenThread, replyInThread, resolveThread } from "./thread-actions.ts";
 import { listReviewThreads } from "./threads.ts";
@@ -70,6 +70,11 @@ export const githubVenue: Venue = {
     const number = numberIn(key);
     if (typeof number !== "number") return number;
     return { outcome: "found", directory: join(worktree, EPISODES, key) };
+  },
+  changeEnded(worktree, key, until) {
+    const number = numberIn(key);
+    if (typeof number !== "number") return number;
+    return pullRequestEnd(number, { directory: worktree, until });
   },
   provideCommits,
   listThreads(change, until) {

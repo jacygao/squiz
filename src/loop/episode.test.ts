@@ -83,6 +83,7 @@ function oneKeyVenue(tree: string, head: string, asked: { key: string; worktree:
       asked.push({ key, worktree: where });
       return key === "k41" ? { outcome: "found", directory: join(where, ".squiz", "k41") } : { outcome: "failed", reason: `no ${key} here` };
     },
+    changeEnded: refuse,
     provideCommits: () => ({ outcome: "ready", alternates: [] }),
     listThreads: () => ({ outcome: "listed", threads: [] }),
     openThread: refuse,

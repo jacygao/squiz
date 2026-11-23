@@ -76,6 +76,11 @@ export type ThreadPosting =
   | { readonly outcome: "anchor-refused"; readonly reason: string }
   | Failed;
 
+export type ChangeEnd =
+  | { readonly outcome: "ended"; readonly how: "merged" | "closed" }
+  | { readonly outcome: "open" }
+  | Failed;
+
 /** What became of a summary or a failure comment. */
 export type Posting = CommentPosting;
 
@@ -106,6 +111,12 @@ export interface Venue {
     worktree: string,
     key: string,
   ): { readonly outcome: "found"; readonly directory: string } | Failed;
+  /**
+   * Whether the change `key` names in `worktree` has ended, as a pull request
+   * does once it is merged or closed. "failed" is no answer either way, and a
+   * caller that removes what an ended change left must read it as open.
+   */
+  changeEnded(worktree: string, key: string, until: Deadline): ChangeEnd;
   /** Extra object directories the snapshot borrows from, once base and head are readable. */
   provideCommits(
     change: Change,

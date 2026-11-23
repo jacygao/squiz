@@ -49,6 +49,8 @@ export type LockOptions = {
   readonly self?: ProcessIdentity;
   /** Whether a holder is still running. `stillRunning` where not given. */
   readonly presence?: (identity: ProcessIdentity) => Presence;
+  /** True where the directory must already exist: one that has gone is not made again, and the lock is unknown. */
+  readonly existing?: boolean;
 };
 
 export type Release =
@@ -82,7 +84,8 @@ export function takeLock(directory: string, name: string, options: LockOptions):
   const self = options.self ?? ownIdentity(options.boundMs);
   if ("reason" in self) return { outcome: "unknown", reason: self.reason };
   try {
-    mkdirSync(directory, { recursive: true });
+    // A draft written into a directory that has gone fails, and is reported as unknown.
+    if (options.existing !== true) mkdirSync(directory, { recursive: true });
   } catch (error) {
     return { outcome: "unknown", reason: `${directory} could not be made: ${messageOf(error)}` };
   }

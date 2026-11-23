@@ -1933,6 +1933,7 @@ function fakeVenue(failing: Partial<Venue> = {}): { readonly venue: Venue; reado
       return { outcome: "found", change };
     },
     episodeDirectory: (worktree, key) => ({ outcome: "found", directory: join(worktree, ".squiz", key) }),
+    changeEnded: () => ({ outcome: "open" }),
     provideCommits: () => ({ outcome: "ready", alternates: [] }),
     listThreads: () => ({ outcome: "listed", threads: [EARLIER_THREAD] }),
     openThread: posted,
