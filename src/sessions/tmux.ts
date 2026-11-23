@@ -31,6 +31,8 @@ export type WindowRequest = {
 };
 
 /**
+ * - `opened`: the command started. It may already have exited, as one that
+ *   fails at once does before its pid can be read.
  * - `refused`: no window opened, so the caller may run the command another way.
  * - `failed`: a window may be running the command, so running it again would
  *   run it twice. Where the window is known it is given, for the caller to close.
@@ -89,9 +91,14 @@ export function openWindow(request: WindowRequest, environment: Environment, bou
     return { outcome: "failed", reason: `tmux printed no window and pid: ${JSON.stringify(ran.stdout)}` };
   }
   const window: TmuxWindow = { id: printed[1] ?? "", name: request.name };
-  const read = identityOf(Number(printed[2]), boundMs);
-  if (read.outcome === "gone")
-    return { outcome: "failed", reason: "the command exited before it could be identified", window };
+  const pid = Number(printed[2]);
+  const read = identityOf(pid, boundMs);
+  // A command that has exited ran, and what it left behind is the caller's to
+  // read. Its window has closed with it, so the second it was found gone
+  // stands in for its start, and names no process running now.
+  if (read.outcome === "gone") {
+    return { outcome: "opened", window, identity: { pid, startedAt: Math.floor(Date.now() / 1_000) } };
+  }
   if (read.outcome === "unknown") return { outcome: "failed", reason: read.reason, window };
   return { outcome: "opened", window, identity: read.identity };
 }

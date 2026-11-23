@@ -560,11 +560,15 @@ async function attempt(
     // stderr would only say the same thing a second way.
     if ((ended.cost?.messages ?? 0) > 0) return ended;
     const said = child === undefined ? keptAt(keptIn) : complaint();
-    if (said === "") return ended;
-    const diagnosis = ended.kind === "incomplete" ? adapter.diagnose?.(said) : undefined;
+    const diagnosis = said !== "" && ended.kind === "incomplete" ? adapter.diagnose?.(said) : undefined;
     if (diagnosis !== undefined) return { ...ended, reason: diagnosis, diagnosed: true };
-    const how = child === undefined ? "," : `: ${endedAs(detached.command, child)},`;
-    return { ...ended, reason: `${ended.reason}${how} and said: ${said}` };
+    // A pane gives no exit status. A run left incomplete still means the
+    // reviewer exited, because the report file ends only once it has.
+    const how =
+      child !== undefined ? `: ${endedAs(detached.command, child)}`
+      : ended.kind === "incomplete" ? `: ${inPane.command} exited`
+      : "";
+    return { ...ended, reason: `${ended.reason}${how}${said === "" ? "" : `, and said: ${said}`}` };
   } catch (cause) {
     // Nothing after this attempt stops the reviewer, and the caller reads what it
     // spent from a file it would otherwise still be writing.
