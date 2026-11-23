@@ -72,12 +72,8 @@ export function sweepEnded(setup: SweepSetup): void {
       continue;
     }
     if (ended.outcome === "open") continue;
-    // Taking the lock makes a directory that has gone, and the worktree with it,
-    // so one removed while GitHub was asked is left gone. Nothing slow runs
-    // between this check and the lock's own.
-    if (until.passed() || !isDirectory(directory)) return;
-
-    const taking = takeHostLock(directory, { boundMs: lockBound(), self, presence });
+    // A worktree removed while GitHub was asked is not made again by taking its lock.
+    const taking = takeHostLock(directory, { boundMs: lockBound(), self, presence, existing: true });
     if (taking.outcome === "held") continue;
     if (taking.outcome === "unknown") {
       log(`kept ${directory}: whether its round host is running could not be told: ${taking.reason}`);
