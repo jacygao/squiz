@@ -338,18 +338,6 @@ export function notRaisedAgain(records: readonly StateRecord[], again: readonly 
 }
 
 /**
- * What a close that ran no reviewer lists of the findings no thread holds: those
- * `last`, the round it closes on, raised, and before them each earlier round's
- * that it did not raise again.
- */
-export function leftByTheLastReview(records: readonly StateRecord[], last: StateRecord | undefined): readonly string[] {
-  if (last?.status !== "reviewed") return [];
-  const its = last.unthreaded ?? [];
-  const before = records.filter((record) => record.status === "reviewed" && record.round.number < last.round.number);
-  return [...notRaisedAgain(before, its), ...its];
-}
-
-/**
  * Each of `findings` that no thread holds, one line each and with no bullet, in
  * the order Notes lists them.
  *

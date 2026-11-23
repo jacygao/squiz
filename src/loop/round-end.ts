@@ -62,7 +62,7 @@ export function lastReviewed(records: readonly StateRecord[]): StateKey | null {
 }
 
 /** The record of the last state the episode reviewed, ranked as `lastReviewed` ranks it. */
-export function lastReviewedRecord(records: readonly StateRecord[]): Reviewed | undefined {
+function lastReviewedRecord(records: readonly StateRecord[]): Reviewed | undefined {
   let reviewed: Reviewed | undefined;
   let highest = 0;
   for (const record of records) {

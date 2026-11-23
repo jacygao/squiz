@@ -30,7 +30,7 @@ import { latestActivity } from "../findings/activity.ts";
 import type { RuledAt } from "../findings/comment.ts";
 import { readThread } from "../findings/thread.ts";
 import type { ClosedBy } from "./failure-body.ts";
-import { leftByTheLastReview, notRaisedAgain, unappliedNotes, unpostedReplyNotes, unthreadedNotes } from "./summary-body.ts";
+import { notRaisedAgain, unappliedNotes, unpostedReplyNotes, unthreadedNotes } from "./summary-body.ts";
 import type {
   Change,
   Posting as CommentPosting,
@@ -73,7 +73,6 @@ import { postFailure } from "./failure-comment.ts";
 import {
   closedBeforeReview,
   lastReviewed,
-  lastReviewedRecord,
   type LeftNotReviewed,
   type QueuedRecord,
   type RoundEnd,
@@ -270,12 +269,6 @@ export type RoundConclusion =
       readonly outcome: "superseded";
       readonly key: string;
       readonly by: StateKey;
-      /**
-       * Present where `by` was reviewed clean with the episode open and nothing
-       * else was queued, so its record became the episode's close, exit 0, and
-       * the summary was posted. Absent, nothing was posted.
-       */
-      readonly closing?: { readonly summary: EpisodeSummary };
     }
   /** Threads are open, and the episode stays open for another round. */
   | ({ readonly outcome: "block" } & RoundAccount)
@@ -557,7 +550,7 @@ async function reviewOn(
   // result recorded against any other state would claim a review it never had.
   const now: StateKey = { head: change.head, activity: listing.step.activity };
   if (setup.state !== undefined && !sameState(now, setup.state)) {
-    return supersededBy(now, change, handedOver, { setup, episode, key, call, stopwatch });
+    return { outcome: "superseded", key, by: now };
   }
 
   const ordinal = state.rounds.length + 1;
@@ -1311,67 +1304,6 @@ function closeOnFailure(
       leftNotReviewed,
     },
   };
-}
-
-/**
- * The conclusion for a state the pull request has moved past, to `now`.
- *
- * Where `now` is the episode's last round, reviewed clean with the episode open,
- * nothing else is queued and none of the reviewer's threads is open, that round
- * is the last with nothing queued behind it, and it closes the episode. The close is written under the state lock, and
- * the summary is then posted from the threads and the episode's state, as any
- * close that runs no reviewer posts it. The caller turns the clean record into
- * the close once it knows what became of the summary, as it records any close.
- */
-function supersededBy(
-  now: StateKey,
-  change: Change,
-  threads: readonly ReviewThread[],
-  { setup, episode, key, call, stopwatch }: Pick<AfterTheGate, "setup" | "episode" | "key" | "call" | "stopwatch">,
-): RoundConclusion {
-  const moved = { outcome: "superseded", key, by: now } as const;
-  let clean: Extract<StateRecord, { readonly result: "clean, episode open" }> | undefined;
-  const written = updateState(
-    episode,
-    (current) => {
-      clean = undefined;
-      const records = current.records ?? [];
-      const record = lastReviewedRecord(records);
-      if (record === undefined || !sameState(record, now) || record.result !== "clean, episode open") return current;
-      if (current.closeReported === true || records.some((held) => held.status === "queued")) return current;
-      // A round after it, even one that failed, may have posted findings.
-      if (current.rounds.length > record.round.number) return current;
-      if (threads.some((thread) => !thread.isResolved)) return current;
-      clean = record;
-      return { ...current, closeReported: true, cleanClose: { head: record.head, activity: record.activity, records: records.length } };
-    },
-    { until: lockWait() },
-  );
-  if (written.outcome === "failed") {
-    return failed("harness", `whether the episode closes on ${now.head.slice(0, 7)} could not be recorded: ${written.reason}`);
-  }
-  // Copied, because the summary's callback does not keep the narrowing.
-  const closing = clean;
-  if (closing === undefined) return moved;
-
-  const state = written.state;
-  const summary = timed(stopwatch, () =>
-    postEpisodeSummary(
-      {
-        change,
-        rounds: state.rounds,
-        handedOver: threads,
-        verdicts: standing(threads, state.rulings),
-        findings: nothingDone(key).findings,
-        earlier: leftByTheLastReview(state.records ?? [], closing),
-        because: "nothing-open",
-        leftNotReviewed: null,
-      },
-      setup.venue,
-      call(),
-    ),
-  );
-  return { ...moved, closing: { summary } };
 }
 
 /** A record's state and what the trigger knew of it, without where its review has got to. */
