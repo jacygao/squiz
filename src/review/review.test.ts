@@ -475,6 +475,20 @@ test("a state reviewed clean whose wait runs out before the close exits 4, namin
   });
 });
 
+test("#782: a state reviewed clean whose closing round wrote the close and never its record waits out its deadline and exits 4", async () => {
+  await withWorktree(async (fixture) => {
+    records(fixture, [{ ...OWN, status: "reviewed", result: "clean, episode open", newFindings: 0, round: ran(1) }, reviewing(LATER)], { closeReported: true });
+
+    const printed = await runReview(request(fixture, { triggered: decided(fixture, { outcome: "in-hand" }), until: deadlineIn(POLL_MS * 5) }));
+
+    assert.equal(printed.exit, 4, `a close with no closing record says nothing of the summary: ${printed.stdout}`);
+    assert.equal(
+      printed.stdout.split("\n")[1],
+      "Squiz found nothing open in PR #41 at 3f9c2e0, and is reviewing 8d21a4f before it closes the review. Run `squiz review 41` again to wait for it.",
+    );
+  });
+});
+
 test("a round that fails exits 1 with the reason it recorded and nothing on stdout", async () => {
   await withWorktree(async (fixture) => {
     records(fixture, [
