@@ -141,17 +141,38 @@ test("#770: a merged pull request's episode is kept while its round host runs, a
   }
 });
 
-test("#770: a gh that never answers leaves the episode, and the host still exits within its bound", () => {
+test("#770: a pull request GitHub never answers for keeps its episode, and leaves time to remove a merged one's", () => {
   const at = tree();
   try {
     const hanging = episode(at, "38");
+    const merged = episode(at, "39");
     answer(at, "38", "hang");
+    answer(at, "39", '{"state":"MERGED"}');
 
     const ran = host(at);
 
     assert.equal(ran.status, 0, ran.stderr);
     assert.equal(existsSync(hanging), true, "an episode whose pull request never answered was removed");
-    // Under the 30 seconds gh is given for a single call, so a sweep bounded only call by call fails it.
+    assert.equal(existsSync(merged), false, "the merged pull request was never asked about");
+  } finally {
+    rmSync(at.base, { recursive: true, force: true });
+  }
+});
+
+test("#770: pull requests GitHub never answers for keep the host to the sweep's bound", () => {
+  const at = tree();
+  try {
+    const numbers = ["31", "32", "33", "34", "35", "36"];
+    for (const number of numbers) {
+      episode(at, number);
+      answer(at, number, "hang");
+    }
+
+    const ran = host(at);
+
+    assert.equal(ran.status, 0, ran.stderr);
+    for (const number of numbers) assert.equal(existsSync(join(at.worktree, ".squiz", number)), true, `#${number}'s episode was removed`);
+    // Under the 30 seconds six of the sweep's calls would take with no bound on them all together.
     assert.ok(ran.seconds < 27, `the host took ${ran.seconds}s, past the sweep's bound`);
   } finally {
     rmSync(at.base, { recursive: true, force: true });

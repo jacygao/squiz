@@ -19,12 +19,15 @@ import { lstatSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { episodeAt } from "../loop/episode.ts";
-import type { Deadline } from "../reviewers/deadline.ts";
+import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import type { Venue } from "../venues/venue.ts";
 import { takeHostLock } from "./lock.ts";
 
 // Each `ps` run that tells whether a lock's holder is still running.
 const LOCK_BOUND_MS = 5_000;
+
+// One pull request that GitHub never answers for leaves time to ask about the others.
+const ASK_BOUND_MS = 5_000;
 
 export type SweepSetup = {
   readonly worktree: string;
@@ -44,7 +47,10 @@ export function sweepEnded(setup: SweepSetup): void {
   } catch {
     return;
   }
-  for (const name of names) {
+  // Each sweep starts at a random entry, so entries that keep eating the
+  // deadline at the front of the listing cannot keep the rest from ever being asked.
+  const start = Math.floor(Math.random() * names.length);
+  for (const name of [...names.slice(start), ...names.slice(0, start)]) {
     if (until.passed()) return;
     if (name === setup.own || !isDirectory(join(worktree, ".squiz", name))) continue;
     // A directory the venue names no episode for, such as the local venue's under the GitHub venue, is not one to remove.
@@ -52,14 +58,17 @@ export function sweepEnded(setup: SweepSetup): void {
     if (named.outcome === "failed") continue;
     const { directory } = named.episode;
 
-    const ended = venue.changeEnded(worktree, name, until);
+    const ended = venue.changeEnded(worktree, name, deadlineIn(Math.min(ASK_BOUND_MS, until.remaining())));
     if (ended.outcome === "failed") {
       log(`kept ${directory}: whether its change has ended could not be told: ${ended.reason}`);
       continue;
     }
     if (ended.outcome === "open") continue;
+    // Taking the lock makes a directory that has gone, and the worktree with it,
+    // so one removed while GitHub was asked is left gone.
+    if (until.passed() || !isDirectory(directory)) return;
 
-    const taking = takeHostLock(directory, { boundMs: LOCK_BOUND_MS });
+    const taking = takeHostLock(directory, { boundMs: Math.max(1, Math.min(LOCK_BOUND_MS, until.remaining())) });
     if (taking.outcome === "held") continue;
     if (taking.outcome === "unknown") {
       log(`kept ${directory}: whether its round host is running could not be told: ${taking.reason}`);
