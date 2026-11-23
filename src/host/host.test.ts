@@ -1784,6 +1784,24 @@ test("a subagent's note is posted to the socket its hook recorded, the parent's,
   }
 });
 
+test("a wake opens with the auth line carrying the owner's recorded token, before the note (#840)", async () => {
+  const socket = await ownerSocket();
+  try {
+    const token = "b47c12f43dddf4c9f353ca12b12eebc4";
+    const owner: Owner = { ...MAIN, messagingSocket: socket.path, messagingToken: token };
+    await host({
+      records: (fixture) => [queued(fixture.head(), null, owner)],
+      findings: [[finding("The name says nothing.")]],
+    });
+
+    const lines = (socket.received()[0] ?? "").split("\n");
+    assert.equal(lines[0], JSON.stringify({ type: "auth", token }), "a bypass-permissions session holds a post that names no token");
+    assert.equal((JSON.parse(lines[1] ?? "null") as { type?: unknown } | null)?.type, "user");
+  } finally {
+    await socket.close();
+  }
+});
+
 test("a note whose owner's socket has gone stays waiting, host.log says why, and the result is unchanged", async () => {
   const gone = join(tmpdir(), `squiz-gone-${process.pid}.sock`);
   const ran = await host({

@@ -23,6 +23,8 @@ export type WakeNote = {
   /** The note's name, as its write returned it. */
   readonly name: string;
   readonly socket: string;
+  /** The owner's messaging token, where its hook recorded one. */
+  readonly token?: string;
   readonly text: string;
 };
 
@@ -37,7 +39,7 @@ export async function wakeOwner(note: WakeNote): Promise<Wake> {
   if (claimed.outcome === "lost") return { outcome: "already delivered" };
   if (claimed.outcome === "failed") return { outcome: "not woken", reason: claimed.reason };
 
-  const posted = await postMessage(note.socket, note.text, POST_BOUND_MS);
+  const posted = await postMessage(note.socket, note.text, POST_BOUND_MS, note.token);
   if (posted.outcome === "delivered") return { outcome: "woken" };
   const released = releaseNote(note.notes, note.sessionId, note.name);
   if (released.outcome === "failed") return { outcome: "not woken", reason: `${posted.reason}; and ${released.reason}` };

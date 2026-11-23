@@ -1,8 +1,8 @@
 ---
 settles: "§ 3: how the round host wakes an idle Claude Code owner, and what the post must carry"
 issue: 277
-recorded: 2026-10-03
-versions: { claude-code: 2.1.288, macos: 26.6.2 }
+recorded: 2026-11-24
+versions: { claude-code: "2.1.288, 2.1.330 (the bypass-permissions session)", macos: 26.6.2 }
 recheck-when: Claude Code changes its messaging socket, how it labels a post to it, or starts checking the token on macOS
 ---
 
@@ -22,8 +22,11 @@ recheck-when: Claude Code changes its messaging socket, how it labels a post to 
   in auto mode and in manual mode, from a double-forked poster and from an
   unrelated process, and after the session had been idle ten minutes. The turn
   began within a second.
-- **Post without the token.** A post with `CLAUDE_CODE_MESSAGING_TOKEN` and one
-  without it woke the session alike, so the hook records the socket alone.
+- **Open the post with the token where the hook recorded one.** In auto and
+  manual mode a post with `CLAUDE_CODE_MESSAGING_TOKEN` and one without it woke
+  the session alike. A session that bypasses permission prompts holds a post
+  without it for a person's approval, so the hook records the token beside the
+  socket.
 - **Connect only once the text is ready, and write it as one line.** Claude Code
   closes a connection that has not sent a complete line within 30 seconds, and
   the socket writes nothing back.
@@ -61,8 +64,6 @@ The transcript records every post as
 
 - **macOS only.** Whether Linux checks the token is not established.
 - **One run per mode.**
-- **No session that bypasses permissions was tried.** Whether such a session
-  holds a post for approval is not established.
 - **Not tried:** a post that arrives while a turn is running.
 - **Every session was in a directory the user already trusts**, so no trust
   dialog was answered.

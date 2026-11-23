@@ -13,10 +13,12 @@
  * The owner is the session in the payload's `session_id`. On `Stop` that is the
  * session whose turn ended. On `SubagentStop` it is the session that dispatched
  * the subagent, and the subagent is named from `agent_id`. Under Claude Code the
- * owner's messaging socket comes from the hook's environment and never from the
- * payload. A
- * subagent runs inside its parent's process, so on `SubagentStop` the socket is
- * the parent's.
+ * owner's messaging socket and its token come from the hook's environment and
+ * never from the payload. A subagent runs inside its parent's process, so on
+ * `SubagentStop` both are the parent's.
+ *
+ * The token is what lets a session that bypasses permission prompts take the
+ * round host's wake without a person approving it.
  *
  * A hook whose environment carries `COPILOT_CLI` runs under Copilot, and its
  * owner's socket is never the environment's. Copilot puts none in a hook's
@@ -50,6 +52,8 @@ export type Owner = {
   readonly sessionId: string;
   /** Absent where no socket reaches the owner. */
   readonly socket?: string;
+  /** Present only with a socket, and only where the environment held one. */
+  readonly token?: string;
 };
 
 export type Firing =
@@ -107,8 +111,7 @@ export function readFiring(text: string, environment: HookEnvironment): FiringRe
   if (typeof sessionId !== "string" || sessionId === "") {
     return unreadable('the payload carries no "session_id", which names the owner');
   }
-  const socket = underCopilot(environment) ? undefined : environment["CLAUDE_CODE_MESSAGING_SOCKET"];
-  const owner: Owner = socket === undefined || socket === "" ? { sessionId } : { sessionId, socket };
+  const owner = claudeCodeOwner(sessionId, environment);
 
   if (event === "Stop") {
     const named = transcriptSession(payload["transcript_path"]);
@@ -194,6 +197,14 @@ function extensionSocket(text: string, sessionId: string): string | undefined {
   // ".." would put the socket outside every session's directory.
   if (sessionId === "." || sessionId === ".." || transcriptSession(transcript) !== sessionId) return undefined;
   return join(dirname(transcript), "squiz.sock");
+}
+
+function claudeCodeOwner(sessionId: string, environment: HookEnvironment): Owner {
+  if (underCopilot(environment)) return { sessionId };
+  const socket = environment["CLAUDE_CODE_MESSAGING_SOCKET"];
+  if (socket === undefined || socket === "") return { sessionId };
+  const token = environment["CLAUDE_CODE_MESSAGING_TOKEN"];
+  return token === undefined || token === "" ? { sessionId, socket } : { sessionId, socket, token };
 }
 
 function underCopilot(environment: HookEnvironment): boolean {

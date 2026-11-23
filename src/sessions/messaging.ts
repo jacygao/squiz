@@ -3,7 +3,10 @@
  * idle. The socket is Claude Code's own, or the one squiz's Copilot extension
  * listens on, which reads the same posts.
  *
- * A post is one JSON line naming a user message. The socket writes nothing back,
+ * A post is one JSON line naming a user message, after an auth line carrying
+ * the session's token where one is given. Claude Code reads a post that opens
+ * with its token as one from the session's own child, and delivers it even to a
+ * session that bypasses permission prompts. The socket writes nothing back,
  * so a post is delivered once every byte of it has reached the socket and the
  * connection has been ended without an error. A peer that closes before the
  * whole post has reached it fails the post. One that closes after, without
@@ -16,9 +19,10 @@ import { createConnection } from "node:net";
 
 export type Posted = { readonly outcome: "delivered" } | { readonly outcome: "failed"; readonly reason: string };
 
-/** Post `text` to the socket at `socketPath`, within `boundMs`. */
-export function postMessage(socketPath: string, text: string, boundMs: number): Promise<Posted> {
-  const line = `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+/** Post `text` to the socket at `socketPath`, within `boundMs`, opening with `token` where one is given. */
+export function postMessage(socketPath: string, text: string, boundMs: number, token?: string): Promise<Posted> {
+  const auth = token === undefined ? "" : `${JSON.stringify({ type: "auth", token })}\n`;
+  const line = `${auth}${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
   return new Promise((resolve) => {
     let settled = false;
     const settle = (posted: Posted): void => {

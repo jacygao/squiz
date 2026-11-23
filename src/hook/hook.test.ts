@@ -37,6 +37,7 @@ const HEAD = "3f9c2e0a1b2c3d4e5f60718293a4b5c6d7e8f901";
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const AGENT_ID = "a1e3196c5ad0f2410";
 const SOCKET = "/tmp/claude-code-messaging.sock";
+const TOKEN = "b47c12f43dddf4c9f353ca12b12eebc4";
 const AGENT_TRANSCRIPT = `/transcripts/${SESSION_ID}/subagents/agent-${AGENT_ID}.jsonl`;
 const BOUND_MS = 10_000;
 
@@ -273,6 +274,25 @@ test("a Stop firing queues the state, owned by the session and its socket, and s
   });
 });
 
+test("a Stop firing records the session's messaging token beside its socket (#840)", async () => {
+  await withPlace(async (place) => {
+    const fired = await fire(place, {
+      payload: stopPayload(place.worktree),
+      environment: { CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, CLAUDE_CODE_MESSAGING_TOKEN: TOKEN },
+    });
+
+    assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
+    assert.deepEqual(recordsIn(place), [
+      {
+        head: HEAD,
+        activity: null,
+        owner: { sessionId: SESSION_ID, messagingSocket: SOCKET, messagingToken: TOKEN },
+        status: "queued",
+      },
+    ]);
+  });
+});
+
 test("a SubagentStop firing queues the state, owned by the parent session, its socket and the subagent", async () => {
   await withPlace(async (place) => {
     const fired = await fire(place, {
@@ -354,7 +374,10 @@ test("Copilot's recorded SubagentStop, fired from outside any worktree, queues f
       stop_reason: "end_turn",
     });
 
-    const fired = await fire(place, { payload, environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET } });
+    const fired = await fire(place, {
+      payload,
+      environment: { COPILOT_CLI: "1", CLAUDE_CODE_MESSAGING_SOCKET: SOCKET, CLAUDE_CODE_MESSAGING_TOKEN: TOKEN },
+    });
 
     assert.deepEqual(fired, { code: 0, stderr: "", stdout: "", elapsedMs: fired.elapsedMs });
     assert.deepEqual(recordsIn(place), [{ head: HEAD, activity: null, owner: { sessionId: SESSION_ID, subagent: AGENT_ID }, status: "queued" }]);

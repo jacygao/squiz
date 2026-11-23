@@ -11,13 +11,14 @@ import { readFiring, readFiringWithSocket, type Firing, type FiringRead, type Ho
 const SESSION_ID = "60517e1f-e1dc-49b1-8e39-6fcbe686f3fb";
 const AGENT_ID = "a1e3196c5ad0f2410";
 const SOCKET = "/tmp/cc-socks/57053.sock";
+const TOKEN = "b47c12f43dddf4c9f353ca12b12eebc4";
 const DIRECTORY = "/work/session-directory";
 
 /** The hook's environment as the runtime gives it, with a messaging socket. */
 const WITH_SOCKET: HookEnvironment = {
   CLAUDE_CODE_SESSION_ID: SESSION_ID,
   CLAUDE_CODE_MESSAGING_SOCKET: SOCKET,
-  CLAUDE_CODE_MESSAGING_TOKEN: "token-not-read-here",
+  CLAUDE_CODE_MESSAGING_TOKEN: TOKEN,
 };
 
 /** A text that must never reach a reason, put where a subagent's last message goes. */
@@ -114,7 +115,7 @@ test("on Stop, the owner is the session itself, with its socket", () => {
   assert.deepEqual(firingIn(readFiring(stopText(), WITH_SOCKET)), {
     event: "Stop",
     directory: DIRECTORY,
-    owner: { sessionId: SESSION_ID, socket: SOCKET },
+    owner: { sessionId: SESSION_ID, socket: SOCKET, token: TOKEN },
   });
 });
 
@@ -124,7 +125,7 @@ test("on SubagentStop, the owner is the dispatching session, with its socket, an
   assert.deepEqual(firingIn(readFiring(subagentStopText(), WITH_SOCKET)), {
     event: "SubagentStop",
     directory: DIRECTORY,
-    owner: { sessionId: SESSION_ID, socket: SOCKET },
+    owner: { sessionId: SESSION_ID, socket: SOCKET, token: TOKEN },
     subagent: AGENT_ID,
   });
 });
@@ -180,7 +181,7 @@ test("a Stop names no subagent, whatever agent fields it carries", () => {
     assert.deepEqual(firingIn(readFiring(stopText(over), WITH_SOCKET)), {
       event: "Stop",
       directory: DIRECTORY,
-      owner: { sessionId: SESSION_ID, socket: SOCKET },
+      owner: { sessionId: SESSION_ID, socket: SOCKET, token: TOKEN },
     });
   }
 });
@@ -303,7 +304,7 @@ test("a Claude Code Stop is read whatever session its transcript's file name giv
     assert.deepEqual(firingIn(readFiring(stopText({ transcript_path: path }), WITH_SOCKET)), {
       event: "Stop",
       directory: DIRECTORY,
-      owner: { sessionId: SESSION_ID, socket: SOCKET },
+      owner: { sessionId: SESSION_ID, socket: SOCKET, token: TOKEN },
     });
   }
 });
@@ -424,7 +425,7 @@ test("outside Copilot, the owner's socket is its environment's, whatever listens
     try {
       const read = await readFiringWithSocket(transcriptUnder(home, SESSION_ID, stopText()), WITH_SOCKET);
 
-      assert.deepEqual(ownerIn(read), { sessionId: SESSION_ID, socket: SOCKET });
+      assert.deepEqual(ownerIn(read), { sessionId: SESSION_ID, socket: SOCKET, token: TOKEN });
     } finally {
       await closed(server);
     }
@@ -525,7 +526,7 @@ test("#859: Claude Code 2.1.321's Stop is read as owned by its session, with its
   assert.deepEqual(firingIn(readFiring(CLAUDE_CODE_STOP, WITH_SOCKET)), {
     event: "Stop",
     directory: "/private/tmp/claude-501/-Users-jacy-Documents-Dev-squiz/b40470cd-5c98-41d6-a7ef-16382cebe8d8/scratchpad/issue-859/repo",
-    owner: { sessionId: "1525f1a6-f15f-4e61-b7cd-3e0ddc344528", socket: SOCKET },
+    owner: { sessionId: "1525f1a6-f15f-4e61-b7cd-3e0ddc344528", socket: SOCKET, token: TOKEN },
   });
 });
 

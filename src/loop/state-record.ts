@@ -32,6 +32,8 @@ export type Owner = {
   readonly subagent?: string;
   /** Present only where the hook found one. */
   readonly messagingSocket?: string;
+  /** The session's messaging token, which a wake opens with. Present only beside a socket. */
+  readonly messagingToken?: string;
 };
 
 export type Backend = "herdr" | "tmux" | "detached";
@@ -279,11 +281,16 @@ function ownerFrom(found: unknown): ReadOwner {
   if (socket !== undefined && !isText(socket)) {
     return { problem: `has "owner.messagingSocket" as ${render(socket)}` };
   }
+  const token = found["messagingToken"];
+  if (token !== undefined && !isText(token)) {
+    return { problem: `has "owner.messagingToken" as ${render(token)}` };
+  }
   return {
     owner: {
       sessionId,
       ...(subagent === undefined ? {} : { subagent }),
       ...(socket === undefined ? {} : { messagingSocket: socket }),
+      ...(token === undefined ? {} : { messagingToken: token }),
     },
   };
 }

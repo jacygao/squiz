@@ -383,7 +383,8 @@ async function noteOwners(episode: Episode, recorded: readonly Recorded[], log: 
     const socket = record.owner?.messagingSocket;
     const text = note.fields["text"];
     if (socket === undefined || text === undefined) continue;
-    const woken = await wakeOwner({ notes, sessionId: note.sessionId, name: written.name, socket, text });
+    const token = record.owner?.messagingToken;
+    const woken = await wakeOwner({ notes, sessionId: note.sessionId, name: written.name, socket, ...(token === undefined ? {} : { token }), text });
     if (woken.outcome === "woken") log(`${named(record)}: woke its owner through ${socket}`);
     else if (woken.outcome === "already delivered") log(`${named(record)}: its note was delivered before the host could post it`);
     else log(`${named(record)}: did not wake its owner: ${woken.reason}`);

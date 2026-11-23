@@ -1,7 +1,7 @@
 ---
 settles: "§ 3 The report: whether the socket wake reaches a subagent's parent"
 issue: 301
-recorded: 2026-10-04
+recorded: 2026-11-24
 versions: { claude-code: 2.1.289, tmux: 3.7b, macos: 26.6.2 }
 recheck-when: Claude Code changes which environment it gives a SubagentStop hook, gives a subagent a messaging socket of its own, or starts checking the token on macOS
 ---
@@ -24,9 +24,10 @@ recheck-when: Claude Code changes which environment it gives a SubagentStop hook
   process, and a subagent runs inside its parent's process with none of its
   own, so the value the hook sees is the parent's. It matched the parent's own
   `Stop` firing in every session.
-- **Post without the token.** Posts with and without it both woke the parent on
-  macOS. A platform that checks the token would refuse the post, and Linux was
-  not run.
+- **Record the token from the same environment, and open the post with it.**
+  Posts with and without it both woke the parent in manual mode on macOS. A
+  parent that bypasses permission prompts holds a post without it for a
+  person's approval (unverified for a subagent's parent).
 - **Wake a subagent's parent through the socket.** A post from a double-forked
   process the hook started, 40 seconds after the parent's turn ended, started a
   turn in the parent every time. It needs no process kept alive for the parent.

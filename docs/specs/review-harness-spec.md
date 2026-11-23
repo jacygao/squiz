@@ -361,7 +361,9 @@ you disagree. Commit and push what you changed, then run `squiz review 41` again
 
 - **Claude Code:** where the hook recorded the session's messaging socket, the
   round host moves the note into `delivered/` and posts its text to the socket as
-  one line, and an idle session starts a turn with it.
+  one line, after the session's messaging token where the hook recorded one. An
+  idle session starts a turn with it in any permission mode, unless Claude Code's
+  `crossSessionInbound` setting is `hold` or `refuse`.
 - **Copilot:** the plugin ships `extensions/squiz-wake/extension.mjs`, which
   Copilot starts in each session. It listens on `squiz.sock` in the session's
   state directory, which the hook records, and turns each post into a turn.

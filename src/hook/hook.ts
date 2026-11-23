@@ -123,6 +123,7 @@ function ownerOf(firing: Extract<Firing, { readonly owner: unknown }>): Owner {
     sessionId: firing.owner.sessionId,
     ...(firing.event === "SubagentStop" ? { subagent: firing.subagent } : {}),
     ...(firing.owner.socket === undefined ? {} : { messagingSocket: firing.owner.socket }),
+    ...(firing.owner.token === undefined ? {} : { messagingToken: firing.owner.token }),
   };
 }
 
