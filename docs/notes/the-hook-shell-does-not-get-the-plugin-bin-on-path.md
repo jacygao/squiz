@@ -1,156 +1,74 @@
 ---
-settles: "§ 3 — whether the hook registration can name the `squiz` binary directly; § 7 and § 10 — whether a marketplace install puts the plugin's bin/ on the Bash tool's PATH"
+settles: "§ 3: how the hook registration names the `squiz` binary"
 issue: [39, 54, 662]
 recorded: 2026-09-09
 versions: { claude-code: "2.1.263, 2.1.285 and 2.1.302", copilot: 1.0.98, node: 24.15.0 }
-recheck-when: Claude Code changes how a plugin's bin/ reaches PATH
+recheck-when: Claude Code changes how a plugin's bin/ reaches PATH or how it runs a hook command
 ---
 
 # The hook's shell does not get the plugin's `bin/` on `PATH`
 
-The Bash tool does. In a session started with `claude --plugin-dir ./`,
-`command -v squiz` resolved to the plugin's own `bin/squiz` and `squiz hook`
-exited 0. The hook did not: registered as `squiz hook`, it fired and exited 127
-with `/bin/sh: squiz: command not found`, and the `PATH` the hook process was
-given held nothing the plugin had added. Registered as
-`${CLAUDE_PLUGIN_ROOT}/bin/squiz hook`, the same hook ran the same binary and
-exited 0.
+## Intent
+
+- Whether the hook registration can name `squiz` bare, as the Bash tool can.
+- What the registration must look like to survive any plugin root.
 
 ## Decisions
 
-- **The registration is `"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook`, exactly.**
-  The runtime sets `CLAUDE_PLUGIN_ROOT` to the plugin root for the hook, so the
-  registration still writes down no install path.
-- **The placeholder is quoted.** Claude Code runs a shell-form hook command
-  under `/bin/sh` and Copilot under `/bin/bash`. Unquoted, a plugin root with a
-  space in its path splits into several words, and the hook exits 127.
-- **A hook that cannot resolve its command looks exactly like a hook with
-  nothing to say.** Both leave an empty transcript. Nothing about the plugin
-  loading says the command will run, so the two are told apart by the exit code
-  in the event stream rather than by output.
-- **The name the coding agent runs resolves under an install as it does under
-  `--plugin-dir`.** An install puts the plugin's `bin/` on the Bash tool's `PATH`,
-  so `squiz threads` and `squiz reply` find the binary either way. What was
-  established is the lookup of `squiz` itself; which commands it dispatches is its
-  own question and nothing here measures it.
+- **Register every hook as `"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook`, exactly.**
+  Registered as `squiz hook`, the hook exited 127 with
+  `/bin/sh: squiz: command not found`: its `PATH` is the user's login `PATH`,
+  with nothing the plugin added. The runtime sets `CLAUDE_PLUGIN_ROOT` to the
+  plugin root for the hook under `--plugin-dir` and under a marketplace install
+  alike, so the registration writes down no install path.
+- **Quote the placeholder.** Claude Code runs a shell-form hook command under
+  `/bin/sh` and Copilot under `/bin/bash`. Unquoted, a plugin root with a space
+  in it splits into several words and the hook exits 127.
 
 ## Needs your input
 
-Nothing. § 7 now says which `PATH` each caller gets and registers the hook
-through `${CLAUDE_PLUGIN_ROOT}`. 2026-10-05: the registration is now in § 3 The
-Claude Code hooks, on `Stop` as well as `SubagentStop`.
+Nothing.
 
 ## Reference
 
-### The command that runs
-
-```
-"${CLAUDE_PLUGIN_ROOT}/bin/squiz" hook
-```
-
-### A plugin root with a space in its path
-
-A stand-in plugin whose root was `…/plugin root`, with squiz's `hooks.json` and
-a `bin/squiz` that recorded its call, fired `Stop` and `SubagentStop` in a
-`claude -p` run. Unquoted, each `hook_response` was:
+### The registration
 
 ```json
-{"hook_name":"SubagentStop","stderr":"/bin/sh: …/before/plugin: No such file or directory\n","exit_code":127,"outcome":"error"}
+{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/squiz\" hook" }
 ```
 
-Quoted, each was `"exit_code":0,"outcome":"success"` with both streams empty,
-and the stand-in recorded `argv` `…/plugin root/bin/squiz hook`. A `copilot -p`
-run with the same stand-in logged `/bin/bash: …/before/plugin: No such file or
-directory` unquoted, and recorded the same `argv` quoted.
+`claude plugin validate --strict .` warns on the unquoted form for each hook and
+passes the quoted one.
 
-`claude plugin validate --strict .` reports the unquoted form as a warning on
-each hook, and passes the quoted one.
+### The hook's environment
 
-### The hook's environment, as observed
+- **`PATH`** is the user's login `PATH`, character for character.
+- **`CLAUDE_PLUGIN_ROOT`** is the plugin root.
+- **`CLAUDE_PROJECT_DIR`** is the project, which only matches the plugin root
+  when the session was started there. Only `CLAUDE_PLUGIN_ROOT` names the plugin.
+- **`process.argv`** is `["<node>", "<plugin root>/src/cli.ts", "hook"]`: the
+  shim resolves the entry point from its own location, not the working
+  directory.
 
-The hook body recorded its own `process.env` on a real firing:
+### Telling a hook that failed to run from one that ran
 
-- **`PATH`** was the user's login `PATH`, character for character, with no entry
-  from the plugin anywhere in it.
-- **`CLAUDE_PLUGIN_ROOT`** was the plugin root — the directory `--plugin-dir`
-  was given.
-- **`CLAUDE_PROJECT_DIR`** was the same directory in this run, because the
-  session was started at the plugin root. They are not the same thing and only
-  the first names the plugin.
-- **`process.argv`** was `["<node>", "<plugin root>/src/cli.ts", "hook"]`, so
-  the shim resolved the entry point from its own location rather than from the
-  working directory.
-
-### Seeing that a hook ran at all
-
-A `SubagentStop` hook that exits 0 in silence and one whose command does not
-exist produce the same nothing in a transcript. Two flags separate them:
+A hook that cannot resolve its command and one that exits 0 in silence leave the
+same empty transcript. The exit code tells them apart:
 
 - `--include-hook-events`, with `--output-format stream-json --verbose`, puts
-  `hook_started` and `hook_response` in the stream. `hook_response` carries
-  `exit_code`, `stdout`, `stderr` and `outcome`. The failing registration gave
-  `"exit_code": 127, "outcome": "error"` with the shell's message in `stderr`;
-  the working one gave `"exit_code": 0, "outcome": "success"` with both streams
-  empty.
-- `--debug-file <path>` records the load — `Read hooks.json for plugin squiz`,
-  `Loading hooks from plugin: squiz`, `Registered 1 hooks from 1 plugins` — and
-  logs the hook's error line. A plugin that failed to load is told apart from a
-  hook that never fired here.
-
-### Under a marketplace install
-
-An install reaches the same two places as `--plugin-dir`, and needs no
-interactive session to set up. The marketplace takes a path, so the repository is
-its own marketplace while one is being tested:
-
-```
-claude plugin marketplace add <repository> --scope local
-claude plugin install squiz@<marketplace> --scope local
-```
-
-Both want a `.claude-plugin/marketplace.json` naming the plugin with
-`"source": "./"`. `claude plugin list` reads the install back, and
-`claude plugin uninstall` and `claude plugin marketplace remove` undo it.
-
-In a session started after that install, with no `--plugin-dir`:
-
-- **The Bash tool's `PATH` held the plugin's `bin/`.** `command -v squiz`
-  resolved to it, and the entry sat 16th. The entries before it were the user's
-  own.
-- **The `SubagentStop` hook ran and exited 0**, so `${CLAUDE_PLUGIN_ROOT}`
-  resolves under an install as it does under `--plugin-dir`. The stream carried:
-
-  ```json
-  {"subtype":"hook_started","hook_name":"SubagentStop","hook_event":"SubagentStop"}
-  {"subtype":"hook_response","hook_name":"SubagentStop","stdout":"","stderr":"","exit_code":0,"outcome":"success"}
-  ```
-
-  Both streams empty and the exit 0 are what say the path resolved: a
-  `CLAUDE_PLUGIN_ROOT` that did not expand gives 127 and the shell's message on
-  `stderr`, which is the failing registration recorded above.
-
-- **`--debug-file` recorded the load**: `Read hooks.json for plugin squiz
-  (enabled=true)`, `Loading hooks from plugin: squiz`, then `Registered 1 hooks
-  from 2 plugins` — the second being a built-in.
-
-**Print mode fires `SubagentStop`.** An earlier attempt to see it with `--debug`
-and a hook rewritten to leave a file behind observed nothing and read that as
-print mode running no hook at all. That was the wrong instrument rather than a
-finding: `--include-hook-events` with `--output-format stream-json --verbose` is
-what puts the firing in the stream, and it was there.
+  `hook_started` and `hook_response` in the stream. A command that did not
+  resolve gives `"exit_code": 127, "outcome": "error"` with the shell's message
+  in `stderr`, and a working one gives `"exit_code": 0, "outcome": "success"`
+  with both streams empty.
+- `--debug-file <path>` records the load, `Read hooks.json for plugin squiz`,
+  `Loading hooks from plugin: squiz` and `Registered 1 hooks from 1 plugins`,
+  which tells a plugin that failed to load from a hook that never fired.
 
 ## Limits
 
-- **The install was from a directory, not from a git host.** The marketplace
-  source was the repository, so the plugin that ran was the repository and the
-  `PATH` entry was its own `bin/`. An install from a remote marketplace copies
-  the plugin elsewhere, and the entry would be that copy's `bin/`. What was
-  established is that an install extends the Bash tool's `PATH` with the plugin's
-  `bin/`, not the literal path it extends it with.
-- **The install was declared at `local` scope.** Whether `user` scope resolves
-  `CLAUDE_PLUGIN_ROOT` differently was not tested.
 - **Whether `${CLAUDE_PLUGIN_ROOT}` is expanded by the runtime or by the shell
-  it runs the command under was not distinguished by a run.** Either way the
-  quoted registration holds, for any root without a `"`, `$` or backtick in it.
-- **One machine, print mode, one subagent per run, `claude-sonnet-5`.** Three
-  runs on macOS for the `--plugin-dir` findings and one for the install.
+  was not distinguished.** The quoted registration holds either way, for a root
+  with no `"`, `$` or backtick in it.
+- **The install was from a directory, at `local` scope.** `user` scope and a
+  remote marketplace were not tried.
+- **One machine, print mode, one subagent per run, `claude-sonnet-5`.**
