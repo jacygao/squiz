@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { deadlineIn } from "../../reviewers/deadline.ts";
-import { changeDiff } from "../../reviewers/git-tools.ts";
+import { changedFiles, changeDiff } from "../../reviewers/git-tools.ts";
 import { addSnapshot, removeSnapshot } from "../../worktree/snapshot.ts";
 import type { Change } from "../venue.ts";
 import { buildHead, type HeadBuild, provideCommits } from "./head.ts";
@@ -322,6 +322,64 @@ test("the head's tree holds nothing of .squiz/, though the build writes there an
       "the venue's own objects and index copy were taken into the reviewed tree",
     );
     assert.equal(readFileSync(join(agent, ".squiz", ".gitignore"), "utf8"), "*\n");
+  });
+});
+
+/** The files the reviewer is handed as changed, and the diff, for the head `worktree` builds on `base`. */
+async function handedToReviewer(worktree: string, base: string): Promise<{ readonly files: readonly string[]; readonly diff: string }> {
+  const head = builtHead(buildHead(worktree, base, deadlineIn(30_000)));
+  const provided = provideCommits(worktree, changeOf(base, head), deadlineIn(30_000));
+  const alternates = provided.outcome === "ready" ? provided.alternates : [];
+  const added = addSnapshot(worktree, { key: "1", round: 1, commit: head, base, alternates }, deadlineIn(30_000));
+  assert.equal(added.outcome, "added", added.outcome === "failed" ? added.reason : "");
+  const snapshot = added.outcome === "added" ? added.path : "";
+  try {
+    const files = await changedFiles(snapshot);
+    assert.ok(Array.isArray(files), "the changed files could not be listed");
+    const diff = await changeDiff(snapshot);
+    assert.equal(diff.failed, false, diff.text);
+    return { files: files as readonly string[], diff: diff.text };
+  } finally {
+    removeSnapshot(snapshot);
+  }
+}
+
+test("an untracked .squiz.json the base lacks is never part of the change the reviewer is handed (#896)", async () => {
+  await withFixture(async ({ agent, base }) => {
+    await writeFile(join(agent, ".squiz.json"), '{"venue":"local"}\n');
+
+    const { files, diff } = await handedToReviewer(agent, base);
+
+    assert.equal(files.includes(".squiz.json"), false, "squiz's own configuration was handed to the reviewer as changed");
+    assert.doesNotMatch(diff, /\.squiz\.json/u);
+    assert.ok(files.includes("untracked.txt"), "the rest of the change went with it");
+  });
+});
+
+test("a tracked .squiz.json that changed is reviewed like any other file (#896)", async () => {
+  await withFixture(async ({ agent, base }) => {
+    await writeFile(join(agent, ".squiz.json"), '{"venue":"local"}\n');
+    git(agent, ["add", ".squiz.json"]);
+
+    const { files, diff } = await handedToReviewer(agent, base);
+
+    assert.ok(files.includes(".squiz.json"), "a .squiz.json the repository tracks was left out of its change");
+    assert.match(diff, /\+\{"venue":"local"\}/u);
+  });
+});
+
+test("a .squiz.json the base has, changed and untracked, still shows its change (#896)", async () => {
+  await withFixture(async ({ main, agent }) => {
+    await writeFile(join(main, ".squiz.json"), '{"venue":"github"}\n');
+    const base = commit(main, "configure squiz");
+    git(agent, ["reset", "--quiet", "--keep", base]);
+    git(agent, ["rm", "--quiet", "--cached", ".squiz.json"]);
+    await writeFile(join(agent, ".squiz.json"), '{"venue":"local"}\n');
+
+    const { files, diff } = await handedToReviewer(agent, base);
+
+    assert.ok(files.includes(".squiz.json"), "a change to the base's .squiz.json was left out");
+    assert.match(diff, /-\{"venue":"github"\}\n\+\{"venue":"local"\}/u);
   });
 });
 
