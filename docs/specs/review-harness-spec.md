@@ -1487,6 +1487,12 @@ The other reasons take the same form:
   posted on PR #41`.
 - A run that failed before any round, or could not reach GitHub, prints
   `squiz: no review ran: <why>`, as `squiz: no review ran: PR #41 is closed`.
+- A run whose state's round reached a result, but which cannot list all the
+  threads that result prints, prints `squiz: the threads on PR #41 could not all
+  be listed to print the review of 3f9c2e0: <reason>`, and posts nothing. A
+  listing that fails after its first page, or runs out of time, is one that
+  could not list them. Exit 1 stands where the run's deadline passed during the
+  listing.
 - A run after this worktree pushed waits up to 60 seconds, or until its
   deadline where that comes first, for GitHub to report a head containing the
   pushed commit, and acts on that head. Where GitHub does not, the run queues
@@ -1879,8 +1885,9 @@ they count any other time.
 
 **`squiz review` waits within one deadline of 540 seconds**, counted from its
 start. A run whose round ends first returns the round's result, 0, 2 or 3, or 1
-with the reason the round recorded, and posts no second failure comment. A run
-whose deadline arrives first exits 4, and a run stopped from outside, by a person
+with the reason the round recorded, and posts no second failure comment. Listing
+the threads that result prints has at least 10 seconds, past the deadline where
+less of it is left. A run whose deadline arrives first exits 4, and a run stopped from outside, by a person
 or the coding agent's tool, ends with no status of its own. Either way the round
 goes on in the round host, and the next run returns its result.
 
