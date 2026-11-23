@@ -17,6 +17,7 @@ import { after, before, describe, test, type TestContext } from "node:test";
 import type { Backends, SessionPlace } from "../sessions/session.ts";
 import { startChild } from "../sessions/child.ts";
 import { identityOf } from "../sessions/process.ts";
+import { startInHerdrPane } from "../sessions/herdr.ts";
 import { openWindow } from "../sessions/tmux.ts";
 import type { Adapter, Invocation } from "./adapter.ts";
 import { copilot } from "./copilot/adapter.ts";
@@ -131,6 +132,46 @@ function adapterOf(scripts: { readonly inPane: string; readonly detached: string
     parse,
     grants,
   };
+}
+
+/** What `pi` 0.85.1 says on stderr, and nowhere else, when it is given a provider it does not know. */
+const STARTUP_ERROR = 'Error: Unknown provider "nosuchprovider". Use --list-models to see available providers/models.';
+
+/**
+ * A reviewer that fails as it starts. In a pane it is an `sh` that says
+ * `STARTUP_ERROR`, keeps it in `kept-stderr.txt` as the Copilot line keeps its
+ * stderr, and exits 1. With no terminal it would review, so a second reviewer
+ * started after it shows in the round.
+ */
+function failingAtOnce(tree: string): Adapter {
+  const kept = join(tree, "kept-stderr.txt");
+  const review = `require("node:fs").appendFileSync(process.env.${REPORTS_VARIABLE}, ${JSON.stringify(reviewLines)});`;
+  const stand = adapterOf({ inPane: "process.exit(3)", detached: review });
+  const script = 'printf "%s\\n" "$0" > "$1"; printf "%s\\n" "$0" >&2; exit 1';
+  return {
+    ...stand,
+    argv: (invocation) => {
+      const line = stand.argv(invocation);
+      return invocation.terminal === "pane" ? { ...line, command: "/bin/sh", args: ["-c", script, STARTUP_ERROR, kept] } : line;
+    },
+    stderrFile: () => kept,
+  };
+}
+
+/**
+ * Every `ps` this process runs, held for a moment before it runs, until the
+ * test ends. A reviewer that exits within that moment of starting is then gone
+ * before any `ps` can read it, every time rather than now and then.
+ */
+function slowPs(t: TestContext): void {
+  const directory = mkdtempSync(join(tmpdir(), "squiz-slow-ps-"));
+  writeFileSync(join(directory, "ps"), '#!/bin/sh\nsleep 0.3\nexec /bin/ps "$@"\n', { mode: 0o755 });
+  const path = process.env["PATH"];
+  process.env["PATH"] = `${directory}:${path ?? ""}`;
+  t.after(() => {
+    process.env["PATH"] = path;
+    rmSync(directory, { recursive: true, force: true });
+  });
 }
 
 /** `adapter`, confining with `COPILOT_ALLOW_ALL` set to the empty string. */
@@ -350,7 +391,7 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     const other = await runRound(failing("Error: something else went wrong"), invocationIn(tree), 30, sessions);
     assert.match(
       other.outcome === "setup" ? other.reason : "",
-      /^the reviewer completed no message, and said: Error: something else went wrong; .*"gpt-6-astra"/u,
+      /^the reviewer completed no message: \S+ exited, and said: Error: something else went wrong; .*"gpt-6-astra"/u,
     );
   });
 
@@ -447,6 +488,33 @@ describe("in a tmux window", { skip: tmuxInstalled ? false : "tmux is not instal
     assert.ok(await eventually(() => !running(note.pid), 2_000), `the reviewer ${note.pid} is still running`);
     assert.ok(await eventually(() => !running(note.tool ?? 0), 2_000), `the reviewer's tool ${note.tool} is still running`);
     assert.ok(!server.windows().includes(place.window.id), "the reviewer's window is still open");
+  });
+
+  test("a reviewer that exits before its window's pid is read fails the round saying it exited and what it said, and no second reviewer runs (#430)", async (t) => {
+    const server = privateTmux(t);
+    slowPs(t);
+    const tree = treeFor(t);
+    let children = 0;
+    const backends: Backends = {
+      herdr: () => ({ outcome: "refused", reason: "not asked" }),
+      tmux: openWindow,
+      child: async (command, environment, boundMs) => {
+        children += 1;
+        return startChild(command, environment, boundMs);
+      },
+    };
+
+    const round = await runRound(failingAtOnce(tree), invocationIn(tree), 30, {
+      environment: server.environment,
+      name: "squiz-142-r1",
+      backends,
+    });
+
+    assert.equal(round.outcome, "setup", accountOf(round));
+    const reason = round.outcome === "setup" ? round.reason : "";
+    assert.match(reason, /\/bin\/sh exited/u, "the reason does not say the reviewer exited");
+    assert.ok(reason.includes(STARTUP_ERROR), `the reason does not carry what the reviewer said: ${reason}`);
+    assert.equal(children, 0, "a second reviewer was started after the first exited");
   });
 
   test("a window that failed to start is closed, the round fails with the reason, and no second reviewer runs", async (t) => {
@@ -732,6 +800,34 @@ describe("in a Herdr pane, against a private server", { skip: herdrInstalled ? f
     assert.ok(place?.backend === "herdr", `the reviewer started in ${JSON.stringify(place)}`);
     assert.equal(place.identity.pid, noteIn(noteFile).pid, "the identity is not the reviewer's own");
     assert.match(herdr(["pane", "get", place.pane]), /pane_not_found/u, "the reviewer's pane is still open");
+  });
+
+  // The gate holds the reviewer until its group has been read, so a `ps` held
+  // for a moment still finds it running.
+  test("a reviewer that exits as soon as its gate opens fails the round saying it exited and what it said, and no second reviewer runs (#430)", async (t) => {
+    const tree = treeFor(t);
+    slowPs(t);
+    let children = 0;
+    const backends: Backends = {
+      herdr: startInHerdrPane,
+      tmux: () => ({ outcome: "refused", reason: "not asked" }),
+      child: async (command, environment, boundMs) => {
+        children += 1;
+        return startChild(command, environment, boundMs);
+      },
+    };
+
+    const round = await runRound(failingAtOnce(tree), invocationIn(tree), 40, {
+      environment,
+      name: "squiz-142-r1",
+      backends,
+    });
+
+    assert.equal(round.outcome, "setup", accountOf(round));
+    const reason = round.outcome === "setup" ? round.reason : "";
+    assert.match(reason, /\/bin\/sh exited/u, "the reason does not say the reviewer exited");
+    assert.ok(reason.includes(STARTUP_ERROR), `the reason does not carry what the reviewer said: ${reason}`);
+    assert.equal(children, 0, "a second reviewer was started after the first exited");
   });
 
   test("pi's own command line starts in a pane with a prompt of many lines, and the reviewer is handed it whole", async (t) => {

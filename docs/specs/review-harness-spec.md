@@ -899,8 +899,9 @@ review run and nothing spent, and the reason names `model` and its value:
 With no `model`, the reviewer's command line and environment are what they are
 without the setting.
 
-**A run that completed no message has a reason that adds what the reviewer said
-on stderr**, in a pane as detached. Where the adapter recognises the cause, the
+**A run that completed no message has a reason that adds that the reviewer
+exited, with its exit status where it ran detached, and what it said on
+stderr**, in a pane as detached. Where the adapter recognises the cause, the
 reason is the adapter's alone. The Copilot adapter recognises a reviewer that is
 not signed in: a run whose stderr holds `Error: No authentication information
 found.` gets a reason that quotes the line and names no model:
@@ -914,8 +915,8 @@ ordinary reason, with what the reviewer said. That reason adds the model the run
 was handed, configured or the user's default:
 
 ```
-the reviewer completed no message; "model" in .squiz.json is "gpt-5-nano", which the reviewer's CLI may not offer
-the reviewer completed no message; .squiz.json sets no "model", and the user's default, "gpt-6-astra", may not be one the reviewer's CLI offers
+the reviewer completed no message: sh exited 1; "model" in .squiz.json is "gpt-5-nano", which the reviewer's CLI may not offer
+the reviewer completed no message: sh exited; .squiz.json sets no "model", and the user's default, "gpt-6-astra", may not be one the reviewer's CLI offers
 ```
 
 **Squiz checks every reporting call itself, whatever CLI serves it.** A
