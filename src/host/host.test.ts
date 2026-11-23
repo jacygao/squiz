@@ -738,7 +738,7 @@ test("a state superseded by a later reply on the same commit is recorded not rev
   assert.equal(second?.status, "reviewed");
 });
 
-test("#416: a reply-state queued behind a clean round and superseded by it, once its reply is deleted, closes the episode on the clean round", async () => {
+test("#944: a reply-state queued behind a clean round and superseded by it, once its reply is deleted, leaves the episode open and the clean round as it was", async () => {
   let head = "";
   const ran = await host({
     records: (fixture) => {
@@ -748,60 +748,30 @@ test("#416: a reply-state queued behind a clean round and superseded by it, once
     // The fake lists no replies, so by the time the host takes the reply-state
     // the pull request is back at the state the first round reviewed.
     onStart: (index, fixture) => {
-      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted", MAIN));
+      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted", PARENT));
     },
   });
 
   assert.equal(ran.started, 1, `no second reviewer should run; the log says:\n${ran.log}`);
   const [clean, superseded] = recordsOf(ran.state);
-  assert.ok(clean?.status === "reviewed" && clean.result === "exited", `the clean round is left as ${JSON.stringify(clean)}`);
-  assert.equal(clean.exitStatus, 0);
-  assert.deepEqual(clean.openThreads, []);
+  assert.ok(
+    clean?.status === "reviewed" && clean.result === "clean, episode open",
+    `the clean round's record was changed to ${JSON.stringify(clean)}`,
+  );
+  assert.equal("exitStatus" in clean, false, `the clean round's record was given an exit: ${JSON.stringify(clean)}`);
   assert.deepEqual(superseded, {
     head,
     activity: "PRRC_deleted",
-    owner: MAIN,
+    owner: PARENT,
     status: "not reviewed",
     reason: `superseded by ${head.slice(0, 7)} with different replies`,
     supersededBy: { head, activity: null },
   });
-  assert.equal(ran.state?.closeReported, true, "the episode was left open with nothing queued to close it");
-  assert.deepEqual(ran.state?.cleanClose, { head, activity: null, records: 2 }, "#832: a close on the clean round must record it as a clean close, or the next head is never reviewed");
-  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 1, `gh was asked for ${ran.kinds.join(", ")}`);
-});
-
-test("#416: a clean round that a later review followed closes nothing when a state is superseded by it", async () => {
-  let first = "";
-  let atFirst = "";
-  let third = "";
-  const ran = await host({
-    records: (fixture) => {
-      first = fixture.head();
-      return [queued(first)];
-    },
-    // The second state's review opens a thread, and the third state is superseded
-    // by the first, as a force-push back to it would leave the pull request.
-    findings: [[], [finding("The name says nothing.")]],
-    onStart: (index, fixture) => {
-      if (index === 0) {
-        atFirst = readFileSync(join(fixture.binaries, "answer-prlist"), "utf8");
-        queueNow(fixture.episode, queued(fixture.push()));
-      }
-      if (index === 1) {
-        third = fixture.push();
-        queueNow(fixture.episode, queued(third));
-        writeFileSync(join(fixture.binaries, "answer-prlist"), atFirst, "utf8");
-      }
-    },
-  });
-
-  assert.equal(ran.started, 2, `the log says:\n${ran.log}`);
-  const [clean, reviewed, superseded] = recordsOf(ran.state);
-  assert.ok(clean?.status === "reviewed" && clean.result === "clean, episode open", `the first state is ${JSON.stringify(clean)}`);
-  assert.ok(reviewed?.status === "reviewed" && reviewed.result === "exited" && reviewed.exitStatus === 2, `the second state is ${JSON.stringify(reviewed)}`);
-  assert.equal(superseded?.status, "not reviewed");
-  assert.notEqual(ran.state?.closeReported, true, "the episode closed over the thread the later review left open");
-  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 0, `gh was asked for ${ran.kinds.join(", ")}`);
+  assert.notEqual(ran.state?.closeReported, true, "the episode closed on the state the superseded one returned to");
+  assert.equal(ran.state?.cleanClose, undefined, "the episode recorded a clean close on the state the superseded one returned to");
+  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 0, `a summary was posted; gh was asked for ${ran.kinds.join(", ")}`);
+  assert.doesNotMatch(ran.log, /episode closed/u, `the log reports a close:\n${ran.log}`);
+  assert.doesNotMatch(JSON.stringify(ran.notes[MAIN.sessionId] ?? []), /closed/u, "the clean round's owner was told the episode closed");
 });
 
 test("a state queued while the summary is being posted is reviewed or refused, and never stopped by a close it arrived before (#405)", async () => {
@@ -1174,68 +1144,6 @@ test("#414: a last round whose summary GitHub refuses keeps the reason on its re
   assert.deepEqual(record.problems, [line]);
   assert.match(ran.log, new RegExp(`round 1: ${escaped(line)}\n`, "u"));
   assert.match(ran.status.stdout, new RegExp(`\n  ${escaped(line)}\n`, "u"));
-});
-
-test("#416: a clean round that closes the episode once the state behind it is superseded keeps the summary's refusal on its record", async () => {
-  const ran = await host({
-    records: atHead,
-    before: refuseSummary,
-    onStart: (index, fixture) => {
-      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted"));
-    },
-  });
-
-  const line = `the review of PR #${PULL_REQUEST} closed without its summary: gh exited 1: no answer fixtured for summary`;
-  assert.ok(ran.kinds.includes("summary"), `gh was asked for ${ran.kinds.join(", ")}`);
-  const [record] = recordsOf(ran.state);
-  assert.ok(record?.status === "reviewed" && record.result === "exited", `recorded as ${JSON.stringify(record)}`);
-  assert.equal(record.exitStatus, 0, "a close without its summary is a close still");
-  assert.deepEqual(record.problems, [line]);
-  assert.match(ran.log, new RegExp(`round 2: ${escaped(line)}\n`, "u"));
-});
-
-test("#416: a clean round closes nothing when a state is superseded by it while a thread of the reviewer's is open", async () => {
-  const ran = await host({
-    records: atHead,
-    // The thread is listed only after the clean round's own listing, as one a
-    // failed round salvaged would be.
-    onStart: (index, fixture) => {
-      if (index !== 0) return;
-      queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted"));
-      writeFileSync(join(fixture.binaries, "answer-threads"), ONE_OPEN_THREAD, "utf8");
-    },
-  });
-
-  const [clean, superseded] = recordsOf(ran.state);
-  assert.ok(clean?.status === "reviewed" && clean.result === "clean, episode open", `the clean round is ${JSON.stringify(clean)}`);
-  assert.equal(superseded?.status, "not reviewed");
-  assert.notEqual(ran.state?.closeReported, true, "the episode closed with nothing open over a thread that is open");
-  assert.equal(ran.kinds.filter((kind) => kind === "summary").length, 0, `gh was asked for ${ran.kinds.join(", ")}`);
-});
-
-test("#416: a clean round closes nothing when a state is superseded by it after a later round failed", async () => {
-  let atFirst = "";
-  const ran = await host({
-    records: atHead,
-    // The second state's round fails, and the third state is superseded by the first.
-    unparsedFrom: 1,
-    onStart: (index, fixture) => {
-      if (index === 0) {
-        atFirst = readFileSync(join(fixture.binaries, "answer-prlist"), "utf8");
-        queueNow(fixture.episode, queued(fixture.push()));
-      }
-      if (index === 1) {
-        queueNow(fixture.episode, queued(fixture.push()));
-        writeFileSync(join(fixture.binaries, "answer-prlist"), atFirst, "utf8");
-      }
-    },
-  });
-
-  const [clean, failed, superseded] = recordsOf(ran.state);
-  assert.ok(clean?.status === "reviewed" && clean.result === "clean, episode open", `the clean round is ${JSON.stringify(clean)}`);
-  assert.equal(failed?.status, "failed", `the second state is ${JSON.stringify(failed)}; the log says:\n${ran.log}`);
-  assert.equal(superseded?.status, "not reviewed");
-  assert.notEqual(ran.state?.closeReported, true, "the episode closed on a clean round a later round followed");
 });
 
 /**
@@ -1764,28 +1672,6 @@ test("a superseded state's owner gets a note naming the state that superseded it
   assert.equal(
     onlyNote(ran, MAIN)["text"],
     `Squiz did not review PR #${PULL_REQUEST} at ${older.slice(0, 7)}: superseded by ${newer.slice(0, 7)}.`,
-  );
-});
-
-test("#416: the owner of a clean round that closes the episode once the state queued behind it is superseded is told the episode closed", async () => {
-  let head = "";
-  const ran = await host({
-    records: (fixture) => {
-      head = fixture.head();
-      return [queued(head, null, MAIN)];
-    },
-    onStart: (index, fixture) => {
-      if (index === 0) queueNow(fixture.episode, queued(fixture.head(), "PRRC_deleted", PARENT));
-    },
-  });
-
-  assert.equal(
-    onlyNote(ran, MAIN).text,
-    `Squiz reviewed PR #${PULL_REQUEST} at ${head.slice(0, 7)}: nothing is open, and the episode has closed. Run \`squiz review ${PULL_REQUEST}\` to read the close.`,
-  );
-  assert.equal(
-    onlyNote(ran, PARENT).text,
-    `Squiz did not review PR #${PULL_REQUEST} at ${head.slice(0, 7)}, the work of subagent ${PARENT.subagent}: superseded by ${head.slice(0, 7)} with different replies.`,
   );
 });
 
