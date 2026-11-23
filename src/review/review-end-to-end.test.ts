@@ -123,6 +123,11 @@ function answer(body) {
   }
   const at = argv.find((a) => a.startsWith("repos/"));
   if (at.includes("/issues/")) {
+    if (state.holdSummary !== undefined && !fs.existsSync(state.holdSummary)) {
+      fs.writeFileSync(state.holdSummary + ".requested", "");
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      while (!fs.existsSync(state.holdSummary)) Atomics.wait(pause, 0, 0, 20);
+    }
     if (state.rejectSummary) {
       process.stdout.write(http("403 Forbidden", { message: "Resource not accessible by integration" }));
       process.stderr.write("gh: Resource not accessible by integration (HTTP 403)\n");
@@ -181,6 +186,11 @@ type GhState = {
   readonly rejectCreate?: boolean;
   /** Whether GitHub refuses every issue comment, which is how the summary is posted. */
   readonly rejectSummary?: boolean;
+  /**
+   * A file whose absence holds every issue comment request until it is made.
+   * A request it holds first writes the same path with `.requested` added.
+   */
+  readonly holdSummary?: string;
   /** Whether GitHub refuses every reply the round posts on a thread. */
   readonly rejectReply?: boolean;
   /** Whether GitHub refuses every resolve and re-open the round sends. */
@@ -534,6 +544,42 @@ test("a run after a round closed without its summary prints the failure the clos
       `Squiz's review of PR #41 closed at ${fixture.gh().head.slice(0, 7)} after 1 round, with nothing open. Only a new head commit starts another review in this worktree.`,
     );
     assert.equal(later.stderr, closing.stderr);
+  });
+});
+
+/**
+ * The close is written before the summary is posted, and the closing round's
+ * record after. Only a refused summary tells a run that returned between the two
+ * from one that waited, so the summary is held until the run has had time to
+ * return, and then refused.
+ */
+test("#782: a run waiting on a state reviewed clean waits for the closing round's record, and prints the summary's refusal", async () => {
+  await withPullRequest([{ findings: [], verdicts: [], holdSeconds: 2 }, { findings: [], verdicts: [] }], async (fixture) => {
+    const release = `${fixture.planFile}.release-summary`;
+    fixture.setGh({ ...fixture.gh(), rejectSummary: true, holdSummary: release });
+
+    let returned = false;
+    const onA = review(fixture).finally(() => {
+      returned = true;
+    });
+    for (let waited = 0; waited < 200 && stateOf_ifAny(fixture.episode) !== "reviewing"; waited += 1) await sleep(50);
+    assert.equal(stateOf_ifAny(fixture.episode), "reviewing", `no round started:\n${hostLog(fixture.episode)}`);
+    fixture.push();
+    const onB = review(fixture);
+
+    for (let waited = 0; waited < 400 && !existsSync(`${release}.requested`); waited += 1) await sleep(50);
+    assert.ok(existsSync(`${release}.requested`), `the closing round asked for no summary:\n${hostLog(fixture.episode)}`);
+    assert.equal(stateOf(fixture.episode).closeReported, true, "the close was not written before the summary was asked for");
+    // Several of the run's polls, each of which reads the close with no closing record behind it.
+    await sleep(1_000);
+    const early = returned;
+    writeFileSync(release, "", "utf8");
+    const [a, b] = await Promise.all([onA, onB]);
+
+    assert.equal(early, false, `the run waiting on A returned before the closing round was recorded:\n${a.stdout}${a.stderr}`);
+    assert.equal(b.exit, 0, `${b.stdout}${b.stderr}\n${hostLog(fixture.episode)}`);
+    assert.equal(a.exit, 0, `${a.stdout}${a.stderr}\n${hostLog(fixture.episode)}`);
+    assert.match(a.stderr, /^squiz: the review of PR #41 closed without its summary: .*403/mu, a.stderr);
   });
 });
 

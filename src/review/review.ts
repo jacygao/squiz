@@ -490,6 +490,9 @@ function afterClean(waiting: Waiting, state: EpisodeState, clean: StateRecord, h
       // Until the round host records it, the close is still posting its summary.
       return closePosting(records, following) ? undefined : compose((threads) => closedUnreviewed(following, records, failed, threads));
     }
+    // The closing round writes the close before it posts the summary, and its
+    // record only after, so what the posting came to reaches the run from that record.
+    if (records.some((record) => record.status === "reviewing")) return undefined;
     return closed(following, state);
   }
   if (records.some((record) => record.status === "queued" || record.status === "reviewing")) return undefined;
