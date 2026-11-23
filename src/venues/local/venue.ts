@@ -47,6 +47,8 @@ export const localVenue: Venue = {
     if (key !== LOCAL_KEY) return failed(REFUSAL);
     return { outcome: "found", directory: localDirectory(worktree) };
   },
+  // The working tree is never merged or closed.
+  changeEnded: (_worktree, key) => (key === LOCAL_KEY ? { outcome: "open" } : failed(REFUSAL)),
   provideCommits(change, until) {
     return provideCommits(worktreeOf(change), change, until);
   },

@@ -57,6 +57,7 @@ import { deadlineIn } from "../reviewers/deadline.ts";
 import { writeNote } from "../sessions/notes.ts";
 import type { ProcessIdentity } from "../sessions/process.ts";
 import { takeEpisodeHostLock, type HostLock } from "./lock.ts";
+import { sweepEnded } from "./sweep.ts";
 import { ownerNote, threadsToPrint, type FailedNoteClose } from "./owner-note.ts";
 import { wakeOwner } from "./wake.ts";
 
@@ -66,6 +67,9 @@ const LOCK_BOUND_MS = 5_000;
 // Another writer holds the state lock for one read and one write, so a wait this
 // long is a holder that has stopped.
 const STATE_WAIT_MS = 5_000;
+
+// Asking GitHub whether each other episode's pull request has ended, all of them together.
+const SWEEP_BUDGET_MS = 20_000;
 
 // Listing the threads for the notes, every page of them.
 const LISTING_WAIT_MS = 30_000;
@@ -149,6 +153,11 @@ export async function runHost(setup: HostSetup): Promise<HostEnd> {
       continue;
     }
     const final: HostEnd = after?.outcome === "unreadable" ? { outcome: "state unreadable", reason: after.reason } : end;
+    // Nothing waits on the host once its lock is free, so the sweep holds up no
+    // review and no hook.
+    if (final.outcome !== "worktree gone") {
+      sweepEnded({ worktree: episode.worktree, own: episode.key, venue: setup.round.venue, until: deadlineIn(SWEEP_BUDGET_MS), log });
+    }
     log(endLine(final));
     return final;
   }

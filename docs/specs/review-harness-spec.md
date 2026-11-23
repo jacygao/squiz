@@ -384,6 +384,19 @@ One worktree, one branch, one pull request, one live episode per pull request.
 **Squiz never removes a worktree.** Whatever created it removes it, and the
 episode's state goes with it.
 
+**In a worktree that outlives its episodes, the round host removes the state of
+each one whose pull request is merged or closed.** Once a host has run its
+rounds, it asks GitHub about every other pull request with a directory in
+`.squiz/`, and removes `.squiz/<number>/` where the pull request is merged or
+closed and no round host is running for it. A pull request GitHub gives no
+answer for keeps its directory, as does one whose host may still be running. The
+questions take at most 20 seconds in all, and a directory not reached waits for
+the next host. `host.log` names each directory removed:
+
+```
+2026-11-24T10:02:11.004Z removed /work/squiz/.squiz/38: PR #38 is merged
+```
+
 **Where a tree's `HEAD` moved to another branch while an episode was live, each
 pull request's episode keeps its state under its own number**, and each reviewer
 reads a snapshot of its own pull request's head.

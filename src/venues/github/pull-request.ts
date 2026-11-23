@@ -49,6 +49,11 @@ export type PullRequestLookup =
   | { readonly outcome: "none" }
   | Failure;
 
+export type PullRequestEnd =
+  | { readonly outcome: "ended"; readonly how: "merged" | "closed" }
+  | { readonly outcome: "open" }
+  | Failure;
+
 /** The `PR_` node id GitHub gave for a pull request's number. */
 export type NodeIdLookup = { readonly outcome: "found"; readonly nodeId: string } | Failure;
 
@@ -96,6 +101,23 @@ export function findPullRequestNodeId(number: number, call: GhCall): NodeIdLooku
   const nodeId = textOf(rowOf(answer.body)?.["node_id"]);
   if (nodeId === null) return failed(`GitHub answered for PR #${number} with no node id`);
   return { outcome: "found", nodeId };
+}
+
+/** Whether pull request `number` is merged, closed or open. Never throws. */
+export function pullRequestEnd(number: number, call: GhCall): PullRequestEnd {
+  const run = runGh(["pr", "view", String(number), "--json", "state"], call);
+  if (run.outcome !== "ran") return failed(run.reason);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(run.stdout);
+  } catch {
+    return failed(`gh answered with what is not JSON: ${saidBy(run.stdout)}`);
+  }
+  const state = rowOf(parsed)?.["state"];
+  if (state === "MERGED") return { outcome: "ended", how: "merged" };
+  if (state === "CLOSED") return { outcome: "ended", how: "closed" };
+  if (state === "OPEN") return { outcome: "open" };
+  return failed(`gh answered for PR #${number} with no state it can be read by: ${saidBy(run.stdout)}`);
 }
 
 /**
