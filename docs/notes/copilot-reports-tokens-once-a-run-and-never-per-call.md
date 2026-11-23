@@ -24,10 +24,15 @@ recheck-when: Copilot CLI upgrades past 1.0.92, its JSON stream gains a per-call
   `model.call_finished`, `assistant.message` and `assistant.turn_end` carry no
   usage, so nothing reports a call as it happens. Only the file holds the run's
   tokens by kind and by model.
-- **Record a cost only for a run that exited 0 by itself, and never as a
-  floor.** The reviewer's shell line appends the usage to the report file after
-  Copilot exits 0. A round stopped from outside, or one that failed, records no
-  cost and names no model. After `SIGKILL` there is no usage file at all.
+- **Take a cost only from an attempt where Copilot exited 0 by itself, and
+  never as a floor.** The reviewer's shell line appends the usage to the report
+  file after Copilot exits 0, so an attempt stopped from outside, or one where
+  Copilot exited nonzero, adds no cost and names no model. After `SIGKILL`
+  there is no usage file at all.
+- **Keep what a round's attempts reported, whatever the round's outcome.** An
+  attempt that exited 0 without finishing the review still reports its usage,
+  and a round whose retry fails or runs out of time keeps the first attempt's
+  spend.
 - **Count `inputTokens + outputTokens` against the token bound, with nothing
   added.** Copilot's `inputTokens` already holds fresh input, cache reads and
   cache writes, so adding the cache figures would count them twice. The sum is

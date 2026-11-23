@@ -27,9 +27,9 @@ recheck-when: pi upgrades past 1.0.0, or the extension API's ctx.shutdown, agent
   `--session-dir` keeps the session file, as `<timestamp>_<uuid>.jsonl`, so the
   round can save the command that resumes it.
 - **Hand it the prompt on the command line, never with `send-keys`.** A prompt
-  on the line started the agent at once, with no keystroke. The prompt holds a
-  diff, and typed into the editor its first newline would submit it. Squiz
-  passes it as `@<prompt file>`, since Herdr refuses a newline on the line
+  on the line started the agent at once, with no keystroke. The prompt spans
+  several lines, and typed into the editor its first newline would submit it.
+  Squiz passes it as `@<prompt file>`, since Herdr refuses a newline on the line
   (unverified in a pane run here).
 - **Read the findings from the report file the extension writes, not from
   `pi`'s output.** In interactive mode stdout is the screen. Each tool's
@@ -74,8 +74,7 @@ Nothing.
   changelog, and it shows an "Update Available" banner.
 - **The pane's stdin is the terminal.** The headless rule that stdin must be
   `/dev/null` does not apply, and a person can type into the review.
-- **The prompt is shown whole in the pane**, diff included, as the first user
-  message.
+- **The prompt is shown whole in the pane**, as the first user message.
 - **1.0.0 makes `--tui-mode fullscreen` the default**, and its `--no-extensions`
   also turns off its built-in extensions. Neither changed anything measured.
 
