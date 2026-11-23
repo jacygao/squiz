@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — which `SubagentStop` payload field names the subagent that did the work, in the owner the hook records"
+settles: "§ 3: which `SubagentStop` payload field names the subagent that did the work, in the owner the hook records"
 issue: 13
 recorded: 2026-09-06
 versions: { claude-code: 2.1.261, node: 24.15.0 }
@@ -8,32 +8,27 @@ recheck-when: Claude Code changes the SubagentStop payload
 
 # `agent_id` names one subagent, and `prompt_id` does not
 
-`agent_id` holds. It was the same on all six stops of one subagent that was
-stopped, resumed, worked and stopped again five times over, and it differed
-between every subagent seen. Five subagents across four sessions — two of them
-concurrent in one session, two more in two sessions running at the same time,
-and one on its own — produced five distinct ids, none of which repeated the id
-an earlier run recorded.
+## Intent
 
-The obvious-looking second choice is wrong. `prompt_id` is shared by every
-subagent in a session and it changed while one subagent was still at work, so
-it would both merge two subagents and split one.
+- Which field of Claude Code's `SubagentStop` payload names the subagent that
+  did the work, stably across its stops and distinctly from every other
+  subagent.
 
 ## Decisions
 
-- **Name the subagent that did the work by `agent_id`.** The `SubagentStop` hook
-  records it in the owner, beside the parent's `session_id`, and the note to the
-  parent names it. The episode itself is keyed on the pull request's number,
-  so nothing here decides where state lives.
-- **Never use `prompt_id` for a subagent.** It is per user turn in the parent
-  session, not per subagent. In the two-subagent run it was the same string for
-  both agents, and it changed between one agent's second and third stop.
-- **Do not rely on the id's shape.** Every id observed matched
-  `^a[0-9a-f]{16}$`, and Copilot's `agent_id` is a session UUID, so the hook
-  reads it as a string and never as a path component.
-- **Cross-session uniqueness is not required, whatever the runtime
-  guarantees.** The id names a subagent within its parent's session, which the
-  owner already names.
+- **Name the subagent that did the work by `agent_id`.** It was the same on all
+  six stops of one subagent, and different for each of five subagents across
+  four sessions, two of them concurrent in one session. The `SubagentStop` hook
+  records it in the owner, beside the parent's `session_id`. The episode is
+  keyed on the pull request, so the id decides nothing about where state lives.
+- **Never use `prompt_id` for a subagent.** It belongs to the user turn in the
+  parent session: two concurrent subagents shared one, and it changed between
+  one subagent's second and third stop. It would both merge two subagents and
+  split one.
+- **Read the id as an opaque string, never as a path component.** Claude Code's
+  ids matched `^a[0-9a-f]{16}$`, and Copilot's `agent_id` is a UUID.
+- **Require the id to be unique only within its parent's session.** The owner
+  already names the session.
 
 ## Needs your input
 
@@ -41,29 +36,29 @@ Nothing.
 
 ## Reference
 
-### The payload, in full
+### The payload
 
-Every field, in the order the runtime emits it, identical in shape across all
-sixteen invocations recorded.
+Every field, in the order Claude Code emits it, the same in all sixteen firings
+recorded:
 
 | Field | Type | |
 |---|---|---|
-| `session_id` | string | UUID of the session that dispatched the subagent. Shared by every subagent in that session |
-| `transcript_path` | string | `…/<session_id>.jsonl` — the parent session's transcript |
-| `cwd` | string | The subagent's working directory, which is where the dispatcher's shell stood when it dispatched the subagent, and where the hook runs. `a-subagents-hook-runs-where-it-was-dispatched.md` records the measurement |
-| `prompt_id` | string | UUID of the user turn in the parent session. Not per subagent, and not stable across one subagent's stops |
-| `permission_mode` | string | `acceptEdits` in every run here |
+| `session_id` | string | UUID of the session that dispatched the subagent, shared by every subagent in it |
+| `transcript_path` | string | `…/<session_id>.jsonl`, the parent session's transcript |
+| `cwd` | string | The subagent's working directory, where the dispatcher's shell stood when it dispatched the subagent, as `a-subagents-hook-runs-where-it-was-dispatched.md` records |
+| `prompt_id` | string | UUID of the user turn in the parent session |
+| `permission_mode` | string | `acceptEdits` in every firing here |
 | `agent_id` | string | The subagent's id |
-| `agent_type` | string | `general-purpose` in every run here. What a `matcher` in the registration would narrow on |
-| `effort` | object | `{"level": "xhigh"}`. One key, `level`, a string |
+| `agent_type` | string | `general-purpose` in every firing here. What a `matcher` in the registration would narrow on |
+| `effort` | object | `{"level": "xhigh"}` |
 | `hook_event_name` | string | `SubagentStop` |
 | `stop_hook_active` | boolean | `false` on a subagent's first stop, `true` on every stop after |
-| `agent_transcript_path` | string | `…/<session_id>/subagents/agent-<agent_id>.jsonl` — the subagent's own transcript |
-| `last_assistant_message` | string | The subagent's final text, so nothing needs to read the transcript to get it |
-| `background_tasks` | array of objects | Every live subagent in the session. Keys `id`, `type`, `status`, `description`, `agent_type`, all strings |
-| `session_crons` | array | Empty in every invocation, so its element type is *(unverified)* |
+| `agent_transcript_path` | string | `…/<session_id>/subagents/agent-<agent_id>.jsonl`, the subagent's own transcript |
+| `last_assistant_message` | string | The subagent's final text |
+| `background_tasks` | array of objects | Every live subagent in the session, with keys `id`, `type`, `status`, `description`, `agent_type`, all strings |
+| `session_crons` | array | Empty in every firing, so its element type is (unverified) |
 
-One record verbatim, from the first stop of two concurrent subagents:
+One record, from the first stop of two concurrent subagents:
 
 ```json
 {
@@ -89,55 +84,19 @@ One record verbatim, from the first stop of two concurrent subagents:
 }
 ```
 
-### What the id looks like, and what it is scoped to
-
-Seventeen characters, matching `^a[0-9a-f]{16}$` in all sixteen invocations:
-`a1e3196c5ad0f2410`, `ad5b06227fb235983`, `a1c126da8a6a782f2`,
-`a52d5fd4b5ef193bc`, `a342aeb88c6a6a49c`, and `a6f2258998dc7a2dd` from an
-earlier run.
-
-**What generates the id could not be determined**, and neither could whether the
-runtime guarantees it is unique beyond one session. Two things bear on it and
-neither settles it. Against a session-scoped id: two sessions launched at the
-same second, with byte-identical prompts, produced different ids, so it is
-neither derived from the prompt nor drawn from a counter that restarts per
-session. For a session-scoped id: `agent_transcript_path` nests the id inside a
-directory named for the session, so the on-disk layout only needs the id to be
-unique within one session.
-
-### Two subagents in one session share everything except the id
-
-In the concurrent run both subagents reported the same `session_id`, the same
-`prompt_id`, and the same `cwd`, because both were dispatched from one directory.
-Only `agent_id` and `agent_transcript_path` told them apart.
-
-`background_tasks` carries the ids of the other live subagents in the session,
-which is a second route to noticing that more than one is at work. It
-listed both ids while both were running and dropped the finished one once it
-had stopped for the last time.
-
-### Proving an id is stable rather than assuming it
-
-An id that collides and an id that is stable look identical if a run has only
-one subagent in it, and grouping a log by `agent_id` cannot detect a collision
-because the collision is what the grouping assumes away. The two subagents were
-each told to end every message, including every message after being told to keep
-working, with a fixed line of its own — `AGENT-ALPHA` or `AGENT-BRAVO`.
-`last_assistant_message` then carries an identity the hook did not supply, and
-the mapping from that line to `agent_id` was one-to-one across all six stops.
+Two subagents dispatched from one directory share `session_id`, `prompt_id` and
+`cwd`. Only `agent_id` and `agent_transcript_path` tell them apart.
+`background_tasks` lists the other live subagents, and drops one once it has
+stopped for the last time.
 
 ## Limits
 
-- **Six stops of one subagent.** It was sent back to work five times by a
-  `SubagentStop` hook that blocked it, a design squiz no longer has, and
-  stopped six times with one id.
-- **Only `-p`, only `general-purpose`, only `claude-sonnet-5`.** No interactive
-  session, no other subagent type, and no other model.
-- **A subagent that is resumed rather than dispatched afresh.** Every subagent
-  here was dispatched once and ran to the end. Whether a follow-up message to an
-  existing subagent keeps its id was not tested here.
-- **Context compaction.** No subagent here ran long enough to
-  compact, so whether the id survives one is unknown.
-- **`session_crons`** was `[]` in every invocation, and `background_tasks` only
-  ever showed `status` as `running`. The other statuses a background task can
-  hold were not seen.
+- **What generates the id, and whether it is unique beyond one session, is
+  unknown.** Two sessions started in the same second with identical prompts got
+  different ids, so it is neither derived from the prompt nor a per-session
+  counter.
+- **The six stops of one subagent came from a `SubagentStop` hook that blocked
+  it**, which squiz's hook never does. A subagent resumed with a follow-up
+  message, and one whose context was compacted, were not run.
+- **Only `-p`, only `general-purpose`, only `claude-sonnet-5`.**
+- **`background_tasks` only ever showed `status` as `running`.**

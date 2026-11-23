@@ -1,5 +1,5 @@
 ---
-settles: "§ 3 — whether two concurrent subagents each get their own worktree, and whether git rev-parse --show-toplevel separates them"
+settles: "§ 3: how a hook names an episode's worktree, so that two concurrent subagents in two worktrees are two episodes"
 issue: 15
 recorded: 2026-09-06
 versions: { claude-code: 2.1.261, git: 2.50.1 }
@@ -8,33 +8,26 @@ recheck-when: Claude Code changes how it sets a hook's working directory
 
 # The worktree toplevel separates two concurrent subagents, and `cwd` does not
 
-Two subagents were run at once, each in its own git worktree on its own branch,
-and every hook firing resolved the worktree of the subagent that fired it. The
-hook's working directory was the worktree, not the repository root, so § 3's
-one worktree, one branch, one pull request, one episode holds. But the hook is
-given the subagent's directory, not the worktree root: a session started in a
-subdirectory of a worktree produced a `cwd` inside that subdirectory while
-`git rev-parse --show-toplevel` still returned the worktree root. The subagent's
-directory is where its dispatcher stood, which
-`a-subagents-hook-runs-where-it-was-dispatched.md` records.
+## Intent
+
+- Whether two concurrent subagents, each in its own git worktree, are told apart
+  by the hook.
+- Which of the directories a hook can see names the episode's worktree.
 
 ## Decisions
 
 - **Locate an episode's worktree with `git rev-parse --show-toplevel`, run from
-  the payload's `cwd`.** The toplevel is the only one of the three available
-  answers that is stable, normalised and different per subagent, and it is what
-  every other per-episode thing hangs off. `cwd` is where it is run from because
-  Copilot runs a plugin's hook in the plugin root, and under Claude Code the
-  hook's own directory is the same as `cwd`.
-- **Never use `cwd`, nor the hook process's own working directory, as it stands,
-  as the episode's directory or as a key.** Both are the subagent's directory. They equal the worktree root only when the subagent was
-  dispatched from the worktree root, which is the dispatcher's habit rather than
-  a guarantee. Two sessions started in two subdirectories of one shared worktree
-  would carry two different `cwd` values and one toplevel, so keying on `cwd`
-  would read one shared tree as two separate episodes.
-- **§ 3 holds as written.** Nothing here contradicts it. The refinement is that
-  "each hook resolves its own working directory" has to mean resolving that
-  directory through git, not reading it.
+  the payload's `cwd`.** Across seven firings from two concurrent subagents, each
+  resolved the worktree of the subagent that fired it. The toplevel is stable,
+  normalised and different per worktree, and every per-episode thing hangs off
+  it. It is run from `cwd` because Copilot runs a plugin's hook in the plugin
+  root.
+- **Never key an episode on `cwd` or the hook's own working directory.** Both are
+  the subagent's directory, which is where its dispatcher stood, and equal the
+  worktree root only when it was dispatched from there. In a session started at
+  `<worktree>/sub`, both were `<worktree>/sub` while the toplevel was
+  `<worktree>`. Two sessions in two subdirectories of one worktree would read as
+  two episodes.
 
 ## Needs your input
 
@@ -42,54 +35,24 @@ Nothing.
 
 ## Reference
 
-### The three directory answers, per firing
-
-Every `SubagentStop` firing offers three, and they are not interchangeable:
-
 | Answer | Where it comes from | What it is |
 |---|---|---|
-| `cwd` | the payload, given by the runtime | the subagent's directory |
-| `pwd` | the hook process itself | the subagent's directory |
-| `git rev-parse --show-toplevel` | computed by the hook | the worktree root |
+| `cwd` | the payload | the subagent's directory |
+| `pwd` | the hook process | the subagent's directory |
+| `git rev-parse --show-toplevel` | run by the hook | the worktree root |
 
-Across seven firings from the two concurrent subagents, all three agreed,
-because both sessions were started at their worktree roots. In a session started
-at `<worktree>/sub`, `cwd` and the hook's `pwd` were both `<worktree>/sub` and
-`--show-toplevel` was `<worktree>`. That is the case that separates them.
+`git rev-parse --abbrev-ref HEAD` from the hook returns the branch checked out in
+that worktree, so the payload need not carry it.
 
-`git rev-parse --abbrev-ref HEAD` from the hook returned the branch checked out
-in that worktree, so the branch is available from the hook without being carried
-in the payload.
-
-### Shared state between two concurrent hooks
-
-Two hooks pointed at one state directory really do corrupt it. Twelve hook
-processes run concurrently against one directory, each reading a counter file,
-adding one and writing it back, left the counter at 6 and wrote 12 records
-carrying only 6 distinct numbers. Separating the state by toplevel removed the
-contention between worktrees and none within one. Every change to an
-episode's state file is now made under `state.lock` (§ 3 The state file).
-
-### Resuming a subagent fires the hook again
-
-One of the two dispatching agents sent a follow-up to its subagent with
-`SendMessage`, addressed to the subagent's `agent_id`. That resumed the same
-subagent, and when it stopped again `SubagentStop` fired once more with the same
-`agent_id` and with `stop_hook_active` back to `false`. So a firing with
-`stop_hook_active: false` is not reliably a subagent's first.
+Separating state by toplevel removes contention between worktrees and none
+within one: twelve hook processes incrementing one counter file left it at 6.
+Every change to an episode's state file is made under `state.lock`.
 
 ## Limits
 
 - **Two concurrent episodes in one shared worktree were not run.** What this
-  note says about a shared tree is reasoned from the subdirectory result above,
-  not observed live.
-- **The subagent could not move its own shell out of the worktree.** A bare
-  `cd /private/tmp` as its own Bash call did not persist: the next `pwd` was the
-  worktree again. Nothing here says what a hook's working directory would be in
-  a runtime where it does persist.
+  note says about a shared tree is reasoned from the subdirectory result.
 - **One run of the concurrent pair**, print mode, `--model sonnet`, macOS, on
-  worktrees of a throwaway repository rather than of this one. No evidence about
-  stability across runs, models, interactive sessions, or more than two at once.
-- **`--include-hook-events` carries no timestamps.** `hook_started` and
-  `hook_response` have `hook_id`, `session_id` and the exit code, so ordering
-  across two sessions has to come from the hook's own clock.
+  worktrees of a throwaway repository. Nothing about more than two at once.
+- **`--include-hook-events` carries no timestamps**, so ordering across two
+  sessions has to come from the hook's own clock.

@@ -1,5 +1,5 @@
 ---
-settles: "§ 5 — how the round's values and the reviewer's environment reach the history tools Copilot's reporting server runs, and whether the grant leaves Copilot a shell"
+settles: "§ 5: how the round's values and the reviewer's environment reach the history tools Copilot's reporting server runs, and whether the grant leaves Copilot a shell"
 issue: 551
 recorded: 2026-10-06
 versions: { copilot: 1.0.92, model: gpt-6-astra, node: 24.15.0, macos: 26.6.2 }
@@ -21,17 +21,19 @@ recheck-when: Copilot CLI upgrades past 1.0.92, or starts filtering the environm
 - **Rely on the server inheriting Copilot's environment.** The server received
   Copilot's whole environment with the configuration's `env` laid over it: a
   variable set only on Copilot arrived, and so did one set empty. So the emptied
-  GitHub tokens reach the server as they reach Copilot. The snapshot is the one
-  round value the server needs, and it travels as `SQUIZ_SNAPSHOT` in the
-  configuration's `env`, which reaches the server whatever the round's own
-  environment holds.
+  GitHub tokens and `GH_CONFIG_DIR` reach the server, and the `git` it starts,
+  as they reach Copilot.
+- **Pass the snapshot as `SQUIZ_SNAPSHOT` in the configuration's `env`.** That
+  reaches the server whatever the round's own environment holds.
 - **Treat the server as a member of the reviewer's group.** Its process group
   was the group of the shell that started Copilot, so the round's signal to that
   group reaches it, and the `git` it starts for a history tool with it.
-- **Grant the tools through `--available-tools` alone, with no
-  `--deny-tool`.** The tools Copilot listed to the model were `view`, `rg`,
-  `glob` and the `squiz-` calls. Asked to run `echo hello` with whatever shell it
-  had, the model said it had none.
+- **Grant the tools through `--available-tools` alone, with no `--deny-tool`.**
+  Copilot listed to the model only the reading tools and the `squiz-` calls.
+  Asked to run `echo hello` with whatever shell it had, the model said it had
+  none.
+- **Let a history tool take as long as it needs.** A server call that took 100
+  seconds was answered, and the model went on.
 
 ## Needs your input
 
@@ -39,31 +41,20 @@ Nothing.
 
 ## Reference
 
-The probe server wrote `process.env` to a file, started with
-`"env":{"PROBE_OUT":"…"}`, under a Copilot started with `SQUIZ_MARKER=hello` and
-`GH_TOKEN=` set. It received 65 variables, `SQUIZ_MARKER` as `hello`, `GH_TOKEN`
-as the empty string, and Copilot's own `COPILOT_*` variables besides.
+The tools Copilot lists to the model are on the `session.start` event's `tools`
+in `<COPILOT_HOME>/session-state/<id>/events.jsonl`. Under the 1.0.92 grant they
+were `view`, `rg`, `glob` and the `squiz-` calls.
 
-A live round through the real adapter and `runRound` called each tool once. The
-grant then carried a seventh call, `run_tests`, since removed, whose command
-printed `GH_TOKEN=[]` and the round's `GH_CONFIG_DIR`, so the server's children
-had the emptied credentials. A `git_blame` sent `"line": "2"` reached the model
-as:
-
-```
-MCP server 'squiz': git_blame was not run: line must be an integer.
-```
-
-The tool list is in `<COPILOT_HOME>/session-state/<id>/events.jsonl`, on the
-`session.start` event's `tools`.
-
-A server call that took 100 seconds was answered, and the model went on.
+A probe server started with `"env":{"PROBE_OUT":"…"}`, under a Copilot started
+with `SQUIZ_MARKER=hello` and `GH_TOKEN=` set, received 65 variables:
+`SQUIZ_MARKER` as `hello`, `GH_TOKEN` as the empty string, and Copilot's own
+`COPILOT_*` variables besides.
 
 ## Limits
 
-- One model, one Copilot version, macOS only.
-- The longest call waited for was 100 seconds. Whether Copilot gives up on an
-  MCP call at some longer wait was not measured.
-- Whether Copilot sends `notifications/cancelled` for a call it abandons was not
-  seen. The server stops a history tool's `git` on one, and the round's signal
-  to the group covers the case where none comes.
+- **One model, one Copilot version, macOS only.**
+- **The longest call waited for was 100 seconds.** Whether Copilot gives up on
+  an MCP call at some longer wait was not measured.
+- **Whether Copilot sends `notifications/cancelled` for a call it abandons** was
+  not seen. The server stops a history tool's `git` on one, and the round's
+  signal to the group covers the case where none comes.
