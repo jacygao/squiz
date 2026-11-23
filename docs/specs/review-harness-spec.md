@@ -390,8 +390,8 @@ rounds, it asks GitHub about every other pull request with a directory in
 `.squiz/`, and removes `.squiz/<number>/` where the pull request is merged or
 closed and no round host is running for it. A pull request GitHub gives no
 answer for keeps its directory, as does one whose host may still be running. The
-questions to GitHub take at most 20 seconds in all, and a directory not reached
-waits for a later host. `host.log` names each directory removed:
+sweep takes at most 20 seconds, and a directory not reached waits for a later
+host. `host.log` names each directory removed:
 
 ```
 2026-11-24T10:02:11.004Z removed /work/squiz/.squiz/38: PR #38 is merged

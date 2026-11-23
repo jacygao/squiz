@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { episodeAt } from "../loop/episode.ts";
 import { deadlineIn, type Deadline } from "../reviewers/deadline.ts";
 import type { Venue } from "../venues/venue.ts";
+import { identityOf, stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import { takeHostLock } from "./lock.ts";
 
 // Each `ps` run that tells whether a lock's holder is still running.
@@ -47,6 +48,13 @@ export function sweepEnded(setup: SweepSetup): void {
   } catch {
     return;
   }
+  const lockBound = (): number => Math.max(1, Math.min(LOCK_BOUND_MS, until.remaining()));
+  // Read once, so that no `ps` runs between finding a directory and taking its lock.
+  const own = identityOf(process.pid, lockBound());
+  if (own.outcome !== "read") return;
+  const self = own.identity;
+  const presence = (identity: ProcessIdentity): Presence =>
+    until.passed() ? { outcome: "unknown", reason: "the sweep's deadline had passed" } : stillRunning(identity, lockBound());
   // Each sweep starts at a random entry, so entries that keep eating the
   // deadline at the front of the listing cannot keep the rest from ever being asked.
   const start = Math.floor(Math.random() * names.length);
@@ -65,10 +73,11 @@ export function sweepEnded(setup: SweepSetup): void {
     }
     if (ended.outcome === "open") continue;
     // Taking the lock makes a directory that has gone, and the worktree with it,
-    // so one removed while GitHub was asked is left gone.
+    // so one removed while GitHub was asked is left gone. Nothing slow runs
+    // between this check and the lock's own.
     if (until.passed() || !isDirectory(directory)) return;
 
-    const taking = takeHostLock(directory, { boundMs: Math.max(1, Math.min(LOCK_BOUND_MS, until.remaining())) });
+    const taking = takeHostLock(directory, { boundMs: lockBound(), self, presence });
     if (taking.outcome === "held") continue;
     if (taking.outcome === "unknown") {
       log(`kept ${directory}: whether its round host is running could not be told: ${taking.reason}`);
