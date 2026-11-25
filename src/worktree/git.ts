@@ -82,8 +82,9 @@ export function refusedAsUsage(output: GitOutput): boolean {
  *
  * Git before 2.29 has no `--no-write-fetch-head`, and refuses it as a usage
  * error, exit 129. It is then asked to fetch without it, and `FETCH_HEAD` is put
- * back as it was, or removed where there was none. A fetch of the coding
- * agent's that ends in that window loses its `FETCH_HEAD`.
+ * back as it was, or removed where there was none, and a `FETCH_HEAD` that
+ * cannot be is the call's failure. A fetch of the coding agent's that ends in
+ * that window loses its `FETCH_HEAD`.
  */
 export function fetchCommits(directory: string, commits: readonly string[], until: Deadline): GitOutput {
   const unwritten = runGit(directory, ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", ...commits], { until });
@@ -98,8 +99,10 @@ export function fetchCommits(directory: string, commits: readonly string[], unti
   try {
     if (before.content === undefined) rmSync(fetchHead, { force: true });
     else writeFileSync(fetchHead, before.content);
-  } catch {
-    // The commits arrived, which is all the caller asked for.
+  } catch (cause) {
+    if (!fetched.ran) return fetched;
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return { ran: false, reason: `FETCH_HEAD at ${fetchHead} could not be put back after the fetch: ${reason}` };
   }
   return fetched;
 }

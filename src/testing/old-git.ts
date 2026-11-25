@@ -62,13 +62,18 @@ export function realGit(): string {
   return path;
 }
 
+/** Make the old git a command named `git` in `directory`, and return its path. */
+export function oldGitIn(directory: string): string {
+  return standIn(directory, "git", oldGitScript(realGit()));
+}
+
 /**
  * Run `body` with the old git first on this process's `PATH`, and put `PATH`
  * back however it ends.
  */
 export async function underOldGit<T>(body: () => Promise<T> | T): Promise<T> {
   const bin = mkdtempSync(join(tmpdir(), "squiz-old-git-"));
-  standIn(bin, "git", oldGitScript(realGit()));
+  oldGitIn(bin);
   const previous = process.env["PATH"];
   process.env["PATH"] = previous === undefined ? bin : `${bin}${delimiter}${previous}`;
   try {
