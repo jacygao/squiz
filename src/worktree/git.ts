@@ -100,9 +100,8 @@ export function fetchCommits(directory: string, commits: readonly string[], unti
     if (before.content === undefined) rmSync(fetchHead, { force: true });
     else writeFileSync(fetchHead, before.content);
   } catch (cause) {
-    if (!fetched.ran) return fetched;
-    const reason = cause instanceof Error ? cause.message : String(cause);
-    return { ran: false, reason: `FETCH_HEAD at ${fetchHead} could not be put back after the fetch: ${reason}` };
+    const unrestored = `FETCH_HEAD at ${fetchHead} could not be put back after the fetch: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return { ran: false, reason: fetched.ran ? unrestored : `${fetched.reason}, and ${unrestored}` };
   }
   return fetched;
 }

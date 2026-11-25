@@ -437,31 +437,55 @@ test("#969: under a git with no --no-write-fetch-head, a worktree that had no FE
   });
 });
 
+/**
+ * An old git first on `PATH` whose fetch leaves a directory where FETCH_HEAD
+ * was, which no file can be written over, and then exits with `fetchExit`.
+ */
+async function withFetchHeadUnrestorable<T>(root: string, fetchHead: string, fetchExit: 0 | 1, body: () => T): Promise<T> {
+  const old = join(root, "old");
+  const bin = join(root, "bin");
+  await mkdir(old);
+  await mkdir(bin);
+  const oldGit = oldGitIn(old);
+  standIn(
+    bin,
+    "git",
+    [
+      `'${oldGit}' "$@"`,
+      "status=$?",
+      'if [ "$1" != "fetch" ] || [ $status -ne 0 ]; then exit $status; fi',
+      `rm -f '${fetchHead}' && mkdir '${fetchHead}'`,
+      fetchExit === 0 ? "exit 0" : 'echo "fatal: the remote hung up" >&2; exit 1',
+      "",
+    ].join("\n"),
+  );
+  return withPathFirst(bin, body);
+}
+
 test("#969: under a git with no --no-write-fetch-head, a FETCH_HEAD that cannot be put back fails the snapshot, naming it", async () => {
   await withTemporaryDirectory(async (root) => {
     const { agent, pushed, fetchHead } = await withCommitToFetch(root);
-    // An old git whose fetch leaves a directory where FETCH_HEAD was, which no
-    // file can be written over.
-    const old = join(root, "old");
-    const bin = join(root, "bin");
-    await mkdir(old);
-    await mkdir(bin);
-    const oldGit = oldGitIn(old);
-    standIn(
-      bin,
-      "git",
-      [
-        `'${oldGit}' "$@"`,
-        "status=$?",
-        `if [ "$1" = "fetch" ] && [ $status -eq 0 ]; then rm -f '${fetchHead}' && mkdir '${fetchHead}'; fi`,
-        "exit $status",
-        "",
-      ].join("\n"),
+
+    const addition = await withFetchHeadUnrestorable(root, fetchHead, 0, () =>
+      addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)),
     );
 
-    const addition = withPathFirst(bin, () => addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)));
-
     assert.match(reasonOf(addition), new RegExp(`^${pushed} could not be fetched: FETCH_HEAD at ${fetchHead} could not be put back after the fetch: `, "u"));
+  });
+});
+
+test("#969: under a git with no --no-write-fetch-head, a fetch that fails and a FETCH_HEAD that cannot be put back are both named", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, pushed, fetchHead } = await withCommitToFetch(root);
+
+    const addition = await withFetchHeadUnrestorable(root, fetchHead, 1, () =>
+      addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)),
+    );
+
+    assert.match(
+      reasonOf(addition),
+      new RegExp(`^${pushed} could not be fetched: git exited 1: fatal: the remote hung up, and FETCH_HEAD at ${fetchHead} could not be put back after the fetch: `, "u"),
+    );
   });
 });
 
