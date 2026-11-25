@@ -25,7 +25,7 @@ import { configFileName, defaultConfig, projectConfigIn, type Config } from "../
 import { adapterFor } from "../reviewers/adapters.ts";
 import { variablesOf } from "../reviewers/round.ts";
 import { carryLogins, copilotHome, copilotToken, tokenSource, userSettings } from "../sessions/copilot-settings.ts";
-import { mainWorktreeIn } from "../worktree/toplevel.ts";
+import { listWorktrees, mainWorktreeIn } from "../worktree/toplevel.ts";
 import { squizzesOnPath, thisSquiz } from "./path-link.ts";
 
 /**
@@ -712,9 +712,12 @@ function repositoryRoot(context: DoctorContext): Root {
   }
   const root = asked.stdout.trim();
   if (root === "") return { outcome: "failed", reason: "git named no worktree for this directory" };
-  const listed = probe("git", ["worktree", "list", "--porcelain", "-z"], untranslated);
-  if (listed.outcome === "absent") return { outcome: "failed", reason: "git is not on PATH" };
-  if (listed.outcome === "failed") return { outcome: "failed", reason: listed.reason };
+  const listed = listWorktrees((args) => {
+    const each = probe("git", args, untranslated);
+    if (each.outcome === "answered") return { ran: true, stdout: each.stdout, status: 0 };
+    return { ran: false, reason: each.outcome === "absent" ? "git is not on PATH" : each.reason };
+  });
+  if (!listed.ran) return { outcome: "failed", reason: listed.reason };
   return { outcome: "found", path: root, main: mainWorktreeIn(listed.stdout) };
 }
 

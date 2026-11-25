@@ -63,13 +63,15 @@ export function buildHead(worktree: string, base: string, until: Deadline): Head
   if (typeof known === "string") return failed(`whether the base ${base} is a commit could not be told: ${known}`);
   if (!known) return failed(`the base ${base} is not a commit in ${worktree}`);
 
-  const paths = runGit(
-    worktree,
-    ["rev-parse", "--path-format=absolute", "--git-path", "index", "--git-path", "objects", "--git-common-dir"],
-    { until, env: plain },
-  );
+  // Git before 2.31 has no `--path-format`, and answers relative to the worktree.
+  const paths = runGit(worktree, ["rev-parse", "--git-path", "index", "--git-path", "objects", "--git-common-dir"], {
+    until,
+    env: plain,
+  });
   if (!paths.ran) return failed(`the repository of ${worktree} could not be found: ${paths.reason}`);
-  const [index = "", repositoryObjects = "", commonDirectory = ""] = paths.stdout.split("\n");
+  const [index = "", repositoryObjects = "", commonDirectory = ""] = paths.stdout
+    .split("\n")
+    .map((each) => resolve(worktree, each));
 
   const local = localDirectory(worktree);
   const objects = headObjects(worktree);

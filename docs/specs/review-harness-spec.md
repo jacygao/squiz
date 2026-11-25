@@ -22,6 +22,9 @@ these. The local venue needs `git` in place of the GitHub repository (§ 4).
 | Runtime | Claude Code / GitHub Copilot CLI | Runs the coding agent, and starts a review when the agent finishes its work. |
 | Reviewer | `pi` / GitHub Copilot CLI | Reviews the change. Only the one the `reviewer` setting names has to be installed. |
 
+Squiz runs on `git` 2.25 or later. With a `git` older than 2.36, it cannot find
+a worktree whose path holds a newline.
+
 ### GitHub access
 
 Squiz does all of this through `gh`:

@@ -12,6 +12,7 @@ import { deadlineIn } from "../../reviewers/deadline.ts";
 import { changedFiles, changeDiff } from "../../reviewers/git-tools.ts";
 import { addSnapshot, removeSnapshot } from "../../worktree/snapshot.ts";
 import type { Change } from "../venue.ts";
+import { underOldGit } from "../../testing/old-git.ts";
 import { buildHead, type HeadBuild, provideCommits } from "./head.ts";
 
 const RACER = fileURLToPath(new URL("../../testing/head-racer.ts", import.meta.url));
@@ -538,5 +539,16 @@ test("a worktree of the same repository where the base has a directory stays, so
 
     const head = builtHead(buildHead(agent, tracked, deadlineIn(30_000)));
     assert.match(treeOf(agent, local, head), new RegExp(`^160000 commit ${base}\treplaced$`, "mu"));
+  });
+});
+
+test("#969: a build under a git with no --path-format, as before 2.31, is the commit a newer git builds", async () => {
+  await withFixture(async ({ main, agent, base }) => {
+    // The main worktree's git answers its paths relative to it, and a linked one's absolute.
+    for (const worktree of [main, agent]) {
+      const old = await underOldGit(() => builtHead(buildHead(worktree, base, deadlineIn(30_000))));
+
+      assert.equal(old, builtHead(buildHead(worktree, base, deadlineIn(30_000))), `in ${worktree}`);
+    }
   });
 });

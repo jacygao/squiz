@@ -24,10 +24,10 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, rmdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
-import { type GitOutput, runGit } from "./git.ts";
+import { fetchCommits, type GitOutput, runGit } from "./git.ts";
 
 /** The snapshot made, and whether its commit had to be fetched first, or why not. */
 export type SnapshotAddition =
@@ -123,12 +123,7 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
 
   if (missing.length > 0) {
     const named = missing.join(" and ");
-    const fetched = runGit(
-      worktree,
-      // FETCH_HEAD is shared with the coding agent, so it is left as it was.
-      ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", ...missing],
-      { until },
-    );
+    const fetched = fetchCommits(worktree, missing, until);
     if (!fetched.ran) return failed(`${named} could not be fetched: ${fetched.reason}`);
     for (const name of missing) {
       const arrived = hasCommit(worktree, name, until, borrowing);
@@ -137,8 +132,10 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
     }
   }
 
-  const common = runGit(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"], { until });
+  // Git before 2.31 has no `--path-format`, and answers relative to the worktree.
+  const common = runGit(worktree, ["rev-parse", "--git-common-dir"], { until });
   if (!common.ran) return failed(`the repository of ${worktree} could not be found: ${common.reason}`);
+  const repository = resolve(worktree, common.stdout.trim());
 
   // A commit fetched by its name is on no ref, and a clone copies refs. The
   // clone reads the repository's objects in place, so it has the commit and its
@@ -156,7 +153,7 @@ export function addSnapshot(worktree: string, of: SnapshotOf, until: Deadline): 
         // push would write.
         "--config",
         "remote.origin.pushurl=/dev/null",
-        common.stdout.trim(),
+        repository,
         path,
       ],
       { until },

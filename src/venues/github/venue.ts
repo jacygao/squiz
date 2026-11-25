@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { currentBranch } from "../../hook/branch.ts";
 import type { Deadline } from "../../reviewers/deadline.ts";
-import { runGit } from "../../worktree/git.ts";
+import { fetchCommits, runGit } from "../../worktree/git.ts";
 import type { Change, ChangeLookup, Failed, ThreadPosting, Venue } from "../venue.ts";
 import type { GhCall } from "./gh.ts";
 import { postFileThread, postThread, type ThreadPosting as GitHubThreadPosting } from "./post-thread.ts";
@@ -170,10 +170,9 @@ function readChange(worktree: string, asked: string | null, until: Deadline): Ch
  */
 function unreportedPush(worktree: string, reported: string, until: Deadline): string | undefined | Failed {
   if (!FULL_COMMIT_NAME.test(reported)) return undefined;
-  const pushed = runGit(worktree, ["rev-parse", "--quiet", "--verify", "@{push}"], { until, answers: [0, 1] });
-  if (!pushed.ran) return failed(pushed.reason);
-  if (pushed.status !== 0) return undefined;
-  const commit = pushed.stdout.trim();
+  const commit = pushedCommit(worktree, until);
+  if (typeof commit === "object") return commit;
+  if (commit === undefined) return undefined;
   if (commit === reported) return undefined;
   const present = hasCommit(worktree, reported, until);
   if (!present.known) return failed(present.reason);
@@ -181,6 +180,28 @@ function unreportedPush(worktree: string, reported: string, until: Deadline): st
   const contained = runGit(worktree, ["merge-base", "--is-ancestor", commit, reported], { until, answers: [0, 1] });
   if (!contained.ran) return failed(contained.reason);
   return contained.status === 0 ? undefined : commit;
+}
+
+/**
+ * The commit `@{push}` names, or `undefined` where HEAD is on no branch, the
+ * branch has no push destination, or the destination has no remote-tracking
+ * ref here.
+ *
+ * `@{push}` itself is not asked for: git 2.25 dies where there is none, as it
+ * does where it cannot read the repository, and says which in words a locale
+ * translates. The push ref `for-each-ref` names is empty in exactly those cases.
+ */
+function pushedCommit(worktree: string, until: Deadline): string | undefined | Failed {
+  const branch = runGit(worktree, ["symbolic-ref", "--quiet", "HEAD"], { until, answers: [0, 1] });
+  if (!branch.ran) return failed(branch.reason);
+  if (branch.status !== 0) return undefined;
+  const destination = runGit(worktree, ["for-each-ref", "--format=%(push)", "--", branch.stdout.trim()], { until });
+  if (!destination.ran) return failed(destination.reason);
+  const ref = destination.stdout.trim();
+  if (ref === "") return undefined;
+  const pushed = runGit(worktree, ["rev-parse", "--quiet", "--verify", `${ref}^{commit}`], { until, answers: [0, 1] });
+  if (!pushed.ran) return failed(pushed.reason);
+  return pushed.status === 0 ? pushed.stdout.trim() : undefined;
 }
 
 function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange {
@@ -201,8 +222,8 @@ function changeOf(pullRequest: PullRequest, worktree: string): PullRequestChange
 
 /**
  * Fetch from `origin` whichever of the base and the head the repository lacks,
- * in one fetch that writes no ref and no `FETCH_HEAD`, and check that each
- * arrived.
+ * in one fetch that writes no ref and leaves `FETCH_HEAD` as it was, and check
+ * that each arrived.
  */
 function provideCommits(
   change: Change,
@@ -220,12 +241,7 @@ function provideCommits(
   }
   if (missing.length === 0) return { outcome: "ready", alternates: [] };
 
-  const fetched = runGit(
-    worktree,
-    // FETCH_HEAD is shared with the coding agent, so it is left as it was.
-    ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", ...missing],
-    { until },
-  );
+  const fetched = fetchCommits(worktree, missing, until);
   if (!fetched.ran) return failed(`${missing.join(" and ")} could not be fetched: ${fetched.reason}`);
   for (const name of missing) {
     const arrived = hasCommit(worktree, name, until);

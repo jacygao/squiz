@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { deadlineIn } from "../../reviewers/deadline.ts";
+import { underOldGit } from "../../testing/old-git.ts";
 import { standIn } from "../../testing/stand-in.ts";
 import type { Change } from "../venue.ts";
 import { githubVenue } from "./venue.ts";
@@ -284,6 +285,29 @@ test("#852: readChange names no unreported commit for a branch that has no push 
     await withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
       assert.equal("unreported" in readFound(worktree), false);
     });
+  });
+});
+
+test("#969: under a git whose @{push} dies where there is none, as git 2.25 does, a branch with no push destination still reads its change", async () => {
+  await withRepository(async (worktree) => {
+    const reported = commitIn(worktree, "two");
+    await underOldGit(() =>
+      withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
+        assert.equal("unreported" in readFound(worktree), false);
+      }),
+    );
+  });
+});
+
+test("#969: under a git whose @{push} dies where there is none, the commit the worktree pushed is still named", async () => {
+  await withPushedRepository(async (worktree, reported) => {
+    const pushed = commitIn(worktree, "two");
+    git(worktree, "push", "--quiet");
+    await underOldGit(() =>
+      withFakeGh([pullRequestRow({ headRefOid: reported })], () => {
+        assert.equal(readFound(worktree).unreported, pushed);
+      }),
+    );
   });
 });
 

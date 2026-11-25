@@ -12,7 +12,7 @@
 import { spawnSync } from "node:child_process";
 
 import type { Deadline } from "../reviewers/deadline.ts";
-import { runGit } from "./git.ts";
+import { type GitOutput, refusedAsUsage, runGit } from "./git.ts";
 
 /** Where the worktree's root is, or why git could not say. */
 export type ToplevelLookup =
@@ -65,21 +65,62 @@ export type MainWorktreeLookup =
 
 /** Ask git for the main worktree of the repository holding `directory`. Never throws. */
 export function mainWorktree(directory: string, until?: Deadline): MainWorktreeLookup {
-  const asked = runGit(directory, ["worktree", "list", "--porcelain", "-z"], { until, ranOut: RAN_OUT });
+  const asked = listWorktrees((args) => runGit(directory, args, { until, ranOut: RAN_OUT }));
   if (!asked.ran) return { outcome: "failed", reason: asked.reason };
   return { outcome: "resolved", path: mainWorktreeIn(asked.stdout) };
 }
 
 /**
- * The main worktree in what `git worktree list --porcelain -z` printed: the first
+ * List the worktrees of a repository with `ask`, which runs git with the
+ * arguments it is handed.
+ *
+ * Git is asked for NUL-separated records first, so that a path holding a
+ * newline is read whole. Git before 2.36 has no `-z` and refuses it as a usage
+ * error, exit 129, and is then asked for the newline-separated records. Either
+ * listing reads with `worktreeEntries`.
+ */
+export function listWorktrees(ask: (args: readonly string[]) => GitOutput): GitOutput {
+  const separated = ask([...LIST, "-z"]);
+  return refusedAsUsage(separated) ? ask(LIST) : separated;
+}
+
+const LIST = ["worktree", "list", "--porcelain"] as const;
+
+/** One worktree as `git worktree list --porcelain` names it. */
+export type WorktreeEntry = { readonly path: string; readonly bare: boolean };
+
+/**
+ * The worktrees in what `git worktree list --porcelain` printed, with or
+ * without `-z`, in the order git listed them, which puts the main one first.
+ *
+ * With `-z` every field ends in a NUL, and without it in a newline, so only a
+ * listing with `-z` holds a NUL. An empty field ends a worktree's record either
+ * way.
+ */
+export function worktreeEntries(listing: string): readonly WorktreeEntry[] {
+  const entries: WorktreeEntry[] = [];
+  let path: string | undefined;
+  let bare = false;
+  for (const field of [...listing.split(listing.includes("\0") ? "\0" : "\n"), ""]) {
+    if (field.startsWith("worktree ")) path = field.slice("worktree ".length);
+    else if (field === "bare") bare = true;
+    else if (field === "") {
+      if (path !== undefined && path !== "") entries.push({ path, bare });
+      path = undefined;
+      bare = false;
+    }
+  }
+  return entries;
+}
+
+/**
+ * The main worktree in what `git worktree list --porcelain` printed: the first
  * entry, which is the one the common `.git` belongs to. A bare repository's
  * first entry is marked `bare`, and it has no worktree to read.
  */
-export function mainWorktreeIn(porcelain: string): string | undefined {
-  const first = porcelain.split("\0\0", 1)[0]?.split("\0") ?? [];
-  if (first.includes("bare")) return undefined;
-  const path = first.find((field) => field.startsWith("worktree "))?.slice("worktree ".length);
-  return path === undefined || path === "" ? undefined : path;
+export function mainWorktreeIn(listing: string): string | undefined {
+  const [first] = worktreeEntries(listing);
+  return first === undefined || first.bare ? undefined : first.path;
 }
 
 /** What a call killed at its bound says, which is never that there is no worktree. */

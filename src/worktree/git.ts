@@ -4,6 +4,8 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type { Deadline } from "../reviewers/deadline.ts";
 
@@ -63,6 +65,57 @@ export function runGit(directory: string, args: readonly string[], options: GitO
     return { ran: false, reason: said === "" ? `${exit} and said nothing` : `${exit}: ${said}` };
   }
   return { ran: true, stdout: result.stdout, status: result.status };
+}
+
+/**
+ * Whether git refused the command line as a usage error, exit 129, as a git too
+ * old for one of its options does. The setup check's own runner words a failure
+ * as runGit does, so this reads either.
+ */
+export function refusedAsUsage(output: GitOutput): boolean {
+  return !output.ran && /^git exited 129\b/u.test(output.reason);
+}
+
+/**
+ * Fetch `commits` from `origin` into the repository of `directory`, writing no
+ * ref, and leaving `FETCH_HEAD` as it was, since the coding agent shares it.
+ *
+ * Git before 2.29 has no `--no-write-fetch-head`, and refuses it as a usage
+ * error, exit 129. It is then asked to fetch without it, and `FETCH_HEAD` is put
+ * back as it was, or removed where there was none. A fetch of the coding
+ * agent's that ends in that window loses its `FETCH_HEAD`.
+ */
+export function fetchCommits(directory: string, commits: readonly string[], until: Deadline): GitOutput {
+  const unwritten = runGit(directory, ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", ...commits], { until });
+  if (!refusedAsUsage(unwritten)) return unwritten;
+
+  const located = runGit(directory, ["rev-parse", "--git-path", "FETCH_HEAD"], { until });
+  if (!located.ran) return located;
+  const fetchHead = resolve(directory, located.stdout.trim());
+  const before = contentOf(fetchHead);
+  if (!before.read) return { ran: false, reason: `${fetchHead} could not be read: ${before.reason}` };
+  const fetched = runGit(directory, ["fetch", "--quiet", "--no-tags", "origin", ...commits], { until });
+  try {
+    if (before.content === undefined) rmSync(fetchHead, { force: true });
+    else writeFileSync(fetchHead, before.content);
+  } catch {
+    // The commits arrived, which is all the caller asked for.
+  }
+  return fetched;
+}
+
+type Content =
+  | { readonly read: true; readonly content: Buffer | undefined }
+  | { readonly read: false; readonly reason: string };
+
+/** What the file at `path` holds, with `undefined` where there is none. */
+function contentOf(path: string): Content {
+  try {
+    return { read: true, content: readFileSync(path) };
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return { read: true, content: undefined };
+    return { read: false, reason: cause instanceof Error ? cause.message : String(cause) };
+  }
 }
 
 const RAN_OUT = "git ran out of the time it was given";
