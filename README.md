@@ -17,7 +17,7 @@ plugin for Claude Code and for the GitHub Copilot CLI.
 ## Prerequisites
 
 - Node 24 or later.
-- `git`, with `gh` signed in (`gh auth login`) for reviews on GitHub.
+- `git` 2.25 or later, with `gh` signed in (`gh auth login`) for reviews on GitHub.
 - Your coding agent: Claude Code or the GitHub Copilot CLI.
 - Your reviewer: the GitHub Copilot CLI or
   [`pi`](https://github.com/earendil-works/pi#readme).
