@@ -8,6 +8,7 @@ import { after, test } from "node:test";
 import { unspent } from "../reviewers/adapter.ts";
 import type { Presence, ProcessIdentity } from "../sessions/process.ts";
 import { githubEpisode } from "../testing/episode.ts";
+import { underOldGit } from "../testing/old-git.ts";
 import { writeState } from "../loop/episode-state.ts";
 import type { StateRecord } from "../loop/state-record.ts";
 import { githubVenue } from "../venues/github/venue.ts";
@@ -569,4 +570,27 @@ test("a reviewed record with no problems, unposted findings or bound prints its 
       "",
     ].join("\n"),
   );
+});
+
+test("#969: under a git with no -z for worktree list, as before 2.36, every worktree's reviews are listed", async () => {
+  made += 1;
+  const repository = join(scratch, `repo-${made}`);
+  mkdirSync(repository);
+  git(repository, ["init", "--quiet", "--initial-branch", "main"]);
+  git(repository, ["-c", "user.email=squiz@example.invalid", "-c", "user.name=Squiz", "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "x"]);
+  const linked = join(scratch, `linked-${made}`);
+  git(repository, ["worktree", "add", "--quiet", "--detach", linked]);
+  for (const [worktree, number] of [[repository, 41], [linked, 42]] as const) {
+    const written = writeState(githubEpisode(worktree, number), {
+      rounds: [],
+      spentOutsideRounds: unspent,
+      records: [{ head, activity: null, status: "queued" }],
+    });
+    assert.deepEqual(written, { outcome: "written" });
+  }
+
+  const printed = await underOldGit(() => squizStatus(repository, githubVenue));
+
+  assert.equal(printed.stderr, "");
+  assert.deepEqual(rowsOf(printed.stdout).slice(1).map((row) => `${row[0]} ${row[3]}`).sort(), ["#41 queued", "#42 queued"]);
 });

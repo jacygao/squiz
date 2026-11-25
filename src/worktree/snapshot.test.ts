@@ -4,11 +4,12 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { test } from "node:test";
 
 import { deadlineIn } from "../reviewers/deadline.ts";
 import { changeDiff, gitBlame, gitLogSearch, gitShow } from "../reviewers/git-tools.ts";
+import { oldGitIn, underOldGit } from "../testing/old-git.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { addSnapshot, BASE_REF, removeSnapshot, type SnapshotAddition, snapshotPath } from "./snapshot.ts";
 
@@ -395,6 +396,99 @@ test("a commit the repository lacks is fetched before the snapshot is added", as
   });
 });
 
+/**
+ * A repository whose remote has a commit the coding agent's linked worktree has
+ * never seen, and that worktree's own FETCH_HEAD, which git keeps per worktree.
+ */
+async function withCommitToFetch(root: string): Promise<{ readonly agent: string; readonly pushed: string; readonly fetchHead: string }> {
+  const { main, agent } = await repositoryWithLinkedWorktree(root);
+  const remote = join(root, "remote");
+  git(root, "clone", "--quiet", main, remote);
+  git(remote, "switch", "--quiet", "-c", "elsewhere");
+  await writeFile(join(remote, "code.ts"), "pushed from elsewhere\n");
+  const pushed = commit(remote, "pushed from elsewhere");
+  git(agent, "remote", "add", "origin", remote);
+  return { agent, pushed, fetchHead: resolve(agent, git(agent, "rev-parse", "--git-path", "FETCH_HEAD").trim()) };
+}
+
+test("#969: under a git with no --no-write-fetch-head, as before 2.29, a missing commit is fetched and FETCH_HEAD is left as it was", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, pushed, fetchHead } = await withCommitToFetch(root);
+    // What the coding agent's own last fetch left.
+    await writeFile(fetchHead, "the coding agent's fetch\n");
+
+    const addition = await underOldGit(() => addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)));
+
+    const path = addedPath(addition);
+    assert.equal(readFileSync(join(path, "code.ts"), "utf8"), "pushed from elsewhere\n");
+    assert.equal(readFileSync(fetchHead, "utf8"), "the coding agent's fetch\n");
+  });
+});
+
+test("#969: under a git with no --no-write-fetch-head, a worktree that had no FETCH_HEAD has none after the fetch", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, pushed, fetchHead } = await withCommitToFetch(root);
+    assert.equal(existsSync(fetchHead), false);
+
+    const addition = await underOldGit(() => addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)));
+
+    addedPath(addition);
+    assert.equal(existsSync(fetchHead), false);
+  });
+});
+
+/**
+ * An old git first on `PATH` whose fetch leaves a directory where FETCH_HEAD
+ * was, which no file can be written over, and then exits with `fetchExit`.
+ */
+async function withFetchHeadUnrestorable<T>(root: string, fetchHead: string, fetchExit: 0 | 1, body: () => T): Promise<T> {
+  const old = join(root, "old");
+  const bin = join(root, "bin");
+  await mkdir(old);
+  await mkdir(bin);
+  const oldGit = oldGitIn(old);
+  standIn(
+    bin,
+    "git",
+    [
+      `'${oldGit}' "$@"`,
+      "status=$?",
+      'if [ "$1" != "fetch" ] || [ $status -ne 0 ]; then exit $status; fi',
+      `rm -f '${fetchHead}' && mkdir '${fetchHead}'`,
+      fetchExit === 0 ? "exit 0" : 'echo "fatal: the remote hung up" >&2; exit 1',
+      "",
+    ].join("\n"),
+  );
+  return withPathFirst(bin, body);
+}
+
+test("#969: under a git with no --no-write-fetch-head, a FETCH_HEAD that cannot be put back fails the snapshot, naming it", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, pushed, fetchHead } = await withCommitToFetch(root);
+
+    const addition = await withFetchHeadUnrestorable(root, fetchHead, 0, () =>
+      addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)),
+    );
+
+    assert.match(reasonOf(addition), new RegExp(`^${pushed} could not be fetched: FETCH_HEAD at ${fetchHead} could not be put back after the fetch: `, "u"));
+  });
+});
+
+test("#969: under a git with no --no-write-fetch-head, a fetch that fails and a FETCH_HEAD that cannot be put back are both named", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { agent, pushed, fetchHead } = await withCommitToFetch(root);
+
+    const addition = await withFetchHeadUnrestorable(root, fetchHead, 1, () =>
+      addSnapshot(agent, { ...roundTwo, base: baseIn(agent), commit: pushed }, deadlineIn(30_000)),
+    );
+
+    assert.match(
+      reasonOf(addition),
+      new RegExp(`^${pushed} could not be fetched: git exited 1: fatal: the remote hung up, and FETCH_HEAD at ${fetchHead} could not be put back after the fetch: `, "u"),
+    );
+  });
+});
+
 test("a commit already present is not fetched", async () => {
   await withTemporaryDirectory(async (root) => {
     const { agent, head } = await repositoryWithLinkedWorktree(root);
@@ -648,3 +742,18 @@ function withPathFirst<T>(directory: string, body: () => T): T {
     else process.env["PATH"] = previous;
   }
 }
+
+test("#969: a snapshot is made from the main worktree and a linked one under a git with no --path-format, as before 2.31", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const { main, agent, head } = await repositoryWithLinkedWorktree(root);
+    const base = baseIn(agent);
+
+    // The main worktree's git answers its common directory as a path relative to it.
+    for (const worktree of [main, agent]) {
+      const path = await underOldGit(() => addedPath(addSnapshot(worktree, { ...roundTwo, base, commit: head }, deadlineIn(30_000))));
+
+      assert.equal(git(path, "rev-parse", "HEAD").trim(), head);
+      removeSnapshot(path);
+    }
+  });
+});

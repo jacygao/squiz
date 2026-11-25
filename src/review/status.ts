@@ -23,6 +23,7 @@ import type { ReviewerPlace, StateRecord } from "../loop/state-record.ts";
 import { stillRunning, type Presence, type ProcessIdentity } from "../sessions/process.ts";
 import type { Venue } from "../venues/venue.ts";
 import { runGit } from "../worktree/git.ts";
+import { listWorktrees, worktreeEntries } from "../worktree/toplevel.ts";
 
 // Long enough for a loaded machine, short enough that a status over many
 // records still returns promptly.
@@ -71,9 +72,8 @@ const NONE = "—";
  * `directory`. Never throws.
  */
 export function squizStatus(directory: string, venue: Venue): { readonly stdout: string; readonly stderr: string } {
-  const listed = runGit(directory, ["worktree", "list", "--porcelain", "-z"], {
-    until: deadlineIn(GIT_BOUND_MS),
-  });
+  const until = deadlineIn(GIT_BOUND_MS);
+  const listed = listWorktrees((args) => runGit(directory, args, { until }));
   if (!listed.ran) {
     return { stdout: "", stderr: failureLine(`no reviews listed: the worktrees could not be listed: ${listed.reason}`) };
   }
@@ -89,23 +89,9 @@ export function squizStatus(directory: string, venue: Venue): { readonly stdout:
 }
 
 /** The worktree paths in `git worktree list --porcelain` output, the main one first. */
-export function worktreesIn(porcelain: string): string[] {
-  const paths: string[] = [];
-  let path: string | undefined;
-  let bare = false;
-  // `-z` ends every field with a NUL, so a path may hold a newline, and an empty
-  // field ends a worktree's stanza.
-  for (const field of porcelain.split("\0")) {
-    if (field.startsWith("worktree ")) path = field.slice("worktree ".length);
-    else if (field === "bare") bare = true;
-    else if (field === "") {
-      // A bare repository has no files checked out, so no episode can live in it.
-      if (path !== undefined && path !== "" && !bare) paths.push(path);
-      path = undefined;
-      bare = false;
-    }
-  }
-  return paths;
+export function worktreesIn(listing: string): string[] {
+  // A bare repository has no files checked out, so no episode can live in it.
+  return worktreeEntries(listing).filter((entry) => !entry.bare).map((entry) => entry.path);
 }
 
 /** Read every episode in `worktrees` into lines. */

@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { oldGitScript, realGit } from "../testing/old-git.ts";
 import { standIn } from "../testing/stand-in.ts";
 import { CHECKS, copilotCopies, pathLink, squizDoctor, type Check, type DoctorContext } from "./doctor.ts";
 
@@ -438,6 +439,14 @@ test("with no reviewer set, the row names pi and the default model in pi's own s
 
   assert.equal(reviewerLine(printed.stdout), `Reviewer pi 0.85.1 (no ${squizFile()}), model deepseek/deepseek-v4-pro, pi's default; thinking medium`);
   assert.equal(printed.exit, 0);
+});
+
+test("#969: under a git with no -z for worktree list, as before 2.36, the reviewer's row reads the repository's .squiz.json", () => {
+  const base = context({ ...EVERY_FAKE, git: oldGitScript(realGit()) });
+
+  const printed = squizDoctor({ ...base, directory: repository('{"model":"openai/gpt-5-mini"}') });
+
+  assert.equal(reviewerLine(printed.stdout), `Reviewer pi 0.85.1 (${squizFile()}), model openai/gpt-5-mini, from .squiz.json; thinking medium`);
 });
 
 test("a model .squiz.json names is the one the row names, over pi's own default", () => {

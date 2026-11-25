@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { worktreeToplevel } from "./toplevel.ts";
+import { underOldGit } from "../testing/old-git.ts";
+import { mainWorktree, worktreeToplevel } from "./toplevel.ts";
 
 /** Run git in `directory`, and fail the test rather than the fixture. */
 function git(directory: string, ...args: readonly string[]): void {
@@ -113,5 +114,19 @@ test("a git that is not installed is a failure", async () => {
       if (previous === undefined) delete process.env["PATH"];
       else process.env["PATH"] = previous;
     }
+  });
+});
+
+test("#969: a git with no -z for worktree list, as before 2.36, still names the main worktree", async () => {
+  await withTemporaryDirectory(async (root) => {
+    const main = join(root, "main");
+    const linked = join(root, "linked");
+    await mkdir(main);
+    commitOn(main, "main");
+    git(main, "worktree", "add", "--quiet", linked, "-b", "review/linked");
+
+    const found = await underOldGit(() => mainWorktree(linked));
+
+    assert.deepEqual(found, { outcome: "resolved", path: resolved(main) });
   });
 });
